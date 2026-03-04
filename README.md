@@ -2,7 +2,8 @@
 
 The Go backend for the [Stackweaver](https://github.com/vhco-pro/stackweaver) DevOps platform.
 
-> **This repository is auto-synced from the Stackweaver monorepo. Do not make changes here directly.**
+> [!IMPORTANT]
+> **This repository is auto-synced from the Stackweaver monorepo. Changes to the `backend` directory will be overwritten.**
 
 ## Usage
 
