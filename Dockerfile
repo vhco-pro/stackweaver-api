@@ -1,4 +1,5 @@
 FROM golang:1.26-alpine AS builder
+ENV GOPRIVATE=github.com/michielvha/stackweaver
 
 ARG IMAGE_NAME=stackweaver-api
 ARG TARGETARCH
@@ -8,7 +9,7 @@ WORKDIR /build
 
 # Copy go modules first for caching
 COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+RUN --mount=type=secret,id=netrc,target=/root/.netrc go mod download
 
 # Copy source code
 COPY backend/ .
