@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/iac-platform/backend/internal/services/auth"
-	"github.com/iac-platform/backend/internal/services/sessions"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
 )
 
 type SessionsHandler struct {

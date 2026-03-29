@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/iac-platform/backend/internal/models"
-	"github.com/iac-platform/backend/internal/repository"
-	"github.com/iac-platform/backend/internal/services/auth"
-	"github.com/iac-platform/backend/internal/storage"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 type ConfigurationVersionHandlerV2 struct {

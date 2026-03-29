@@ -8,10 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/api/helpers"
-	"github.com/iac-platform/backend/internal/services/activity"
-	"github.com/iac-platform/backend/internal/services/apikey"
-	"github.com/iac-platform/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
+	"github.com/michielvha/stackweaver/backend/internal/services/activity"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 )
 
 type APIKeyHandler struct {

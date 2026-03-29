@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 )
 
 func RBACMiddleware(rbacService *rbac.Service, permission rbac.Permission) gin.HandlerFunc {

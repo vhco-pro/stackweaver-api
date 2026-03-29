@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/iac-platform/backend/internal/repository"
+	"github.com/michielvha/stackweaver/core/repository"
 )
 
 // WebhookEventHandlerV2 handles webhook event listing for debugging.

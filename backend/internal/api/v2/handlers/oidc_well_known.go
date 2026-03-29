@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/iac-platform/backend/internal/services/oidc"
+	"github.com/michielvha/stackweaver/core/services/oidc"
 )
 
 // OIDCWellKnownHandler serves the OIDC discovery endpoints.
