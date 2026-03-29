@@ -5,7 +5,7 @@ package helpers
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/services/activity"
+	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 )
 
 // GetActivityContext extracts activity context from Gin context

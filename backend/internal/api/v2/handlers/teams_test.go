@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/models"
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 // TestUpdateOrganizationAccessFromRequest_MutualExclusivity tests that

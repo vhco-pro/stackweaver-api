@@ -9,11 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/api/v2/response"
-	"github.com/iac-platform/backend/internal/models"
-	"github.com/iac-platform/backend/internal/queue"
-	"github.com/iac-platform/backend/internal/services/ansible"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
+	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/queue"
+	"github.com/michielvha/stackweaver/core/services/ansible"
 )
 
 // InventorySourceSyncMessage represents a request to sync a dynamic inventory source

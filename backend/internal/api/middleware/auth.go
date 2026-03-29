@@ -4,7 +4,7 @@ package middleware
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/iac-platform/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 )
 
 func AuthMiddleware(authService *auth.Service) gin.HandlerFunc {

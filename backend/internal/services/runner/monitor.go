@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/iac-platform/backend/internal/repository"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/core/repository"
 )
 
 // MonitorService handles background tasks for runner management

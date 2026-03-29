@@ -20,14 +20,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	terraform "github.com/iac-platform/backend/internal/api/v2/handlers/terraform"
-	"github.com/iac-platform/backend/internal/models"
-	"github.com/iac-platform/backend/internal/queue"
-	"github.com/iac-platform/backend/internal/repository"
-	"github.com/iac-platform/backend/internal/services/auth"
-	"github.com/iac-platform/backend/internal/services/vcs"
-	"github.com/iac-platform/backend/internal/storage"
 	"github.com/michielvha/logger"
+	terraform "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/queue"
+	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 // VCSAppInstallationHandlerV2 handles VCS App installation flow (GitHub, Azure DevOps)

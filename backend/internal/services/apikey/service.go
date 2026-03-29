@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/models"
-	"github.com/iac-platform/backend/internal/repository"
+	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 	"golang.org/x/crypto/bcrypt"
 )
 

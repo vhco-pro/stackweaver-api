@@ -14,8 +14,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/repository"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
 )
 

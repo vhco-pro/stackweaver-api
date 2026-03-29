@@ -18,10 +18,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/models"
-	"github.com/iac-platform/backend/internal/repository"
-	"github.com/iac-platform/backend/internal/services/auth"
-	"github.com/iac-platform/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )

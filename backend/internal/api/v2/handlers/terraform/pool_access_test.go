@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/iac-platform/backend/internal/models"
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 func TestCheckPoolAccess_OrgScoped(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 	// "github.com/gomarkdown/markdown"
 	// "github.com/gomarkdown/markdown/html"
 	// "github.com/gomarkdown/markdown/parser"
-	"github.com/iac-platform/backend/internal/models"
-	"github.com/iac-platform/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 type RegistryModuleHandler struct {
