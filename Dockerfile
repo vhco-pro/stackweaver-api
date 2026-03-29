@@ -15,9 +15,9 @@ COPY backend/ .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -o stackweaver-api ./cmd/api
 
-# Runtime stage — distroless eliminates all OS-level CVEs
-# Includes ca-certificates and tzdata, runs as nonroot (UID 65534) by default
-FROM gcr.io/distroless/static@sha256:47b2d72ff90843eb8a768b5c2f89b40741843b639d065b9b937b07cd59b479c6
+# Runtime stage — distroless:nonroot eliminates all OS-level CVEs
+# Includes ca-certificates and tzdata, runs as nonroot (UID 65534)
+FROM gcr.io/distroless/static:nonroot@sha256:e3f945647ffb95b5839c07038d64f9811adf17308b9121d8a2b87b6a22a80a39
 
 COPY --from=builder /build/stackweaver-api /stackweaver-api
 COPY --from=builder /build/config /etc/iac/config
