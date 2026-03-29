@@ -5,6 +5,7 @@ ARG TARGETARCH
 ARG TARGETOS=linux
 
 WORKDIR /build
+RUN apk add --no-cache git
 
 COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=secret,id=netrc,target=/root/.netrc go mod download
