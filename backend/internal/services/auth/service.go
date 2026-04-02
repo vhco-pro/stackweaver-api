@@ -419,3 +419,36 @@ func (s *Service) GetTokenClaims(c *gin.Context) (*oidc.AccessTokenClaims, error
 	}
 	return tokenClaims, nil
 }
+
+// FetchUserInfoPicture calls the OIDC UserInfo endpoint and returns the picture URL.
+// Returns empty string if the user has no avatar or the call fails.
+// Only works for JWT auth (requires a valid access token).
+func (s *Service) FetchUserInfoPicture(ctx context.Context, c *gin.Context) string {
+	// Only fetch for JWT auth — API key / TFE token don't work with Zitadel UserInfo
+	authMethod, _ := c.Get("auth_method")
+	if authMethod != "jwt" {
+		return ""
+	}
+
+	// Extract Bearer token from Authorization header
+	authHeader := c.GetHeader("Authorization")
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return ""
+	}
+	tokenString := parts[1]
+
+	if s.verifier == nil || s.issuer == "" {
+		return ""
+	}
+
+	userInfoData := fetchUserInfoFromEndpoint(ctx, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
+	if userInfoData == nil {
+		return ""
+	}
+
+	if picture, ok := userInfoData["picture"].(string); ok {
+		return picture
+	}
+	return ""
+}

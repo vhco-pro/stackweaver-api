@@ -67,6 +67,12 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 		}
 	}
 
+	// Fetch avatar from Zitadel UserInfo (picture claim) for JWT-authenticated users.
+	// On failure, avatar is simply omitted — the frontend will show a fallback.
+	if picture := h.authService.FetchUserInfoPicture(c.Request.Context(), c); picture != "" {
+		response["avatar"] = picture
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
