@@ -532,6 +532,229 @@ func TestGetPermissionsFromProjectAccess_Ansible(t *testing.T) {
 	}
 }
 
+// TestGetPermissionsFromWorkspaceAccess tests workspace access level mapping
+// for all four levels (admin, write, plan, read) and nil access.
+func TestGetPermissionsFromWorkspaceAccess(t *testing.T) {
+	service := &Service{}
+
+	adminAccess := "admin"
+	writeAccess := "write"
+	planAccess := "plan"
+	readAccess := "read"
+
+	tests := []struct {
+		name            string
+		workspaceAccess *models.TeamWorkspaceAccess
+		mustHave        []Permission
+		mustNotHaveAny  []Permission
+	}{
+		{
+			name: "Admin has all workspace permissions",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Access: &adminAccess,
+			},
+			mustHave: []Permission{
+				PermissionWorkspaceRead, PermissionWorkspaceWrite,
+				PermissionRunRead, PermissionRunWrite,
+				PermissionVariables, PermissionStateVersions, PermissionRuns,
+				PermissionSentinelMocks, PermissionWorkspaceLocking, PermissionRunTasks,
+			},
+		},
+		{
+			name: "Write has all except SentinelMocks",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Access: &writeAccess,
+			},
+			mustHave: []Permission{
+				PermissionWorkspaceRead, PermissionWorkspaceWrite,
+				PermissionRunRead, PermissionRunWrite,
+				PermissionVariables, PermissionStateVersions, PermissionRuns,
+				PermissionWorkspaceLocking, PermissionRunTasks,
+			},
+			mustNotHaveAny: []Permission{PermissionSentinelMocks},
+		},
+		{
+			name: "Plan has read + plan, no write",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Access: &planAccess,
+			},
+			mustHave: []Permission{
+				PermissionWorkspaceRead, PermissionRunRead,
+				PermissionStateVersions, PermissionVariables, PermissionRuns,
+			},
+			mustNotHaveAny: []Permission{
+				PermissionWorkspaceWrite, PermissionRunWrite,
+				PermissionSentinelMocks, PermissionWorkspaceLocking, PermissionRunTasks,
+			},
+		},
+		{
+			name: "Read is read-only, no Runs execution",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Access: &readAccess,
+			},
+			mustHave: []Permission{
+				PermissionWorkspaceRead, PermissionRunRead,
+				PermissionStateVersions, PermissionVariables, PermissionSentinelMocks,
+			},
+			mustNotHaveAny: []Permission{
+				PermissionWorkspaceWrite, PermissionRunWrite, PermissionRuns,
+				PermissionWorkspaceLocking, PermissionRunTasks,
+			},
+		},
+		{
+			name: "Nil access + no custom = empty",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Access: nil,
+			},
+			mustNotHaveAny: []Permission{
+				PermissionWorkspaceRead, PermissionWorkspaceWrite,
+				PermissionRunRead, PermissionRunWrite,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			perms := service.getPermissionsFromWorkspaceAccess(tt.workspaceAccess)
+			for _, p := range tt.mustHave {
+				if !perms[p] {
+					t.Errorf("permission %s must be granted but was not", p)
+				}
+			}
+			for _, p := range tt.mustNotHaveAny {
+				if perms[p] {
+					t.Errorf("permission %s must NOT be granted but was", p)
+				}
+			}
+		})
+	}
+}
+
+// TestGetPermissionsFromWorkspaceAccess_GranularCustom tests that custom
+// granular fields (Runs, Variables, StateVersions, etc.) work independently.
+func TestGetPermissionsFromWorkspaceAccess_GranularCustom(t *testing.T) {
+	service := &Service{}
+
+	runsRead := "read"
+	runsPlan := "plan"
+	runsApply := "apply"
+	varsRead := "read"
+	varsWrite := "write"
+	stateRead := "read"
+	stateReadOutputs := "read-outputs"
+	sentinelRead := "read"
+	lockingTrue := true
+	runTasksTrue := true
+
+	tests := []struct {
+		name            string
+		workspaceAccess *models.TeamWorkspaceAccess
+		mustHave        []Permission
+		mustNotHaveAny  []Permission
+	}{
+		{
+			name: "Runs=read grants RunRead only",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Runs: &runsRead,
+			},
+			mustHave:       []Permission{PermissionRunRead},
+			mustNotHaveAny: []Permission{PermissionRuns},
+		},
+		{
+			name: "Runs=plan grants Runs",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Runs: &runsPlan,
+			},
+			mustHave: []Permission{PermissionRuns},
+		},
+		{
+			name: "Runs=apply grants Runs",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Runs: &runsApply,
+			},
+			mustHave: []Permission{PermissionRuns},
+		},
+		{
+			name: "Variables=read grants Variables",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Variables: &varsRead,
+			},
+			mustHave: []Permission{PermissionVariables},
+		},
+		{
+			name: "Variables=write grants Variables",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), Variables: &varsWrite,
+			},
+			mustHave: []Permission{PermissionVariables},
+		},
+		{
+			name: "StateVersions=read grants StateVersions",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), StateVersions: &stateRead,
+			},
+			mustHave: []Permission{PermissionStateVersions},
+		},
+		{
+			name: "StateVersions=read-outputs grants StateVersions",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), StateVersions: &stateReadOutputs,
+			},
+			mustHave: []Permission{PermissionStateVersions},
+		},
+		{
+			name: "SentinelMocks=read grants SentinelMocks",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), SentinelMocks: &sentinelRead,
+			},
+			mustHave: []Permission{PermissionSentinelMocks},
+		},
+		{
+			name: "WorkspaceLocking=true grants WorkspaceLocking",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), WorkspaceLocking: &lockingTrue,
+			},
+			mustHave: []Permission{PermissionWorkspaceLocking},
+		},
+		{
+			name: "RunTasks=true grants RunTasks",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(), RunTasks: &runTasksTrue,
+			},
+			mustHave: []Permission{PermissionRunTasks},
+		},
+		{
+			name: "Multiple custom fields combine additively",
+			workspaceAccess: &models.TeamWorkspaceAccess{
+				ID: uuid.New(), TeamID: uuid.New(),
+				Runs: &runsPlan, Variables: &varsWrite, WorkspaceLocking: &lockingTrue,
+			},
+			mustHave: []Permission{
+				PermissionRuns, PermissionVariables, PermissionWorkspaceLocking,
+			},
+			mustNotHaveAny: []Permission{
+				PermissionWorkspaceRead, PermissionWorkspaceWrite,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			perms := service.getPermissionsFromWorkspaceAccess(tt.workspaceAccess)
+			for _, p := range tt.mustHave {
+				if !perms[p] {
+					t.Errorf("permission %s must be granted but was not", p)
+				}
+			}
+			for _, p := range tt.mustNotHaveAny {
+				if perms[p] {
+					t.Errorf("permission %s must NOT be granted but was", p)
+				}
+			}
+		})
+	}
+}
+
 // TestGetPermissionsFromOrganizationAccess_FineGrainedAnsible tests that
 // individual per-resource Ansible permission fields map to the correct
 // granular permissions without granting access to other resource types.
