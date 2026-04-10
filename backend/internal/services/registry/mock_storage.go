@@ -7,10 +7,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"time"
+
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
-// MockStorage is an in-memory storage implementation for testing
+// MockStorage is an in-memory storage implementation for testing.
+// Implements storage.Client.
 type MockStorage struct {
 	objects map[string][]byte
 }
@@ -24,44 +28,68 @@ func NewMockStorage() *MockStorage {
 
 var ErrObjectNotFound = errors.New("object not found")
 
-func (m *MockStorage) PutObject(ctx context.Context, bucket, key string, data io.Reader, size int64) error {
-	buf := make([]byte, size)
-	if _, err := io.ReadFull(data, buf); err != nil {
-		return err
-	}
-	m.objects[bucket+"/"+key] = buf
+func (m *MockStorage) Put(_ context.Context, key string, data []byte) error {
+	m.objects[key] = data
 	return nil
 }
 
-func (m *MockStorage) GetObject(ctx context.Context, bucket, key string) (io.Reader, error) {
-	data, ok := m.objects[bucket+"/"+key]
+func (m *MockStorage) Get(_ context.Context, key string) ([]byte, error) {
+	data, ok := m.objects[key]
 	if !ok {
 		return nil, ErrObjectNotFound
 	}
-	return bytes.NewReader(data), nil
+	return data, nil
 }
 
-func (m *MockStorage) PresignGetObject(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
-	if _, ok := m.objects[bucket+"/"+key]; !ok {
-		return "", ErrObjectNotFound
-	}
-	return "http://mock-storage.example.com/" + bucket + "/" + key, nil
-}
-
-func (m *MockStorage) DeleteObject(ctx context.Context, bucket, key string) error {
-	delete(m.objects, bucket+"/"+key)
+func (m *MockStorage) Delete(_ context.Context, key string) error {
+	delete(m.objects, key)
 	return nil
 }
 
-func (m *MockStorage) ListObjects(ctx context.Context, bucket, prefix string) ([]ObjectInfo, error) {
-	var results []ObjectInfo
-	for key := range m.objects {
-		if len(key) > len(bucket+"/"+prefix) && key[:len(bucket+"/"+prefix)] == bucket+"/"+prefix {
-			results = append(results, ObjectInfo{
+func (m *MockStorage) PutStream(_ context.Context, key string, reader io.Reader, size int64) error {
+	var data []byte
+	var err error
+	if size >= 0 {
+		data = make([]byte, size)
+		_, err = io.ReadFull(reader, data)
+	} else {
+		data, err = io.ReadAll(reader)
+	}
+	if err != nil {
+		return err
+	}
+	m.objects[key] = data
+	return nil
+}
+
+func (m *MockStorage) GetStream(_ context.Context, key string) (io.ReadCloser, error) {
+	data, ok := m.objects[key]
+	if !ok {
+		return nil, ErrObjectNotFound
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (m *MockStorage) List(_ context.Context, prefix string) ([]storage.ObjectInfo, error) {
+	var results []storage.ObjectInfo
+	for key, data := range m.objects {
+		if strings.HasPrefix(key, prefix) {
+			results = append(results, storage.ObjectInfo{
 				Key:  key,
-				Size: int64(len(m.objects[key])),
+				Size: int64(len(data)),
 			})
 		}
 	}
 	return results, nil
+}
+
+func (m *MockStorage) PresignGet(_ context.Context, key string, _ time.Duration) (string, error) {
+	if _, ok := m.objects[key]; !ok {
+		return "", ErrObjectNotFound
+	}
+	return "http://mock-storage.example.com/" + key, nil
+}
+
+func (m *MockStorage) Ping(_ context.Context) error {
+	return nil
 }

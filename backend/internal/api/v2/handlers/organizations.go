@@ -5,6 +5,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -27,9 +28,10 @@ type OrganizationHandlerV2 struct {
 	authService     *auth.Service
 	activityService *activity.Service
 	rbacService     *rbac.Service
+	db              *gorm.DB
 }
 
-func NewOrganizationHandlerV2(orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, projectRepo *repository.ProjectRepository, authService *auth.Service, activityService *activity.Service, rbacService *rbac.Service) *OrganizationHandlerV2 {
+func NewOrganizationHandlerV2(orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, projectRepo *repository.ProjectRepository, authService *auth.Service, activityService *activity.Service, rbacService *rbac.Service, db *gorm.DB) *OrganizationHandlerV2 {
 	return &OrganizationHandlerV2{
 		orgRepo:         orgRepo,
 		teamRepo:        teamRepo,
@@ -37,6 +39,7 @@ func NewOrganizationHandlerV2(orgRepo *repository.OrganizationRepository, teamRe
 		authService:     authService,
 		activityService: activityService,
 		rbacService:     rbacService,
+		db:              db,
 	}
 }
 
@@ -461,6 +464,24 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// Set the latest stable Terraform version as org default
+	if org.DefaultTerraformVersion == "" && h.db != nil {
+		var versions []models.TerraformVersion
+		if err := h.db.Where("enabled = ? AND beta = ? AND deprecated = ?", true, false, false).
+			Find(&versions).Error; err == nil && len(versions) > 0 {
+			// Sort by semver descending to find the latest
+			sort.Slice(versions, func(i, j int) bool {
+				return compareVersions(versions[i].Version, versions[j].Version) > 0
+			})
+			org.DefaultTerraformVersion = versions[0].Version
+			if err := h.orgRepo.Update(org); err != nil {
+				logger.Warnf("Failed to set default terraform version for org %s: %v", org.Name, err)
+			} else {
+				logger.Infof("Set default terraform version for org %s to %s", org.Name, versions[0].Version)
+			}
+		}
 	}
 
 	// Log activity

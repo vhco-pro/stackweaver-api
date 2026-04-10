@@ -216,7 +216,6 @@ func TestCreateProvider(t *testing.T) {
 		gpgKeyRepo,
 		authService,
 		mockStorage,
-		"test-bucket",
 	)
 
 	// Setup router with auth middleware that sets user in context
@@ -330,7 +329,6 @@ func TestPublishProviderPlatform(t *testing.T) {
 		gpgKeyRepo,
 		authService,
 		mockStorage,
-		"test-bucket",
 	)
 
 	// Setup router with auth middleware that sets user in context for testing
@@ -483,7 +481,6 @@ func TestPublishProviderPlatformWithGPG(t *testing.T) {
 		gpgKeyRepo,
 		authService,
 		mockStorage,
-		"test-bucket",
 	)
 
 	// Setup router with auth middleware that sets user in context for testing

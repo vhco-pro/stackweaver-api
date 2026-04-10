@@ -20,7 +20,6 @@ type ConfigurationVersionHandlerV2 struct {
 	workspaceRepo     *repository.WorkspaceRepository
 	authService       *auth.Service
 	storageClient     storage.Client
-	storageBucket     string
 }
 
 func NewConfigurationVersionHandlerV2(
@@ -28,14 +27,12 @@ func NewConfigurationVersionHandlerV2(
 	workspaceRepo *repository.WorkspaceRepository,
 	authService *auth.Service,
 	storageClient storage.Client,
-	storageBucket string,
 ) *ConfigurationVersionHandlerV2 {
 	return &ConfigurationVersionHandlerV2{
 		configVersionRepo: configVersionRepo,
 		workspaceRepo:     workspaceRepo,
 		authService:       authService,
 		storageClient:     storageClient,
-		storageBucket:     storageBucket,
 	}
 }
 

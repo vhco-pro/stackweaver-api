@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 type ProviderService struct {
@@ -17,8 +18,7 @@ type ProviderService struct {
 	providerPlatformRepo *repository.ProviderPlatformRepository
 	providerDownloadRepo *repository.ProviderDownloadRepository
 	orgRepo              *repository.OrganizationRepository
-	storage              StorageBackend
-	storageBucket        string
+	storage              storage.Client
 }
 
 func NewProviderService(
@@ -27,8 +27,7 @@ func NewProviderService(
 	providerPlatformRepo *repository.ProviderPlatformRepository,
 	providerDownloadRepo *repository.ProviderDownloadRepository,
 	orgRepo *repository.OrganizationRepository,
-	storage StorageBackend,
-	storageBucket string,
+	storageClient storage.Client,
 ) *ProviderService {
 	return &ProviderService{
 		providerRepo:         providerRepo,
@@ -36,8 +35,7 @@ func NewProviderService(
 		providerPlatformRepo: providerPlatformRepo,
 		providerDownloadRepo: providerDownloadRepo,
 		orgRepo:              orgRepo,
-		storage:              storage,
-		storageBucket:        storageBucket,
+		storage:              storageClient,
 	}
 }
 
@@ -128,7 +126,7 @@ func (s *ProviderService) GetDownloadURL(ctx context.Context, namespace, name, v
 	}
 
 	// Generate presigned URL (15 minutes expiry as per Terraform Registry spec)
-	url, err := s.storage.PresignGetObject(ctx, s.storageBucket, platform.BinaryPath, 15*time.Minute)
+	url, err := s.storage.PresignGet(ctx, platform.BinaryPath, 15*time.Minute)
 	if err != nil {
 		return "", err
 	}

@@ -3,10 +3,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -410,10 +413,21 @@ func (h *AdminTerraformVersionsHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// SeedOfficialVersions seeds the database with official Terraform versions if they don't exist.
+// SeedOfficialVersions seeds the database with official Terraform versions.
+// First attempts to fetch the latest versions from the HashiCorp releases CDN.
+// Falls back to the hardcoded list for air-gapped environments.
 // Called during platform startup.
 func SeedOfficialVersions(db *gorm.DB) {
-	for _, ver := range models.OfficialTerraformVersions {
+	versions := fetchStableVersionsFromCDN()
+	if len(versions) == 0 {
+		logger.Warnf("Could not fetch versions from HashiCorp CDN, using fallback list (%d versions)", len(models.OfficialTerraformVersions))
+		versions = models.OfficialTerraformVersions
+	} else {
+		logger.Infof("Fetched %d stable Terraform versions from HashiCorp CDN", len(versions))
+	}
+
+	seedCount := 0
+	for _, ver := range versions {
 		var existing models.TerraformVersion
 		if err := db.Where("version = ?", ver).First(&existing).Error; err == nil {
 			continue // Already exists
@@ -424,15 +438,97 @@ func SeedOfficialVersions(db *gorm.DB) {
 			URL:      fmt.Sprintf("https://releases.hashicorp.com/terraform/%s/terraform_%s_linux_amd64.zip", ver, ver),
 			Official: true,
 			Enabled:  true,
-			Beta:     strings.Contains(ver, "-"),
+			Beta:     false, // CDN fetch and fallback list both exclude pre-release
 		}
 		if err := db.Create(version).Error; err != nil {
-			// Ignore duplicate key errors from concurrent startups
 			if !strings.Contains(err.Error(), "duplicate") {
 				logger.Warnf("Failed to seed terraform version %s: %v", ver, err)
 			}
+		} else {
+			seedCount++
 		}
 	}
+	if seedCount > 0 {
+		logger.Infof("Seeded %d new Terraform versions", seedCount)
+	}
+}
+
+// fetchStableVersionsFromCDN fetches available Terraform versions from the HashiCorp
+// releases index. Returns only stable versions (no alpha, beta, rc, dev). Versions
+// older than 1.5.0 are excluded. Returns nil on error (caller should use fallback).
+func fetchStableVersionsFromCDN() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, models.HashiCorpReleasesURL, nil)
+	if err != nil {
+		logger.Warnf("Failed to create request for HashiCorp releases: %v", err)
+		return nil
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		logger.Warnf("Failed to fetch HashiCorp releases index: %v", err)
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Warnf("HashiCorp releases index returned status %d", resp.StatusCode)
+		return nil
+	}
+
+	var index struct {
+		Versions map[string]json.RawMessage `json:"versions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&index); err != nil {
+		logger.Warnf("Failed to parse HashiCorp releases index: %v", err)
+		return nil
+	}
+
+	var versions []string
+	for ver := range index.Versions {
+		// Skip pre-release versions (alpha, beta, rc, dev)
+		if strings.ContainsAny(ver, "-+") {
+			continue
+		}
+		// Only include 1.x versions with proper semver format
+		parts := strings.Split(ver, ".")
+		if len(parts) != 3 {
+			continue
+		}
+		major, err1 := strconv.Atoi(parts[0])
+		minor, err2 := strconv.Atoi(parts[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		// Only 1.5.0+
+		if major < 1 || (major == 1 && minor < 5) {
+			continue
+		}
+		versions = append(versions, ver)
+	}
+
+	// Sort descending (latest first)
+	sort.Slice(versions, func(i, j int) bool {
+		return compareVersions(versions[i], versions[j]) > 0
+	})
+
+	return versions
+}
+
+// compareVersions compares two semver strings. Returns >0 if a > b, <0 if a < b, 0 if equal.
+func compareVersions(a, b string) int {
+	ap := strings.Split(a, ".")
+	bp := strings.Split(b, ".")
+	for i := 0; i < 3; i++ {
+		av, _ := strconv.Atoi(ap[i])
+		bv, _ := strconv.Atoi(bp[i])
+		if av != bv {
+			return av - bv
+		}
+	}
+	return 0
 }
 
 // ListEnabled returns all enabled, non-deprecated terraform versions.

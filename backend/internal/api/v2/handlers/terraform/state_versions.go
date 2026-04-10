@@ -27,7 +27,6 @@ type StateVersionHandlerV2 struct {
 	rbacService      *rbac.Service
 	stateService     *state.Service
 	storageClient    storage.Client
-	storageBucket    string
 }
 
 func NewStateVersionHandlerV2(
@@ -38,7 +37,6 @@ func NewStateVersionHandlerV2(
 	rbacService *rbac.Service,
 	stateService *state.Service,
 	storageClient storage.Client,
-	storageBucket string,
 ) *StateVersionHandlerV2 {
 	return &StateVersionHandlerV2{
 		stateVersionRepo: stateVersionRepo,
@@ -48,7 +46,6 @@ func NewStateVersionHandlerV2(
 		rbacService:      rbacService,
 		stateService:     stateService,
 		storageClient:    storageClient,
-		storageBucket:    storageBucket,
 	}
 }
 

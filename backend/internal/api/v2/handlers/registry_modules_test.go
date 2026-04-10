@@ -139,7 +139,7 @@ func TestListModules(t *testing.T) {
 
 	// Create a mock storage (in-memory for testing)
 	mockStorage := registry.NewMockStorage()
-	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage, "test-bucket")
+	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage)
 
 	handler := &RegistryModuleHandler{
 		moduleService: moduleService,
@@ -221,7 +221,7 @@ func TestGetModuleVersions(t *testing.T) {
 	moduleDownloadRepo := repository.NewModuleDownloadRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
 	mockStorage := registry.NewMockStorage()
-	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage, "test-bucket")
+	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage)
 
 	handler := &RegistryModuleHandler{
 		moduleService: moduleService,
@@ -291,7 +291,7 @@ func TestPublishModuleVersion(t *testing.T) {
 
 	// Create module publisher
 	vcsConnectionRepo := repository.NewVCSConnectionRepository(db)
-	modulePublisher := registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, vcsConnectionRepo, mockStorage, "test-bucket")
+	modulePublisher := registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, vcsConnectionRepo, mockStorage)
 
 	// Create auth service
 	userRepo := repository.NewUserRepository(db)

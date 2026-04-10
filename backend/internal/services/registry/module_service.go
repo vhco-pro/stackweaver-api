@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 type ModuleService struct {
@@ -16,8 +17,7 @@ type ModuleService struct {
 	moduleVersionRepo  *repository.ModuleVersionRepository
 	moduleDownloadRepo *repository.ModuleDownloadRepository
 	orgRepo            *repository.OrganizationRepository
-	storage            StorageBackend
-	storageBucket      string
+	storage            storage.Client
 }
 
 func NewModuleService(
@@ -25,16 +25,14 @@ func NewModuleService(
 	moduleVersionRepo *repository.ModuleVersionRepository,
 	moduleDownloadRepo *repository.ModuleDownloadRepository,
 	orgRepo *repository.OrganizationRepository,
-	storage StorageBackend,
-	storageBucket string,
+	storageClient storage.Client,
 ) *ModuleService {
 	return &ModuleService{
 		moduleRepo:         moduleRepo,
 		moduleVersionRepo:  moduleVersionRepo,
 		moduleDownloadRepo: moduleDownloadRepo,
 		orgRepo:            orgRepo,
-		storage:            storage,
-		storageBucket:      storageBucket,
+		storage:            storageClient,
 	}
 }
 
@@ -120,7 +118,7 @@ func (s *ModuleService) GetDownloadURL(ctx context.Context, namespace, name, pro
 	}
 
 	// Generate presigned URL (15 minutes expiry as per Terraform Registry spec)
-	url, err := s.storage.PresignGetObject(ctx, s.storageBucket, moduleVersion.TarballPath, 15*time.Minute)
+	url, err := s.storage.PresignGet(ctx, moduleVersion.TarballPath, 15*time.Minute)
 	if err != nil {
 		return "", err
 	}
