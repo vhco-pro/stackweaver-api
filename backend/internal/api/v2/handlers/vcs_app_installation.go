@@ -510,7 +510,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 			}
 
 			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile); err != nil {
+			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 				logger.Errorf("Failed to upload config for workspace %s: %v", ws.ID, err)
 				configVersion.Status = models.ConfigurationVersionStatusErrored
 				configVersion.ErrorMessage = fmt.Sprintf("Failed to upload: %v", err)
@@ -747,7 +747,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 			}
 
 			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile); err != nil {
+			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 				logger.Errorf("Failed to upload config for workspace %s: %v", ws.ID, err)
 				configVersion.Status = models.ConfigurationVersionStatusErrored
 				configVersion.ErrorMessage = fmt.Sprintf("Failed to upload: %v", err)
@@ -1605,7 +1605,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			}
 
 			logger.Infof("Uploading tarball to MinIO: %s for workspace %s", storageKey, ws.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile); err != nil {
+			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 				logger.Errorf("Failed to upload configuration for workspace %s: %v", ws.ID, err)
 				// Mark configuration version as errored since upload failed
 				configVersion.Status = models.ConfigurationVersionStatusErrored
@@ -2049,7 +2049,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			}
 
 			logger.Infof("Uploading tarball to MinIO: %s for workspace %s", storageKey, ws.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile); err != nil {
+			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 				logger.Errorf("Failed to upload configuration for workspace %s: %v", ws.ID, err)
 				configVersion.Status = models.ConfigurationVersionStatusErrored
 				configVersion.ErrorMessage = fmt.Sprintf("Failed to upload configuration: %v", err)

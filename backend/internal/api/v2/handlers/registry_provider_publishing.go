@@ -17,6 +17,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 // RegistryProviderPublishingHandler handles provider publishing operations
@@ -27,8 +28,7 @@ type RegistryProviderPublishingHandler struct {
 	orgRepo              *repository.OrganizationRepository
 	gpgKeyRepo           *repository.GPGKeyRepository
 	authService          *auth.Service
-	storage              registry.StorageBackend
-	storageBucket        string
+	storage              storage.Client
 	gpgService           *registry.GPGService
 }
 
@@ -39,8 +39,7 @@ func NewRegistryProviderPublishingHandler(
 	orgRepo *repository.OrganizationRepository,
 	gpgKeyRepo *repository.GPGKeyRepository,
 	authService *auth.Service,
-	storage registry.StorageBackend,
-	storageBucket string,
+	storageClient storage.Client,
 ) *RegistryProviderPublishingHandler {
 	return &RegistryProviderPublishingHandler{
 		providerRepo:         providerRepo,
@@ -49,8 +48,7 @@ func NewRegistryProviderPublishingHandler(
 		orgRepo:              orgRepo,
 		gpgKeyRepo:           gpgKeyRepo,
 		authService:          authService,
-		storage:              storage,
-		storageBucket:        storageBucket,
+		storage:              storageClient,
 		gpgService:           registry.NewGPGService(),
 	}
 }
@@ -319,7 +317,7 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 	storagePath := fmt.Sprintf("providers/%s/%s/%s/%s_%s/%s",
 		org.Name, provider.Name, normalizedVersion, os, arch, file.Filename)
 
-	if err := h.storage.PutObject(c.Request.Context(), h.storageBucket, storagePath, src, file.Size); err != nil {
+	if err := h.storage.PutStream(c.Request.Context(), storagePath, src, file.Size); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to upload to storage"}},
 		})
@@ -359,7 +357,7 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 			org.Name, provider.Name, normalizedVersion, os, arch, file.Filename)
 
 		signatureReader := bytes.NewReader(signature)
-		if err := h.storage.PutObject(c.Request.Context(), h.storageBucket, signaturePath, signatureReader, int64(len(signature))); err != nil {
+		if err := h.storage.PutStream(c.Request.Context(), signaturePath, signatureReader, int64(len(signature))); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to upload signature to storage"}},
 			})

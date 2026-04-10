@@ -2889,7 +2889,7 @@ func (h *RunHandlerV2) createConfigurationVersionFromVCS(ctx context.Context, wo
 	}()
 
 	storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
-	if err := h.storageClient.PutStream(ctx, storageKey, tarballFile); err != nil {
+	if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 		return "", fmt.Errorf("failed to upload configuration: %w", err)
 	}
 

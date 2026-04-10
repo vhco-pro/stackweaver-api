@@ -17,6 +17,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 // ModulePublisher handles module publishing operations
@@ -26,8 +27,7 @@ type ModulePublisher struct {
 	orgRepo           *repository.OrganizationRepository
 	vcsConnectionRepo *repository.VCSConnectionRepository
 	parser            *ModuleParser
-	storage           StorageBackend
-	storageBucket     string
+	storage           storage.Client
 }
 
 // NewModulePublisher creates a new module publisher
@@ -36,8 +36,7 @@ func NewModulePublisher(
 	moduleVersionRepo *repository.ModuleVersionRepository,
 	orgRepo *repository.OrganizationRepository,
 	vcsConnectionRepo *repository.VCSConnectionRepository,
-	storage StorageBackend,
-	storageBucket string,
+	storageClient storage.Client,
 ) *ModulePublisher {
 	return &ModulePublisher{
 		moduleRepo:        moduleRepo,
@@ -45,8 +44,7 @@ func NewModulePublisher(
 		orgRepo:           orgRepo,
 		vcsConnectionRepo: vcsConnectionRepo,
 		parser:            NewModuleParser(),
-		storage:           storage,
-		storageBucket:     storageBucket,
+		storage:           storageClient,
 	}
 }
 
@@ -170,7 +168,7 @@ func (p *ModulePublisher) PublishVersionFromTarball(
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	if err := p.storage.PutObject(ctx, p.storageBucket, storagePath, tarballFile, fileInfo.Size()); err != nil {
+	if err := p.storage.PutStream(ctx, storagePath, tarballFile, fileInfo.Size()); err != nil {
 		return nil, fmt.Errorf("failed to upload to storage: %w", err)
 	}
 
@@ -266,7 +264,7 @@ func (p *ModulePublisher) PublishVersionFromDirectory(
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	if err := p.storage.PutObject(ctx, p.storageBucket, storagePath, tarballFile, fileInfo.Size()); err != nil {
+	if err := p.storage.PutStream(ctx, storagePath, tarballFile, fileInfo.Size()); err != nil {
 		return nil, fmt.Errorf("failed to upload to storage: %w", err)
 	}
 

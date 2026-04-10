@@ -3,6 +3,7 @@
 package routes
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -83,7 +84,7 @@ func SetupV2Routes(
 	rbacService := rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo)
 
 	// Handlers
-	orgHandler := handlers.NewOrganizationHandlerV2(orgRepo, teamRepo, projectRepo, authService, activityService, rbacService)
+	orgHandler := handlers.NewOrganizationHandlerV2(orgRepo, teamRepo, projectRepo, authService, activityService, rbacService, db)
 	projectHandler := handlers.NewProjectHandlerV2(projectRepo, orgRepo, teamRepo, authService, activityService, rbacService)
 	teamHandler := handlers.NewTeamHandlerV2(teamRepo, orgRepo, authService, rbacService)
 	teamWorkspaceAccessHandler := handlers.NewTeamWorkspaceAccessHandlerV2(teamRepo, workspaceRepo, projectRepo, orgRepo, authService, rbacService)
@@ -354,42 +355,14 @@ func SetupV2Routes(
 	// Configuration Versions Repository and Handler
 	configVersionRepo := repository.NewConfigurationVersionRepository(db)
 
-	// Initialize storage for configuration versions (same as registry storage)
-	storageBackend := os.Getenv("STORAGE_BACKEND")
-	if storageBackend == "" {
-		storageBackend = "minio"
+	// Initialize unified storage client (single client for all storage operations)
+	storageCfg := storage.ConfigFromEnv()
+	storageClient, err := storage.NewClient(context.Background(), storageCfg)
+	if err != nil {
+		logger.Warnf("Failed to initialize storage: %v (storage features will be limited)", err)
 	}
 
-	var configStorageClient storage.Client
-	var configStorageBucket string
-
-	if storageBackend == "minio" {
-		minioEndpoint := os.Getenv("MINIO_ENDPOINT")
-		if minioEndpoint == "" {
-			minioEndpoint = "localhost:9000"
-		}
-		minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
-		if minioAccessKey == "" {
-			minioAccessKey = "minioadmin"
-		}
-		minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
-		if minioSecretKey == "" {
-			minioSecretKey = "minioadmin"
-		}
-		configStorageBucket = os.Getenv("STORAGE_BUCKET")
-		if configStorageBucket == "" {
-			configStorageBucket = "terraform-registry"
-		}
-		useSSL := os.Getenv("MINIO_USE_SSL") == "true"
-
-		var err error
-		configStorageClient, err = storage.NewMinIOClient(minioEndpoint, minioAccessKey, minioSecretKey, configStorageBucket, useSSL)
-		if err != nil {
-			logger.Warnf("Failed to initialize MinIO storage for configuration versions: %v (uploads will fail)", err)
-		}
-	}
-
-	configVersionHandler := terraformHandlers.NewConfigurationVersionHandlerV2(configVersionRepo, workspaceRepo, authService, configStorageClient, configStorageBucket)
+	configVersionHandler := terraformHandlers.NewConfigurationVersionHandlerV2(configVersionRepo, workspaceRepo, authService, storageClient)
 
 	// Initialize Redis log buffer service for log streaming
 	// Initialize Redis connection for log streaming (reuse same config as Ansible queue)
@@ -417,7 +390,7 @@ func SetupV2Routes(
 	// Add VCS connection repository and GitHub app manager for automatic configuration version creation from VCS
 	phaseStateRepo := repository.NewRunPhaseStateRepository(db)
 	stateVersionRepo := repository.NewStateVersionRepository(db)
-	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, configStorageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo)
+	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo)
 
 	// Terraform Runs (TFE-compatible)
 	// TFE expects: /api/v2/runs/:id
@@ -489,10 +462,10 @@ func SetupV2Routes(
 
 	// State Service (for lock checking and state management)
 	// Use same storage client as configuration versions (state stored in same bucket, different paths)
-	stateService := state.NewService(stateVersionRepo, stateLockRepo, workspaceRepo, configStorageClient)
+	stateService := state.NewService(stateVersionRepo, stateLockRepo, workspaceRepo, storageClient)
 
 	// State Versions Handlers (reuse same storage client as configuration versions)
-	stateVersionHandler := terraformHandlers.NewStateVersionHandlerV2(stateVersionRepo, workspaceRepo, projectRepo, authService, rbacService, stateService, configStorageClient, configStorageBucket)
+	stateVersionHandler := terraformHandlers.NewStateVersionHandlerV2(stateVersionRepo, workspaceRepo, projectRepo, authService, rbacService, stateService, storageClient)
 
 	// State Versions (TFE-compatible)
 	// TFE expects: /api/v2/workspaces/:id/state-versions
@@ -645,44 +618,13 @@ func SetupV2Routes(
 	moduleVersionRepo := repository.NewModuleVersionRepository(db)
 	moduleDownloadRepo := repository.NewModuleDownloadRepository(db)
 
-	// Initialize storage for registry (reuse same config as configuration versions)
-	var registryStorage registry.StorageBackend
-	var storageBucket string
-
-	if storageBackend == "minio" {
-		minioEndpoint := os.Getenv("MINIO_ENDPOINT")
-		if minioEndpoint == "" {
-			minioEndpoint = "localhost:9000"
-		}
-		minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
-		if minioAccessKey == "" {
-			minioAccessKey = "minioadmin"
-		}
-		minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
-		if minioSecretKey == "" {
-			minioSecretKey = "minioadmin"
-		}
-		storageBucket = os.Getenv("STORAGE_BUCKET")
-		if storageBucket == "" {
-			storageBucket = "terraform-registry"
-		}
-		useSSL := os.Getenv("MINIO_USE_SSL") == "true"
-
-		var err error
-		registryStorage, err = registry.NewMinIOStorage(minioEndpoint, minioAccessKey, minioSecretKey, storageBucket, useSSL)
-		if err != nil {
-			logger.Warnf("Failed to initialize MinIO storage for registry: %v (registry features will be limited)", err)
-		}
-	}
-
-	// Module Publisher
+	// Module Publisher (reuses unified storage client)
 	modulePublisher := registry.NewModulePublisher(
 		moduleRepo,
 		moduleVersionRepo,
 		orgRepo,
 		vcsConnectionRepo,
-		registryStorage,
-		storageBucket,
+		storageClient,
 	)
 
 	// Registry Publishing Handler
@@ -741,54 +683,6 @@ func SetupV2Routes(
 	if githubAppManager != nil && githubAppManager.IsEnabled() {
 		vcsWebhook := r.Group("/api/v2/vcs-connections/github")
 		{
-			// Initialize storage for VCS webhook handler
-			// Reuse the same storage client as configuration versions to ensure consistency
-			// The webhook handler needs to upload configuration tarballs to the same bucket
-			// Use configStorageClient (same instance used by UI-triggered runs)
-			// This ensures webhook-triggered runs use the exact same storage configuration
-			var storageClient storage.Client
-
-			if configStorageClient != nil {
-				// Primary path: reuse configuration versions storage client
-				storageClient = configStorageClient
-				logger.Infof("VCS webhook handler using configStorageClient (shared with UI-triggered runs), bucket: %s", configStorageBucket)
-			} else {
-				// Fallback: initialize with EXACT same logic as configStorageClient
-				// This should rarely happen, but ensures consistency if configStorageClient failed to initialize
-				storageBackend := os.Getenv("STORAGE_BACKEND")
-				if storageBackend == "" {
-					storageBackend = "minio"
-				}
-				if storageBackend == "minio" {
-					minioEndpoint := os.Getenv("MINIO_ENDPOINT")
-					if minioEndpoint == "" {
-						minioEndpoint = "localhost:9000"
-					}
-					minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
-					if minioAccessKey == "" {
-						minioAccessKey = "minioadmin"
-					}
-					minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
-					if minioSecretKey == "" {
-						minioSecretKey = "minioadmin"
-					}
-					// Use STORAGE_BUCKET (same as configuration versions), not MINIO_BUCKET
-					storageBucket := os.Getenv("STORAGE_BUCKET")
-					if storageBucket == "" {
-						storageBucket = "terraform-registry" // Same default as configuration versions
-					}
-					useSSL := os.Getenv("MINIO_USE_SSL") == "true"
-
-					var err error
-					storageClient, err = storage.NewMinIOClient(minioEndpoint, minioAccessKey, minioSecretKey, storageBucket, useSSL)
-					if err != nil {
-						logger.Warnf("Failed to initialize MinIO client for VCS webhook: %v", err)
-					} else {
-						logger.Infof("VCS webhook handler initialized with fallback storage client, bucket: %s", storageBucket)
-					}
-				}
-			}
-
 			// Get Ansible inventory repo for inventory sync
 			ansibleInventoryRepoForWebhook := repository.NewAnsibleInventoryRepository(db)
 
@@ -843,31 +737,6 @@ func SetupV2Routes(
 	{
 		orgVCSConnections := v2.Group("/organizations/:name/vcs-connections")
 		{
-			// Initialize storage for VCS connection handlers
-			storageBackend := os.Getenv("STORAGE_BACKEND")
-			if storageBackend == "" {
-				storageBackend = "minio"
-			}
-			var storageClient storage.Client
-			var storageBucket string
-			if storageBackend == "minio" {
-				minioEndpoint := os.Getenv("MINIO_ENDPOINT")
-				minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
-				minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
-				storageBucket = os.Getenv("MINIO_BUCKET")
-				if storageBucket == "" {
-					storageBucket = "iac-platform"
-				}
-				useSSL := os.Getenv("MINIO_USE_SSL") == "true"
-				if minioEndpoint != "" && minioAccessKey != "" && minioSecretKey != "" {
-					var err error
-					storageClient, err = storage.NewMinIOClient(minioEndpoint, minioAccessKey, minioSecretKey, storageBucket, useSSL)
-					if err != nil {
-						logger.Warnf("Failed to initialize MinIO client for VCS connections: %v", err)
-					}
-				}
-			}
-
 			// Get Ansible inventory repo for inventory sync
 			ansibleInventoryRepoForInstall := repository.NewAnsibleInventoryRepository(db)
 
@@ -961,7 +830,7 @@ func SetupV2Routes(
 				azureDevOpsManager,
 				vcsRegistry,
 				registryPublishingHandler,
-				configStorageClient,
+				storageClient,
 				ansibleQueueForADO,
 			)
 
@@ -974,9 +843,7 @@ func SetupV2Routes(
 
 	// Registry Routes (Public - No Auth Required for Terraform CLI)
 	// These endpoints are outside the authenticated v2 group
-	// Note: moduleRepo, moduleVersionRepo, moduleDownloadRepo, registryStorage, and storageBucket
-	// are already initialized above for the publishing routes
-	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, registryStorage, storageBucket)
+	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, storageClient)
 	moduleHandler := handlers.NewRegistryModuleHandler(moduleService)
 
 	// Initialize provider repositories and services
@@ -984,7 +851,7 @@ func SetupV2Routes(
 	providerVersionRepo := repository.NewProviderVersionRepository(db)
 	providerPlatformRepo := repository.NewProviderPlatformRepository(db)
 	providerDownloadRepo := repository.NewProviderDownloadRepository(db)
-	providerService := registry.NewProviderService(providerRepo, providerVersionRepo, providerPlatformRepo, providerDownloadRepo, orgRepo, registryStorage, storageBucket)
+	providerService := registry.NewProviderService(providerRepo, providerVersionRepo, providerPlatformRepo, providerDownloadRepo, orgRepo, storageClient)
 	providerHandler := handlers.NewRegistryProviderHandler(providerService)
 
 	// GPG Key Repository and Handler
@@ -999,8 +866,7 @@ func SetupV2Routes(
 		orgRepo,
 		gpgKeyRepo,
 		authService,
-		registryStorage,
-		storageBucket,
+		storageClient,
 	)
 
 	// Module Registry (v1) - Public endpoints
@@ -1195,7 +1061,7 @@ func SetupV2Routes(
 		runnerRepo, runnerJobExecRepo, agentPoolRepo, nil,
 		ansibleJobRepo, ansiblePlaybookRepo, ansibleInventoryRepo,
 		ansibleCredentialRepo, ansibleConfigRepo, runnerInventoryService, vcsRegistry, runnerCryptoSvc,
-		variableService, configStorageClient, db,
+		variableService, storageClient, db,
 	)
 
 	// Wire OIDC workload identity services for self-hosted runners
