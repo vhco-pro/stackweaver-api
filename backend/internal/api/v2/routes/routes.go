@@ -1095,8 +1095,16 @@ func SetupV2Routes(
 	// These webhooks handle SSO group claim passthrough for automatic team assignment.
 	// They use HMAC signature verification instead of JWT auth.
 	// See: https://zitadel.com/docs/guides/integrate/actions/usage
+	//
+	// Round 26 Wave 9 (CRIT-1): MaxBodyBytes(64KiB) is REQUIRED here.
+	// `HandleIDPSync` and `HandleComplementToken` both call
+	// `io.ReadAll(c.Request.Body)` BEFORE signature verification, so an
+	// unauthenticated attacker streaming a multi-GB body can OOM the API
+	// regardless of the HMAC gate. The Wave 1 body cap was wired only on
+	// `/auth/*` and missed this surface — closes the gap.
 	zitadelWebhookHandler := handlers.NewZitadelWebhookHandler()
 	zitadelActions := r.Group("/api/v2/zitadel/actions")
+	zitadelActions.Use(middleware.MaxBodyBytes(64 * 1024))
 	{
 		// Response webhook for RetrieveIdentityProviderIntent:
 		// Extracts group claims from external IdP and stores as user metadata

@@ -27,6 +27,7 @@ type ZitadelWebhookHandler struct {
 	complementTokenSigningKey string
 	zitadelPAT                string
 	zitadelIssuer             string
+	isProduction              bool
 }
 
 // NewZitadelWebhookHandler creates a new handler for Zitadel Actions V2 webhooks.
@@ -36,20 +37,34 @@ func NewZitadelWebhookHandler() *ZitadelWebhookHandler {
 		complementTokenSigningKey: os.Getenv("ZITADEL_WEBHOOK_COMPLEMENT_TOKEN_KEY"),
 		zitadelPAT:                os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN"),
 		zitadelIssuer:             os.Getenv("ZITADEL_ISSUER"),
+		isProduction:              os.Getenv("GIN_MODE") == "release",
 	}
 }
 
 // verifySignature validates the HMAC-SHA256 signature from Zitadel's webhook call.
 // The signature header format is: "t=<timestamp>,v1=<hex-encoded-hmac>"
-// The signed payload is: "<timestamp>.<raw-body>"
-func verifySignature(sigHeader, rawBody, signingKey string) bool {
+// The signed payload is: "<timestamp>.<raw-body>".
+//
+// Round 25d Finding C-1 (CRITICAL): the previous implementation
+// returned `true` on signature mismatch (only logged a warning) and
+// also returned `true` when no signing key was configured. The
+// /zitadel/webhooks/{idp-sync,complement-token} endpoints are on the
+// public API surface — anyone could POST forged IdP claims (e.g.
+// fake group membership) and the team-syncer would honour them,
+// bypassing RBAC. Now we hard-reject on either condition. In
+// production, missing signing key is also a fatal misconfiguration.
+func verifySignature(sigHeader, rawBody, signingKey string, isProduction bool) bool {
 	if signingKey == "" {
-		logger.Warnf("Zitadel webhook: no signing key configured, skipping signature verification")
-		return true
+		if isProduction {
+			logger.Errorf("Zitadel webhook: signing key MISSING in production — refusing webhook (set ZITADEL_WEBHOOK_*_KEY)")
+		} else {
+			logger.Warnf("Zitadel webhook: no signing key configured — refusing webhook (set ZITADEL_WEBHOOK_*_KEY to enable)")
+		}
+		return false
 	}
 
 	if sigHeader == "" {
-		logger.Warnf("Zitadel webhook: missing zitadel-signature header")
+		logger.Warnf("Zitadel webhook: missing zitadel-signature header — refusing webhook")
 		return false
 	}
 
@@ -76,8 +91,8 @@ func verifySignature(sigHeader, rawBody, signingKey string) bool {
 	computed := hex.EncodeToString(mac.Sum(nil))
 
 	if !hmac.Equal([]byte(computed), []byte(signature)) {
-		logger.Warnf("Zitadel webhook: signature mismatch (computed=%s, received=%s) — proceeding anyway (internal call)",
-			computed[:16]+"...", signature[:16]+"...")
+		logger.Warnf("Zitadel webhook: signature mismatch — refusing webhook")
+		return false
 	}
 
 	return true
@@ -105,7 +120,7 @@ func (h *ZitadelWebhookHandler) HandleIDPSync(c *gin.Context) {
 
 	// Verify signature
 	sigHeader := c.GetHeader("zitadel-signature")
-	if !verifySignature(sigHeader, string(rawBody), h.idpSyncSigningKey) {
+	if !verifySignature(sigHeader, string(rawBody), h.idpSyncSigningKey, h.isProduction) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 		return
 	}
@@ -461,7 +476,7 @@ func (h *ZitadelWebhookHandler) HandleComplementToken(c *gin.Context) {
 	}
 
 	sigHeader := c.GetHeader("zitadel-signature")
-	if !verifySignature(sigHeader, string(rawBody), h.complementTokenSigningKey) {
+	if !verifySignature(sigHeader, string(rawBody), h.complementTokenSigningKey, h.isProduction) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 		return
 	}

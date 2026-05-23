@@ -44,15 +44,21 @@ func CORSMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// Also allow if origin is empty (same-origin request) or if it's a localhost variant
-		// This handles cases where the browser sends different localhost formats
+		// Also allow if origin is empty (same-origin request) or if it's a localhost variant.
+		// This handles cases where the browser sends different localhost formats.
+		//
+		// Round 24 Finding 2 (HIGH): the previous prefix check
+		// (`origin[:16] == "http://localhost"`) matched
+		// `http://localhost.evil.com:1234` because there was no
+		// host-boundary delimiter — combined with
+		// `Allow-Credentials: true` an attacker who tricks a victim
+		// into navigating to a `localhost.<attacker>` host could
+		// pivot into the auth proxy with cookies attached. The fix:
+		// after the literal host prefix, require the next byte to
+		// be `:` (port), `/` (path), or end-of-string, anchoring the
+		// match to the actual hostname.
 		if !allowed && origin != "" {
-			// Check if it's a localhost variant (any port)
-			if (len(origin) > 16 && origin[:16] == "http://localhost") ||
-				(len(origin) > 15 && origin[:15] == "http://127.0.0.1") ||
-				(len(origin) > 10 && origin[:10] == "http://[::1]") {
-				allowed = true
-			}
+			allowed = isLocalhostOrigin(origin)
 		}
 
 		// For OPTIONS requests (preflight), always set CORS headers if origin is present
@@ -84,4 +90,33 @@ func CORSMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// isLocalhostOrigin reports whether the given Origin header value is
+// a localhost variant on any port. Round 24 Finding 2: anchored on
+// the host boundary so `http://localhost.evil.com` does NOT match.
+//
+// Accepted shapes:
+//   - http://localhost            (no port, no path — exact match)
+//   - http://localhost:NNNN       (any port)
+//   - http://localhost/path        (defensive — Origin headers don't carry paths in practice but be tolerant)
+//   - same for http://127.0.0.1 and http://[::1]
+//
+// Rejected:
+//   - http://localhost.evil.com   (the dot is not a host boundary)
+//   - http://localhostevil        (no separator)
+//   - https://localhost           (we only allow http for the dev allowlist)
+func isLocalhostOrigin(origin string) bool {
+	for _, host := range []string{"http://localhost", "http://127.0.0.1", "http://[::1]"} {
+		if origin == host {
+			return true
+		}
+		if len(origin) > len(host) && origin[:len(host)] == host {
+			next := origin[len(host)]
+			if next == ':' || next == '/' {
+				return true
+			}
+		}
+	}
+	return false
 }

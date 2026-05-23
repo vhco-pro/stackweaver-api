@@ -1,5 +1,19 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
+//go:build integration
+// +build integration
+
+// Integration-only tests — require a live PostgreSQL reachable at
+// `$TEST_DATABASE_URL` (or the local default
+// `postgres://iac:iac_password@localhost:5432/iac_platform`). Compiled
+// into the test binary ONLY when the `integration` build tag is set:
+//
+//   go test -tags=integration ./backend/internal/api/v2/handlers/...
+//
+// Companion to `registry_modules_test.go`. See that file for the
+// rationale on why DB-needing tests are gated rather than left to
+// `t.Skipf` at runtime.
+
 package handlers
 
 import (
