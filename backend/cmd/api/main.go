@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -129,6 +131,7 @@ func main() {
 		&models.StateLock{},
 		&models.AuditLog{},
 		&models.APIKey{},
+		&models.TFEToken{},
 		&models.WebhookEvent{},
 		// Registry models
 		&models.Module{},
@@ -406,8 +409,108 @@ func main() {
 		logger.Info("Runner Monitor Service disabled (set RUNNER_MONITOR_ENABLED=true to enable)")
 	}
 
+	// Initialize Auth Proxy for custom login UI (replaces the hosted Zitadel login-ui container)
+	// Round 25 hardening (item 15): in production, refuse to start when
+	// ZITADEL_API_CLIENT_ID is empty. Without it, backchannel-logout
+	// audience binding silently disables and any Zitadel-signed
+	// logout_token from any other RP on the same instance can terminate
+	// sessions in this app (Round 23 Finding 1). The handler-side check
+	// in `getBackchannelVerifier` would also panic, but only on first
+	// backchannel request — possibly hours/days after deploy. Failing
+	// here at startup gives the operator instant feedback (pod
+	// CrashLoopBackOff visible in helm install output).
+	isProduction := os.Getenv("GIN_MODE") == "release"
+	if isProduction && loginServicePAT != "" && zitadelClientID == "" {
+		logger.Errorf("startup: ZITADEL_API_CLIENT_ID is empty in production — refusing to start. Set ZITADEL_API_CLIENT_ID to the OIDC client_id this RP is registered under at Zitadel (required for backchannel-logout audience binding per OIDC §2.6).")
+		os.Exit(1)
+	}
+
+	var authProxy *handlers.AuthProxy
+	if loginServicePAT != "" {
+		zitadelInternalURL := "http://" + zitadelInternalAddr
+		notificationMode := handlers.NotificationModeReturnCode
+		if mode := os.Getenv("STACKWEAVER_NOTIFICATION_MODE"); mode == "email" {
+			notificationMode = handlers.NotificationModeEmail
+		}
+		// F-sec-5/6 lockout — env-overridable so prod / staging / dev
+		// can each pick a sensible threshold. The defaults inside
+		// NewAuthProxy (5 attempts in 15 min) cover the common case;
+		// here we only override when the operator explicitly opts in.
+		lockoutThreshold := 0
+		if v := os.Getenv("STACKWEAVER_LOGINNAME_LOCKOUT_THRESHOLD"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				lockoutThreshold = n
+			}
+		}
+		var lockoutWindow time.Duration
+		if v := os.Getenv("STACKWEAVER_LOGINNAME_LOCKOUT_WINDOW"); v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				lockoutWindow = d
+			}
+		}
+		// Round 25 Wave 5 (item 5): parse STACKWEAVER_POST_LOGOUT_HOSTS
+		// (comma-separated extra hosts the EndSession redirect-host
+		// allowlist will accept on top of STACKWEAVER_APP_URL's host).
+		var postLogoutHosts []string
+		if v := os.Getenv("STACKWEAVER_POST_LOGOUT_HOSTS"); v != "" {
+			for _, h := range strings.Split(v, ",") {
+				if h = strings.TrimSpace(h); h != "" {
+					postLogoutHosts = append(postLogoutHosts, h)
+				}
+			}
+		}
+
+		// Round 25 Wave 6 (item 6 / Round 22 OOS): parse the optional
+		// shared decoy secret for HA deployments. Base64-encoded ≥32
+		// bytes. Empty / unset → NewAuthProxy generates a per-process
+		// random secret (single-replica friendly). Misconfiguration
+		// (set but invalid encoding / too short) is fatal in
+		// production so the operator notices.
+		var decoySecret []byte
+		if raw := os.Getenv("STACKWEAVER_DECOY_SECRET"); raw != "" {
+			decoded, err := base64.StdEncoding.DecodeString(raw)
+			switch {
+			case err != nil:
+				if isProduction {
+					logger.Errorf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 (production refuses to start with a bad shared secret): %v", err)
+					os.Exit(1)
+				}
+				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 — falling back to per-process random secret: %v", err)
+			case len(decoded) < 32:
+				if isProduction {
+					logger.Errorf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) — production refuses to start", len(decoded))
+					os.Exit(1)
+				}
+				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) — falling back to per-process random secret", len(decoded))
+			default:
+				decoySecret = decoded
+				logger.Info("auth proxy: STACKWEAVER_DECOY_SECRET configured — decoy ids will be stable across replicas")
+			}
+		}
+
+		authProxy = handlers.NewAuthProxy(handlers.AuthProxyConfig{
+			ZitadelInternalURL:        zitadelInternalURL,
+			ZitadelIssuer:             zitadelIssuer,
+			PAT:                       loginServicePAT,
+			ClientID:                  zitadelClientID,
+			NotificationMode:          notificationMode,
+			DefaultRedirectURI:        os.Getenv("STACKWEAVER_DEFAULT_REDIRECT_URI"),
+			AutoSubmitCode:            os.Getenv("STACKWEAVER_AUTO_SUBMIT_CODE") == "true",
+			CustomRequestHeaders:      os.Getenv("CUSTOM_REQUEST_HEADERS"),
+			IsProduction:              isProduction,
+			PublicFrontendURL:         os.Getenv("STACKWEAVER_APP_URL"),
+			PostLogoutAllowedHosts:    postLogoutHosts,
+			DecoySecret:               decoySecret,
+			LoginNameLockoutThreshold: lockoutThreshold,
+			LoginNameLockoutWindow:    lockoutWindow,
+		})
+		logger.Info("Auth Proxy initialized for custom login UI")
+	} else {
+		logger.Warn("Auth Proxy not initialized — ZITADEL_LOGIN_SERVICE_USER_TOKEN not set")
+	}
+
 	// Setup routes
-	router := routes.SetupRoutes(db, authService, totpService, profileService, sessionsService, apiKeyService, githubAppManager)
+	router := routes.SetupRoutes(db, authService, totpService, profileService, sessionsService, apiKeyService, githubAppManager, authProxy)
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)

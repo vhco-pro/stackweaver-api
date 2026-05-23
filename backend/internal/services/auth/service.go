@@ -4,6 +4,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,6 +17,21 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 )
+
+// shortTokenID returns a 16-hex-char SHA-256 prefix of the token, suitable
+// for opaque correlation in debug logs without revealing token bytes.
+// Round 25 hardening (item 16): the previous implementation logged the
+// first 10 raw chars of the token at Debug, leaking enough entropy to
+// be useful in a log-correlation attack on TFE-style tokens. SHA-256 is
+// one-way; the hex prefix is enough to match an audit-log record back to
+// a Debug breadcrumb but cannot be back-walked to the source token.
+func shortTokenID(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])[:16]
+}
 
 // APIKeyVerifier interface for API key verification
 type APIKeyVerifier interface {
@@ -28,9 +45,27 @@ type TeamSyncer interface {
 	SyncUserTeams(ctx context.Context, userID uuid.UUID, ssoGroups []string) error
 }
 
+// TFETokenLookup is the subset of `repository.TFETokenRepository`
+// the auth service depends on. Defined as an interface so unit tests
+// can mock the lookup without standing up a real Postgres + bcrypt
+// hashing harness. The concrete repo satisfies it implicitly.
+type TFETokenLookup interface {
+	GetByToken(tokenString string) (*models.TFEToken, error)
+	UpdateLastUsed(id uuid.UUID) error
+}
+
+// UserLookup is the subset of `repository.UserRepository` the auth
+// service depends on. Same rationale as TFETokenLookup — keeps the
+// service mockable without a database. The concrete repo satisfies
+// it implicitly.
+type UserLookup interface {
+	GetByID(id uuid.UUID) (*models.User, error)
+	GetOrCreateByZitadelSubject(subject, email, name string) (*models.User, error)
+}
+
 type Service struct {
-	userRepo      *repository.UserRepository
-	tfeTokenRepo  *repository.TFETokenRepository
+	userRepo      UserLookup
+	tfeTokenRepo  TFETokenLookup
 	apiKeyService APIKeyVerifier
 	teamSyncer    TeamSyncer
 	verifier      *ZitadelVerifier
@@ -38,7 +73,23 @@ type Service struct {
 	clientID      string
 }
 
+// NewService constructs the auth service with the production repos.
+// The signature accepts the concrete `*repository.X` types so no
+// caller needs to change after the interface refactor — Go's
+// structural typing means a concrete repo satisfies the lookup
+// interface automatically.
 func NewService(userRepo *repository.UserRepository, tfeTokenRepo *repository.TFETokenRepository) *Service {
+	return &Service{
+		userRepo:     userRepo,
+		tfeTokenRepo: tfeTokenRepo,
+	}
+}
+
+// NewServiceWithLookups is the test-friendly constructor — accepts
+// the lookup interfaces directly so unit tests can pass mocks
+// without depending on the concrete repo types or a live database.
+// Production callers should keep using `NewService`.
+func NewServiceWithLookups(userRepo UserLookup, tfeTokenRepo TFETokenLookup) *Service {
 	return &Service{
 		userRepo:     userRepo,
 		tfeTokenRepo: tfeTokenRepo,
@@ -227,12 +278,14 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 
 		tokenString := parts[1]
 
-		// Debug logging for authentication attempts
-		tokenPreview := tokenString
-		if len(tokenString) > 10 {
-			tokenPreview = tokenString[:10]
-		}
-		logger.Debugf("auth: received token (first 10 chars): %s...", tokenPreview)
+		// Debug logging for authentication attempts.
+		// Round 25 hardening (item 16): never log raw token bytes — even
+		// the first 10 characters of a TFE-style API token (`tfe-…`)
+		// carry enough entropy to be useful in a log-correlation attack
+		// if Debug is ever enabled in production. Log a SHA-256-truncated
+		// token-id instead, which is opaque but stable enough to match
+		// against an audit log.
+		logger.Debugf("auth: received token (id: %s)", shortTokenID(tokenString))
 		logger.Debugf("auth: request path: %s", c.Request.URL.Path)
 		logger.Debugf("auth: request method: %s", c.Request.Method)
 

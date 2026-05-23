@@ -1,5 +1,20 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
+//go:build integration
+// +build integration
+
+// Integration-only tests — require a live PostgreSQL reachable at
+// `$TEST_DATABASE_URL` (or the local default
+// `postgres://iac:iac_password@localhost:5432/iac_platform`). Compiled
+// into the test binary ONLY when the `integration` build tag is set:
+//
+//   go test -tags=integration ./backend/internal/api/v2/handlers/...
+//
+// The default CI pipeline has no PostgreSQL service, so without this
+// guard each test logged a noisy `connection refused` before self-
+// skipping via `t.Skipf`. Gating at compile time keeps `go test ./...`
+// clean and forces the test author to opt in explicitly.
+
 package handlers
 
 import (
