@@ -1,5 +1,7 @@
 # Stackweaver API
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/vhco-pro/stackweaver-api/badge)](https://scorecard.dev/viewer/?uri=github.com/vhco-pro/stackweaver-api)
+
 The Go backend for the [Stackweaver](https://github.com/vhco-pro/stackweaver) DevOps platform.
 
 > [!IMPORTANT]
