@@ -24,4 +24,4 @@ jobs:
     with:
       # Keep false while this repo is private. Flip to true after the public-flip
       # wave of the OSPS audit lands (see osps-baseline-audit.md, Wave 6).
-      publish_results: false
+      publish_results: true
