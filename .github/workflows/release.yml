@@ -82,6 +82,23 @@ jobs:
         with:
           version: ${{ github.ref_name }}
 
+  release-assets:
+    needs: [merge, changelog]
+    if: ${{ github.event.repository.visibility == 'public' }}
+    permissions:
+      contents: write       # upload to GitHub Release
+      packages: read        # read GHCR for digest lookup
+      attestations: read    # read attestation store
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve image digest
+        id: digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
           # Container packages owned by an org → /orgs/<org>/packages
           digest=$(gh api --paginate \
             "/orgs/vhco-pro/packages/container/${REPO_NAME}/versions" \
