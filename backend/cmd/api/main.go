@@ -654,3 +654,5 @@ func applyEnvOverrides(config *Config) {
 		config.Zitadel.ClientSecret = v
 	}
 }
+
+// sync smoke test 1779753492
