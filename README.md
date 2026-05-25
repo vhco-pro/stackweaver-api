@@ -1,4 +1,4 @@
-# Stackweaver™ API
+# Stackweaver API
 
 The Go backend for the [Stackweaver](https://github.com/vhco-pro/stackweaver) DevOps platform.
 
