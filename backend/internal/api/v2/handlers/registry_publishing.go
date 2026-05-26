@@ -579,15 +579,15 @@ func (h *RegistryPublishingHandler) PublishFromGitTag(
 	tagName string,
 	repositoryFullName string,
 ) error {
-	// Validate webhook-supplied inputs before they reach git CLI. Without
-	// this, a tag named "--upload-pack=evil" or a repo name containing
-	// shell metacharacters could subvert the git invocations below
+	// Inline regex guards (CodeQL-recognised barriers). Without these, a
+	// tag named "--upload-pack=evil" or a repo name containing shell
+	// metacharacters could subvert the git invocations below
 	// (Wave 8 / D1).
-	if err := gitargs.ValidateRefName(tagName); err != nil {
-		return fmt.Errorf("invalid tag name %q: %w", tagName, err)
+	if !gitargs.RefNameRe.MatchString(tagName) {
+		return fmt.Errorf("invalid tag name %q", tagName)
 	}
-	if err := gitargs.ValidateRepoFullName(repositoryFullName); err != nil {
-		return fmt.Errorf("invalid repository name: %w", err)
+	if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+		return fmt.Errorf("invalid repository name")
 	}
 
 	// Get module to access VCS connection
