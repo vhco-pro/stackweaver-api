@@ -17,6 +17,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/security/gitargs"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
@@ -578,6 +579,17 @@ func (h *RegistryPublishingHandler) PublishFromGitTag(
 	tagName string,
 	repositoryFullName string,
 ) error {
+	// Validate webhook-supplied inputs before they reach git CLI. Without
+	// this, a tag named "--upload-pack=evil" or a repo name containing
+	// shell metacharacters could subvert the git invocations below
+	// (Wave 8 / D1).
+	if err := gitargs.ValidateRefName(tagName); err != nil {
+		return fmt.Errorf("invalid tag name %q: %w", tagName, err)
+	}
+	if err := gitargs.ValidateRepoFullName(repositoryFullName); err != nil {
+		return fmt.Errorf("invalid repository name: %w", err)
+	}
+
 	// Get module to access VCS connection
 	module, err := h.moduleRepo.GetByID(moduleID)
 	if err != nil {
