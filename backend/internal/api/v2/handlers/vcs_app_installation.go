@@ -1451,16 +1451,19 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 
 			ctx := context.Background()
 
-			// Validate webhook-supplied inputs before they reach git CLI or
-			// filesystem paths. The inline regexp.MatchString guard (NOT a
-			// wrapper function call) is what CodeQL's Go taint tracker
-			// recognises as a barrier on the matched variable. See Wave 8
-			// plan §"why-inline" for the long form. (D1+D2.)
-			if !gitargs.CommitSHARe.MatchString(commitHash) {
+			// Sanitise webhook-supplied inputs by rebinding through a strict
+			// regex match. Using FindString (which returns the matched
+			// substring or "") creates a value CodeQL Go's taint tracker
+			// recognises as derived solely from the regex — stronger than
+			// an inline MatchString guard, which doesn't propagate across
+			// goroutine variable captures. (Wave 8 / D1+D2.)
+			commitHash = gitargs.CommitSHARe.FindString(commitHash)
+			if commitHash == "" {
 				logger.Warnf("Invalid commit hash for workspace %s, skipping", ws.ID)
 				return
 			}
-			if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+			repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
+			if repositoryFullName == "" {
 				logger.Warnf("Invalid repository name for workspace %s, skipping", ws.ID)
 				return
 			}
@@ -1911,17 +1914,19 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 			ctx := context.Background()
 
-			// Inline regex guards (CodeQL-recognised barriers).
-			// See Wave 8 plan §"why-inline". (D1+D2.)
-			if !gitargs.CommitSHARe.MatchString(headSHA) {
+			// Sanitise via regex rebind. See Wave 8 plan / D1+D2.
+			headSHA = gitargs.CommitSHARe.FindString(headSHA)
+			if headSHA == "" {
 				logger.Warnf("Invalid PR head SHA for workspace %s, skipping", ws.ID)
 				return
 			}
-			if !gitargs.RefNameRe.MatchString(headBranch) {
+			headBranch = gitargs.RefNameRe.FindString(headBranch)
+			if headBranch == "" {
 				logger.Warnf("Invalid PR head branch for workspace %s, skipping", ws.ID)
 				return
 			}
-			if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+			repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
+			if repositoryFullName == "" {
 				logger.Warnf("Invalid repository name for workspace %s, skipping", ws.ID)
 				return
 			}
@@ -2311,24 +2316,30 @@ func (h *VCSAppInstallationHandlerV2) isWorkspaceAffectedByFiles(workspace model
 // getPRChangedFiles uses git diff to get the list of files changed between base and head branches
 // Returns empty slice if unable to determine (e.g., no access to repo), which will trigger all workspaces
 func (h *VCSAppInstallationHandlerV2) getPRChangedFiles(repositoryFullName, baseBranch, headBranch, headSHA string) []string {
-	// Inline regex guards (CodeQL-recognised barriers). Without these, a
-	// refname starting with "-" could smuggle arbitrary git options
-	// (CVE-2017-1000117 class). Wave 8 / D1.
-	if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+	// Sanitise via regex rebind. Without this, a refname starting with
+	// "-" could smuggle arbitrary git options (CVE-2017-1000117 class).
+	// Wave 8 / D1.
+	repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
+	if repositoryFullName == "" {
 		logger.Warnf("getPRChangedFiles: invalid repository name")
 		return nil
 	}
-	if !gitargs.RefNameRe.MatchString(baseBranch) {
+	baseBranch = gitargs.RefNameRe.FindString(baseBranch)
+	if baseBranch == "" {
 		logger.Warnf("getPRChangedFiles: invalid base branch")
 		return nil
 	}
-	if !gitargs.RefNameRe.MatchString(headBranch) {
+	headBranch = gitargs.RefNameRe.FindString(headBranch)
+	if headBranch == "" {
 		logger.Warnf("getPRChangedFiles: invalid head branch")
 		return nil
 	}
-	if headSHA != "" && !gitargs.CommitSHARe.MatchString(headSHA) {
-		logger.Warnf("getPRChangedFiles: invalid head SHA")
-		return nil
+	if headSHA != "" {
+		headSHA = gitargs.CommitSHARe.FindString(headSHA)
+		if headSHA == "" {
+			logger.Warnf("getPRChangedFiles: invalid head SHA")
+			return nil
+		}
 	}
 
 	// Create a temporary directory for git operations

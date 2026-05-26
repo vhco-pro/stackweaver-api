@@ -579,14 +579,15 @@ func (h *RegistryPublishingHandler) PublishFromGitTag(
 	tagName string,
 	repositoryFullName string,
 ) error {
-	// Inline regex guards (CodeQL-recognised barriers). Without these, a
-	// tag named "--upload-pack=evil" or a repo name containing shell
-	// metacharacters could subvert the git invocations below
-	// (Wave 8 / D1).
-	if !gitargs.RefNameRe.MatchString(tagName) {
-		return fmt.Errorf("invalid tag name %q", tagName)
+	// Sanitise via regex rebind. Without this, a tag named
+	// "--upload-pack=evil" or a repo name containing shell metacharacters
+	// could subvert the git invocations below (Wave 8 / D1).
+	tagName = gitargs.RefNameRe.FindString(tagName)
+	if tagName == "" {
+		return fmt.Errorf("invalid tag name")
 	}
-	if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+	repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
+	if repositoryFullName == "" {
 		return fmt.Errorf("invalid repository name")
 	}
 
