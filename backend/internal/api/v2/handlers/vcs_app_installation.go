@@ -1452,15 +1452,16 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			ctx := context.Background()
 
 			// Validate webhook-supplied inputs before they reach git CLI or
-			// filesystem paths. Strict input validation here is what allows
-			// CodeQL to mark the downstream exec.Command / os.* sinks as
-			// sanitised (Wave 8 / D1+D2).
-			if err := gitargs.ValidateCommitSHA(commitHash); err != nil {
-				logger.Warnf("Invalid commit hash for workspace %s, skipping: %v", ws.ID, err)
+			// filesystem paths. The inline regexp.MatchString guard (NOT a
+			// wrapper function call) is what CodeQL's Go taint tracker
+			// recognises as a barrier on the matched variable. See Wave 8
+			// plan §"why-inline" for the long form. (D1+D2.)
+			if !gitargs.CommitSHARe.MatchString(commitHash) {
+				logger.Warnf("Invalid commit hash for workspace %s, skipping", ws.ID)
 				return
 			}
-			if err := gitargs.ValidateRepoFullName(repositoryFullName); err != nil {
-				logger.Warnf("Invalid repository name for workspace %s, skipping: %v", ws.ID, err)
+			if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+				logger.Warnf("Invalid repository name for workspace %s, skipping", ws.ID)
 				return
 			}
 
@@ -1910,18 +1911,18 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 			ctx := context.Background()
 
-			// Validate webhook-supplied inputs before they reach git CLI or
-			// filesystem paths. See Wave 8 plan (D1, D2) for rationale.
-			if err := gitargs.ValidateCommitSHA(headSHA); err != nil {
-				logger.Warnf("Invalid PR head SHA for workspace %s, skipping: %v", ws.ID, err)
+			// Inline regex guards (CodeQL-recognised barriers).
+			// See Wave 8 plan §"why-inline". (D1+D2.)
+			if !gitargs.CommitSHARe.MatchString(headSHA) {
+				logger.Warnf("Invalid PR head SHA for workspace %s, skipping", ws.ID)
 				return
 			}
-			if err := gitargs.ValidateRefName(headBranch); err != nil {
-				logger.Warnf("Invalid PR head branch %q for workspace %s, skipping: %v", headBranch, ws.ID, err)
+			if !gitargs.RefNameRe.MatchString(headBranch) {
+				logger.Warnf("Invalid PR head branch for workspace %s, skipping", ws.ID)
 				return
 			}
-			if err := gitargs.ValidateRepoFullName(repositoryFullName); err != nil {
-				logger.Warnf("Invalid repository name for workspace %s, skipping: %v", ws.ID, err)
+			if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+				logger.Warnf("Invalid repository name for workspace %s, skipping", ws.ID)
 				return
 			}
 
@@ -2310,26 +2311,24 @@ func (h *VCSAppInstallationHandlerV2) isWorkspaceAffectedByFiles(workspace model
 // getPRChangedFiles uses git diff to get the list of files changed between base and head branches
 // Returns empty slice if unable to determine (e.g., no access to repo), which will trigger all workspaces
 func (h *VCSAppInstallationHandlerV2) getPRChangedFiles(repositoryFullName, baseBranch, headBranch, headSHA string) []string {
-	// Validate every webhook-supplied input before passing to git CLI.
-	// Without this validation, a refname starting with "-" could smuggle
-	// arbitrary git options (CVE-2017-1000117 class). Wave 8 / D1.
-	if err := gitargs.ValidateRepoFullName(repositoryFullName); err != nil {
-		logger.Warnf("getPRChangedFiles: invalid repository name: %v", err)
+	// Inline regex guards (CodeQL-recognised barriers). Without these, a
+	// refname starting with "-" could smuggle arbitrary git options
+	// (CVE-2017-1000117 class). Wave 8 / D1.
+	if !gitargs.RepoFullNameRe.MatchString(repositoryFullName) {
+		logger.Warnf("getPRChangedFiles: invalid repository name")
 		return nil
 	}
-	if err := gitargs.ValidateRefName(baseBranch); err != nil {
-		logger.Warnf("getPRChangedFiles: invalid base branch %q: %v", baseBranch, err)
+	if !gitargs.RefNameRe.MatchString(baseBranch) {
+		logger.Warnf("getPRChangedFiles: invalid base branch")
 		return nil
 	}
-	if err := gitargs.ValidateRefName(headBranch); err != nil {
-		logger.Warnf("getPRChangedFiles: invalid head branch %q: %v", headBranch, err)
+	if !gitargs.RefNameRe.MatchString(headBranch) {
+		logger.Warnf("getPRChangedFiles: invalid head branch")
 		return nil
 	}
-	if headSHA != "" {
-		if err := gitargs.ValidateCommitSHA(headSHA); err != nil {
-			logger.Warnf("getPRChangedFiles: invalid head SHA: %v", err)
-			return nil
-		}
+	if headSHA != "" && !gitargs.CommitSHARe.MatchString(headSHA) {
+		logger.Warnf("getPRChangedFiles: invalid head SHA")
+		return nil
 	}
 
 	// Create a temporary directory for git operations
