@@ -2373,6 +2373,14 @@ func spliceDecoyRowsIntoSearchResponse(realBody []byte, decoys []sessionEntry, s
 		return nil
 	}
 	decoyRows := extractDecoyRows(decoys, secret)
+	// Bound check the cap argument to `make` so CodeQL's
+	// go/allocation-size-overflow query is satisfied and a malicious
+	// upstream cannot trigger an oversized allocation (Wave 8 / D4).
+	// 65536 rows is far more than any realistic session listing.
+	const maxRows = 1 << 16
+	if len(parsed.Sessions) > maxRows || len(decoyRows) > maxRows {
+		return nil
+	}
 	merged := make([]json.RawMessage, 0, len(parsed.Sessions)+len(decoyRows))
 	merged = append(merged, decoyRows...)
 	merged = append(merged, parsed.Sessions...)
