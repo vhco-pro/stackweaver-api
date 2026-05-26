@@ -1505,6 +1505,14 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 				// Fallback to unauthenticated GitHub clone
 				cloneURL = fmt.Sprintf("https://github.com/%s.git", repositoryFullName)
 			}
+			// Sanitise cloneURL by regex rebind right before the git sink so
+			// CodeQL's taint tracker sees the value as derived solely from
+			// gitargs.GitURLRe. (Wave 8 / D1, second pass.)
+			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
+			if cloneURL == "" {
+				logger.Warnf("Invalid clone URL for workspace %s, skipping", ws.ID)
+				return
+			}
 
 			// Clone repository - use unshallow clone first, then checkout specific commit
 			// We need full history to checkout arbitrary commits
@@ -1519,15 +1527,21 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			cmd.Dir = tempDir
 			if err := cmd.Run(); err != nil {
 				logger.Errorf("Failed to checkout commit %s for workspace %s: %v", commitHash, ws.ID, err)
-				// Try to fetch the commit if checkout failed
-				cmd = exec.CommandContext(ctx, "git", "fetch", "origin", commitHash) //nolint:gosec // intentional: executing git command
+				// Try to fetch the commit if checkout failed.
+				// Re-bind through the regex right before the sink — CodeQL
+				// loses the barrier when the value crosses an error branch.
+				safeCommit := gitargs.CommitSHARe.FindString(commitHash)
+				if safeCommit == "" {
+					return
+				}
+				cmd = exec.CommandContext(ctx, "git", "fetch", "origin", safeCommit) //nolint:gosec // intentional: executing git command
 				cmd.Dir = tempDir
 				if fetchErr := cmd.Run(); fetchErr != nil {
 					logger.Errorf("Failed to fetch commit %s for workspace %s: %v", commitHash, ws.ID, fetchErr)
 					return
 				}
 				// Try checkout again after fetch
-				cmd = exec.CommandContext(ctx, "git", "checkout", commitHash) //nolint:gosec // intentional: executing git command
+				cmd = exec.CommandContext(ctx, "git", "checkout", safeCommit) //nolint:gosec // intentional: executing git command
 				cmd.Dir = tempDir
 				if err := cmd.Run(); err != nil {
 					logger.Errorf("Failed to checkout commit %s for workspace %s after fetch: %v", commitHash, ws.ID, err)
@@ -1543,7 +1557,16 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			if len(commitHash) >= 7 {
 				commitShort = commitHash[:7]
 			}
-			tarballPath := filepath.Join(os.TempDir(), fmt.Sprintf("workspace-%s-%s.tar.gz", ws.ID, commitShort))
+			tarballName := fmt.Sprintf("workspace-%s-%s.tar.gz", ws.ID, commitShort)
+			// filepath.IsLocal is a CodeQL-recognised sanitiser for go/path-injection.
+			// We checked all inputs upstream (regex-bound ws.ID UUID and commitShort
+			// derived from a regex-bound SHA), but the slice [:7] confuses CodeQL's
+			// barrier tracking, so we re-verify the joined filename here.
+			if !filepath.IsLocal(tarballName) {
+				logger.Warnf("Invalid tarball name for workspace %s, skipping", ws.ID)
+				return
+			}
+			tarballPath := filepath.Join(os.TempDir(), tarballName)
 			defer func() {
 				if err := os.Remove(tarballPath); err != nil && !os.IsNotExist(err) {
 					logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
@@ -1968,6 +1991,12 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			} else {
 				cloneURL = fmt.Sprintf("https://github.com/%s.git", repositoryFullName)
 			}
+			// Sanitise cloneURL just before the git sink. Wave 8 second pass.
+			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
+			if cloneURL == "" {
+				logger.Warnf("Invalid PR clone URL for workspace %s, skipping", ws.ID)
+				return
+			}
 
 			// Clone repository
 			cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, tempDir) //nolint:gosec // intentional: executing git command
@@ -1981,15 +2010,20 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			cmd.Dir = tempDir
 			if err := cmd.Run(); err != nil {
 				logger.Errorf("Failed to checkout branch %s for workspace %s: %v", headBranch, ws.ID, err)
-				// Try to fetch the branch if checkout failed
-				cmd = exec.CommandContext(ctx, "git", "fetch", "origin", headBranch) //nolint:gosec // intentional: executing git command
+				// Re-bind through the regex right before the sink — CodeQL loses
+				// the barrier across the error branch.
+				safeBranch := gitargs.RefNameRe.FindString(headBranch)
+				if safeBranch == "" {
+					return
+				}
+				cmd = exec.CommandContext(ctx, "git", "fetch", "origin", safeBranch) //nolint:gosec // intentional: executing git command
 				cmd.Dir = tempDir
 				if fetchErr := cmd.Run(); fetchErr != nil {
 					logger.Errorf("Failed to fetch branch %s for workspace %s: %v", headBranch, ws.ID, fetchErr)
 					return
 				}
 				// Try checkout again after fetch
-				cmd = exec.CommandContext(ctx, "git", "checkout", headBranch) //nolint:gosec // intentional: executing git command
+				cmd = exec.CommandContext(ctx, "git", "checkout", safeBranch) //nolint:gosec // intentional: executing git command
 				cmd.Dir = tempDir
 				if err := cmd.Run(); err != nil {
 					logger.Errorf("Failed to checkout branch %s for workspace %s after fetch: %v", headBranch, ws.ID, err)
@@ -2002,7 +2036,12 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			if len(headSHA) >= 7 {
 				commitShort = headSHA[:7]
 			}
-			tarballPath := filepath.Join(os.TempDir(), fmt.Sprintf("workspace-pr-%s-%s.tar.gz", ws.ID, commitShort))
+			tarballName := fmt.Sprintf("workspace-pr-%s-%s.tar.gz", ws.ID, commitShort)
+			if !filepath.IsLocal(tarballName) {
+				logger.Warnf("Invalid PR tarball name for workspace %s, skipping", ws.ID)
+				return
+			}
+			tarballPath := filepath.Join(os.TempDir(), tarballName)
 			defer func() {
 				if err := os.Remove(tarballPath); err != nil && !os.IsNotExist(err) {
 					logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
@@ -2503,7 +2542,16 @@ func getDirectory(path string) string {
 
 // createTarball creates a gzipped tarball from a directory (similar to module publisher)
 func (h *VCSAppInstallationHandlerV2) createTarball(sourceDir, outputPath string) error {
-	file, err := os.Create(outputPath) //nolint:gosec // outputPath is validated (in temp directory)
+	// Defence-in-depth and CodeQL barrier: rebuild outputPath from its basename
+	// after verifying it via filepath.IsLocal. Callers already validate, but
+	// CodeQL's path-injection tracker cannot follow the value across function
+	// boundaries, so the sanitiser must appear inline at the sink.
+	base := filepath.Base(outputPath)
+	if !filepath.IsLocal(base) {
+		return fmt.Errorf("invalid output path: %q", outputPath)
+	}
+	safePath := filepath.Join(os.TempDir(), base)
+	file, err := os.Create(safePath) //nolint:gosec // safePath is filepath.Join(TempDir, IsLocal(base))
 	if err != nil {
 		return err
 	}
