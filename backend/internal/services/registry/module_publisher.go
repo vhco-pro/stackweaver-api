@@ -17,6 +17,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/security/archive"
 	"github.com/michielvha/stackweaver/core/storage"
 )
 
@@ -401,9 +402,16 @@ func (p *ModulePublisher) extractTarball(reader io.Reader, destDir string) error
 			return err
 		}
 
-		targetPath := filepath.Join(destDir, header.Name) //nolint:gosec // path traversal protection below
+		// Validate the entry name BEFORE constructing any filesystem path.
+		// archive.SafeEntryName uses filepath.IsLocal which CodeQL's
+		// go/zipslip query recognises as a sanitiser (Wave 8 / D3).
+		safeName, err := archive.SafeEntryName(header.Name)
+		if err != nil {
+			return fmt.Errorf("invalid file path in archive: %w", err)
+		}
+		targetPath := filepath.Join(destDir, safeName) //nolint:gosec // safeName validated by archive.SafeEntryName
 
-		// Security: Prevent directory traversal - ensure targetPath is within destDir
+		// Defence-in-depth: also verify the joined path stays under destDir.
 		cleanTargetPath := filepath.Clean(targetPath)
 		cleanDestDir := filepath.Clean(destDir)
 		if !strings.HasPrefix(cleanTargetPath, cleanDestDir+string(filepath.Separator)) && cleanTargetPath != cleanDestDir {
