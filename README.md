@@ -10,7 +10,7 @@ This is the public release repository for the Stackweaver API. It is published f
 docker pull ghcr.io/vhco-pro/stackweaver-api:latest
 ```
 
-See the [Stackweaver documentation](https://github.com/vhco-pro/stackweaver) for deployment instructions.
+See the [Stackweaver documentation](https://sw.vhco.pro/docs) for deployment instructions.
 
 ## License
 
