@@ -653,6 +653,8 @@ func SetupV2Routes(
 		vcsConnections.DELETE("/:id", vcsConnectionHandler.Delete)
 		// Repository and branch listing
 		vcsConnections.GET("/:id/repositories", vcsConnectionHandler.ListRepositories)
+		// Project listing (Azure DevOps only; 501 for providers without a project layer)
+		vcsConnections.GET("/:id/projects", vcsConnectionHandler.ListProjects)
 		vcsConnections.GET("/:id/repositories/:owner/:repo/branches", vcsConnectionHandler.ListBranches)
 		// File content retrieval
 		vcsConnections.GET("/:id/repositories/:owner/:repo/contents/*path", vcsConnectionHandler.GetFileContent)
