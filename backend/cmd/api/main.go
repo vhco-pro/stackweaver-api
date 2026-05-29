@@ -74,7 +74,7 @@ func main() {
 		if err := yaml.Unmarshal(configData, &config); err != nil {
 			logger.Fatalf("Failed to parse config: %v", err)
 		}
-	case errors.Is(err, os.ErrNotExist) && !explicitPath:
+	case !explicitPath && (errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission)):
 		logger.Info("No config file found, using environment variables only")
 	default:
 		logger.Fatalf("Failed to read config file: %v", err)
