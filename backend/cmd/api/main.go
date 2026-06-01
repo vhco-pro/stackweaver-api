@@ -131,7 +131,6 @@ func main() {
 		&models.StateLock{},
 		&models.AuditLog{},
 		&models.APIKey{},
-		&models.TFEToken{},
 		&models.WebhookEvent{},
 		// Registry models
 		&models.Module{},
@@ -177,8 +176,7 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 
 	// Initialize auth service
-	tfeTokenRepo := repository.NewTFETokenRepository(db)
-	authService := auth.NewService(userRepo, tfeTokenRepo)
+	authService := auth.NewService(userRepo)
 
 	// Initialize Zitadel verifier
 	// Prefer environment variables over config file values

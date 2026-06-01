@@ -8,23 +8,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
-	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/repository"
 )
 
+// TokenHandlerV2 serves the TFE-compatible token endpoints (`/api/v2/tokens`).
+// These mint **user-bound** tokens — the `terraform login` / personal access
+// token. They are now backed by the unified api_keys table (kind="user") via
+// the shared apikey.Service, not the legacy tfe_tokens table.
 type TokenHandlerV2 struct {
-	tfeTokenRepo *repository.TFETokenRepository
-	authService  *auth.Service
+	apiKeyService *apikey.Service
+	authService   *auth.Service
 }
 
 func NewTokenHandlerV2(
-	tfeTokenRepo *repository.TFETokenRepository,
+	apiKeyService *apikey.Service,
 	authService *auth.Service,
 ) *TokenHandlerV2 {
 	return &TokenHandlerV2{
-		tfeTokenRepo: tfeTokenRepo,
-		authService:  authService,
+		apiKeyService: apiKeyService,
+		authService:   authService,
 	}
 }
 
@@ -42,7 +45,7 @@ type TokenResponseV2 struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
-// Create creates a new TFE token for the authenticated user
+// Create creates a new user-bound token for the authenticated user
 // POST /api/v2/tokens
 func (h *TokenHandlerV2) Create(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
@@ -73,30 +76,10 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Generate token
-	tokenString, err := models.GenerateTFEToken()
+	// Mint a user-bound token (kind="user") via the unified apikey service.
+	// The description is stored as the key name.
+	apiKey, tokenString, err := h.apiKeyService.CreateUserToken(user.ID, req.Description, req.ExpiresAt)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to generate token",
-				},
-			},
-		})
-		return
-	}
-
-	// Create token record (token will be hashed in repository)
-	tfeToken := &models.TFEToken{
-		UserID:      user.ID,
-		Token:       tokenString, // Will be hashed in Create()
-		Description: req.Description,
-		ExpiresAt:   req.ExpiresAt,
-	}
-
-	if err := h.tfeTokenRepo.Create(tfeToken); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
@@ -113,19 +96,19 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 	// TFE-compatible response format
 	c.JSON(http.StatusCreated, gin.H{
 		"data": gin.H{
-			"id":   tfeToken.ID,
+			"id":   apiKey.ID,
 			"type": "tokens",
 			"attributes": gin.H{
 				"token":       tokenString, // Plaintext token (only shown once)
-				"description": tfeToken.Description,
-				"expires_at":  tfeToken.ExpiresAt,
-				"created_at":  tfeToken.CreatedAt,
+				"description": apiKey.Name,
+				"expires_at":  apiKey.ExpiresAt,
+				"created_at":  apiKey.CreatedAt,
 			},
 		},
 	})
 }
 
-// List lists all TFE tokens for the authenticated user
+// List lists all user-bound tokens for the authenticated user
 // GET /api/v2/tokens
 func (h *TokenHandlerV2) List(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
@@ -142,7 +125,7 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	tokens, err := h.tfeTokenRepo.ListByUser(user.ID)
+	tokens, err := h.apiKeyService.ListUserTokens(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -163,7 +146,7 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 			"id":   token.ID,
 			"type": "tokens",
 			"attributes": gin.H{
-				"description":  token.Description,
+				"description":  token.Name,
 				"last_used_at": token.LastUsedAt,
 				"expires_at":   token.ExpiresAt,
 				"created_at":   token.CreatedAt,
@@ -177,7 +160,7 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 	})
 }
 
-// Delete deletes a TFE token
+// Delete deletes a user-bound token
 // DELETE /api/v2/tokens/:id
 func (h *TokenHandlerV2) Delete(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
@@ -208,41 +191,14 @@ func (h *TokenHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	// Verify token belongs to user
-	token, err := h.tfeTokenRepo.GetByID(tokenID)
-	if err != nil {
+	// DeleteAPIKey verifies ownership (key belongs to the authenticated user).
+	if err := h.apiKeyService.DeleteAPIKey(tokenID, user.ID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "404",
 					"title":  "Not Found",
 					"detail": "Token not found",
-				},
-			},
-		})
-		return
-	}
-
-	if token.UserID != user.ID {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Token does not belong to user",
-				},
-			},
-		})
-		return
-	}
-
-	if err := h.tfeTokenRepo.Delete(tokenID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to delete token",
 				},
 			},
 		})

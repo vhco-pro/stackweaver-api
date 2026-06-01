@@ -4,10 +4,28 @@ package apikey
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 )
+
+// coarseRank ranks the coarse access levels so the hierarchy
+// read < write < admin can be compared. A higher level grants every lower
+// level (an `admin` scope satisfies a `read` requirement).
+var coarseRank = map[string]int{"read": 1, "write": 2, "admin": 3}
+
+// CoarseLevelForMethod maps an HTTP method to the minimum coarse access level
+// a token must hold to perform it. Safe (read-only) methods require `read`;
+// every mutating method requires `write`.
+func CoarseLevelForMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "read"
+	default:
+		return "write"
+	}
+}
 
 // Scope represents a parsed API key scope
 type Scope struct {
@@ -186,6 +204,33 @@ func (sc *ScopeChecker) HasPermission(resourceType string, resourceID *uuid.UUID
 // HasOrgPermission checks if the scopes grant permission for an organization
 func (sc *ScopeChecker) HasOrgPermission(orgID uuid.UUID, permission string) bool {
 	return sc.HasPermission("org", &orgID, permission)
+}
+
+// GrantsOrgLevel reports whether the token's org-typed scopes grant at least
+// the requested coarse access level (read < write < admin) for orgID. It
+// honors the hierarchy, so an `admin` scope satisfies a `write` or `read`
+// requirement and a `write` scope satisfies a `read` requirement.
+//
+// hasOrgScope reports whether the token carries any org-typed scope for orgID
+// at all. The caller uses it to decide whether to enforce: a token scoped only
+// to a project or team within the org (no org-level scope) cannot be evaluated
+// at the org granularity, so the wall defers those to per-handler checks rather
+// than wrongly denying them.
+func (sc *ScopeChecker) GrantsOrgLevel(orgID uuid.UUID, required string) (granted, hasOrgScope bool) {
+	reqRank, ok := coarseRank[required]
+	if !ok {
+		return false, false
+	}
+	for _, scope := range sc.scopes {
+		if scope.Type != "org" || scope.ResourceID == nil || *scope.ResourceID != orgID {
+			continue
+		}
+		hasOrgScope = true
+		if coarseRank[scope.Permission] >= reqRank {
+			granted = true
+		}
+	}
+	return granted, hasOrgScope
 }
 
 // HasProjectPermission checks if the scopes grant permission for a project

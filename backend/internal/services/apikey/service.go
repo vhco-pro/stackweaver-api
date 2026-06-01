@@ -73,8 +73,19 @@ func GetKeyPrefix(key string) string {
 	return key[:12]
 }
 
-// CreateAPIKey creates a new API key for a user
+// CreateAPIKey creates a new API key for a user.
+//
+// Every API key MUST be bound to exactly one organization (single-org token
+// invariant). A key with no scopes, or whose scopes do not resolve to an
+// organization, is rejected — there is no instance-wide token for non-admins.
 func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, expiresAt *time.Time) (*models.APIKey, string, error) {
+	// Reject empty/nil scopes outright. Under the single-org token model an
+	// empty scope means "deny", not "full access" — the caller must declare a
+	// scope that binds the key to an organization.
+	if len(scopes) == 0 {
+		return nil, "", fmt.Errorf("API key must declare at least one scope bound to an organization")
+	}
+
 	// Generate the API key
 	key, err := GenerateAPIKey()
 	if err != nil {
@@ -87,16 +98,20 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 		return nil, "", fmt.Errorf("failed to hash API key: %w", err)
 	}
 
-	// If no scopes provided, default to full access (empty array means all scopes)
-	// This maintains backward compatibility
-	if scopes == nil {
-		scopes = []string{}
-	}
-
 	// Validate and parse scopes
 	parsedScopes, err := ParseScopes(scopes)
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid scopes: %w", err)
+	}
+
+	// Reject wildcard scopes outright. There is no platform-admin concept yet,
+	// so a `*` scope (or a `*` permission such as `org:<id>:*`) would grant
+	// unbounded access and defeat the single-org token model. Wildcard creation
+	// is re-enabled for platform admins only once #132 lands.
+	for _, scope := range parsedScopes {
+		if scope.Type == "*" || scope.Permission == "*" {
+			return nil, "", fmt.Errorf("wildcard scopes are not permitted")
+		}
 	}
 
 	// Validate organization, project, and team access
@@ -181,10 +196,18 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 		}
 	}
 
+	// Enforce the single-org token invariant: the scopes must resolve to exactly
+	// one organization. A key that binds to no org (e.g. only legacy/user/wildcard
+	// scopes) is rejected — there is no instance-wide token for non-admins.
+	if orgID == nil {
+		return nil, "", fmt.Errorf("API key must be scoped to exactly one organization (use an org, project, or team scope)")
+	}
+
 	// Create the API key record
 	apiKey := &models.APIKey{
 		UserID:         userID,
 		Name:           name,
+		Kind:           models.APIKeyKindOrg,
 		KeyHash:        keyHash,
 		KeyPrefix:      GetKeyPrefix(key),
 		Scopes:         models.StringArray(scopes),
@@ -202,9 +225,51 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 	return apiKey, key, nil
 }
 
-// ListAPIKeys lists all API keys for a user
+// CreateUserToken creates a user-bound (acts-as-user) token — the personal
+// access / `terraform login` token. Unlike an org-bound API key it is NOT
+// pinned to a single organization: it is authorized by the owning user's
+// organization memberships at the request boundary. It therefore carries no
+// scopes and a nil OrganizationID.
+//
+// This is the unified successor to the legacy `tfe_tokens` table: user tokens
+// are now kind="user" rows in api_keys so there is a single token subsystem.
+func (s *Service) CreateUserToken(userID uuid.UUID, name string, expiresAt *time.Time) (*models.APIKey, string, error) {
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate user token: %w", err)
+	}
+
+	keyHash, err := HashKey(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to hash user token: %w", err)
+	}
+
+	apiKey := &models.APIKey{
+		UserID:    userID,
+		Name:      name,
+		Kind:      models.APIKeyKindUser,
+		KeyHash:   keyHash,
+		KeyPrefix: GetKeyPrefix(key),
+		Scopes:    models.StringArray{},
+		ExpiresAt: expiresAt,
+	}
+
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("failed to create user token: %w", err)
+	}
+
+	return apiKey, key, nil
+}
+
+// ListAPIKeys lists a user's org-bound automation keys (kind="org").
+// User-bound tokens are listed separately via ListUserTokens.
 func (s *Service) ListAPIKeys(userID uuid.UUID) ([]*models.APIKey, error) {
-	return s.apiKeyRepo.GetByUserID(userID)
+	return s.apiKeyRepo.GetByUserIDAndKind(userID, models.APIKeyKindOrg)
+}
+
+// ListUserTokens lists a user's user-bound (acts-as-user) tokens (kind="user").
+func (s *Service) ListUserTokens(userID uuid.UUID) ([]*models.APIKey, error) {
+	return s.apiKeyRepo.GetByUserIDAndKind(userID, models.APIKeyKindUser)
 }
 
 // GetAPIKey gets a single API key by ID (for the owner)
