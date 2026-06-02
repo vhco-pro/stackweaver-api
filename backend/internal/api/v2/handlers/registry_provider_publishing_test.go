@@ -218,8 +218,7 @@ func TestCreateProvider(t *testing.T) {
 	orgRepo := repository.NewOrganizationRepository(db)
 	gpgKeyRepo := repository.NewGPGKeyRepository(db)
 	userRepo := repository.NewUserRepository(db)
-	tfeTokenRepo := repository.NewTFETokenRepository(db)
-	authService := auth.NewService(userRepo, tfeTokenRepo)
+	authService := auth.NewService(userRepo)
 	mockStorage := registry.NewMockStorage()
 
 	handler := NewRegistryProviderPublishingHandler(
@@ -331,8 +330,7 @@ func TestPublishProviderPlatform(t *testing.T) {
 	orgRepo := repository.NewOrganizationRepository(db)
 	gpgKeyRepo := repository.NewGPGKeyRepository(db)
 	userRepo := repository.NewUserRepository(db)
-	tfeTokenRepo := repository.NewTFETokenRepository(db)
-	authService := auth.NewService(userRepo, tfeTokenRepo)
+	authService := auth.NewService(userRepo)
 	mockStorage := registry.NewMockStorage()
 
 	handler := NewRegistryProviderPublishingHandler(
@@ -471,8 +469,7 @@ func TestPublishProviderPlatformWithGPG(t *testing.T) {
 	gpgKeyRepo := repository.NewGPGKeyRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
 	userRepo := repository.NewUserRepository(db)
-	tfeTokenRepo := repository.NewTFETokenRepository(db)
-	authService := auth.NewService(userRepo, tfeTokenRepo)
+	authService := auth.NewService(userRepo)
 	gpgKeyHandler := NewGPGKeyHandler(gpgKeyRepo, orgRepo, authService)
 
 	gpgKey := uploadTestGPGKey(t, db, org, user, gpgKeyHandler)

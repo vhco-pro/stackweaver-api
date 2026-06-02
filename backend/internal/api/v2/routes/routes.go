@@ -14,6 +14,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	terraformHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -50,6 +51,11 @@ func SetupV2Routes(
 	// API v2
 	v2 := r.Group("/api/v2")
 	v2.Use(middleware.AuthMiddleware(authService))
+	// Tenant-isolation wall: for api-key tokens, resolve the request's
+	// target organization and enforce that an org-bound token may only act
+	// within its bound org, and a user-bound token only within orgs the
+	// user belongs to. JWT/session identities pass straight through.
+	v2.Use(middleware.OrgResolutionWall(middleware.NewDBOrgResolver(db)))
 
 	// VCS Provider Registry (multi-provider support)
 	azureDevOpsManager, err := vcs.NewAzureDevOpsManager()
@@ -458,7 +464,6 @@ func SetupV2Routes(
 	// stateVersionRepo created earlier for runHandler
 	stateLockRepo := repository.NewStateLockRepository(db)
 	variableRepo := repository.NewVariableRepository(db)
-	tfeTokenRepo := repository.NewTFETokenRepository(db)
 
 	// State Service (for lock checking and state management)
 	// Use same storage client as configuration versions (state stored in same bucket, different paths)
@@ -601,8 +606,11 @@ func SetupV2Routes(
 		varsetsById.DELETE("/:id/relationships/vars/:variable_id", variableSetHandler.DeleteVariableSetVariable)
 	}
 
-	// TFE Token Management
-	tokenHandler := handlers.NewTokenHandlerV2(tfeTokenRepo, authService)
+	// TFE Token Management — user-bound tokens (`terraform login` / PATs).
+	// Backed by the unified api_keys table (kind="user") via the apikey service.
+	apiKeyRepo := repository.NewAPIKeyRepository(db)
+	tokenAPIKeyService := apikey.NewService(apiKeyRepo, orgRepo, projectRepo, teamRepo)
+	tokenHandler := handlers.NewTokenHandlerV2(tokenAPIKeyService, authService)
 	tokens := v2.Group("/tokens")
 	{
 		tokens.GET("", tokenHandler.List)
@@ -653,6 +661,8 @@ func SetupV2Routes(
 		vcsConnections.DELETE("/:id", vcsConnectionHandler.Delete)
 		// Repository and branch listing
 		vcsConnections.GET("/:id/repositories", vcsConnectionHandler.ListRepositories)
+		// Project listing (Azure DevOps only; 501 for providers without a project layer)
+		vcsConnections.GET("/:id/projects", vcsConnectionHandler.ListProjects)
 		vcsConnections.GET("/:id/repositories/:owner/:repo/branches", vcsConnectionHandler.ListBranches)
 		// File content retrieval
 		vcsConnections.GET("/:id/repositories/:owner/:repo/contents/*path", vcsConnectionHandler.GetFileContent)

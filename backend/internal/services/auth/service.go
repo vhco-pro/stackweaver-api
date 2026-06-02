@@ -45,19 +45,10 @@ type TeamSyncer interface {
 	SyncUserTeams(ctx context.Context, userID uuid.UUID, ssoGroups []string) error
 }
 
-// TFETokenLookup is the subset of `repository.TFETokenRepository`
-// the auth service depends on. Defined as an interface so unit tests
-// can mock the lookup without standing up a real Postgres + bcrypt
-// hashing harness. The concrete repo satisfies it implicitly.
-type TFETokenLookup interface {
-	GetByToken(tokenString string) (*models.TFEToken, error)
-	UpdateLastUsed(id uuid.UUID) error
-}
-
 // UserLookup is the subset of `repository.UserRepository` the auth
-// service depends on. Same rationale as TFETokenLookup — keeps the
-// service mockable without a database. The concrete repo satisfies
-// it implicitly.
+// service depends on. Defined as an interface so unit tests can pass
+// a mock without a live database. The concrete repo satisfies it
+// implicitly.
 type UserLookup interface {
 	GetByID(id uuid.UUID) (*models.User, error)
 	GetOrCreateByZitadelSubject(subject, email, name string) (*models.User, error)
@@ -65,7 +56,6 @@ type UserLookup interface {
 
 type Service struct {
 	userRepo      UserLookup
-	tfeTokenRepo  TFETokenLookup
 	apiKeyService APIKeyVerifier
 	teamSyncer    TeamSyncer
 	verifier      *ZitadelVerifier
@@ -74,25 +64,22 @@ type Service struct {
 }
 
 // NewService constructs the auth service with the production repos.
-// The signature accepts the concrete `*repository.X` types so no
-// caller needs to change after the interface refactor — Go's
-// structural typing means a concrete repo satisfies the lookup
-// interface automatically.
-func NewService(userRepo *repository.UserRepository, tfeTokenRepo *repository.TFETokenRepository) *Service {
+// The signature accepts the concrete `*repository.UserRepository` so
+// production callers stay simple — Go's structural typing means the
+// concrete repo satisfies the `UserLookup` interface automatically.
+func NewService(userRepo *repository.UserRepository) *Service {
 	return &Service{
-		userRepo:     userRepo,
-		tfeTokenRepo: tfeTokenRepo,
+		userRepo: userRepo,
 	}
 }
 
 // NewServiceWithLookups is the test-friendly constructor — accepts
-// the lookup interfaces directly so unit tests can pass mocks
-// without depending on the concrete repo types or a live database.
+// the lookup interface directly so unit tests can pass a mock
+// without depending on the concrete repo type or a live database.
 // Production callers should keep using `NewService`.
-func NewServiceWithLookups(userRepo UserLookup, tfeTokenRepo TFETokenLookup) *Service {
+func NewServiceWithLookups(userRepo UserLookup) *Service {
 	return &Service{
-		userRepo:     userRepo,
-		tfeTokenRepo: tfeTokenRepo,
+		userRepo: userRepo,
 	}
 }
 
@@ -140,24 +127,13 @@ func (s *Service) GetUserFromContext(c *gin.Context) (*models.User, error) {
 }
 
 // GetUserFromToken authenticates a token and returns the user
-// Supports TFE tokens (tfe- prefix) and JWT tokens
+// Supports programmatic tokens (tfe- prefix, both org-bound and
+// user-bound api_keys) and JWT tokens (Zitadel).
 func (s *Service) GetUserFromToken(tokenString string) (*models.User, error) {
-	// Try TFE token first (if it starts with "tfe-")
+	// Programmatic tokens carry the "tfe-" prefix (Terraform Cloud
+	// compatible). Both org-bound and user-bound tokens are api_keys,
+	// so a single api-key lookup resolves them.
 	if strings.HasPrefix(tokenString, "tfe-") {
-		// Try TFE token lookup
-		tfeToken, err := s.tfeTokenRepo.GetByToken(tokenString)
-		if err == nil {
-			// Update last used timestamp
-			_ = s.tfeTokenRepo.UpdateLastUsed(tfeToken.ID)
-
-			// Get user
-			user, err := s.userRepo.GetByID(tfeToken.UserID)
-			if err == nil {
-				return user, nil
-			}
-		}
-
-		// If TFE token lookup fails, try API key (Terraform Cloud compatible)
 		if s.apiKeyService != nil {
 			apiKey, err := s.apiKeyService.VerifyAPIKey(tokenString)
 			if err == nil && apiKey != nil {
@@ -289,30 +265,11 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		logger.Debugf("auth: request path: %s", c.Request.URL.Path)
 		logger.Debugf("auth: request method: %s", c.Request.Method)
 
-		// Try API key or TFE token first (if it starts with "tfe-")
+		// Programmatic tokens carry the "tfe-" prefix (Terraform Cloud
+		// compatible). Both org-bound and user-bound tokens are api_keys,
+		// so a single api-key lookup resolves them.
 		if strings.HasPrefix(tokenString, "tfe-") {
-			logger.Debug("auth: token starts with 'tfe-', attempting TFE token lookup")
-			// First try TFE token (legacy)
-			tfeToken, err := s.tfeTokenRepo.GetByToken(tokenString)
-			if err == nil {
-				logger.Debugf("auth: TFE token lookup successful, user_id: %s", tfeToken.UserID)
-				// Update last used timestamp
-				_ = s.tfeTokenRepo.UpdateLastUsed(tfeToken.ID)
-
-				// Get user
-				user, err := s.userRepo.GetByID(tfeToken.UserID)
-				if err == nil {
-					// Store user in context
-					c.Set("user_id", user.ID)
-					c.Set("user_email", user.Email)
-					c.Set("user_name", user.Name)
-					c.Set("auth_method", "tfe_token")
-					c.Next()
-					return
-				}
-			}
-
-			// If TFE token lookup fails, try API key (Terraform Cloud compatible)
+			logger.Debug("auth: token starts with 'tfe-', attempting api-key lookup")
 			if s.apiKeyService != nil {
 				apiKey, err := s.apiKeyService.VerifyAPIKey(tokenString)
 				if err == nil && apiKey != nil {
@@ -330,15 +287,24 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 						// Store API key details for runner registration and scope checks
 						c.Set("api_key_id", apiKey.ID)
 						c.Set("api_key_scopes", []string(apiKey.Scopes))
+						c.Set("api_key", apiKey)
+						// Org-resolution wall inputs (Phase 2): the token's
+						// kind drives how the target org is authorized. An
+						// org-bound token also carries its bound org id; a
+						// user-bound token carries none (authorized by the
+						// user's memberships at the wall instead).
+						c.Set("token_kind", apiKey.Kind)
+						if apiKey.OrganizationID != nil {
+							c.Set("token_org_id", *apiKey.OrganizationID)
+						}
 						c.Next()
 						return
 					}
+				} else if err != nil {
+					logger.Debugf("auth: api-key lookup failed: %v", err)
 				}
 			}
-			// If both fail, continue to JWT verification
-			if err != nil {
-				logger.Debugf("auth: TFE token lookup failed: %v", err)
-			}
+			// If api-key auth fails, continue to JWT verification
 		} else {
 			logger.Debug("auth: token does not start with 'tfe-', attempting JWT verification")
 		}

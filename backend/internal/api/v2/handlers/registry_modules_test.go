@@ -310,8 +310,7 @@ func TestPublishModuleVersion(t *testing.T) {
 
 	// Create auth service
 	userRepo := repository.NewUserRepository(db)
-	tfeTokenRepo := repository.NewTFETokenRepository(db)
-	authService := auth.NewService(userRepo, tfeTokenRepo)
+	authService := auth.NewService(userRepo)
 
 	handler := NewRegistryPublishingHandler(
 		moduleRepo,
