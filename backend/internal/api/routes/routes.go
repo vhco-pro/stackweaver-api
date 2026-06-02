@@ -4,9 +4,11 @@ package routes
 
 import (
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/handlers"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	v2handlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
@@ -17,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
+	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"gorm.io/gorm"
@@ -70,6 +73,15 @@ func SetupRoutes(
 	// Terraform Service Discovery (public endpoint - no auth required)
 	// GET /.well-known/terraform.json
 	r.GET("/.well-known/terraform.json", v2handlers.HandleServiceDiscovery)
+
+	// ==========================================
+	// Terraform CLI login (login.v1) — OAuth2 authorization-code + PKCE.
+	// Registered on the ROOT router (not the /api/v2 group) so it bypasses the
+	// org-resolution wall: the flow is org-agnostic and mints a user-bound
+	// token. MintCode is Bearer-authed (the SPA session); Token is public (the
+	// CLI has no session yet — PKCE + the one-time code are the authentication).
+	// ==========================================
+	setupOAuthLoginRoutes(r, authService, apiKeyService)
 
 	// ==========================================
 	// Webhook Routes (no auth - uses signature validation)
@@ -143,6 +155,37 @@ func SetupRoutes(
 	}
 
 	return r
+}
+
+// setupOAuthLoginRoutes wires the Terraform CLI login.v1 endpoints. It opens a
+// dedicated Redis connection for the short-lived one-time authorization-code
+// store. If Redis is unavailable the feature is disabled (discovery still
+// advertises login.v1, but no exchange endpoint is registered) rather than
+// blocking startup — mirroring how log streaming degrades.
+func setupOAuthLoginRoutes(r *gin.Engine, authService *auth.Service, apiKeyService *apikey.Service) {
+	host := os.Getenv("REDIS_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	port := 6379
+	if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			port = p
+		}
+	}
+	password := os.Getenv("REDIS_PASSWORD")
+
+	redisQueue, err := queue.NewRedisQueue(host, port, password, 0)
+	if err != nil {
+		logger.Warnf("Failed to initialize Redis for terraform login (login.v1): %v (CLI login will be disabled)", err)
+		return
+	}
+
+	oauthHandler := v2handlers.NewOAuthLoginHandler(apiKeyService, authService, redisQueue.Client())
+
+	// MintCode requires the SPA Bearer session; Token is public (PKCE + code).
+	r.POST("/api/v2/oauth/authorize", middleware.AuthMiddleware(authService), oauthHandler.MintCode)
+	r.POST("/api/v2/oauth/token", oauthHandler.Token)
 }
 
 // setupAuthProxyRoutes registers all /auth/* routes for the custom login UI proxy.

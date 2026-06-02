@@ -3,75 +3,45 @@
 package auth
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
-// F-reg-1 + F-reg-2 — TFE token + API key auth regression.
+// Programmatic-token auth regression.
 //
-// Plan contract (docs/internal/plans/features/custom-login-ui-plan.md):
-//   F-reg-1: TFE token auth still works
-//   F-reg-2: API key auth still works
+// Plan contract (docs/internal/plans/security/api-key-org-scoping-enforcement-plan.md):
+// all programmatic tokens — org-bound automation keys and user-bound
+// (`terraform login`) tokens — are now `tfe-`-prefixed api_keys. The
+// legacy separate `tfe_tokens` table was retired, so `GetUserFromToken`
+// resolves a `tfe-`-prefixed token through a single api-key lookup.
 //
-// The custom-login-ui rollout added /auth/* proxy routes but did NOT
-// touch the /api/v2/* auth middleware or the `Service.GetUserFromToken`
-// routing logic. These tests pin the contract so a future regression
-// (e.g. a refactor that swaps the prefix check, removes the API key
-// fallback, or changes the user-lookup chain) is caught at unit-test
-// time rather than discovered when terraform-provider-tfe stops
-// authenticating.
+// These tests pin that routing contract so a future refactor (swapping
+// the prefix check, dropping the api-key lookup, or changing the
+// user-lookup chain) is caught at unit-test time rather than when
+// terraform-provider-tfe stops authenticating.
 //
 // # Why mocks instead of a real Postgres
 //
-// The auth service's lookup interfaces (`TFETokenLookup`, `UserLookup`,
-// `APIKeyVerifier`) are narrow — exactly the methods `GetUserFromToken`
-// calls. Mocks here exercise the SAME code path the production
-// service runs, just with deterministic repos. A DB integration test
-// would also exercise gorm + bcrypt, but those layers have their own
-// upstream test coverage; what's load-bearing for auth-routing is
-// the prefix check, the fallback chain, and the user-id lookup.
+// The auth service's lookup interfaces (`UserLookup`, `APIKeyVerifier`)
+// are narrow — exactly the methods `GetUserFromToken` calls. Mocks here
+// exercise the SAME code path the production service runs, just with
+// deterministic repos. bcrypt-of-API-key and gorm have their own
+// upstream coverage.
 //
 // # What's NOT covered here (and where it lives)
 //
-// - JWT verification: `ZitadelVerifier` lives in `verifier.go`, gets
-//   integration coverage from every E2E spec (auth-setup mints a real
-//   Zitadel JWT, every UI spec uses it).
-// - bcrypt-of-API-key: covered in `services/apikey/service_test.go`
-//   when that lands; for now exercised end-to-end whenever an API key
-//   is created and consumed in the dev stack.
-// - Middleware HTTP wiring (Authorization header parsing, gin
-//   context, etc): covered by `Service.AuthenticateMiddleware`'s
-//   shape — these unit tests exercise the underlying lookup. A
-//   middleware-level test would add value but isn't required for
-//   the F-reg-1/2 contract.
+//   - JWT verification: `ZitadelVerifier` lives in `verifier.go`, gets
+//     integration coverage from every E2E spec.
+//   - api-key creation/scoping: `services/apikey/service_test.go`.
 
 // --- Mocks ---
-
-type mockTFETokenRepo struct {
-	getByTokenFn      func(string) (*models.TFEToken, error)
-	updateLastUsedFn  func(uuid.UUID) error
-	getByTokenCalls   []string
-	updateLastUsedIDs []uuid.UUID
-}
-
-func (m *mockTFETokenRepo) GetByToken(token string) (*models.TFEToken, error) {
-	m.getByTokenCalls = append(m.getByTokenCalls, token)
-	if m.getByTokenFn != nil {
-		return m.getByTokenFn(token)
-	}
-	return nil, errors.New("not found")
-}
-
-func (m *mockTFETokenRepo) UpdateLastUsed(id uuid.UUID) error {
-	m.updateLastUsedIDs = append(m.updateLastUsedIDs, id)
-	if m.updateLastUsedFn != nil {
-		return m.updateLastUsedFn(id)
-	}
-	return nil
-}
 
 type mockUserRepo struct {
 	getByIDFn     func(uuid.UUID) (*models.User, error)
@@ -117,69 +87,17 @@ func (m *mockAPIKeyService) UpdateLastUsed(id uuid.UUID) error {
 	return nil
 }
 
-// --- F-reg-1: TFE token auth ---
+// --- Programmatic-token (api-key) auth ---
 
-func TestGetUserFromToken_TFETokenSucceeds(t *testing.T) {
-	userID := uuid.New()
-	tokenID := uuid.New()
-	wantUser := &models.User{ID: userID, Email: "tfe-user@example.com", Name: "TFE User"}
-
-	const validTFEToken = "tfe-validtoken123" //nolint:gosec // test fixture, not a real credential
-	tfeRepo := &mockTFETokenRepo{
-		getByTokenFn: func(token string) (*models.TFEToken, error) {
-			if token != validTFEToken {
-				return nil, errors.New("not found")
-			}
-			return &models.TFEToken{ID: tokenID, UserID: userID, Token: "hashed"}, nil
-		},
-	}
-	userRepo := &mockUserRepo{
-		getByIDFn: func(id uuid.UUID) (*models.User, error) {
-			if id != userID {
-				return nil, errors.New("user not found")
-			}
-			return wantUser, nil
-		},
-	}
-
-	svc := NewServiceWithLookups(userRepo, tfeRepo)
-
-	got, err := svc.GetUserFromToken(validTFEToken)
-	if err != nil {
-		t.Fatalf("expected success, got error: %v", err)
-	}
-	if got.ID != wantUser.ID {
-		t.Errorf("returned user id: want %s, got %s", wantUser.ID, got.ID)
-	}
-	if got.Email != wantUser.Email {
-		t.Errorf("returned user email: want %s, got %s", wantUser.Email, got.Email)
-	}
-
-	// Lookup fired exactly once with the full token.
-	if len(tfeRepo.getByTokenCalls) != 1 || tfeRepo.getByTokenCalls[0] != validTFEToken {
-		t.Errorf("GetByToken call log: %v", tfeRepo.getByTokenCalls)
-	}
-	// UpdateLastUsed bumped the matched token's id (best-effort, not
-	// blocking on success — but the bookkeeping must fire).
-	if len(tfeRepo.updateLastUsedIDs) != 1 || tfeRepo.updateLastUsedIDs[0] != tokenID {
-		t.Errorf("UpdateLastUsed call log: %v", tfeRepo.updateLastUsedIDs)
-	}
-}
-
-func TestGetUserFromToken_TFETokenLookupFailsFallsThroughToAPIKey(t *testing.T) {
+func TestGetUserFromToken_APIKeyTokenSucceeds(t *testing.T) {
 	userID := uuid.New()
 	apiKeyID := uuid.New()
-	wantUser := &models.User{ID: userID, Email: "apikey-user@example.com"}
+	wantUser := &models.User{ID: userID, Email: "apikey-user@example.com", Name: "API User"}
 
-	tfeRepo := &mockTFETokenRepo{
-		// TFE lookup fails — must not return a user.
-		getByTokenFn: func(string) (*models.TFEToken, error) {
-			return nil, errors.New("token not found")
-		},
-	}
+	const validToken = "tfe-validtoken123" //nolint:gosec // test fixture, not a real credential
 	apiKey := &mockAPIKeyService{
 		verifyFn: func(key string) (*models.APIKey, error) {
-			if key != "tfe-apikeytoken456" {
+			if key != validToken {
 				return nil, errors.New("invalid api key")
 			}
 			return &models.APIKey{ID: apiKeyID, UserID: userID}, nil
@@ -194,122 +112,72 @@ func TestGetUserFromToken_TFETokenLookupFailsFallsThroughToAPIKey(t *testing.T) 
 		},
 	}
 
-	svc := NewServiceWithLookups(userRepo, tfeRepo)
+	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
-	got, err := svc.GetUserFromToken("tfe-apikeytoken456")
+	got, err := svc.GetUserFromToken(validToken)
 	if err != nil {
-		t.Fatalf("expected fallback to API key to succeed, got error: %v", err)
+		t.Fatalf("expected success, got error: %v", err)
 	}
 	if got.ID != wantUser.ID {
 		t.Errorf("returned user id: want %s, got %s", wantUser.ID, got.ID)
 	}
-	// TFE lookup happened first.
-	if len(tfeRepo.getByTokenCalls) != 1 {
-		t.Errorf("TFE GetByToken should have been tried first; got calls: %v", tfeRepo.getByTokenCalls)
+	if got.Email != wantUser.Email {
+		t.Errorf("returned user email: want %s, got %s", wantUser.Email, got.Email)
 	}
-	// API key fallback fired.
-	if len(apiKey.verifyCalls) != 1 || apiKey.verifyCalls[0] != "tfe-apikeytoken456" {
-		t.Errorf("API key fallback didn't fire; calls: %v", apiKey.verifyCalls)
+
+	// Lookup fired exactly once with the full token.
+	if len(apiKey.verifyCalls) != 1 || apiKey.verifyCalls[0] != validToken {
+		t.Errorf("VerifyAPIKey call log: %v", apiKey.verifyCalls)
 	}
+	// UpdateLastUsed bumped the matched key's id.
 	if len(apiKey.updateCalls) != 1 || apiKey.updateCalls[0] != apiKeyID {
-		t.Errorf("UpdateLastUsed on API key didn't fire: %v", apiKey.updateCalls)
+		t.Errorf("UpdateLastUsed call log: %v", apiKey.updateCalls)
 	}
 }
 
-func TestGetUserFromToken_TFEPrefixButUnknownUser(t *testing.T) {
-	// TFE lookup matches the token but the linked user is gone (e.g.
-	// orphaned token after a user delete). Service must NOT return a
-	// nil-user with nil-error — the contract is "either valid user
-	// or error". Today the loop just falls through to JWT, which
-	// without a verifier returns "authentication service not
-	// initialized". That's the regression-pinning value here: the
-	// "broken token" case never silently succeeds.
-	tokenID := uuid.New()
-	missingUserID := uuid.New()
-
-	tfeRepo := &mockTFETokenRepo{
-		getByTokenFn: func(string) (*models.TFEToken, error) {
-			return &models.TFEToken{ID: tokenID, UserID: missingUserID}, nil
-		},
-	}
-	userRepo := &mockUserRepo{
-		// User lookup fails — this is the orphaned-token case.
-		getByIDFn: func(uuid.UUID) (*models.User, error) {
-			return nil, errors.New("user not found")
-		},
-	}
-
-	svc := NewServiceWithLookups(userRepo, tfeRepo)
-
-	got, err := svc.GetUserFromToken("tfe-orphaned789")
-	if err == nil {
-		t.Fatalf("orphaned-token case must return an error, got user: %+v", got)
-	}
-	if got != nil {
-		t.Errorf("orphaned-token case must return a nil user, got: %+v", got)
-	}
-}
-
-func TestGetUserFromToken_NonTFEPrefixSkipsTFEAndAPIKey(t *testing.T) {
-	// Token without the `tfe-` prefix must NOT touch the TFE / API
-	// key lookup paths. Without a JWT verifier set, the call falls
-	// through to the "authentication service not initialized" error.
-	// What matters is that the lookups didn't fire — a regression
-	// where the prefix check was inverted would call them.
-	tfeRepo := &mockTFETokenRepo{}
+func TestGetUserFromToken_NonTFEPrefixSkipsAPIKey(t *testing.T) {
+	// Token without the `tfe-` prefix must NOT touch the api-key
+	// lookup path. Without a JWT verifier set, the call falls through
+	// to the "authentication service not initialized" error. What
+	// matters is that the api-key lookup didn't fire — a regression
+	// where the prefix check was inverted would call it.
 	apiKey := &mockAPIKeyService{}
 	userRepo := &mockUserRepo{}
 
-	svc := NewServiceWithLookups(userRepo, tfeRepo)
+	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
 	_, err := svc.GetUserFromToken("eyJhbGciOi...not-a-tfe-token")
 	if err == nil {
 		t.Fatal("non-tfe token without JWT verifier must return an error")
 	}
-	if len(tfeRepo.getByTokenCalls) != 0 {
-		t.Errorf("non-tfe token must NOT trigger TFE lookup; got calls: %v", tfeRepo.getByTokenCalls)
-	}
 	if len(apiKey.verifyCalls) != 0 {
-		t.Errorf("non-tfe token must NOT trigger API key lookup; got calls: %v", apiKey.verifyCalls)
+		t.Errorf("non-tfe token must NOT trigger api-key lookup; got calls: %v", apiKey.verifyCalls)
 	}
 }
 
-// --- F-reg-2: API key auth (when no TFE token matches) ---
-
-func TestGetUserFromToken_APIKeyFallbackWithoutAPIKeyServiceFailsCleanly(t *testing.T) {
-	// `tfe-` prefix, TFE lookup fails, AND no APIKeyService set
-	// (older deployments before the API key feature landed). Must
-	// fall through cleanly without panicking on a nil pointer.
-	tfeRepo := &mockTFETokenRepo{
-		getByTokenFn: func(string) (*models.TFEToken, error) {
-			return nil, errors.New("not found")
-		},
-	}
+func TestGetUserFromToken_APIKeyMissingServiceFailsCleanly(t *testing.T) {
+	// `tfe-` prefix but no APIKeyService set must fall through cleanly
+	// without panicking on a nil pointer.
 	userRepo := &mockUserRepo{}
 
-	svc := NewServiceWithLookups(userRepo, tfeRepo)
+	svc := NewServiceWithLookups(userRepo)
 	// Deliberately do NOT call SetAPIKeyService — apiKeyService stays nil.
 
 	_, err := svc.GetUserFromToken("tfe-something")
 	if err == nil {
-		t.Fatal("missing API key service AND failing TFE lookup must error, not silently succeed")
+		t.Fatal("missing api-key service must error, not silently succeed")
 	}
 }
 
 func TestGetUserFromToken_APIKeyValidButOrphanedUser(t *testing.T) {
-	// API key matches but the linked user is gone. Same shape as the
-	// TFE orphaned-token case — service must NOT return a nil-user
-	// with nil-error.
+	// API key matches but the linked user is gone (e.g. orphaned key
+	// after a user delete). Service must NOT return a nil-user with
+	// nil-error — the contract is "either valid user or error".
 	apiKeyID := uuid.New()
 	missingUserID := uuid.New()
 
-	tfeRepo := &mockTFETokenRepo{
-		getByTokenFn: func(string) (*models.TFEToken, error) {
-			return nil, errors.New("not a tfe token")
-		},
-	}
 	apiKey := &mockAPIKeyService{
 		verifyFn: func(string) (*models.APIKey, error) {
 			return &models.APIKey{ID: apiKeyID, UserID: missingUserID}, nil
@@ -321,14 +189,107 @@ func TestGetUserFromToken_APIKeyValidButOrphanedUser(t *testing.T) {
 		},
 	}
 
-	svc := NewServiceWithLookups(userRepo, tfeRepo)
+	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
 	got, err := svc.GetUserFromToken("tfe-validkey-orphanuser")
 	if err == nil {
-		t.Fatalf("orphaned-API-key case must return an error, got user: %+v", got)
+		t.Fatalf("orphaned-key case must return an error, got user: %+v", got)
 	}
 	if got != nil {
-		t.Errorf("orphaned-API-key case must return a nil user, got: %+v", got)
+		t.Errorf("orphaned-key case must return a nil user, got: %+v", got)
+	}
+}
+
+// --- Org-resolution wall inputs (Phase 2 step 1) ---
+//
+// `AuthenticateMiddleware` must publish the token's *kind* (and, for an
+// org-bound token, its bound org id) into the gin context so the
+// downstream org-resolution wall can authorize the target org against
+// the token. These tests pin that the two kinds are stamped correctly:
+// an org-bound key sets `token_kind="org"` + `token_org_id`; a
+// user-bound key sets `token_kind="user"` and NO `token_org_id`.
+
+func runMiddlewareWithAPIKey(t *testing.T, apiKey *models.APIKey, user *models.User) map[string]any {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	apiKeySvc := &mockAPIKeyService{
+		verifyFn: func(string) (*models.APIKey, error) { return apiKey, nil },
+	}
+	userRepo := &mockUserRepo{
+		getByIDFn: func(uuid.UUID) (*models.User, error) { return user, nil },
+	}
+	svc := NewServiceWithLookups(userRepo)
+	svc.SetAPIKeyService(apiKeySvc)
+
+	captured := map[string]any{}
+	r := gin.New()
+	r.Use(svc.AuthenticateMiddleware())
+	r.GET("/probe", func(c *gin.Context) {
+		for _, k := range []string{"token_kind", "token_org_id", "auth_method"} {
+			if v, ok := c.Get(k); ok {
+				captured[k] = v
+			}
+		}
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/probe", nil)
+	req.Header.Set("Authorization", "Bearer tfe-probe-token")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("middleware rejected the request: status %d", w.Code)
+	}
+	return captured
+}
+
+func TestAuthenticateMiddleware_OrgBoundTokenSetsBoundOrg(t *testing.T) {
+	userID := uuid.New()
+	orgID := uuid.New()
+	apiKey := &models.APIKey{
+		ID:             uuid.New(),
+		UserID:         userID,
+		Kind:           models.APIKeyKindOrg,
+		OrganizationID: &orgID,
+	}
+	user := &models.User{ID: userID, Email: "org@example.com", Name: "Org User"}
+
+	got := runMiddlewareWithAPIKey(t, apiKey, user)
+
+	if got["auth_method"] != "api_key" {
+		t.Errorf("auth_method: want api_key, got %v", got["auth_method"])
+	}
+	if got["token_kind"] != models.APIKeyKindOrg {
+		t.Errorf("token_kind: want %q, got %v", models.APIKeyKindOrg, got["token_kind"])
+	}
+	gotOrg, ok := got["token_org_id"].(uuid.UUID)
+	if !ok {
+		t.Fatalf("token_org_id missing or wrong type: %#v", got["token_org_id"])
+	}
+	if gotOrg != orgID {
+		t.Errorf("token_org_id: want %s, got %s", orgID, gotOrg)
+	}
+}
+
+func TestAuthenticateMiddleware_UserBoundTokenSetsNoOrg(t *testing.T) {
+	userID := uuid.New()
+	apiKey := &models.APIKey{
+		ID:             uuid.New(),
+		UserID:         userID,
+		Kind:           models.APIKeyKindUser,
+		OrganizationID: nil,
+	}
+	user := &models.User{ID: userID, Email: "user@example.com", Name: "PAT User"}
+
+	got := runMiddlewareWithAPIKey(t, apiKey, user)
+
+	if got["token_kind"] != models.APIKeyKindUser {
+		t.Errorf("token_kind: want %q, got %v", models.APIKeyKindUser, got["token_kind"])
+	}
+	if _, present := got["token_org_id"]; present {
+		t.Errorf("user-bound token must NOT set token_org_id, got %v", got["token_org_id"])
 	}
 }

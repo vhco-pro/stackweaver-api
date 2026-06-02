@@ -348,7 +348,13 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 		return
 	}
 
-	repos, err := provider.ListRepositories(c.Request.Context(), connection, page, perPage)
+	project := c.Query("project")
+	var repos []vcs.Repository
+	if scoped, ok := provider.(vcs.ProjectScopedRepoLister); ok && project != "" {
+		repos, err = scoped.ListRepositoriesByProject(c.Request.Context(), connection, project, page, perPage)
+	} else {
+		repos, err = provider.ListRepositories(c.Request.Context(), connection, page, perPage)
+	}
 	if err != nil {
 		switch {
 		case isNotImplemented(err):
@@ -374,6 +380,71 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": repos,
+		"meta": gin.H{"pagination": gin.H{"page": page, "per_page": perPage}},
+	})
+}
+
+// ListProjects lists projects for a VCS connection.
+// Only providers with a project layer (Azure DevOps) support this; others return 501.
+// GET /api/v2/vcs-connections/:id/projects
+func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
+		})
+		return
+	}
+
+	connection, err := h.vcsConnectionRepo.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
+		})
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
+	if perPage > 100 {
+		perPage = 100
+	}
+
+	provider := h.getProvider(c, connection)
+	if provider == nil {
+		return
+	}
+
+	lister, ok := provider.(vcs.ProjectLister)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{
+			"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": fmt.Sprintf("Project listing is not supported for %s", connection.Provider)}},
+		})
+		return
+	}
+
+	projects, err := lister.ListProjects(c.Request.Context(), connection, page, perPage)
+	if err != nil {
+		switch {
+		case isIdentityNotMaterialized(err):
+			c.JSON(http.StatusForbidden, gin.H{
+				"errors": []gin.H{{
+					"status": "403", "title": "Identity Not Materialized",
+					"detail": "Your Azure DevOps identity has not been activated in this organization. " +
+						"Open https://dev.azure.com/ in a browser, sign in with the same Microsoft account you used to authorize Stackweaver, " +
+						"then delete this VCS connection and reconnect.",
+				}},
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to list projects: %v", err)}},
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": projects,
 		"meta": gin.H{"pagination": gin.H{"page": page, "per_page": perPage}},
 	})
 }
