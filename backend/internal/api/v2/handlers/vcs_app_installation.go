@@ -108,6 +108,34 @@ func NewVCSAppInstallationHandlerV2(
 	}
 }
 
+// inventorySyncPayload builds the ansible_sync queue payload for a VCS inventory,
+// pre-resolving a fresh, token-embedded clone URL server-side so the runner never
+// needs the provider's OAuth credentials. Resolution is best-effort: on failure
+// only the inventory_id is sent and the runner falls back to resolving from the DB.
+func (h *VCSAppInstallationHandlerV2) inventorySyncPayload(ctx context.Context, inv *models.AnsibleInventory) map[string]any {
+	payload := map[string]any{"inventory_id": inv.ID.String()}
+	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || inv.VCSConnectionID == nil || inv.VCSRepository == "" {
+		return payload
+	}
+	conn, err := h.vcsConnectionRepo.GetByID(*inv.VCSConnectionID)
+	if err != nil {
+		logger.Warnf("Inventory %s: failed to load VCS connection for clone-URL pre-resolution: %v", inv.ID, err)
+		return payload
+	}
+	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, inv.VCSRepository)
+	if err != nil {
+		logger.Warnf("Inventory %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", inv.ID, err)
+		return payload
+	}
+	branch := inv.VCSBranch
+	if branch == "" {
+		branch = "main"
+	}
+	payload["clone_url"] = cloneURL
+	payload["branch"] = branch
+	return payload
+}
+
 // InitiateInstallation initiates the GitHub App installation flow
 // Returns the installation URL for the frontend to redirect to
 // GET /api/v2/organizations/:name/vcs-connections/github/install
@@ -548,7 +576,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 		inv := inventory
 		if h.ansibleQueue != nil {
 			go func() {
-				syncMsg := map[string]any{"inventory_id": inv.ID.String()}
+				syncMsg := h.inventorySyncPayload(context.Background(), &inv)
 				if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 					logger.Errorf("Error queuing sync for inventory %s: %v", inv.ID, err)
 				}
@@ -1728,10 +1756,8 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 				logger.Infof("Triggering sync for inventory: %s (ID: %s)", inventory.Name, inventory.ID)
 				if h.ansibleQueue != nil {
 					go func(inv models.AnsibleInventory) {
-						// Use JSON marshaling to create the sync message (same format as ansible-runner expects)
-						syncMsg := map[string]interface{}{
-							"inventory_id": inv.ID.String(),
-						}
+						// Pre-resolve the clone URL server-side (same format the ansible-runner expects)
+						syncMsg := h.inventorySyncPayload(context.Background(), &inv)
 						if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 							logger.Errorf("Error queuing sync for inventory %s: %v", inv.ID, err)
 						}
