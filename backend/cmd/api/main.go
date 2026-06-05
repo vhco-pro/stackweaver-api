@@ -102,6 +102,30 @@ func main() {
 		logger.Warnf("Failed to enable uuid-ossp extension (may already be enabled): %v", err)
 	}
 
+	// Rebuild legacy single-column unique indexes on Ansible inventory host
+	// and group names as the intended composite (inventory_id, name) indexes.
+	// The original schema made host/group names globally unique across every
+	// inventory, so the same name (e.g. "localhost") could only ever exist in
+	// one inventory. Drop the legacy index when present so AutoMigrate (below)
+	// recreates it as composite. Idempotent: once the index already covers
+	// inventory_id it is left untouched.
+	rebuildCompositeIndex := func(indexName string) {
+		var indexdef string
+		if err := db.Raw("SELECT indexdef FROM pg_indexes WHERE indexname = ?", indexName).Scan(&indexdef).Error; err != nil {
+			logger.Warnf("Failed to inspect index %s: %v", indexName, err)
+			return
+		}
+		if indexdef != "" && !strings.Contains(indexdef, "inventory_id") {
+			if err := db.Exec("DROP INDEX IF EXISTS " + indexName).Error; err != nil {
+				logger.Warnf("Failed to drop legacy index %s: %v", indexName, err)
+			} else {
+				logger.Infof("Dropped legacy single-column index %s; AutoMigrate will rebuild it as composite (inventory_id, name)", indexName)
+			}
+		}
+	}
+	rebuildCompositeIndex("idx_inventory_host")
+	rebuildCompositeIndex("idx_inventory_group")
+
 	// Run GORM AutoMigrate to create/update tables
 	if err := db.AutoMigrate(
 		&models.User{},
