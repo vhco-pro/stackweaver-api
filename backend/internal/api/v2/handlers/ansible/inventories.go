@@ -25,6 +25,14 @@ import (
 // InventorySyncMessage represents a request to sync an inventory from VCS
 type InventorySyncMessage struct {
 	InventoryID uuid.UUID `json:"inventory_id"`
+	// CloneURL is a pre-authenticated, token-embedded clone URL resolved by the
+	// API at enqueue time. When set, the runner clones with it directly and does
+	// not need its own VCS OAuth credentials to refresh tokens. Empty falls back
+	// to the runner resolving the URL from the DB (legacy behaviour).
+	CloneURL string `json:"clone_url,omitempty"`
+	// Branch is the branch to clone, carried alongside CloneURL so the runner does
+	// not need to re-read it from the DB on the pre-resolved path.
+	Branch string `json:"branch,omitempty"`
 }
 
 // InventoryHandler handles Ansible inventory API endpoints
@@ -63,6 +71,34 @@ func NewInventoryHandler(
 		vcsRegistry:       vcsRegistry,
 		vcsConnectionRepo: vcsConnectionRepo,
 	}
+}
+
+// buildInventorySyncMessage builds the queue message for a VCS inventory sync.
+// It resolves a fresh, token-embedded clone URL server-side (where the VCS OAuth
+// credentials live) so the runner never needs those credentials and never has to
+// refresh tokens itself. Resolution is best-effort: on any failure the message is
+// returned without a CloneURL and the runner falls back to resolving from the DB.
+func (h *InventoryHandler) buildInventorySyncMessage(ctx context.Context, inventory *models.AnsibleInventory) InventorySyncMessage {
+	msg := InventorySyncMessage{InventoryID: inventory.ID}
+	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || inventory.VCSConnectionID == nil || inventory.VCSRepository == "" {
+		return msg
+	}
+	conn, err := h.vcsConnectionRepo.GetByID(*inventory.VCSConnectionID)
+	if err != nil {
+		logger.Warnf("Inventory %s: failed to load VCS connection for clone-URL pre-resolution: %v", inventory.ID, err)
+		return msg
+	}
+	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, inventory.VCSRepository)
+	if err != nil {
+		logger.Warnf("Inventory %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", inventory.ID, err)
+		return msg
+	}
+	msg.CloneURL = cloneURL
+	msg.Branch = inventory.VCSBranch
+	if msg.Branch == "" {
+		msg.Branch = "main"
+	}
+	return msg
 }
 
 // maybeRegisterADOWebhook registers Azure DevOps service hook subscriptions for a specific repo
@@ -395,9 +431,7 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 			logger.Warnf("Failed to update inventory sync status: %v", err)
 		}
 
-		syncMsg := InventorySyncMessage{
-			InventoryID: inventory.ID,
-		}
+		syncMsg := h.buildInventorySyncMessage(c.Request.Context(), inventory)
 		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 			// Log error but don't fail the create request
 			inventory.LastSyncStatus = "pending"
@@ -972,9 +1006,7 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 
 	// Queue sync job
 	if h.queue != nil {
-		syncMsg := InventorySyncMessage{
-			InventoryID: inventory.ID,
-		}
+		syncMsg := h.buildInventorySyncMessage(c.Request.Context(), inventory)
 		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 			// Revert status on queue failure
 			inventory.LastSyncStatus = "failed"
