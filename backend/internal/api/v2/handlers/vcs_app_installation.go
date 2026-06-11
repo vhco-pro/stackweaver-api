@@ -112,6 +112,33 @@ func NewVCSAppInstallationHandlerV2(
 // pre-resolving a fresh, token-embedded clone URL server-side so the runner never
 // needs the provider's OAuth credentials. Resolution is best-effort: on failure
 // only the inventory_id is sent and the runner falls back to resolving from the DB.
+// playbookSyncPayload builds the webhook-triggered playbook sync message, resolving
+// a fresh token-embedded clone URL server-side (best-effort) so the runner needs no
+// VCS OAuth credentials. Mirrors inventorySyncPayload.
+func (h *VCSAppInstallationHandlerV2) playbookSyncPayload(ctx context.Context, pb *models.AnsiblePlaybook) map[string]any {
+	payload := map[string]any{"playbook_id": pb.ID.String()}
+	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || pb.VCSConnectionID == nil || pb.VCSRepository == "" {
+		return payload
+	}
+	conn, err := h.vcsConnectionRepo.GetByID(*pb.VCSConnectionID)
+	if err != nil {
+		logger.Warnf("Playbook %s: failed to load VCS connection for clone-URL pre-resolution: %v", pb.ID, err)
+		return payload
+	}
+	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, pb.VCSRepository)
+	if err != nil {
+		logger.Warnf("Playbook %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", pb.ID, err)
+		return payload
+	}
+	branch := pb.VCSBranch
+	if branch == "" {
+		branch = "main"
+	}
+	payload["clone_url"] = cloneURL
+	payload["branch"] = branch
+	return payload
+}
+
 func (h *VCSAppInstallationHandlerV2) inventorySyncPayload(ctx context.Context, inv *models.AnsibleInventory) map[string]any {
 	payload := map[string]any{"inventory_id": inv.ID.String()}
 	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || inv.VCSConnectionID == nil || inv.VCSRepository == "" {
@@ -589,7 +616,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 			pb := playbook
 			if h.ansibleQueue != nil {
 				go func() {
-					syncMsg := map[string]any{"playbook_id": pb.ID.String()}
+					syncMsg := h.playbookSyncPayload(context.Background(), &pb)
 					if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 						logger.Errorf("Error queuing sync for playbook %s: %v", pb.ID, err)
 					}
