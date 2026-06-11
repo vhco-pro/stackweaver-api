@@ -271,6 +271,12 @@ type UpdateJobTemplateRequest struct {
 			ScheduleCron    *string                    `json:"schedule-cron,omitempty"`
 		} `json:"attributes"`
 		Relationships struct {
+			Playbook struct {
+				Data *struct {
+					ID   string `json:"id"`
+					Type string `json:"type"`
+				} `json:"data"`
+			} `json:"playbook,omitempty"`
 			Inventory struct {
 				Data *struct {
 					ID   string `json:"id"`
@@ -748,22 +754,7 @@ func (h *PlaybookHandler) CreatePlaybookByOrganization(c *gin.Context) {
 	h.maybeRegisterADOWebhook(playbook.VCSConnectionID, playbook.VCSRepository)
 
 	// Auto-trigger sync for VCS-backed playbooks
-	if playbook.VCSConnectionID != nil && playbook.VCSRepository != "" && h.queue != nil {
-		playbook.LastSyncStatus = "syncing"
-		if err := h.playbookRepo.Update(playbook); err != nil {
-			logger.Warnf("Failed to update playbook sync status: %v", err)
-		}
-
-		syncMsg := h.buildPlaybookSyncMessage(context.Background(), playbook)
-		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-			// Log error but don't fail the create request
-			playbook.LastSyncStatus = "pending"
-			playbook.LastSyncError = "Auto-sync failed to queue: " + err.Error()
-			if updateErr := h.playbookRepo.Update(playbook); updateErr != nil {
-				logger.Warnf("Failed to update playbook after sync queue error: %v", updateErr)
-			}
-		}
-	}
+	h.enqueueInitialSync(playbook)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"data": formatPlaybookResponse(playbook),
@@ -1777,6 +1768,44 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 	}
 	if req.Data.Attributes.ScheduleCron != nil {
 		template.ScheduleCron = *req.Data.Attributes.ScheduleCron
+	}
+
+	// Handle playbook relationship update
+	if req.Data.Relationships.Playbook.Data != nil {
+		pbid, err := uuid.Parse(req.Data.Relationships.Playbook.Data.ID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "Invalid playbook ID"},
+				},
+			})
+			return
+		}
+		playbook, err := h.playbookRepo.GetByID(pbid)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "Playbook not found"},
+				},
+			})
+			return
+		}
+		// The organization is the tenant boundary: the UI lists playbooks
+		// org-wide and templates may legitimately reference a playbook from a
+		// sibling project, so only cross-org references are rejected.
+		if playbook.ProjectID != template.ProjectID {
+			tplProject, tplErr := h.projectRepo.GetByID(template.ProjectID)
+			pbProject, pbErr := h.projectRepo.GetByID(playbook.ProjectID)
+			if tplErr != nil || pbErr != nil || tplProject.OrganizationID != pbProject.OrganizationID {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"errors": []gin.H{
+						{"status": "400", "title": "Bad Request", "detail": "Playbook does not belong to this template's organization"},
+					},
+				})
+				return
+			}
+		}
+		template.PlaybookID = pbid
 	}
 
 	// Handle inventory relationship update

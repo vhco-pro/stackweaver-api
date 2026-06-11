@@ -263,7 +263,16 @@ func SetupAnsibleRoutes(
 	{
 		orgPlaybooks.GET("", playbookHandler.ListPlaybooksByOrganization)
 		orgPlaybooks.POST("", playbookHandler.CreatePlaybookByOrganization)
+		// Discovery actions: register many playbooks from one repository / find-or-create one
+		orgPlaybooks.POST("/actions/bulk-import", playbookHandler.BulkImportPlaybooks)
+		orgPlaybooks.POST("/actions/find-or-create", playbookHandler.FindOrCreatePlaybook)
 	}
+
+	// GET /api/v2/organizations/:name/ansible/vcs-playbook-files
+	// Lists playbook candidate files in a connected repository (annotated with
+	// already-registered playbooks) for the bulk-import wizard and the job
+	// template repository browser.
+	v2.GET("/organizations/:name/ansible/vcs-playbook-files", playbookHandler.ListPlaybookFiles)
 
 	// Project-scoped playbook endpoints (for backward compatibility and querying by project)
 	// GET /api/v2/projects/:id/ansible/playbooks
