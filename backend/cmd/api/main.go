@@ -109,22 +109,27 @@ func main() {
 	// one inventory. Drop the legacy index when present so AutoMigrate (below)
 	// recreates it as composite. Idempotent: once the index already covers
 	// inventory_id it is left untouched.
-	rebuildCompositeIndex := func(indexName string) {
+	rebuildCompositeIndex := func(indexName, requiredColumn string) {
 		var indexdef string
 		if err := db.Raw("SELECT indexdef FROM pg_indexes WHERE indexname = ?", indexName).Scan(&indexdef).Error; err != nil {
 			logger.Warnf("Failed to inspect index %s: %v", indexName, err)
 			return
 		}
-		if indexdef != "" && !strings.Contains(indexdef, "inventory_id") {
+		if indexdef != "" && !strings.Contains(indexdef, requiredColumn) {
 			if err := db.Exec("DROP INDEX IF EXISTS " + indexName).Error; err != nil {
 				logger.Warnf("Failed to drop legacy index %s: %v", indexName, err)
 			} else {
-				logger.Infof("Dropped legacy single-column index %s; AutoMigrate will rebuild it as composite (inventory_id, name)", indexName)
+				logger.Infof("Dropped legacy single-column index %s; AutoMigrate will rebuild it as composite (%s, name)", indexName, requiredColumn)
 			}
 		}
 	}
-	rebuildCompositeIndex("idx_inventory_host")
-	rebuildCompositeIndex("idx_inventory_group")
+	rebuildCompositeIndex("idx_inventory_host", "inventory_id")
+	rebuildCompositeIndex("idx_inventory_group", "inventory_id")
+	// Playbook and job template names were globally unique by accident (the
+	// uniqueIndex tag only covered the name column); the intended scope is
+	// per-project.
+	rebuildCompositeIndex("idx_project_playbook", "project_id")
+	rebuildCompositeIndex("idx_project_template", "project_id")
 
 	// Run GORM AutoMigrate to create/update tables
 	if err := db.AutoMigrate(
