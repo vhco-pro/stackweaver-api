@@ -24,6 +24,14 @@ import (
 // PlaybookSyncMessage represents a request to sync a playbook from VCS
 type PlaybookSyncMessage struct {
 	PlaybookID uuid.UUID `json:"playbook_id"`
+	// CloneURL is a pre-authenticated, token-embedded clone URL resolved by the
+	// API at enqueue time. When set, the runner clones with it directly and does
+	// not need its own VCS OAuth credentials to refresh tokens. Empty falls back
+	// to the runner resolving the URL from the DB (legacy behaviour).
+	CloneURL string `json:"clone_url,omitempty"`
+	// Branch is the branch to clone, carried alongside CloneURL so the runner does
+	// not need to re-read it from the DB on the pre-resolved path.
+	Branch string `json:"branch,omitempty"`
 }
 
 // PlaybookHandler handles Ansible playbook API endpoints
@@ -70,6 +78,43 @@ func NewPlaybookHandler(
 	}
 }
 
+// normalizeSourceMode validates the requested playbook source mode, defaulting to
+// "cached" for empty or unrecognized values.
+func normalizeSourceMode(mode string) string {
+	if mode == models.PlaybookSourceModeFresh {
+		return models.PlaybookSourceModeFresh
+	}
+	return models.PlaybookSourceModeCached
+}
+
+// buildPlaybookSyncMessage builds the queue message for a VCS playbook sync. It
+// resolves a fresh, token-embedded clone URL server-side (where the VCS OAuth
+// credentials live) so the runner never needs those credentials and never has to
+// refresh tokens itself. Resolution is best-effort: on any failure the message is
+// returned without a CloneURL and the runner falls back to resolving from the DB.
+func (h *PlaybookHandler) buildPlaybookSyncMessage(ctx context.Context, playbook *models.AnsiblePlaybook) PlaybookSyncMessage {
+	msg := PlaybookSyncMessage{PlaybookID: playbook.ID}
+	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || playbook.VCSConnectionID == nil || playbook.VCSRepository == "" {
+		return msg
+	}
+	conn, err := h.vcsConnectionRepo.GetByID(*playbook.VCSConnectionID)
+	if err != nil {
+		logger.Warnf("Playbook %s: failed to load VCS connection for clone-URL pre-resolution: %v", playbook.ID, err)
+		return msg
+	}
+	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, playbook.VCSRepository)
+	if err != nil {
+		logger.Warnf("Playbook %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", playbook.ID, err)
+		return msg
+	}
+	msg.CloneURL = cloneURL
+	msg.Branch = playbook.VCSBranch
+	if msg.Branch == "" {
+		msg.Branch = "main"
+	}
+	return msg
+}
+
 // maybeRegisterADOWebhook registers Azure DevOps service hook subscriptions for a specific repo
 // in a background goroutine. Silently skips if not ADO, no webhook base URL, or wrong repo format.
 func (h *PlaybookHandler) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath string) {
@@ -110,6 +155,7 @@ type CreatePlaybookRequest struct {
 			VCSRepository string `json:"vcs-repository"` // Repository full name (e.g., "owner/repo")
 			VCSBranch     string `json:"vcs-branch"`     // Branch to use (defaults to "main")
 			PlaybookPath  string `json:"playbook-path"`  // Path to playbook file in repo
+			SourceMode    string `json:"source-mode"`    // "cached" (default) or "fresh"
 		} `json:"attributes"`
 		Relationships struct {
 			Project struct {
@@ -139,6 +185,7 @@ type UpdatePlaybookRequest struct {
 			VCSRepository *string `json:"vcs-repository,omitempty"`
 			VCSBranch     *string `json:"vcs-branch,omitempty"`
 			PlaybookPath  *string `json:"playbook-path,omitempty"`
+			SourceMode    *string `json:"source-mode,omitempty"`
 		} `json:"attributes"`
 		Relationships struct {
 			VCSConnection struct {
@@ -527,6 +574,7 @@ func (h *PlaybookHandler) CreatePlaybook(c *gin.Context) {
 		VCSRepository: req.Data.Attributes.VCSRepository,
 		VCSBranch:     req.Data.Attributes.VCSBranch,
 		PlaybookPath:  req.Data.Attributes.PlaybookPath,
+		SourceMode:    normalizeSourceMode(req.Data.Attributes.SourceMode),
 	}
 
 	if playbook.PlaybookPath == "" {
@@ -663,6 +711,7 @@ func (h *PlaybookHandler) CreatePlaybookByOrganization(c *gin.Context) {
 		VCSRepository: req.Data.Attributes.VCSRepository,
 		VCSBranch:     req.Data.Attributes.VCSBranch,
 		PlaybookPath:  req.Data.Attributes.PlaybookPath,
+		SourceMode:    normalizeSourceMode(req.Data.Attributes.SourceMode),
 	}
 
 	if playbook.PlaybookPath == "" {
@@ -705,9 +754,7 @@ func (h *PlaybookHandler) CreatePlaybookByOrganization(c *gin.Context) {
 			logger.Warnf("Failed to update playbook sync status: %v", err)
 		}
 
-		syncMsg := PlaybookSyncMessage{
-			PlaybookID: playbook.ID,
-		}
+		syncMsg := h.buildPlaybookSyncMessage(context.Background(), playbook)
 		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 			// Log error but don't fail the create request
 			playbook.LastSyncStatus = "pending"
@@ -806,6 +853,9 @@ func (h *PlaybookHandler) UpdatePlaybook(c *gin.Context) {
 	}
 	if req.Data.Attributes.PlaybookPath != nil {
 		playbook.PlaybookPath = *req.Data.Attributes.PlaybookPath
+	}
+	if req.Data.Attributes.SourceMode != nil {
+		playbook.SourceMode = normalizeSourceMode(*req.Data.Attributes.SourceMode)
 	}
 
 	// Handle VCS connection relationship update
@@ -1047,9 +1097,7 @@ func (h *PlaybookHandler) SyncPlaybook(c *gin.Context) {
 
 	// Queue sync job
 	if h.queue != nil {
-		syncMsg := PlaybookSyncMessage{
-			PlaybookID: playbook.ID,
-		}
+		syncMsg := h.buildPlaybookSyncMessage(context.Background(), playbook)
 		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 			// Revert status on queue failure
 			playbook.LastSyncStatus = "failed"
@@ -1925,23 +1973,30 @@ func formatPlaybookResponse(playbook *models.AnsiblePlaybook) gin.H {
 	}
 
 	attributes := gin.H{
-		"name":             playbook.Name,
-		"description":      playbook.Description,
-		"vcs-repository":   playbook.VCSRepository,
-		"vcs-branch":       playbook.VCSBranch,
-		"vcs-provider":     vcsProvider,
-		"vcs-account-name": vcsAccountName,
-		"playbook-path":    playbook.PlaybookPath,
-		"last-sync-at":     nil,
-		"last-sync-status": playbook.LastSyncStatus,
-		"last-sync-commit": playbook.LastSyncCommit,
-		"last-sync-error":  playbook.LastSyncError,
-		"created-at":       playbook.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"updated-at":       playbook.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		"name":              playbook.Name,
+		"description":       playbook.Description,
+		"vcs-repository":    playbook.VCSRepository,
+		"vcs-branch":        playbook.VCSBranch,
+		"vcs-provider":      vcsProvider,
+		"vcs-account-name":  vcsAccountName,
+		"playbook-path":     playbook.PlaybookPath,
+		"source-mode":       playbook.SourceMode,
+		"last-sync-at":      nil,
+		"last-sync-status":  playbook.LastSyncStatus,
+		"last-sync-commit":  playbook.LastSyncCommit,
+		"last-sync-error":   playbook.LastSyncError,
+		"cached-commit":     playbook.CachedCommit,
+		"cached-at":         nil,
+		"cached-size-bytes": playbook.CachedSizeBytes,
+		"created-at":        playbook.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"updated-at":        playbook.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 
 	if playbook.LastSyncAt != nil {
 		attributes["last-sync-at"] = playbook.LastSyncAt.Format("2006-01-02T15:04:05Z")
+	}
+	if playbook.CachedAt != nil {
+		attributes["cached-at"] = playbook.CachedAt.Format("2006-01-02T15:04:05Z")
 	}
 
 	relationships := gin.H{

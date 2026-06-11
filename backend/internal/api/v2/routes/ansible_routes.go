@@ -108,6 +108,9 @@ func SetupAnsibleRoutes(
 
 	// Create job service with variable set support
 	jobService := ansible.NewJobServiceWithVariables(jobRepo, playbookRepo, inventoryRepo, templateRepo, projectRepo, variableService, redisQueue)
+	// Wire the VCS resolver so job launches pre-resolve a token-embedded playbook
+	// clone URL server-side (runner then needs no VCS OAuth credentials).
+	jobService.SetVCSResolver(vcsRegistry, vcsConnectionRepo)
 
 	// Initialize new repositories for inventory sources and schedules
 	inventorySourceRepo := repository.NewAnsibleInventorySourceRepository(db)
