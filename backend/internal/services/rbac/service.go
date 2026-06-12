@@ -101,6 +101,7 @@ const (
 	PermissionAnsibleJobTemplateWrite Permission = "ansible:job-template:write"
 	PermissionAnsibleJobRead          Permission = "ansible:job:read"
 	PermissionAnsibleJobExecute       Permission = "ansible:job:execute"
+	PermissionAnsibleAdHocExecute     Permission = "ansible:adhoc:execute" // Run ad hoc commands against inventories (AWX adhoc_role)
 	PermissionAnsibleScheduleRead     Permission = "ansible:schedule:read"
 	PermissionAnsibleScheduleWrite    Permission = "ansible:schedule:write"
 )
@@ -187,6 +188,56 @@ func (s *Service) CheckResourcePermission(
 	return allPermissions[permission], nil
 }
 
+// TeamAnsibleTemplateAccess summarizes one team's effective permissions on an
+// Ansible job template (org-level access merged with project-level access).
+type TeamAnsibleTemplateAccess struct {
+	TeamID   uuid.UUID `json:"team_id"`
+	TeamName string    `json:"team_name"`
+	Read     bool      `json:"read"`
+	Write    bool      `json:"write"`
+	Execute  bool      `json:"execute"`
+}
+
+// GetTeamAccessForAnsibleTemplate returns every team in the org that has any
+// effective permission on a job template in the given project. Read-only
+// visibility for the template Access tab; enforcement stays in the Check*
+// methods (see RBAC_MASTER_PLAN for per-resource grants).
+func (s *Service) GetTeamAccessForAnsibleTemplate(orgID, projectID uuid.UUID) ([]TeamAnsibleTemplateAccess, error) {
+	if s.teamRepo == nil {
+		return nil, fmt.Errorf("team repository not available")
+	}
+	teams, _, err := s.teamRepo.List(orgID, 1000, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list teams: %w", err)
+	}
+	result := make([]TeamAnsibleTemplateAccess, 0, len(teams))
+	for i := range teams {
+		team := &teams[i]
+		perms := map[Permission]bool{}
+		if team.OrganizationAccess != nil {
+			for perm := range s.getPermissionsFromOrganizationAccess(team.OrganizationAccess) {
+				perms[perm] = true
+			}
+		}
+		if projectAccess, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && projectAccess != nil {
+			for perm := range s.getPermissionsFromProjectAccess(projectAccess, ResourceTypeAnsibleJobTemplate) {
+				perms[perm] = true
+			}
+		}
+		access := TeamAnsibleTemplateAccess{
+			TeamID:   team.ID,
+			TeamName: team.Name,
+			Read:     perms[PermissionAnsibleJobTemplateRead],
+			Write:    perms[PermissionAnsibleJobTemplateWrite],
+			Execute:  perms[PermissionAnsibleJobExecute],
+		}
+		if access.Read || access.Write || access.Execute {
+			result = append(result, access)
+		}
+	}
+	return result, nil
+}
+
 // getPermissionsFromOrganizationAccess extracts all permissions from team organization access
 func (s *Service) getPermissionsFromOrganizationAccess(orgAccess *models.TeamOrganizationAccess) map[Permission]bool {
 	perms := make(map[Permission]bool)
@@ -269,6 +320,7 @@ func (s *Service) getPermissionsFromOrganizationAccess(orgAccess *models.TeamOrg
 		perms[PermissionAnsibleJobTemplateWrite] = true
 		perms[PermissionAnsibleJobRead] = true
 		perms[PermissionAnsibleJobExecute] = true
+		perms[PermissionAnsibleAdHocExecute] = true
 		perms[PermissionAnsibleScheduleRead] = true
 		perms[PermissionAnsibleScheduleWrite] = true
 	}
@@ -325,6 +377,7 @@ func (s *Service) getPermissionsFromOrganizationAccess(orgAccess *models.TeamOrg
 	if orgAccess.ManageAnsibleJobs {
 		perms[PermissionAnsibleJobRead] = true
 		perms[PermissionAnsibleJobExecute] = true
+		perms[PermissionAnsibleAdHocExecute] = true
 		perms[PermissionOrgReadAnsible] = true
 	}
 	if orgAccess.ReadAnsibleJobs {
@@ -376,6 +429,7 @@ func (s *Service) getPermissionsFromProjectAccess(projectAccess *models.TeamProj
 			perms[PermissionAnsibleJobTemplateWrite] = true
 			perms[PermissionAnsibleJobRead] = true
 			perms[PermissionAnsibleJobExecute] = true
+			perms[PermissionAnsibleAdHocExecute] = true
 			perms[PermissionAnsibleScheduleRead] = true
 			perms[PermissionAnsibleScheduleWrite] = true
 		case "maintain", "write":
@@ -402,6 +456,7 @@ func (s *Service) getPermissionsFromProjectAccess(projectAccess *models.TeamProj
 			perms[PermissionAnsibleJobTemplateWrite] = true
 			perms[PermissionAnsibleJobRead] = true
 			perms[PermissionAnsibleJobExecute] = true
+			perms[PermissionAnsibleAdHocExecute] = true
 			perms[PermissionAnsibleScheduleRead] = true
 			perms[PermissionAnsibleScheduleWrite] = true
 		case "read":
@@ -848,6 +903,7 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userID, organizat
 				PermissionAnsibleJobTemplateWrite:     true,
 				PermissionAnsibleJobRead:              true,
 				PermissionAnsibleJobExecute:           true,
+				PermissionAnsibleAdHocExecute:         true,
 				PermissionAnsibleScheduleRead:         true,
 				PermissionAnsibleScheduleWrite:        true,
 			}, nil

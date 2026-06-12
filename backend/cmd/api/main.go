@@ -29,6 +29,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/oidc"
@@ -131,6 +132,35 @@ func main() {
 	rebuildCompositeIndex("idx_project_playbook", "project_id")
 	rebuildCompositeIndex("idx_project_template", "project_id")
 
+	// queued_at (NULL = held by the template concurrency gate) is introduced by
+	// this release. Detect whether the column predates this startup so jobs
+	// created before the column existed can be backfilled exactly once below —
+	// without the backfill they would all look "held" and be re-dispatched.
+	var hasQueuedAt bool
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ansible_jobs' AND column_name = 'queued_at')").Scan(&hasQueuedAt).Error; err != nil {
+		logger.Warnf("Failed to inspect ansible_jobs.queued_at column: %v", err)
+		hasQueuedAt = true // fail safe: never backfill on uncertainty
+	}
+
+	// Notification dispatch markers are introduced by this release. Detect
+	// whether they predate this startup so pre-existing finished jobs can be
+	// marked notified exactly once below — otherwise attaching a notification
+	// channel later would replay every historical job as a fresh notification.
+	var hasNotifyMarkers bool
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ansible_jobs' AND column_name = 'notified_finished_at')").Scan(&hasNotifyMarkers).Error; err != nil {
+		logger.Warnf("Failed to inspect ansible_jobs.notified_finished_at column: %v", err)
+		hasNotifyMarkers = true // fail safe: never backfill on uncertainty
+	}
+
+	// The template multi-credential join table is introduced by this release;
+	// when it doesn't exist yet, seed it from the legacy single credential_id
+	// after AutoMigrate creates it.
+	var hasTemplateCredentials bool
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ansible_job_template_credentials')").Scan(&hasTemplateCredentials).Error; err != nil {
+		logger.Warnf("Failed to inspect ansible_job_template_credentials table: %v", err)
+		hasTemplateCredentials = true // fail safe: never backfill on uncertainty
+	}
+
 	// Run GORM AutoMigrate to create/update tables
 	if err := db.AutoMigrate(
 		&models.User{},
@@ -181,7 +211,12 @@ func main() {
 		&models.AnsibleJob{},
 		&models.AnsibleJobEvent{},
 		&models.AnsibleInventorySource{},
+		&models.AnsibleInventorySync{},
+		&models.AnsibleConstructedInput{},
 		&models.AnsibleSchedule{},
+		// Ansible notification models
+		&models.AnsibleNotificationTemplate{},
+		&models.AnsibleNotificationAttachment{},
 		// Ansible Workflow models
 		&models.AnsibleWorkflow{},
 		&models.AnsibleWorkflowNode{},
@@ -194,6 +229,68 @@ func main() {
 		&models.AzureOIDCConfiguration{},
 	); err != nil {
 		logger.Fatalf("Failed to run database migrations: %v", err)
+	}
+
+	// Ad hoc jobs have no playbook; AutoMigrate never relaxes an existing NOT
+	// NULL constraint, so drop it explicitly (idempotent).
+	if err := db.Exec("ALTER TABLE ansible_jobs ALTER COLUMN playbook_id DROP NOT NULL").Error; err != nil {
+		logger.Warnf("Failed to drop NOT NULL on ansible_jobs.playbook_id: %v", err)
+	}
+
+	// One-time backfill: jobs created before queued_at existed were all
+	// dispatched at creation time, so mark them released.
+	if !hasQueuedAt {
+		if err := db.Exec("UPDATE ansible_jobs SET queued_at = created_at WHERE queued_at IS NULL").Error; err != nil {
+			logger.Warnf("Failed to backfill ansible_jobs.queued_at: %v", err)
+		} else {
+			logger.Info("Backfilled ansible_jobs.queued_at for pre-existing jobs")
+		}
+	}
+
+	// One-time cutover: mark every pre-existing job/workflow run as already
+	// notified for the transitions that already happened, so the polling
+	// notification worker only fires on transitions that occur AFTER this
+	// upgrade. Without this, attaching a channel replays the entire history.
+	if !hasNotifyMarkers {
+		for _, stmt := range []string{
+			"UPDATE ansible_jobs SET notified_started_at = COALESCE(started_at, created_at) WHERE started_at IS NOT NULL AND notified_started_at IS NULL",
+			"UPDATE ansible_jobs SET notified_finished_at = COALESCE(finished_at, updated_at) WHERE finished_at IS NOT NULL AND notified_finished_at IS NULL",
+			"UPDATE ansible_workflow_jobs SET notified_started_at = COALESCE(started_at, created_at) WHERE started_at IS NOT NULL AND notified_started_at IS NULL",
+			"UPDATE ansible_workflow_jobs SET notified_finished_at = COALESCE(finished_at, updated_at) WHERE finished_at IS NOT NULL AND notified_finished_at IS NULL",
+		} {
+			if err := db.Exec(stmt).Error; err != nil {
+				logger.Warnf("Failed to backfill notification markers: %v", err)
+			}
+		}
+		logger.Info("Backfilled notification dispatch markers for pre-existing jobs and workflow runs")
+	}
+
+	// One-time backfill: seed the multi-credential set from the legacy single
+	// credential reference.
+	if !hasTemplateCredentials {
+		if err := db.Exec("INSERT INTO ansible_job_template_credentials (ansible_job_template_id, ansible_credential_id) SELECT id, credential_id FROM ansible_job_templates WHERE credential_id IS NOT NULL ON CONFLICT DO NOTHING").Error; err != nil {
+			logger.Warnf("Failed to backfill ansible_job_template_credentials: %v", err)
+		} else {
+			logger.Info("Backfilled ansible_job_template_credentials from legacy credential_id")
+		}
+	}
+
+	// Schedules consolidation: the embedded per-template cron fields were never
+	// executed by anything — migrate them into real AnsibleSchedule rows (which
+	// the scheduler does run) and switch the embedded flag off. Idempotent:
+	// after the first run no template has schedule_enabled set.
+	if err := db.Exec(`
+		INSERT INTO ansible_schedules (id, organization_id, name, description, type, status, job_template_id, cron_expression, timezone, config, created_at, updated_at)
+		SELECT uuid_generate_v4(), p.organization_id, 'Migrated: ' || t.name,
+		       'Migrated from the job template''s embedded schedule fields',
+		       'job_template', 'enabled', t.id, t.schedule_cron, 'UTC', '{}', NOW(), NOW()
+		FROM ansible_job_templates t
+		JOIN projects p ON p.id = t.project_id
+		WHERE t.schedule_enabled = true AND t.schedule_cron <> ''
+		  AND NOT EXISTS (SELECT 1 FROM ansible_schedules s WHERE s.job_template_id = t.id)`).Error; err != nil {
+		logger.Warnf("Failed to migrate embedded template schedules: %v", err)
+	} else if err := db.Exec("UPDATE ansible_job_templates SET schedule_enabled = false WHERE schedule_enabled = true").Error; err != nil {
+		logger.Warnf("Failed to clear embedded template schedule flags: %v", err)
 	}
 	logger.Info("Database migrations completed successfully")
 
@@ -348,6 +445,8 @@ func main() {
 			ansibleCredentialRepo,
 			cryptoService,
 		)
+		// Record scheduler/workflow-triggered sync runs in the history table
+		inventorySourceService.SetSyncRepo(repository.NewAnsibleInventorySyncRepository(db))
 
 		// Wire OIDC workload identity support for Azure inventory sync
 		azureOIDCRepo := repository.NewAzureOIDCConfigurationRepository(db)
@@ -374,7 +473,30 @@ func main() {
 		templateVariableRepoForAnsible := repository.NewAnsibleJobTemplateVariableRepository(db)
 		variableServiceForAnsible := variable.NewServiceWithTemplateVariables(variableRepoForAnsible, variableSetRepoForAnsible, workspaceRepoForAnsible, templateVariableRepoForAnsible, encryptionKeyBytes)
 
-		// Initialize job service with variable set support (nil queue for now - jobs handled by scheduler)
+		// Redis queue so scheduled launches and released held jobs actually
+		// dispatch to platform runners (a nil queue here used to leave scheduled
+		// jobs pending forever).
+		redisHost := os.Getenv("REDIS_HOST")
+		if redisHost == "" {
+			redisHost = "localhost"
+		}
+		redisPort := 6379
+		if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
+			if p, perr := strconv.Atoi(portStr); perr == nil {
+				redisPort = p
+			}
+		}
+		// Assign through an interface var so a connection failure leaves a true
+		// nil queue (a nil *RedisQueue assigned to a queue.Queue is a typed-nil
+		// that defeats the `== nil` dispatch guards and panics on Enqueue).
+		var schedulerQueue queue.Queue
+		if q, qErr := queue.NewRedisQueue(redisHost, redisPort, os.Getenv("REDIS_PASSWORD"), 0); qErr != nil {
+			logger.Warnf("Failed to initialize Redis queue for the Ansible scheduler: %v (scheduled platform jobs will not dispatch)", qErr)
+		} else {
+			schedulerQueue = q
+		}
+
+		// Initialize job service with variable set support
 		jobService := ansible.NewJobServiceWithVariables(
 			ansibleJobRepo,
 			ansiblePlaybookRepo,
@@ -382,8 +504,12 @@ func main() {
 			ansibleTemplateRepo,
 			projectRepo,
 			variableServiceForAnsible,
-			nil, // No queue - scheduler creates jobs directly
+			schedulerQueue,
 		)
+		// Honor update_on_launch on scheduled/held launches: stale dynamic
+		// sources sync first and the job is held until they settle.
+		jobService.SetInventorySourceRepo(inventorySourceRepo)
+		jobService.SetOrganizationRepo(repository.NewOrganizationRepository(db))
 
 		// Create scheduler service
 		schedulerService = ansible.NewSchedulerService(
@@ -393,13 +519,74 @@ func main() {
 			ansiblePlaybookRepo,
 			inventorySourceService,
 			jobService,
+			repository.NewOrganizationRepository(db),
 		)
+
+		// Workflow execution engine advanced by the scheduler tick.
+		schedulerService.SetWorkflowEngine(ansible.NewWorkflowEngineService(
+			repository.NewAnsibleWorkflowRepository(db),
+			ansibleJobRepo,
+			jobService,
+			inventorySourceService,
+		))
+
+		// Notification delivery advanced by the scheduler tick.
+		if cryptoSvc, cryptoErr := crypto.NewCryptoService(encryptionKeyBytes); cryptoErr == nil {
+			schedulerService.SetNotificationService(ansible.NewNotificationService(
+				repository.NewAnsibleNotificationRepository(db),
+				ansibleJobRepo,
+				cryptoSvc,
+			))
+		} else {
+			logger.Warnf("Notification service disabled: %v", cryptoErr)
+		}
 
 		// Start the scheduler
 		schedulerService.Start()
 		logger.Info("Ansible Scheduler Service started")
 	} else {
 		logger.Info("Ansible Scheduler Service disabled (set ANSIBLE_SCHEDULER_ENABLED=true to enable)")
+
+		// The held-job gates (template concurrency, update-on-launch syncs,
+		// constructed rebuilds) apply to every launch regardless of this flag,
+		// and the scheduler tick is their only release path — so without the
+		// scheduler, held jobs would stay pending forever. Run a minimal
+		// release loop instead.
+		var releaseQueue queue.Queue
+		{
+			redisHost := os.Getenv("REDIS_HOST")
+			if redisHost == "" {
+				redisHost = "localhost"
+			}
+			redisPort := 6379
+			if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
+				if p, perr := strconv.Atoi(portStr); perr == nil {
+					redisPort = p
+				}
+			}
+			if q, qErr := queue.NewRedisQueue(redisHost, redisPort, os.Getenv("REDIS_PASSWORD"), 0); qErr != nil {
+				logger.Warnf("Held-job release loop: Redis unavailable: %v (released platform jobs will not dispatch)", qErr)
+			} else {
+				releaseQueue = q
+			}
+		}
+		releaseJobService := ansible.NewJobService(
+			repository.NewAnsibleJobRepository(db),
+			repository.NewAnsiblePlaybookRepository(db),
+			repository.NewAnsibleInventoryRepository(db),
+			repository.NewAnsibleJobTemplateRepository(db),
+			repository.NewProjectRepository(db),
+			releaseQueue,
+		)
+		releaseJobService.SetInventorySourceRepo(repository.NewAnsibleInventorySourceRepository(db))
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				releaseJobService.ReleaseHeldJobs(context.Background())
+			}
+		}()
+		logger.Info("Held-job release loop started (scheduler disabled)")
 	}
 
 	// Initialize Drift Detection Service for Terraform workspaces

@@ -51,6 +51,9 @@ type OrganizationAttributes struct {
 	CollaboratorAuthPolicy  string  `json:"collaborator-auth-policy"`  // password or two_factor_mandatory
 	CostEstimationEnabled   *bool   `json:"cost-estimation-enabled"`   // pointer to distinguish unset from false
 	DefaultTerraformVersion *string `json:"default-terraform-version"` // org-wide default terraform version
+	// Org-wide retention for finished Ansible jobs (0 = keep forever).
+	AnsibleJobRetentionDays *int    `json:"ansible-job-retention-days"`
+	AnsibleAdHocModules     *string `json:"ansible-adhoc-modules"`
 }
 
 // CreateOrganizationRequestV2 supports both simple JSON and JSON:API format
@@ -103,6 +106,8 @@ func buildTFEOrganizationResponse(org *models.Organization) gin.H {
 			"collaborator-auth-policy":            collaboratorAuthPolicy,
 			"cost-estimation-enabled":             org.CostEstimationEnabled,
 			"default-terraform-version":           org.DefaultTerraformVersion,
+			"ansible-job-retention-days":          org.AnsibleJobRetentionDays,
+			"ansible-adhoc-modules":               org.AnsibleAdHocModules,
 			"speculative-plan-management-enabled": true,
 			"aggregated-commit-status-enabled":    false,
 			"assessments-enforced":                false,
@@ -538,6 +543,8 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	newCollaboratorAuthPolicy := ""
 	var newCostEstimationEnabled *bool
 	var newDefaultTerraformVersion *string
+	var newAnsibleJobRetentionDays *int
+	var newAnsibleAdHocModules *string
 
 	if req.Data != nil {
 		if req.Data.Attributes.Name != "" {
@@ -554,6 +561,8 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		}
 		newCostEstimationEnabled = req.Data.Attributes.CostEstimationEnabled
 		newDefaultTerraformVersion = req.Data.Attributes.DefaultTerraformVersion
+		newAnsibleJobRetentionDays = req.Data.Attributes.AnsibleJobRetentionDays
+		newAnsibleAdHocModules = req.Data.Attributes.AnsibleAdHocModules
 	}
 
 	if newName != "" {
@@ -592,6 +601,12 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	}
 	if newDefaultTerraformVersion != nil {
 		org.DefaultTerraformVersion = *newDefaultTerraformVersion
+	}
+	if newAnsibleJobRetentionDays != nil && *newAnsibleJobRetentionDays >= 0 {
+		org.AnsibleJobRetentionDays = *newAnsibleJobRetentionDays
+	}
+	if newAnsibleAdHocModules != nil {
+		org.AnsibleAdHocModules = *newAnsibleAdHocModules
 	}
 
 	if err := h.orgRepo.Update(org); err != nil {

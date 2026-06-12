@@ -4,6 +4,8 @@ package ansible
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -47,6 +49,12 @@ type PlaybookHandler struct {
 	queue             queue.Queue
 	vcsRegistry       *vcs.ProviderRegistry
 	vcsConnectionRepo *repository.VCSConnectionRepository
+	// credentialRepo backs the template multi-credential endpoints (wired via
+	// SetCredentialRepo).
+	credentialRepo *repository.AnsibleCredentialRepository
+	// agentPoolRepo backs the agent pool org-ownership check on template
+	// create/update (wired via SetAgentPoolRepo).
+	agentPoolRepo *repository.AgentPoolRepository
 }
 
 // NewPlaybookHandler creates a new playbook handler
@@ -78,6 +86,37 @@ func NewPlaybookHandler(
 	}
 }
 
+// SetAgentPoolRepo wires the agent pool repository used to verify pool
+// ownership on template create/update.
+func (h *PlaybookHandler) SetAgentPoolRepo(repo *repository.AgentPoolRepository) {
+	h.agentPoolRepo = repo
+}
+
+// validateAgentPoolInOrg verifies the referenced agent pool belongs to orgID —
+// a template carrying another org's pool would route every launch (manual,
+// scheduled, webhook, workflow) onto that org's self-hosted runners. Writes a
+// 400 response and returns false when the pool is missing or foreign.
+func (h *PlaybookHandler) validateAgentPoolInOrg(c *gin.Context, poolID, orgID uuid.UUID) bool {
+	if h.agentPoolRepo == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{
+				{"status": "500", "title": "Internal Server Error", "detail": "Agent pool validation unavailable"},
+			},
+		})
+		return false
+	}
+	pool, err := h.agentPoolRepo.GetByID(poolID, false)
+	if err != nil || pool.OrganizationID != orgID {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"errors": []gin.H{
+				{"status": "400", "title": "Bad Request", "detail": "Agent pool not found in this organization"},
+			},
+		})
+		return false
+	}
+	return true
+}
+
 // normalizeSourceMode validates the requested playbook source mode, defaulting to
 // "cached" for empty or unrecognized values.
 func normalizeSourceMode(mode string) string {
@@ -85,6 +124,27 @@ func normalizeSourceMode(mode string) string {
 		return models.PlaybookSourceModeFresh
 	}
 	return models.PlaybookSourceModeCached
+}
+
+// normalizeJobSliceCount clamps the slice count to [1, 50] — AWX warns that
+// very high node counts degrade the scheduler.
+func normalizeJobSliceCount(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > 50 {
+		return 50
+	}
+	return n
+}
+
+// generateHostConfigKey returns a random 32-hex-char provisioning callback key.
+func generateHostConfigKey() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // buildPlaybookSyncMessage builds the queue message for a VCS playbook sync. It
@@ -215,6 +275,13 @@ type CreateJobTemplateRequest struct {
 			DiffMode        bool                      `json:"diff-mode"`
 			ScheduleEnabled bool                      `json:"schedule-enabled"`
 			ScheduleCron    string                    `json:"schedule-cron"`
+			// Lifecycle controls; Enabled is a pointer so an omitted field keeps
+			// the default (enabled) without a zero-value footgun.
+			Enabled           *bool `json:"enabled"`
+			TimeoutSeconds    int   `json:"timeout-seconds"`
+			AllowSimultaneous bool  `json:"allow-simultaneous"`
+			RetentionDays     *int  `json:"retention-days"`
+			JobSliceCount     int   `json:"job-slice-count"`
 		} `json:"attributes"`
 		Relationships struct {
 			Project struct {
@@ -257,18 +324,26 @@ type UpdateJobTemplateRequest struct {
 		Type       string `json:"type"`
 		ID         string `json:"id"`
 		Attributes struct {
-			Name            *string                    `json:"name,omitempty"`
-			Description     *string                    `json:"description,omitempty"`
-			ExtraVars       *models.InventoryVariables `json:"extra-vars,omitempty"`
-			Limit           *string                    `json:"limit,omitempty"`
-			Tags            *string                    `json:"tags,omitempty"`
-			SkipTags        *string                    `json:"skip-tags,omitempty"`
-			Verbosity       *int                       `json:"verbosity,omitempty"`
-			Forks           *int                       `json:"forks,omitempty"`
-			BecomeEnabled   *bool                      `json:"become-enabled,omitempty"`
-			DiffMode        *bool                      `json:"diff-mode,omitempty"`
-			ScheduleEnabled *bool                      `json:"schedule-enabled,omitempty"`
-			ScheduleCron    *string                    `json:"schedule-cron,omitempty"`
+			Name              *string                    `json:"name,omitempty"`
+			Description       *string                    `json:"description,omitempty"`
+			ExtraVars         *models.InventoryVariables `json:"extra-vars,omitempty"`
+			Limit             *string                    `json:"limit,omitempty"`
+			Tags              *string                    `json:"tags,omitempty"`
+			SkipTags          *string                    `json:"skip-tags,omitempty"`
+			Verbosity         *int                       `json:"verbosity,omitempty"`
+			Forks             *int                       `json:"forks,omitempty"`
+			BecomeEnabled     *bool                      `json:"become-enabled,omitempty"`
+			DiffMode          *bool                      `json:"diff-mode,omitempty"`
+			ScheduleEnabled   *bool                      `json:"schedule-enabled,omitempty"`
+			ScheduleCron      *string                    `json:"schedule-cron,omitempty"`
+			Enabled           *bool                      `json:"enabled,omitempty"`
+			TimeoutSeconds    *int                       `json:"timeout-seconds,omitempty"`
+			AllowSimultaneous *bool                      `json:"allow-simultaneous,omitempty"`
+			// A negative value clears the override (inherit the org setting).
+			RetentionDays   *int  `json:"retention-days,omitempty"`
+			JobSliceCount   *int  `json:"job-slice-count,omitempty"`
+			AllowCallbacks  *bool `json:"allow-callbacks,omitempty"`
+			LaunchOnWebhook *bool `json:"launch-on-webhook,omitempty"`
 		} `json:"attributes"`
 		Relationships struct {
 			Playbook struct {
@@ -1434,27 +1509,46 @@ func (h *PlaybookHandler) CreateTemplate(c *gin.Context) {
 			})
 			return
 		}
+		project, err := h.projectRepo.GetByID(projectID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "Invalid project ID"},
+				},
+			})
+			return
+		}
+		if !h.validateAgentPoolInOrg(c, apid, project.OrganizationID) {
+			return
+		}
 		agentPoolID = &apid
 	}
 
 	template := &models.AnsibleJobTemplate{
-		ProjectID:       projectID,
-		PlaybookID:      playbookID,
-		InventoryID:     inventoryID,
-		CredentialID:    credentialID,
-		AgentPoolID:     agentPoolID,
-		Name:            req.Data.Attributes.Name,
-		Description:     req.Data.Attributes.Description,
-		ExtraVars:       req.Data.Attributes.ExtraVars,
-		Limit:           req.Data.Attributes.Limit,
-		Tags:            req.Data.Attributes.Tags,
-		SkipTags:        req.Data.Attributes.SkipTags,
-		Verbosity:       req.Data.Attributes.Verbosity,
-		Forks:           req.Data.Attributes.Forks,
-		BecomeEnabled:   req.Data.Attributes.BecomeEnabled,
-		DiffMode:        req.Data.Attributes.DiffMode,
-		ScheduleEnabled: req.Data.Attributes.ScheduleEnabled,
-		ScheduleCron:    req.Data.Attributes.ScheduleCron,
+		ProjectID:         projectID,
+		PlaybookID:        playbookID,
+		InventoryID:       inventoryID,
+		CredentialID:      credentialID,
+		AgentPoolID:       agentPoolID,
+		Name:              req.Data.Attributes.Name,
+		Description:       req.Data.Attributes.Description,
+		ExtraVars:         req.Data.Attributes.ExtraVars,
+		Limit:             req.Data.Attributes.Limit,
+		Tags:              req.Data.Attributes.Tags,
+		SkipTags:          req.Data.Attributes.SkipTags,
+		Verbosity:         req.Data.Attributes.Verbosity,
+		Forks:             req.Data.Attributes.Forks,
+		BecomeEnabled:     req.Data.Attributes.BecomeEnabled,
+		DiffMode:          req.Data.Attributes.DiffMode,
+		ScheduleEnabled:   req.Data.Attributes.ScheduleEnabled,
+		ScheduleCron:      req.Data.Attributes.ScheduleCron,
+		TimeoutSeconds:    req.Data.Attributes.TimeoutSeconds,
+		AllowSimultaneous: req.Data.Attributes.AllowSimultaneous,
+		RetentionDays:     req.Data.Attributes.RetentionDays,
+		JobSliceCount:     normalizeJobSliceCount(req.Data.Attributes.JobSliceCount),
+	}
+	if req.Data.Attributes.Enabled != nil {
+		template.Disabled = !*req.Data.Attributes.Enabled
 	}
 
 	if template.Forks == 0 {
@@ -1613,27 +1707,37 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 			})
 			return
 		}
+		if !h.validateAgentPoolInOrg(c, apid, org.ID) {
+			return
+		}
 		agentPoolID = &apid
 	}
 
 	template := &models.AnsibleJobTemplate{
-		ProjectID:       projectID,
-		PlaybookID:      playbookID,
-		InventoryID:     inventoryID,
-		CredentialID:    credentialID,
-		AgentPoolID:     agentPoolID,
-		Name:            req.Data.Attributes.Name,
-		Description:     req.Data.Attributes.Description,
-		ExtraVars:       req.Data.Attributes.ExtraVars,
-		Limit:           req.Data.Attributes.Limit,
-		Tags:            req.Data.Attributes.Tags,
-		SkipTags:        req.Data.Attributes.SkipTags,
-		Verbosity:       req.Data.Attributes.Verbosity,
-		Forks:           req.Data.Attributes.Forks,
-		BecomeEnabled:   req.Data.Attributes.BecomeEnabled,
-		DiffMode:        req.Data.Attributes.DiffMode,
-		ScheduleEnabled: req.Data.Attributes.ScheduleEnabled,
-		ScheduleCron:    req.Data.Attributes.ScheduleCron,
+		ProjectID:         projectID,
+		PlaybookID:        playbookID,
+		InventoryID:       inventoryID,
+		CredentialID:      credentialID,
+		AgentPoolID:       agentPoolID,
+		Name:              req.Data.Attributes.Name,
+		Description:       req.Data.Attributes.Description,
+		ExtraVars:         req.Data.Attributes.ExtraVars,
+		Limit:             req.Data.Attributes.Limit,
+		Tags:              req.Data.Attributes.Tags,
+		SkipTags:          req.Data.Attributes.SkipTags,
+		Verbosity:         req.Data.Attributes.Verbosity,
+		Forks:             req.Data.Attributes.Forks,
+		BecomeEnabled:     req.Data.Attributes.BecomeEnabled,
+		DiffMode:          req.Data.Attributes.DiffMode,
+		ScheduleEnabled:   req.Data.Attributes.ScheduleEnabled,
+		ScheduleCron:      req.Data.Attributes.ScheduleCron,
+		TimeoutSeconds:    req.Data.Attributes.TimeoutSeconds,
+		AllowSimultaneous: req.Data.Attributes.AllowSimultaneous,
+		RetentionDays:     req.Data.Attributes.RetentionDays,
+		JobSliceCount:     normalizeJobSliceCount(req.Data.Attributes.JobSliceCount),
+	}
+	if req.Data.Attributes.Enabled != nil {
+		template.Disabled = !*req.Data.Attributes.Enabled
 	}
 
 	if template.Forks == 0 {
@@ -1769,6 +1873,39 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 	if req.Data.Attributes.ScheduleCron != nil {
 		template.ScheduleCron = *req.Data.Attributes.ScheduleCron
 	}
+	if req.Data.Attributes.Enabled != nil {
+		template.Disabled = !*req.Data.Attributes.Enabled
+	}
+	if req.Data.Attributes.TimeoutSeconds != nil {
+		template.TimeoutSeconds = *req.Data.Attributes.TimeoutSeconds
+	}
+	if req.Data.Attributes.AllowSimultaneous != nil {
+		template.AllowSimultaneous = *req.Data.Attributes.AllowSimultaneous
+	}
+	if req.Data.Attributes.RetentionDays != nil {
+		if *req.Data.Attributes.RetentionDays < 0 {
+			template.RetentionDays = nil // inherit the organization setting
+		} else {
+			template.RetentionDays = req.Data.Attributes.RetentionDays
+		}
+	}
+	if req.Data.Attributes.JobSliceCount != nil {
+		template.JobSliceCount = normalizeJobSliceCount(*req.Data.Attributes.JobSliceCount)
+	}
+	if req.Data.Attributes.LaunchOnWebhook != nil {
+		template.LaunchOnWebhook = *req.Data.Attributes.LaunchOnWebhook
+	}
+	if req.Data.Attributes.AllowCallbacks != nil {
+		template.AllowCallbacks = *req.Data.Attributes.AllowCallbacks
+		if template.AllowCallbacks && template.HostConfigKey == "" {
+			key, err := generateHostConfigKey()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to generate host config key"}}})
+				return
+			}
+			template.HostConfigKey = key
+		}
+	}
 
 	// Handle playbook relationship update
 	if req.Data.Relationships.Playbook.Data != nil {
@@ -1838,6 +1975,9 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 						{"status": "400", "title": "Bad Request", "detail": "Invalid agent pool ID"},
 					},
 				})
+				return
+			}
+			if !h.validateAgentPoolInOrg(c, apid, template.Project.OrganizationID) {
 				return
 			}
 			template.AgentPoolID = &apid
@@ -2108,20 +2248,28 @@ func formatJobTemplateResponse(template *models.AnsibleJobTemplate) gin.H {
 		"id":   template.ID.String(),
 		"type": "ansible-job-templates",
 		"attributes": gin.H{
-			"name":             template.Name,
-			"description":      template.Description,
-			"extra-vars":       template.ExtraVars,
-			"limit":            template.Limit,
-			"tags":             template.Tags,
-			"skip-tags":        template.SkipTags,
-			"verbosity":        template.Verbosity,
-			"forks":            template.Forks,
-			"become-enabled":   template.BecomeEnabled,
-			"diff-mode":        template.DiffMode,
-			"schedule-enabled": template.ScheduleEnabled,
-			"schedule-cron":    template.ScheduleCron,
-			"created-at":       template.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":       template.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			"name":               template.Name,
+			"description":        template.Description,
+			"extra-vars":         template.ExtraVars,
+			"limit":              template.Limit,
+			"tags":               template.Tags,
+			"skip-tags":          template.SkipTags,
+			"verbosity":          template.Verbosity,
+			"forks":              template.Forks,
+			"become-enabled":     template.BecomeEnabled,
+			"diff-mode":          template.DiffMode,
+			"schedule-enabled":   template.ScheduleEnabled,
+			"schedule-cron":      template.ScheduleCron,
+			"enabled":            !template.Disabled,
+			"timeout-seconds":    template.TimeoutSeconds,
+			"allow-simultaneous": template.AllowSimultaneous,
+			"retention-days":     template.RetentionDays,
+			"job-slice-count":    template.JobSliceCount,
+			"allow-callbacks":    template.AllowCallbacks,
+			"launch-on-webhook":  template.LaunchOnWebhook,
+			"host-config-key":    template.HostConfigKey,
+			"created-at":         template.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			"updated-at":         template.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		},
 		"relationships": relationships,
 	}

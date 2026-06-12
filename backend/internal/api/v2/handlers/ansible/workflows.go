@@ -12,6 +12,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/ansible"
 	"gorm.io/datatypes"
 )
 
@@ -22,6 +23,8 @@ type WorkflowHandler struct {
 	projectRepo  *repository.ProjectRepository
 	authService  *auth.Service
 	rbacService  *rbac.Service
+	// engine executes workflow runs (wired via SetEngine).
+	engine *ansible.WorkflowEngineService
 }
 
 // NewWorkflowHandler creates a new WorkflowHandler
@@ -258,8 +261,22 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	}
 
 	if req.Data.Relationships.Project.Data != nil {
-		projectID, _ := uuid.Parse(req.Data.Relationships.Project.Data.ID)
+		projectID, err := uuid.Parse(req.Data.Relationships.Project.Data.ID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid project ID"}}})
+			return
+		}
 		workflow.ProjectID = projectID
+	} else {
+		// No project relationship: fall back to the org's default project
+		// (mirrors inventory creation). Without this the insert violates the
+		// project foreign key.
+		defaultProject, err := h.projectRepo.GetByOrganizationAndName(org.ID, "default")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "A project relationship is required (no default project exists)"}}})
+			return
+		}
+		workflow.ProjectID = defaultProject.ID
 	}
 
 	if req.Data.Relationships.Inventory.Data != nil {

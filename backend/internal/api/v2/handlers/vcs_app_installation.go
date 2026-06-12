@@ -27,6 +27,7 @@ import (
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/security/gitargs"
+	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/storage"
 )
@@ -51,6 +52,44 @@ type VCSAppInstallationHandlerV2 struct {
 	registryPublisher  *RegistryPublishingHandler    // For tag push event handling
 	storageClient      storage.Client
 	ansibleQueue       queue.Queue // For inventory and playbook sync
+
+	// Optional webhook template launcher (SetTemplateLauncher): templates with
+	// launch_on_webhook fire when their playbook's repo receives a push.
+	templateRepo      *repository.AnsibleJobTemplateRepository
+	webhookJobService *coreansible.JobService
+}
+
+// SetTemplateLauncher wires webhook-triggered template launches. Optional;
+// without it pushes only sync playbooks/inventories (legacy behavior).
+func (h *VCSAppInstallationHandlerV2) SetTemplateLauncher(templateRepo *repository.AnsibleJobTemplateRepository, jobService *coreansible.JobService) {
+	h.templateRepo = templateRepo
+	h.webhookJobService = jobService
+}
+
+// launchWebhookTemplates launches every enabled template of the playbook that
+// opted into webhook launches. Best-effort: failures are logged and never fail
+// the webhook delivery. Returns the number of launched jobs.
+func (h *VCSAppInstallationHandlerV2) launchWebhookTemplates(playbookID uuid.UUID, playbookName, repo, branch string) int {
+	if h.templateRepo == nil || h.webhookJobService == nil {
+		return 0
+	}
+	templates, err := h.templateRepo.ListWebhookLaunchByPlaybook(playbookID)
+	if err != nil {
+		logger.Errorf("Webhook launch: failed to list templates for playbook %s: %v", playbookID, err)
+		return 0
+	}
+	launched := 0
+	for i := range templates {
+		template := &templates[i]
+		job, err := h.webhookJobService.LaunchFromTemplate(context.Background(), template.ID, nil, nil)
+		if err != nil {
+			logger.Warnf("Webhook launch: template %q failed to launch: %v", template.Name, err)
+			continue
+		}
+		logger.Infof("Webhook launch: push to %s@%s launched template %q (playbook %q) as job %s", repo, branch, template.Name, playbookName, job.ID)
+		launched++
+	}
+	return launched
 }
 
 func NewVCSAppInstallationHandlerV2(
@@ -140,7 +179,7 @@ func (h *VCSAppInstallationHandlerV2) playbookSyncPayload(ctx context.Context, p
 }
 
 func (h *VCSAppInstallationHandlerV2) inventorySyncPayload(ctx context.Context, inv *models.AnsibleInventory) map[string]any {
-	payload := map[string]any{"inventory_id": inv.ID.String()}
+	payload := map[string]any{"inventory_id": inv.ID.String(), "triggered_by": "webhook"}
 	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || inv.VCSConnectionID == nil || inv.VCSRepository == "" {
 		return payload
 	}
@@ -622,6 +661,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 					}
 				}()
 			}
+			h.launchWebhookTemplates(pb.ID, pb.Name, wp.Repository, branchName)
 		}
 	}
 
@@ -1833,6 +1873,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 							}
 						}(playbook)
 					}
+					h.launchWebhookTemplates(playbook.ID, playbook.Name, repositoryFullName, branchName)
 				}
 			}
 		}
