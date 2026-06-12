@@ -42,10 +42,11 @@ type CreateScheduleRequest struct {
 		Attributes struct {
 			Name              string                `json:"name" binding:"required,min=1,max=255"`
 			Description       string                `json:"description"`
-			ScheduleType      models.ScheduleType   `json:"schedule-type" binding:"required,oneof=job_template inventory_source playbook_sync"`
+			ScheduleType      models.ScheduleType   `json:"schedule-type" binding:"required,oneof=job_template inventory_source playbook_sync workflow"`
 			JobTemplateID     string                `json:"job-template-id"`
 			InventorySourceID string                `json:"inventory-source-id"`
 			PlaybookID        string                `json:"playbook-id"`
+			WorkflowID        string                `json:"workflow-id"`
 			CronExpression    string                `json:"cron-expression" binding:"required"`
 			Timezone          string                `json:"timezone" binding:"required"`
 			StartDateTime     string                `json:"start-date-time"`
@@ -129,7 +130,7 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 	}
 
 	// Parse target IDs based on type
-	var jobTemplateID, inventorySourceID, playbookID *uuid.UUID
+	var jobTemplateID, inventorySourceID, playbookID, workflowID *uuid.UUID
 	attrs := req.Data.Attributes
 
 	switch attrs.ScheduleType {
@@ -168,6 +169,18 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 			return
 		}
 		playbookID = &id
+
+	case models.ScheduleTypeWorkflow:
+		if attrs.WorkflowID == "" {
+			response.BadRequest(c, "workflow-id is required for workflow schedules")
+			return
+		}
+		id, err := uuid.Parse(attrs.WorkflowID)
+		if err != nil {
+			response.BadRequest(c, "Invalid workflow-id")
+			return
+		}
+		workflowID = &id
 	}
 
 	// Parse optional date times
@@ -189,13 +202,10 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 		endDateTime = &endDT
 	}
 
-	// Get user ID from context
-	var createdBy *uuid.UUID
-	if userIDStr, exists := c.Get("user_id"); exists {
-		if id, err := uuid.Parse(userIDStr.(string)); err == nil {
-			createdBy = &id
-		}
-	}
+	// Attribute the schedule to the authenticated user (already resolved for the
+	// RBAC check above). The previous c.Get("user_id").(string) assertion
+	// panicked: the auth middleware stores user_id as a uuid.UUID, not a string.
+	createdBy := &user.ID
 
 	// Ensure Config is not nil (default to empty map)
 	config := attrs.Config
@@ -213,6 +223,7 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 		jobTemplateID,
 		inventorySourceID,
 		playbookID,
+		workflowID,
 		config,
 		createdBy,
 		startDateTime,
@@ -439,7 +450,11 @@ func (h *ScheduleHandler) List(c *gin.Context) {
 		return
 	}
 
-	response.Paginated(c, schedules, total, limit, offset)
+	formatted := make([]gin.H, 0, len(schedules))
+	for i := range schedules {
+		formatted = append(formatted, formatScheduleResponse(&schedules[i]))
+	}
+	response.Paginated(c, formatted, total, limit, offset)
 }
 
 // Update updates a schedule
@@ -804,7 +819,11 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 		return
 	}
 
-	response.Paginated(c, schedules, total, limit, offset)
+	formatted := make([]gin.H, 0, len(schedules))
+	for i := range schedules {
+		formatted = append(formatted, formatScheduleResponse(&schedules[i]))
+	}
+	response.Paginated(c, formatted, total, limit, offset)
 }
 
 // RunNow triggers immediate execution of a schedule

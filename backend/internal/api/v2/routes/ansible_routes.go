@@ -21,6 +21,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// AnsibleRouteServices exposes the ansible services built by SetupAnsibleRoutes
+// that later route groups (workflows, public callbacks) need to share.
+type AnsibleRouteServices struct {
+	WorkflowEngine *ansible.WorkflowEngineService
+	JobService     *ansible.JobService
+}
+
 // SetupAnsibleWorkflowRoutes sets up workflow-specific routes (called after other repos are initialized)
 func SetupAnsibleWorkflowRoutes(
 	v2 *gin.RouterGroup,
@@ -29,9 +36,11 @@ func SetupAnsibleWorkflowRoutes(
 	projectRepo *repository.ProjectRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	workflowEngine *ansible.WorkflowEngineService,
 ) {
 	// Initialize Workflow Handler
 	workflowHandler := ansibleHandlers.NewWorkflowHandler(workflowRepo, orgRepo, projectRepo, authService, rbacService)
+	workflowHandler.SetEngine(workflowEngine)
 
 	// ==========================================
 	// Ansible Workflow Template Routes
@@ -58,9 +67,24 @@ func SetupAnsibleWorkflowRoutes(
 		// Edges management
 		workflows.GET("/:id/edges", workflowHandler.ListEdges)
 		workflows.POST("/:id/edges", workflowHandler.CreateEdge)
+
+		// Execution
+		workflows.POST("/:id/launch", workflowHandler.LaunchWorkflow)
+		workflows.GET("/:id/jobs", workflowHandler.ListWorkflowJobs)
 	}
 
 	// Workflow Node by ID endpoints
+	// Workflow runs + approval decisions
+	workflowJobs := v2.Group("/ansible/workflow-jobs")
+	{
+		workflowJobs.GET("/:id", workflowHandler.GetWorkflowJob)
+	}
+	workflowNodeJobs := v2.Group("/ansible/workflow-node-jobs")
+	{
+		workflowNodeJobs.POST("/:id/approve", workflowHandler.ApproveWorkflowNode)
+		workflowNodeJobs.POST("/:id/deny", workflowHandler.DenyWorkflowNode)
+	}
+
 	// PATCH/DELETE /api/v2/ansible/workflow-nodes/:id
 	workflowNodes := v2.Group("/ansible/workflow-nodes")
 	{
@@ -93,7 +117,7 @@ func SetupAnsibleRoutes(
 	encryptionKey []byte,
 	vcsRegistry *vcs.ProviderRegistry,
 	vcsConnectionRepo *repository.VCSConnectionRepository,
-) {
+) *AnsibleRouteServices {
 	// Initialize Ansible Services
 	credentialService := ansible.NewCredentialService(credentialRepo, encryptionKey)
 	inventoryService := ansible.NewInventoryService(inventoryRepo, orgRepo)
@@ -115,6 +139,12 @@ func SetupAnsibleRoutes(
 	// Initialize new repositories for inventory sources and schedules
 	inventorySourceRepo := repository.NewAnsibleInventorySourceRepository(db)
 	scheduleRepo := repository.NewAnsibleScheduleRepository(db)
+	// Honor update_on_launch on API launches: stale dynamic sources sync first
+	// and the job is held until they settle.
+	jobService.SetInventorySourceRepo(inventorySourceRepo)
+	// Enforce the ad hoc module allowlist at the launch choke point (covers Run
+	// Command and relaunch of ad hoc jobs).
+	jobService.SetOrganizationRepo(orgRepo)
 
 	// Initialize crypto service for secure credential handling
 	cryptoService, err := crypto.NewCryptoService(encryptionKey)
@@ -124,6 +154,9 @@ func SetupAnsibleRoutes(
 
 	// Initialize Inventory Source Service
 	inventorySourceService := ansible.NewInventorySourceService(inventorySourceRepo, inventoryRepo, credentialRepo, cryptoService)
+	// Record sync runs in the history table (Syncs tab)
+	inventorySyncRepo := repository.NewAnsibleInventorySyncRepository(db)
+	inventorySourceService.SetSyncRepo(inventorySyncRepo)
 
 	// Wire OIDC workload identity support for Azure inventory sync (dynamic sources)
 	azureOIDCRepo := repository.NewAzureOIDCConfigurationRepository(db)
@@ -151,7 +184,53 @@ func SetupAnsibleRoutes(
 		playbookRepo,
 		inventorySourceService,
 		jobService,
+		orgRepo,
 	)
+
+	// Workflow execution engine: launches runnable nodes and follows edges.
+	// Returned to the caller so the workflow routes (and the started scheduler
+	// in cmd/api) share one instance.
+	workflowEngine := ansible.NewWorkflowEngineService(
+		repository.NewAnsibleWorkflowRepository(db),
+		jobRepo,
+		jobService,
+		inventorySourceService,
+	)
+	// The HTTP scheduler instance is CRUD-only (it never ticks — the executing
+	// scheduler lives in cmd/api), but CreateSchedule validates workflow
+	// schedules against the engine, so it must be wired here too or workflow
+	// schedules can never be created.
+	schedulerService.SetWorkflowEngine(workflowEngine)
+
+	// Notification templates + attachments (webhook / email / Teams).
+	notificationRepo := repository.NewAnsibleNotificationRepository(db)
+	notificationService := ansible.NewNotificationService(notificationRepo, jobRepo, cryptoService)
+	notificationHandler := ansibleHandlers.NewNotificationHandler(
+		notificationRepo,
+		templateRepo,
+		repository.NewAnsibleWorkflowRepository(db),
+		orgRepo,
+		authService,
+		rbacService,
+		cryptoService,
+		notificationService,
+	)
+
+	// Org-scoped notification template endpoints
+	orgNotifications := v2.Group("/organizations/:name/ansible/notification-templates")
+	{
+		orgNotifications.GET("", notificationHandler.List)
+		orgNotifications.POST("", notificationHandler.Create)
+	}
+	notificationTemplates := v2.Group("/ansible/notification-templates")
+	{
+		notificationTemplates.PATCH("/:id", notificationHandler.Update)
+		notificationTemplates.DELETE("/:id", notificationHandler.Delete)
+		notificationTemplates.POST("/:id/test", notificationHandler.TestSend)
+	}
+	// Attachments
+	v2.POST("/organizations/:name/ansible/notification-attachments", notificationHandler.Attach)
+	v2.DELETE("/organizations/:name/ansible/notification-attachments/:attachment_id", notificationHandler.Detach)
 
 	// Initialize Variable Set Handler for job template variable sets (reuse from terraform routes)
 	variableSetRepoForAnsible := repository.NewVariableSetRepository(db)
@@ -163,11 +242,16 @@ func SetupAnsibleRoutes(
 	hostHandler := ansibleHandlers.NewHostHandler(inventoryService, inventoryRepo, authService)
 	groupHandler := ansibleHandlers.NewGroupHandler(inventoryService, inventoryRepo, authService)
 	credentialHandler := ansibleHandlers.NewCredentialHandler(credentialService, orgRepo, projectRepo, authService, rbacService)
+	agentPoolRepo := repository.NewAgentPoolRepository(db)
 	playbookHandler := ansibleHandlers.NewPlaybookHandler(playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo)
+	playbookHandler.SetCredentialRepo(credentialRepo)
+	playbookHandler.SetAgentPoolRepo(agentPoolRepo)
 	jobHandler := ansibleHandlers.NewJobHandler(jobService, projectRepo, orgRepo, templateRepo, authService, rbacService)
+	adHocHandler := ansibleHandlers.NewAdHocHandler(inventoryRepo, orgRepo, credentialRepo, projectRepo, agentPoolRepo, jobService, authService, rbacService)
 
 	// Initialize new handlers
 	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, redisQueue)
+	inventorySyncHandler := ansibleHandlers.NewInventorySyncHandler(inventorySyncRepo, inventoryRepo, authService, rbacService)
 	scheduleHandler := ansibleHandlers.NewScheduleHandler(schedulerService, orgRepo, authService, rbacService)
 	collectionsHandler := ansibleHandlers.NewCollectionsHandler()
 
@@ -320,6 +404,14 @@ func SetupAnsibleRoutes(
 		jobTemplates.DELETE("/:id", playbookHandler.DeleteTemplate)
 		// Launch from template
 		jobTemplates.POST("/:id/launch", jobHandler.LaunchFromTemplate)
+		// Notification attachments
+		jobTemplates.GET("/:id/notifications", notificationHandler.ListForJobTemplate)
+		// Read-only team access summary
+		jobTemplates.GET("/:id/access", playbookHandler.GetTemplateAccess)
+		// Multi-credential attachment set (AWX-style)
+		jobTemplates.GET("/:id/credentials", playbookHandler.ListTemplateCredentials)
+		jobTemplates.POST("/:id/credentials", playbookHandler.AttachTemplateCredential)
+		jobTemplates.DELETE("/:id/credentials/:credential_id", playbookHandler.DetachTemplateCredential)
 		// Variable sets that apply to this job template (inherited from project)
 		jobTemplates.GET("/:id/variable-sets", variableSetHandlerForAnsible.ListVariableSetsByJobTemplate)
 		// Template variables (individual variables for this job template)
@@ -375,6 +467,18 @@ func SetupAnsibleRoutes(
 		inventorySources.POST("", inventorySourceHandler.Create)
 	}
 
+	// Ad hoc commands (AWX-style "Run Command")
+	// POST /api/v2/ansible/inventories/:id/actions/run-command
+	v2.POST("/ansible/inventories/:id/actions/run-command", adHocHandler.RunCommand)
+	// GET /api/v2/organizations/:name/ansible/adhoc-modules (effective allowlist)
+	v2.GET("/organizations/:name/ansible/adhoc-modules", adHocHandler.ListModules)
+
+	// Inventory sync history
+	// GET /api/v2/ansible/inventories/:id/syncs
+	v2.GET("/ansible/inventories/:id/syncs", inventorySyncHandler.List)
+	// GET /api/v2/ansible/inventory-syncs/:sync_id (includes captured output)
+	v2.GET("/ansible/inventory-syncs/:sync_id", inventorySyncHandler.Get)
+
 	// Inventory Source by ID endpoints
 	// GET/PATCH/DELETE /api/v2/ansible/inventory-sources/:id
 	inventorySourcesByID := v2.Group("/ansible/inventory-sources")
@@ -427,4 +531,6 @@ func SetupAnsibleRoutes(
 	// Per-job collections (requirements.yml installs)
 	// GET /api/v2/ansible/jobs/:id/collections
 	jobs.GET("/:id/collections", collectionsHandler.ListJobCollections)
+
+	return &AnsibleRouteServices{WorkflowEngine: workflowEngine, JobService: jobService}
 }

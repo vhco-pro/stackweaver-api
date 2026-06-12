@@ -1065,8 +1065,20 @@ type JobArtifactsResponse struct {
 	ExtraVars        map[string]interface{} `json:"extra_vars,omitempty"`
 	EnvironmentVars  map[string]string      `json:"environment_vars,omitempty"` // Cloud auth env vars (OIDC, etc.)
 	Credential       *CredentialArtifact    `json:"credential,omitempty"`
-	JobConfig        *AnsibleJobConfig      `json:"job_config,omitempty"`
-	VCS              *VCSArtifact           `json:"vcs,omitempty"`
+	// Vaults carries every attached vault credential (multi-vault support);
+	// the runner writes each to a file and passes --vault-id <id>@<file>.
+	Vaults []VaultArtifact `json:"vaults,omitempty"`
+	// GCPServiceAccount is a decrypted service-account JSON the runner writes
+	// to a file and exposes via GOOGLE_APPLICATION_CREDENTIALS.
+	GCPServiceAccount string            `json:"gcp_service_account,omitempty"`
+	JobConfig         *AnsibleJobConfig `json:"job_config,omitempty"`
+	VCS               *VCSArtifact      `json:"vcs,omitempty"`
+}
+
+// VaultArtifact is one decrypted vault password for the runner.
+type VaultArtifact struct {
+	Password string `json:"password"` //nolint:gosec // G117: intentional credential field for runner artifacts
+	VaultID  string `json:"vault_id,omitempty"`
 }
 
 // VCSArtifact contains VCS info for cloning the repository on a self-hosted runner
@@ -1083,17 +1095,20 @@ type CredentialArtifact struct {
 	Password   string `json:"password,omitempty"` //nolint:gosec // G117: intentional credential field for runner artifacts
 	SSHKey     string `json:"ssh_key,omitempty"`
 	VaultToken string `json:"vault_token,omitempty"`
+	// BecomePassword is injected as ansible_become_pass when the job escalates.
+	BecomePassword string `json:"become_password,omitempty"` //nolint:gosec // G117: intentional credential field for runner artifacts
 }
 
 // AnsibleJobConfig contains ansible-specific execution configuration
 type AnsibleJobConfig struct {
-	Limit         string `json:"limit,omitempty"`
-	Tags          string `json:"tags,omitempty"`
-	SkipTags      string `json:"skip_tags,omitempty"`
-	Verbosity     int    `json:"verbosity"`
-	Forks         int    `json:"forks"`
-	BecomeEnabled bool   `json:"become_enabled"`
-	DiffMode      bool   `json:"diff_mode"`
+	Limit          string `json:"limit,omitempty"`
+	Tags           string `json:"tags,omitempty"`
+	SkipTags       string `json:"skip_tags,omitempty"`
+	Verbosity      int    `json:"verbosity"`
+	Forks          int    `json:"forks"`
+	BecomeEnabled  bool   `json:"become_enabled"`
+	DiffMode       bool   `json:"diff_mode"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"` // kills the run when exceeded (0 = none)
 }
 
 // GetJobStatus returns the current run/job status so the agent can poll for cancellation.
@@ -1174,19 +1189,31 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		JobID:   job.ID.String(),
 		JobType: "ansible_job",
 		JobConfig: &AnsibleJobConfig{
-			Limit:         job.Limit,
-			Tags:          job.Tags,
-			SkipTags:      job.SkipTags,
-			Verbosity:     job.Verbosity,
-			Forks:         job.Forks,
-			BecomeEnabled: job.BecomeEnabled,
-			DiffMode:      job.DiffMode,
+			Limit:          job.Limit,
+			Tags:           job.Tags,
+			SkipTags:       job.SkipTags,
+			Verbosity:      job.Verbosity,
+			Forks:          job.Forks,
+			BecomeEnabled:  job.BecomeEnabled,
+			DiffMode:       job.DiffMode,
+			TimeoutSeconds: job.TimeoutSeconds,
 		},
 	}
 
-	// Get playbook info and VCS details for the runner to clone the repo
-	if h.playbookRepo != nil {
-		playbook, err := h.playbookRepo.GetByID(job.PlaybookID)
+	// Ad hoc jobs have no playbook: ship the generated transient playbook as
+	// content; the agent writes it into the job workspace and runs it.
+	if job.JobType == models.AnsibleJobTypeAdHoc {
+		if content, adhocErr := ansible.BuildAdHocPlaybook(job.Module, job.ModuleArgs); adhocErr != nil {
+			logger.Warnf("Failed to build ad hoc playbook for job %s: %v", job.ID, adhocErr)
+		} else {
+			response.PlaybookContent = string(content)
+			response.PlaybookPath = "adhoc.yml"
+		}
+	}
+
+	// Get playbook info and VCS details for the runner to clone the repo.
+	if h.playbookRepo != nil && job.PlaybookID != nil {
+		playbook, err := h.playbookRepo.GetByID(*job.PlaybookID)
 		if err == nil {
 			response.PlaybookPath = playbook.PlaybookPath
 
@@ -1220,43 +1247,118 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		}
 	}
 
-	// Get credential first so we can inject password into inventory if needed
+	// Resolve every credential attached to the job: the template's
+	// multi-credential set plus the job's own credential (legacy single
+	// machine credential; skipped when already in the set).
 	var decryptedPassword string
-	if job.CredentialID != nil && h.credentialRepo != nil && h.cryptoService != nil {
-		cred, err := h.credentialRepo.GetByID(*job.CredentialID)
-		if err == nil {
-			credArtifact := &CredentialArtifact{
-				Type: string(cred.Type),
+	if h.credentialRepo != nil && h.cryptoService != nil {
+		var credIDs []uuid.UUID
+		if job.TemplateID != nil {
+			if err := h.db.Raw("SELECT ansible_credential_id FROM ansible_job_template_credentials WHERE ansible_job_template_id = ? ORDER BY ansible_credential_id", *job.TemplateID).Scan(&credIDs).Error; err != nil {
+				logger.Warnf("Failed to list template credentials for job %s: %v", job.ID, err)
 			}
-
-			// Copy username if set
-			if cred.Username != "" {
-				credArtifact.Username = cred.Username
-			}
-
-			// Decrypt credential fields
-			if cred.Password != "" {
-				if decrypted, err := h.cryptoService.Decrypt(cred.Password); err == nil {
-					credArtifact.Password = decrypted
-					// Track password for injection into inventory (Machine SSH credentials)
-					if cred.Type == models.CredentialTypeMachineSSH {
-						decryptedPassword = decrypted
-					}
+		}
+		if job.CredentialID != nil {
+			found := false
+			for _, id := range credIDs {
+				if id == *job.CredentialID {
+					found = true
+					break
 				}
 			}
-			if cred.SSHPrivateKey != "" {
-				if decrypted, err := h.cryptoService.Decrypt(cred.SSHPrivateKey); err == nil {
-					credArtifact.SSHKey = decrypted
-				}
+			if !found {
+				credIDs = append(credIDs, *job.CredentialID)
 			}
+		}
 
-			response.Credential = credArtifact
+		decrypt := func(v string) string {
+			if v == "" {
+				return ""
+			}
+			if d, derr := h.cryptoService.Decrypt(v); derr == nil {
+				return d
+			}
+			return ""
+		}
+		if len(credIDs) > 0 && response.EnvironmentVars == nil {
+			response.EnvironmentVars = map[string]string{}
+		}
+		for _, id := range credIDs {
+			cred, err := h.credentialRepo.GetByID(id)
+			if err != nil {
+				logger.Warnf("Failed to load credential %s for job %s: %v", id, job.ID, err)
+				continue
+			}
+			switch cred.Type {
+			case models.CredentialTypeSSH, models.CredentialTypeMachineSSH:
+				credArtifact := &CredentialArtifact{Type: string(cred.Type), Username: cred.Username}
+				credArtifact.Password = decrypt(cred.Password)
+				if cred.Type == models.CredentialTypeMachineSSH && credArtifact.Password != "" {
+					decryptedPassword = credArtifact.Password
+				}
+				credArtifact.SSHKey = decrypt(cred.SSHPrivateKey)
+				credArtifact.BecomePassword = decrypt(cred.BecomePassword)
+				response.Credential = credArtifact
+			case models.CredentialTypeVault:
+				if pw := decrypt(cred.VaultPassword); pw != "" {
+					response.Vaults = append(response.Vaults, VaultArtifact{Password: pw, VaultID: cred.VaultID})
+				}
+			case models.CredentialTypeAWSAccessKey:
+				if v := decrypt(cred.AWSAccessKeyID); v != "" {
+					response.EnvironmentVars["AWS_ACCESS_KEY_ID"] = v
+				}
+				if v := decrypt(cred.AWSSecretAccessKey); v != "" {
+					response.EnvironmentVars["AWS_SECRET_ACCESS_KEY"] = v
+				}
+			case models.CredentialTypeAzure:
+				if cred.AzureTenantID != "" {
+					response.EnvironmentVars["AZURE_TENANT_ID"] = cred.AzureTenantID
+					response.EnvironmentVars["AZURE_TENANT"] = cred.AzureTenantID
+				}
+				if cred.AzureClientID != "" {
+					response.EnvironmentVars["AZURE_CLIENT_ID"] = cred.AzureClientID
+				}
+				if v := decrypt(cred.AzureClientSecret); v != "" {
+					response.EnvironmentVars["AZURE_CLIENT_SECRET"] = v
+					response.EnvironmentVars["AZURE_SECRET"] = v
+				}
+			case models.CredentialTypeGCP:
+				if v := decrypt(cred.GCPServiceAccount); v != "" {
+					response.GCPServiceAccount = v
+				}
+			case models.CredentialTypeVMware:
+				if cred.Username != "" {
+					response.EnvironmentVars["VMWARE_USER"] = cred.Username
+				}
+				if v := decrypt(cred.Password); v != "" {
+					response.EnvironmentVars["VMWARE_PASSWORD"] = v
+				}
+			case models.CredentialTypeSCM:
+				// SCM credentials are handled via the VCS connection, not job env.
+			}
 		}
 	}
 
 	// Generate inventory content using the inventory service (same approach as platform-managed runner)
 	if h.inventoryService != nil {
 		inventoryJSON, err := h.inventoryService.GenerateInventoryJSON(job.InventoryID)
+		// Job slicing: keep only this slice's modulo-partition of the hosts.
+		if err == nil && job.SliceCount > 1 {
+			inventoryJSON, err = ansible.FilterInventoryJSONForSlice(inventoryJSON, job.SliceNumber, job.SliceCount)
+			if err != nil {
+				// Fail the job rather than shipping no inventory (which would run
+				// against zero hosts and report success) — mirrors the platform
+				// runner, which hard-fails the same slice error.
+				logger.Warnf("Failed to slice inventory for job %s: %v", job.ID, err)
+				job.Status = models.AnsibleJobStatusFailed
+				job.ErrorMessage = fmt.Sprintf("failed to slice inventory: %v", err)
+				if updateErr := h.ansibleJobRepo.Update(job); updateErr != nil {
+					logger.Warnf("Failed to mark sliced job %s failed: %v", job.ID, updateErr)
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "failed to slice inventory: " + err.Error()}}})
+				return
+			}
+		}
 		if err == nil {
 			// If we have a Machine SSH credential with a password, inject it into the inventory
 			if decryptedPassword != "" {
@@ -1322,18 +1424,26 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate OIDC token for self-hosted Ansible runner (job %s): %v", job.ID, tokenErr)
 				} else {
-					response.EnvironmentVars = map[string]string{
-						"AZURE_CLIENT_ID":       oidcConfig.ClientID,
-						"AZURE_TENANT_ID":       oidcConfig.TenantID,
-						"AZURE_SUBSCRIPTION_ID": oidcConfig.SubscriptionID,
-						"AZURE_FEDERATED_TOKEN": token,
-						"ARM_OIDC_TOKEN":        token,
-						"ARM_CLIENT_ID":         oidcConfig.ClientID,
-						"ARM_SUBSCRIPTION_ID":   oidcConfig.SubscriptionID,
-						"ARM_TENANT_ID":         oidcConfig.TenantID,
-						"ARM_USE_OIDC":          "true",
+					if response.EnvironmentVars == nil {
+						response.EnvironmentVars = map[string]string{}
 					}
-					logger.Infof("Injected OIDC workload identity token for self-hosted Ansible runner (job %s, org=%s)", job.ID, org.Name)
+					// An attached Azure credential wins over org-level OIDC.
+					if response.EnvironmentVars["AZURE_CLIENT_ID"] == "" {
+						response.EnvironmentVars["AZURE_CLIENT_ID"] = oidcConfig.ClientID
+						response.EnvironmentVars["AZURE_TENANT_ID"] = oidcConfig.TenantID
+						// azure.azcollection reads the legacy AZURE_TENANT name; the
+						// runner's startup bridge can't help here because artifact env
+						// vars are appended at exec time, after the bridge ran.
+						response.EnvironmentVars["AZURE_TENANT"] = oidcConfig.TenantID
+						response.EnvironmentVars["AZURE_SUBSCRIPTION_ID"] = oidcConfig.SubscriptionID
+						response.EnvironmentVars["AZURE_FEDERATED_TOKEN"] = token
+						response.EnvironmentVars["ARM_OIDC_TOKEN"] = token
+						response.EnvironmentVars["ARM_CLIENT_ID"] = oidcConfig.ClientID
+						response.EnvironmentVars["ARM_SUBSCRIPTION_ID"] = oidcConfig.SubscriptionID
+						response.EnvironmentVars["ARM_TENANT_ID"] = oidcConfig.TenantID
+						response.EnvironmentVars["ARM_USE_OIDC"] = "true"
+						logger.Infof("Injected OIDC workload identity token for self-hosted Ansible runner (job %s, org=%s)", job.ID, org.Name)
+					}
 				}
 			}
 		}
@@ -1522,10 +1632,11 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]PendingJob, error) {
 	pendingJobs := []PendingJob{}
 
-	// Query Ansible jobs if runner can execute them
+	// Query Ansible jobs if runner can execute them. Held jobs (queued_at NULL,
+	// waiting on the template concurrency gate) are not offered to runners.
 	if runner.CanExecuteAnsible() && h.ansibleJobRepo != nil {
 		var jobs []models.AnsibleJob
-		if err := h.db.Where("status = ? AND agent_pool_id = ?", models.AnsibleJobStatusPending, runner.AgentPoolID).
+		if err := h.db.Where("status = ? AND agent_pool_id = ? AND queued_at IS NOT NULL", models.AnsibleJobStatusPending, runner.AgentPoolID).
 			Preload("Project").Order("created_at ASC").Limit(5).Find(&jobs).Error; err == nil {
 			for _, job := range jobs {
 				// Ensure a RunnerJobExecution record exists

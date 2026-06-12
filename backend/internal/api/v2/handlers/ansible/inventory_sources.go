@@ -19,6 +19,8 @@ import (
 // InventorySourceSyncMessage represents a request to sync a dynamic inventory source
 type InventorySourceSyncMessage struct {
 	SourceID uuid.UUID `json:"source_id"`
+	// TriggeredBy records what started the sync; recorded in the sync history.
+	TriggeredBy string `json:"triggered_by,omitempty"`
 }
 
 // InventorySourceHandler handles inventory source API requests
@@ -48,6 +50,9 @@ type CreateInventorySourceRequest struct {
 			SyncSchedule       string                       `json:"sync-schedule"`
 			UpdateOnLaunch     *bool                        `json:"update-on-launch"`
 			UpdateCacheTimeout *int                         `json:"update-cache-timeout"`
+			Overwrite          *bool                        `json:"overwrite"`
+			OverwriteVars      *bool                        `json:"overwrite-vars"`
+			Verbosity          *int                         `json:"verbosity"`
 			GroupByInstanceID  *bool                        `json:"group-by-instance-id"`
 			GroupByRegion      *bool                        `json:"group-by-region"`
 			GroupByAZ          *bool                        `json:"group-by-availability-zone"`
@@ -73,6 +78,9 @@ type UpdateInventorySourceRequest struct {
 			SyncSchedule       *string                       `json:"sync-schedule"`
 			UpdateOnLaunch     *bool                         `json:"update-on-launch"`
 			UpdateCacheTimeout *int                          `json:"update-cache-timeout"`
+			Overwrite          *bool                         `json:"overwrite"`
+			OverwriteVars      *bool                         `json:"overwrite-vars"`
+			Verbosity          *int                          `json:"verbosity"`
 			GroupByInstanceID  *bool                         `json:"group-by-instance-id"`
 			GroupByRegion      *bool                         `json:"group-by-region"`
 			GroupByAZ          *bool                         `json:"group-by-availability-zone"`
@@ -138,6 +146,39 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
+	}
+
+	// Apply the sync-behavior attributes the constructor doesn't take, so
+	// create requests don't silently fall back to model defaults.
+	syncOpts := ansible.UpdateInventorySourceOptions{
+		UpdateOnLaunch:     attrs.UpdateOnLaunch,
+		UpdateCacheTimeout: attrs.UpdateCacheTimeout,
+		Overwrite:          attrs.Overwrite,
+		OverwriteVars:      attrs.OverwriteVars,
+		Verbosity:          attrs.Verbosity,
+		Enabled:            attrs.Enabled,
+		GroupByInstanceID:  attrs.GroupByInstanceID,
+		GroupByRegion:      attrs.GroupByRegion,
+		GroupByAZ:          attrs.GroupByAZ,
+	}
+	if attrs.SyncSchedule != "" {
+		syncOpts.SyncSchedule = &attrs.SyncSchedule
+	}
+	if attrs.GroupByTag != "" {
+		syncOpts.GroupByTag = &attrs.GroupByTag
+	}
+	if attrs.HostnameVar != "" {
+		syncOpts.HostnameVar = &attrs.HostnameVar
+	}
+	if attrs.InstanceFilters != "" {
+		syncOpts.InstanceFilters = &attrs.InstanceFilters
+	}
+	if syncOpts != (ansible.UpdateInventorySourceOptions{}) {
+		if updated, optErr := h.sourceService.UpdateInventorySource(source.ID, syncOpts); optErr != nil {
+			logger.Warnf("Inventory source %s created but sync options not applied: %v", source.ID, optErr)
+		} else {
+			source = updated
+		}
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"data": formatInventorySourceResponse(source)})
@@ -260,6 +301,9 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 		UpdateOnLaunch:     attrs.UpdateOnLaunch,
 		UpdateCacheTimeout: attrs.UpdateCacheTimeout,
 		SyncSchedule:       attrs.SyncSchedule,
+		Overwrite:          attrs.Overwrite,
+		OverwriteVars:      attrs.OverwriteVars,
+		Verbosity:          attrs.Verbosity,
 	}
 
 	// Handle credential: empty string = clear credential (switch to OIDC), non-empty = set credential
@@ -348,7 +392,8 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 	// Queue sync job to ansible-runner via Redis
 	if h.queue != nil {
 		syncMsg := InventorySourceSyncMessage{
-			SourceID: id,
+			SourceID:    id,
+			TriggeredBy: "manual",
 		}
 		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 			// Revert status
@@ -378,6 +423,9 @@ func formatInventorySourceResponse(source *models.AnsibleInventorySource) gin.H 
 			"config":                     source.Config,
 			"update-on-launch":           source.UpdateOnLaunch,
 			"update-cache-timeout":       source.UpdateCacheTimeout,
+			"overwrite":                  source.Overwrite,
+			"overwrite-vars":             source.OverwriteVars,
+			"verbosity":                  source.Verbosity,
 			"group-by-instance-id":       source.GroupByInstanceID,
 			"group-by-region":            source.GroupByRegion,
 			"group-by-availability-zone": source.GroupByAvailabilityZone,

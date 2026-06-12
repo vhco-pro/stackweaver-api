@@ -33,6 +33,9 @@ type InventorySyncMessage struct {
 	// Branch is the branch to clone, carried alongside CloneURL so the runner does
 	// not need to re-read it from the DB on the pre-resolved path.
 	Branch string `json:"branch,omitempty"`
+	// TriggeredBy records what started the sync (manual | webhook | launch);
+	// recorded in the sync history. Empty = manual.
+	TriggeredBy string `json:"triggered_by,omitempty"`
 }
 
 // InventoryHandler handles Ansible inventory API endpoints
@@ -144,6 +147,11 @@ type CreateInventoryRequest struct {
 			VCSRepository string                    `json:"vcs_repository"`
 			VCSBranch     string                    `json:"vcs_branch"`
 			InventoryPath string                    `json:"inventory_path"`
+			// Constructed inventory fields
+			SourceVars              string   `json:"source-vars"`
+			ConstructedLimit        string   `json:"constructed-limit"`
+			ConstructedCacheTimeout int      `json:"constructed-cache-timeout"`
+			InputInventoryIDs       []string `json:"input-inventory-ids"`
 		} `json:"attributes"`
 		Relationships struct {
 			VCSConnection struct {
@@ -174,6 +182,11 @@ type UpdateInventoryRequest struct {
 			VCSRepository *string                    `json:"vcs_repository"`
 			VCSBranch     *string                    `json:"vcs_branch"`
 			InventoryPath *string                    `json:"inventory_path"`
+			// Constructed inventory fields
+			SourceVars              *string   `json:"source-vars"`
+			ConstructedLimit        *string   `json:"constructed-limit"`
+			ConstructedCacheTimeout *int      `json:"constructed-cache-timeout"`
+			InputInventoryIDs       *[]string `json:"input-inventory-ids"`
 		} `json:"attributes"`
 		Relationships struct {
 			VCSConnection struct {
@@ -345,6 +358,20 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 		invType = models.InventoryTypeDynamic
 	case "vcs":
 		invType = models.InventoryTypeVCS
+	case "constructed":
+		invType = models.InventoryTypeConstructed
+	}
+
+	// Constructed inventories need at least one valid input
+	if invType == models.InventoryTypeConstructed {
+		if len(req.Data.Attributes.InputInventoryIDs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "Constructed inventories need at least one input inventory"},
+				},
+			})
+			return
+		}
 	}
 
 	// Parse VCS connection ID if provided
@@ -423,6 +450,35 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 
 	// Register ADO webhooks if this inventory is linked to an Azure DevOps repository
 	h.maybeRegisterADOWebhook(inventory.VCSConnectionID, inventory.VCSRepository)
+
+	// Constructed inventories: persist rules + ordered inputs, then queue the
+	// initial build.
+	if inventory.Type == models.InventoryTypeConstructed {
+		inventory.SourceVars = req.Data.Attributes.SourceVars
+		inventory.ConstructedLimit = req.Data.Attributes.ConstructedLimit
+		inventory.ConstructedCacheTimeout = req.Data.Attributes.ConstructedCacheTimeout
+		if !h.setConstructedInputs(c, org.ID, inventory, req.Data.Attributes.InputInventoryIDs) {
+			return
+		}
+		inventory.LastSyncStatus = "syncing"
+		if err := h.inventoryRepo.Update(inventory); err != nil {
+			logger.Warnf("Failed to persist constructed inventory fields: %v", err)
+		}
+		if h.queue != nil {
+			syncMsg := InventorySyncMessage{InventoryID: inventory.ID, TriggeredBy: "manual"}
+			if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
+				logger.Warnf("Failed to queue initial constructed inventory build: %v", err)
+				inventory.LastSyncStatus = "pending"
+				if updateErr := h.inventoryRepo.Update(inventory); updateErr != nil {
+					logger.Warnf("Failed to update inventory after build queue error: %v", updateErr)
+				}
+			}
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"data": formatInventoryResponse(inventory),
+		})
+		return
+	}
 
 	// Auto-trigger sync for VCS-backed inventories
 	if inventory.VCSConnectionID != nil && inventory.VCSRepository != "" && inventory.InventoryPath != "" && h.queue != nil {
@@ -511,9 +567,18 @@ func (h *InventoryHandler) Get(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatInventoryResponse(inventory),
-	})
+	resp := formatInventoryResponse(inventory)
+	// Constructed inventories also list their ordered inputs
+	if inventory.Type == models.InventoryTypeConstructed {
+		if inputs, err := h.inventoryRepo.ListConstructedInputs(inventory.ID); err == nil {
+			inputList := make([]gin.H, 0, len(inputs))
+			for i := range inputs {
+				inputList = append(inputList, gin.H{"id": inputs[i].ID.String(), "name": inputs[i].Name})
+			}
+			resp["attributes"].(gin.H)["input-inventories"] = inputList
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": resp})
 }
 
 // Update updates an inventory
@@ -660,12 +725,101 @@ func (h *InventoryHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// Constructed inventories: apply rule/limit/input changes
+	if inventory.Type == models.InventoryTypeConstructed {
+		changed := false
+		if req.Data.Attributes.SourceVars != nil {
+			inventory.SourceVars = *req.Data.Attributes.SourceVars
+			changed = true
+		}
+		if req.Data.Attributes.ConstructedLimit != nil {
+			inventory.ConstructedLimit = *req.Data.Attributes.ConstructedLimit
+			changed = true
+		}
+		if req.Data.Attributes.ConstructedCacheTimeout != nil {
+			inventory.ConstructedCacheTimeout = *req.Data.Attributes.ConstructedCacheTimeout
+			changed = true
+		}
+		if changed {
+			if err := h.inventoryRepo.Update(inventory); err != nil {
+				logger.Warnf("Failed to persist constructed inventory fields: %v", err)
+			}
+		}
+		if req.Data.Attributes.InputInventoryIDs != nil {
+			if !h.setConstructedInputs(c, inventory.OrganizationID, inventory, *req.Data.Attributes.InputInventoryIDs) {
+				return
+			}
+		}
+	}
+
 	// Register ADO webhooks if this inventory is linked to an Azure DevOps repository
 	h.maybeRegisterADOWebhook(inventory.VCSConnectionID, inventory.VCSRepository)
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": formatInventoryResponse(inventory),
 	})
+}
+
+// setConstructedInputs validates and persists the ordered input list of a
+// constructed inventory. On failure it writes the error response and returns
+// false. Inputs must belong to the same organization and cannot themselves be
+// constructed (no nesting in v1).
+func (h *InventoryHandler) setConstructedInputs(c *gin.Context, orgID uuid.UUID, inventory *models.AnsibleInventory, inputIDs []string) bool {
+	if len(inputIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"errors": []gin.H{
+				{"status": "400", "title": "Bad Request", "detail": "Constructed inventories need at least one input inventory"},
+			},
+		})
+		return false
+	}
+	ids := make([]uuid.UUID, 0, len(inputIDs))
+	for _, raw := range inputIDs {
+		inputID, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "Invalid input inventory ID " + raw},
+				},
+			})
+			return false
+		}
+		input, err := h.inventoryRepo.GetByID(inputID)
+		if err != nil || input.OrganizationID != orgID {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "Input inventory " + raw + " not found in this organization"},
+				},
+			})
+			return false
+		}
+		if input.Type == models.InventoryTypeConstructed {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "Constructed inventories cannot be inputs of other constructed inventories"},
+				},
+			})
+			return false
+		}
+		if input.ID == inventory.ID {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{"status": "400", "title": "Bad Request", "detail": "An inventory cannot be its own input"},
+				},
+			})
+			return false
+		}
+		ids = append(ids, inputID)
+	}
+	if err := h.inventoryRepo.SetConstructedInputs(inventory.ID, ids); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{
+				{"status": "500", "title": "Internal Server Error", "detail": "Failed to save input inventories"},
+			},
+		})
+		return false
+	}
+	return true
 }
 
 // Delete deletes an inventory
@@ -982,8 +1136,10 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 		return
 	}
 
-	// Check if inventory has VCS configuration
-	if inventory.VCSConnectionID == nil || inventory.VCSRepository == "" || inventory.InventoryPath == "" {
+	// Constructed inventories rebuild from their inputs; VCS inventories need
+	// their VCS configuration.
+	if inventory.Type != models.InventoryTypeConstructed &&
+		(inventory.VCSConnectionID == nil || inventory.VCSRepository == "" || inventory.InventoryPath == "") {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"errors": []gin.H{
 				{"status": "400", "title": "Bad Request", "detail": "Inventory has no VCS connection configured"},
@@ -1007,6 +1163,7 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 	// Queue sync job
 	if h.queue != nil {
 		syncMsg := h.buildInventorySyncMessage(c.Request.Context(), inventory)
+		syncMsg.TriggeredBy = "manual"
 		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
 			// Revert status on queue failure
 			inventory.LastSyncStatus = "failed"
@@ -1042,6 +1199,9 @@ func formatInventoryResponse(inv *models.AnsibleInventory) gin.H {
 		"last-sync-error":            inv.LastSyncError,
 		"last-sync-hosts-discovered": inv.LastSyncHostsDiscovered,
 		"last-sync-log":              inv.LastSyncLog,
+		"source-vars":                inv.SourceVars,
+		"constructed-limit":          inv.ConstructedLimit,
+		"constructed-cache-timeout":  inv.ConstructedCacheTimeout,
 		"created-at":                 inv.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		"updated-at":                 inv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}

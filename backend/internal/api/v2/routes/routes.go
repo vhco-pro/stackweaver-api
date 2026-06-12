@@ -12,6 +12,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
+	ansibleHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible"
 	terraformHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
@@ -712,10 +713,13 @@ func SetupV2Routes(
 			}
 			redisPassword := os.Getenv("REDIS_PASSWORD")
 
+			// Assign on success only: a nil *RedisQueue stored in a queue.Queue is
+			// a typed-nil that passes != nil checks and panics on Enqueue.
 			var ansibleQueueForWebhook queue.Queue
-			ansibleQueueForWebhook, err := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0)
-			if err != nil {
-				logger.Warnf("Failed to initialize Redis queue for inventory sync: %v", err)
+			if q, qErr := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0); qErr != nil {
+				logger.Warnf("Failed to initialize Redis queue for inventory sync: %v", qErr)
+			} else {
+				ansibleQueueForWebhook = q
 			}
 
 			webhookEventRepoForHandler := repository.NewWebhookEventRepository(db)
@@ -736,6 +740,11 @@ func SetupV2Routes(
 				registryPublishingHandler,
 				storageClient,
 				ansibleQueueForWebhook,
+			)
+			// Push events also launch templates that opted into webhook launches
+			appHandler.SetTemplateLauncher(
+				repository.NewAnsibleJobTemplateRepository(db),
+				newWebhookTemplateLaunchService(db, ansibleQueueForWebhook, vcsRegistry, vcsConnectionRepo),
 			)
 			vcsWebhook.POST("/webhook", appHandler.HandleInstallationWebhook)
 		}
@@ -767,9 +776,10 @@ func SetupV2Routes(
 			redisPassword := os.Getenv("REDIS_PASSWORD")
 
 			var ansibleQueueForInstall queue.Queue
-			ansibleQueueForInstall, err := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0)
-			if err != nil {
-				logger.Warnf("Failed to initialize Redis queue for inventory sync: %v", err)
+			if q, qErr := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0); qErr != nil {
+				logger.Warnf("Failed to initialize Redis queue for inventory sync: %v", qErr)
+			} else {
+				ansibleQueueForInstall = q
 			}
 
 			webhookEventRepoForInstall := repository.NewWebhookEventRepository(db)
@@ -819,10 +829,13 @@ func SetupV2Routes(
 				}
 			}
 			redisPassword := os.Getenv("REDIS_PASSWORD")
+			// Assign on success only: a nil *RedisQueue stored in a queue.Queue is
+			// a typed-nil that passes != nil checks and panics on Enqueue.
 			var ansibleQueueForADO queue.Queue
-			ansibleQueueForADO, adoQueueErr := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0)
-			if adoQueueErr != nil {
+			if q, adoQueueErr := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0); adoQueueErr != nil {
 				logger.Warnf("Failed to initialize Redis queue for ADO webhook: %v", adoQueueErr)
+			} else {
+				ansibleQueueForADO = q
 			}
 
 			adoHandler := handlers.NewVCSAppInstallationHandlerV2(
@@ -842,6 +855,11 @@ func SetupV2Routes(
 				registryPublishingHandler,
 				storageClient,
 				ansibleQueueForADO,
+			)
+			// Push events also launch templates that opted into webhook launches
+			adoHandler.SetTemplateLauncher(
+				repository.NewAnsibleJobTemplateRepository(db),
+				newWebhookTemplateLaunchService(db, ansibleQueueForADO, vcsRegistry, vcsConnectionRepo),
 			)
 
 			// OAuth2 callback (frontend redirects here after ADO authorization)
@@ -1020,7 +1038,7 @@ func SetupV2Routes(
 	}
 
 	// Setup Ansible routes
-	SetupAnsibleRoutes(
+	ansibleServices := SetupAnsibleRoutes(
 		v2,
 		db,
 		ansibleInventoryRepo,
@@ -1047,7 +1065,18 @@ func SetupV2Routes(
 		projectRepo,
 		authService,
 		rbacService,
+		ansibleServices.WorkflowEngine,
 	)
+
+	// Provisioning callbacks: public, key-authenticated endpoint a provisioned
+	// host calls to request its own configuration. Registered on the root
+	// router (outside the auth middleware), like the VCS webhooks.
+	provisioningCallbackHandler := ansibleHandlers.NewProvisioningCallbackHandler(
+		repository.NewAnsibleJobTemplateRepository(db),
+		repository.NewAnsibleInventoryRepository(db),
+		ansibleServices.JobService,
+	)
+	r.POST("/api/v2/ansible/job-templates/:id/callback", provisioningCallbackHandler.Handle)
 
 	// ==========================================
 	// Runner Agent API (for self-hosted runners)
@@ -1127,6 +1156,56 @@ func SetupV2Routes(
 }
 
 // parsePort parses a port string to int
+// ansibleEncryptionKeyBytes derives the 32-byte AES key from
+// ANSIBLE_ENCRYPTION_KEY / ENCRYPTION_KEY (same normalization as the main
+// Ansible route setup).
+func ansibleEncryptionKeyBytes() []byte {
+	key := os.Getenv("ANSIBLE_ENCRYPTION_KEY")
+	if key == "" {
+		key = os.Getenv("ENCRYPTION_KEY")
+	}
+	if key == "" {
+		return make([]byte, 32)
+	}
+	keyBytes, err := hex.DecodeString(key)
+	if err != nil {
+		keyBytes = []byte(key)
+	}
+	if len(keyBytes) < 32 {
+		padded := make([]byte, 32)
+		copy(padded, keyBytes)
+		return padded
+	}
+	return keyBytes[:32]
+}
+
+// newWebhookTemplateLaunchService builds the job service used by VCS push
+// webhooks to launch templates with launch_on_webhook: full variable-set
+// merging, update-on-launch gating, and server-side clone-URL resolution —
+// identical semantics to UI launches.
+func newWebhookTemplateLaunchService(db *gorm.DB, q queue.Queue, vcsRegistry *vcs.ProviderRegistry, vcsConnectionRepo *repository.VCSConnectionRepository) *ansible.JobService {
+	encryptionKey := ansibleEncryptionKeyBytes()
+	variableService := variable.NewServiceWithTemplateVariables(
+		repository.NewVariableRepository(db),
+		repository.NewVariableSetRepository(db),
+		repository.NewWorkspaceRepository(db),
+		repository.NewAnsibleJobTemplateVariableRepository(db),
+		encryptionKey,
+	)
+	jobService := ansible.NewJobServiceWithVariables(
+		repository.NewAnsibleJobRepository(db),
+		repository.NewAnsiblePlaybookRepository(db),
+		repository.NewAnsibleInventoryRepository(db),
+		repository.NewAnsibleJobTemplateRepository(db),
+		repository.NewProjectRepository(db),
+		variableService,
+		q,
+	)
+	jobService.SetInventorySourceRepo(repository.NewAnsibleInventorySourceRepository(db))
+	jobService.SetVCSResolver(vcsRegistry, vcsConnectionRepo)
+	return jobService
+}
+
 func parsePort(portStr string) (int, error) {
 	var port int
 	_, err := fmt.Sscanf(portStr, "%d", &port)
