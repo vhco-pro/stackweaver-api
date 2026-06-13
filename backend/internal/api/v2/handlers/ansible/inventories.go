@@ -885,6 +885,39 @@ func (h *InventoryHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	// ?force=true cascades over every dependent resource (templates, jobs,
+	// schedules, workflow nodes, sources). It deletes resources well beyond the
+	// inventory itself, so it additionally requires org-level Ansible manage.
+	if c.Query("force") == "true" {
+		canManage, err := h.rbacService.CheckOrgManageAnsible(c.Request.Context(), user.ID, inventoryForRBAC.OrganizationID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
+				},
+			})
+			return
+		}
+		if !canManage {
+			c.JSON(http.StatusForbidden, gin.H{
+				"errors": []gin.H{
+					{"status": "403", "title": "Forbidden", "detail": "Force delete requires organization-level Ansible management permission"},
+				},
+			})
+			return
+		}
+		if err := h.inventoryService.ForceDeleteInventory(id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
+				},
+			})
+			return
+		}
+		c.Status(http.StatusNoContent)
+		return
+	}
+
 	if err := h.inventoryService.DeleteInventory(id); err != nil {
 		// Check if it's a dependency error (contains "cannot delete" or "referenced")
 		errStr := err.Error()
