@@ -4,7 +4,6 @@ package routes
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"os"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/encryptionkey"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -497,29 +497,9 @@ func SetupV2Routes(
 		stateVersionsById.DELETE("/:id", stateVersionHandler.Delete)
 	}
 
-	// Get encryption key for variables (reuse same logic as Ansible)
-	variableEncryptionKey := os.Getenv("ENCRYPTION_KEY")
-	var variableEncryptionKeyBytes []byte
-	if variableEncryptionKey != "" {
-		var decodeErr error
-		variableEncryptionKeyBytes, decodeErr = hex.DecodeString(variableEncryptionKey)
-		if decodeErr != nil {
-			logger.Warnf("Failed to decode variable encryption key: %v (using raw bytes)", decodeErr)
-			variableEncryptionKeyBytes = []byte(variableEncryptionKey)
-		}
-		// Ensure key is 32 bytes for AES-256
-		if len(variableEncryptionKeyBytes) < 32 {
-			paddedKey := make([]byte, 32)
-			copy(paddedKey, variableEncryptionKeyBytes)
-			variableEncryptionKeyBytes = paddedKey
-		} else if len(variableEncryptionKeyBytes) > 32 {
-			variableEncryptionKeyBytes = variableEncryptionKeyBytes[:32]
-		}
-	} else {
-		logger.Warn("No encryption key configured for variables (set ENCRYPTION_KEY)")
-		// Use a default key for development only - this should be overridden in production
-		variableEncryptionKeyBytes = make([]byte, 32)
-	}
+	// Get encryption key for variables. Fails loud on a missing/insecure key
+	// (AUD-013); DEV_INSECURE_KEY=1 is the local-dev escape hatch.
+	variableEncryptionKeyBytes := encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY"))
 	// Create variable service with workspace support for platform variables
 	// Note: variableSetRepo is created later, but we can still use workspace repo for platform vars
 	variableService := variable.NewServiceWithVariableSetsAndWorkspace(variableRepo, nil, workspaceRepo, variableEncryptionKeyBytes)
@@ -1010,32 +990,13 @@ func SetupV2Routes(
 		logger.Warnf("Failed to initialize Redis queue for Ansible: %v (Ansible job queueing will be disabled)", err)
 	}
 
-	// Get encryption key for Ansible credentials
+	// Get encryption key for Ansible credentials. Fails loud on a missing/insecure
+	// key (AUD-013); DEV_INSECURE_KEY=1 is the local-dev escape hatch.
 	ansibleEncryptionKey := os.Getenv("ANSIBLE_ENCRYPTION_KEY")
 	if ansibleEncryptionKey == "" {
 		ansibleEncryptionKey = os.Getenv("ENCRYPTION_KEY")
 	}
-	var encryptionKeyBytes []byte
-	if ansibleEncryptionKey != "" {
-		var decodeErr error
-		encryptionKeyBytes, decodeErr = hex.DecodeString(ansibleEncryptionKey)
-		if decodeErr != nil {
-			logger.Warnf("Failed to decode Ansible encryption key: %v (using raw bytes)", decodeErr)
-			encryptionKeyBytes = []byte(ansibleEncryptionKey)
-		}
-		// Ensure key is 32 bytes for AES-256
-		if len(encryptionKeyBytes) < 32 {
-			paddedKey := make([]byte, 32)
-			copy(paddedKey, encryptionKeyBytes)
-			encryptionKeyBytes = paddedKey
-		} else if len(encryptionKeyBytes) > 32 {
-			encryptionKeyBytes = encryptionKeyBytes[:32]
-		}
-	} else {
-		logger.Warn("No encryption key configured for Ansible credentials (set ANSIBLE_ENCRYPTION_KEY or ENCRYPTION_KEY)")
-		// Use a default key for development only - this should be overridden in production
-		encryptionKeyBytes = make([]byte, 32)
-	}
+	encryptionKeyBytes := encryptionkey.Resolve(ansibleEncryptionKey)
 
 	// Setup Ansible routes
 	ansibleServices := SetupAnsibleRoutes(
@@ -1157,26 +1118,14 @@ func SetupV2Routes(
 
 // parsePort parses a port string to int
 // ansibleEncryptionKeyBytes derives the 32-byte AES key from
-// ANSIBLE_ENCRYPTION_KEY / ENCRYPTION_KEY (same normalization as the main
-// Ansible route setup).
+// ANSIBLE_ENCRYPTION_KEY / ENCRYPTION_KEY, failing loud on a missing/insecure
+// key (AUD-013) unless DEV_INSECURE_KEY=1 is set.
 func ansibleEncryptionKeyBytes() []byte {
 	key := os.Getenv("ANSIBLE_ENCRYPTION_KEY")
 	if key == "" {
 		key = os.Getenv("ENCRYPTION_KEY")
 	}
-	if key == "" {
-		return make([]byte, 32)
-	}
-	keyBytes, err := hex.DecodeString(key)
-	if err != nil {
-		keyBytes = []byte(key)
-	}
-	if len(keyBytes) < 32 {
-		padded := make([]byte, 32)
-		copy(padded, keyBytes)
-		return padded
-	}
-	return keyBytes[:32]
+	return encryptionkey.Resolve(key)
 }
 
 // newWebhookTemplateLaunchService builds the job service used by VCS push
