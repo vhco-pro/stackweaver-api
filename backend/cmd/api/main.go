@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,6 +20,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/encryptionkey"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/backend/internal/services/runner"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
@@ -407,30 +407,13 @@ func main() {
 		ansibleCredentialRepo := repository.NewAnsibleCredentialRepository(db)
 		inventorySourceRepo := repository.NewAnsibleInventorySourceRepository(db)
 
-		// Get encryption key for credentials
+		// Get encryption key for credentials. Fails loud on a missing/insecure key
+		// (AUD-013); DEV_INSECURE_KEY=1 is the local-dev escape hatch.
 		encryptionKey := os.Getenv("ANSIBLE_ENCRYPTION_KEY")
 		if encryptionKey == "" {
 			encryptionKey = os.Getenv("ENCRYPTION_KEY")
 		}
-
-		var encryptionKeyBytes []byte
-		if encryptionKey != "" {
-			var decodeErr error
-			encryptionKeyBytes, decodeErr = hex.DecodeString(encryptionKey)
-			if decodeErr != nil {
-				encryptionKeyBytes = []byte(encryptionKey)
-			}
-			// Ensure key is 32 bytes for AES-256
-			if len(encryptionKeyBytes) < 32 {
-				paddedKey := make([]byte, 32)
-				copy(paddedKey, encryptionKeyBytes)
-				encryptionKeyBytes = paddedKey
-			} else if len(encryptionKeyBytes) > 32 {
-				encryptionKeyBytes = encryptionKeyBytes[:32]
-			}
-		} else {
-			encryptionKeyBytes = make([]byte, 32)
-		}
+		encryptionKeyBytes := encryptionkey.Resolve(encryptionKey)
 
 		// Initialize crypto service
 		cryptoService, err := crypto.NewCryptoService(encryptionKeyBytes)
