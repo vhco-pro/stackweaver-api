@@ -436,42 +436,65 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 		return
 	}
 
-	// Get the job execution record
-	exec, err := h.jobExecRepo.GetByJobID(jobID)
+	runnerID, err := uuid.Parse(req.RunnerID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
-		}
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid runner_id"}}})
 		return
 	}
 
-	// Update execution record status to running
-	if err := h.jobExecRepo.UpdateStatus(exec.ID, models.JobExecutionStatusRunning, ""); err != nil {
+	if h.ansibleJobRepo == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
 		return
 	}
 
-	// Update the ansible job status to running and set start time
-	if h.ansibleJobRepo != nil {
-		job, err := h.ansibleJobRepo.GetByID(jobID)
-		if err == nil {
-			now := time.Now()
-			job.Status = models.AnsibleJobStatusRunning
-			job.StartedAt = &now
-
-			// Set the runner ID on the job
-			runnerID, parseErr := uuid.Parse(req.RunnerID)
-			if parseErr == nil {
-				job.RunnerID = &runnerID
-			}
-
-			_ = h.ansibleJobRepo.Update(job)
+	// Atomically claim the job. Only the runner that flips the still-pending row
+	// wins; any other runner offered the same job loses the race and is told to
+	// skip it (409). This prevents two agent-pool runners from executing the same
+	// job/slice.
+	claimed, err := h.ansibleJobRepo.ClaimForRunner(jobID, runnerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		return
+	}
+	if !claimed {
+		// Either the job no longer exists, or another runner already claimed it.
+		if _, getErr := h.ansibleJobRepo.GetByID(jobID); getErr != nil {
+			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+			return
 		}
+		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": "Job already claimed by another runner"}}})
+		return
 	}
 
+	// Record the execution against the winning runner. The exec record is created
+	// here (at claim time) rather than at offer time, so capacity accounting and
+	// completion tracking reflect the runner that actually owns the job.
+	h.upsertJobExecution(jobID, runnerID)
+
 	c.JSON(http.StatusOK, gin.H{"status": "started"})
+}
+
+// upsertJobExecution ensures a running RunnerJobExecution record exists for the
+// (claimed) Ansible job, bound to the winning runner. Created at claim time so a
+// runner is only counted as busy with jobs it actually owns.
+func (h *RunnerAgentHandler) upsertJobExecution(jobID, runnerID uuid.UUID) {
+	workspaceName := ""
+	if job, err := h.ansibleJobRepo.GetByID(jobID); err == nil && job.Project.Name != "" {
+		workspaceName = job.Project.Name
+	}
+
+	if exec, err := h.jobExecRepo.GetByJobID(jobID); err == nil {
+		_ = h.jobExecRepo.UpdateStatus(exec.ID, models.JobExecutionStatusRunning, "")
+		return
+	}
+
+	_ = h.jobExecRepo.Create(&models.RunnerJobExecution{
+		RunnerID:      runnerID,
+		JobType:       models.JobTypeAnsibleJob,
+		JobID:         jobID,
+		WorkspaceName: workspaceName,
+		Status:        models.JobExecutionStatusRunning,
+	})
 }
 
 // jobStartTerraformRun handles job start for Terraform runs
@@ -1626,34 +1649,69 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	c.JSON(http.StatusOK, response)
 }
 
+// projectNameByID returns a project's name for display on offered jobs, or "" if
+// it can't be resolved (best-effort — the agent only uses it for labelling).
+func (h *RunnerAgentHandler) projectNameByID(projectID uuid.UUID) string {
+	var project models.Project
+	if err := h.db.Select("name").First(&project, "id = ?", projectID).Error; err != nil {
+		return ""
+	}
+	return project.Name
+}
+
 // findPendingJobsForRunner finds pending jobs that can be executed by the given runner.
-// It also creates RunnerJobExecution records so that JobStart/JobComplete can find them.
+// Ansible jobs are reserved for the runner here (runner_id stamped) so concurrent
+// pollers get disjoint work; the agent then claims each via JobStart.
 // Supports both Ansible jobs and Terraform runs depending on runner type.
 func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]PendingJob, error) {
 	pendingJobs := []PendingJob{}
 
-	// Query Ansible jobs if runner can execute them. Held jobs (queued_at NULL,
-	// waiting on the template concurrency gate) are not offered to runners.
+	// Capacity-aware, distribution-safe offering. `maxJobs` bounds how much work a
+	// runner takes; the agent runs serially so it is usually 1.
+	maxJobs := runner.MaxConcurrentJobs
+	if maxJobs <= 0 {
+		maxJobs = 1
+	}
+
+	// Ansible jobs: each polling runner ATOMICALLY reserves its own pending jobs by
+	// stamping runner_id under FOR UPDATE SKIP LOCKED. Without this, simultaneous
+	// pollers all get offered the same top job and contend on the claim — which
+	// funnels every sibling slice onto whichever runner wins the race (no
+	// distribution). SKIP LOCKED makes concurrent pollers grab DISJOINT rows, so N
+	// slices spread across N idle agents. Held jobs (queued_at NULL, waiting on the
+	// template concurrency gate) are not offered. A reservation is released if the
+	// runner goes offline before starting (see ReleaseReservationsForOfflineRunners).
 	if runner.CanExecuteAnsible() && h.ansibleJobRepo != nil {
-		var jobs []models.AnsibleJob
-		if err := h.db.Where("status = ? AND agent_pool_id = ? AND queued_at IS NOT NULL", models.AnsibleJobStatusPending, runner.AgentPoolID).
-			Preload("Project").Order("created_at ASC").Limit(5).Find(&jobs).Error; err == nil {
-			for _, job := range jobs {
-				// Ensure a RunnerJobExecution record exists
-				if _, err := h.jobExecRepo.GetByJobID(job.ID); err != nil {
-					exec := &models.RunnerJobExecution{
-						RunnerID:      runner.ID,
-						JobType:       models.JobTypeAnsibleJob,
-						JobID:         job.ID,
-						WorkspaceName: job.Project.Name,
-						Status:        models.JobExecutionStatusPending,
-					}
-					_ = h.jobExecRepo.Create(exec)
-				}
+		// Outstanding = jobs this runner has reserved or is running but hasn't
+		// finished. Caps reservations to the runner's free capacity.
+		var outstanding int64
+		if err := h.db.Model(&models.AnsibleJob{}).
+			Where("runner_id = ? AND status IN ?", runner.ID,
+				[]models.AnsibleJobStatus{models.AnsibleJobStatusPending, models.AnsibleJobStatusRunning}).
+			Count(&outstanding).Error; err != nil {
+			return pendingJobs, err
+		}
+		if capacity := maxJobs - int(outstanding); capacity > 0 {
+			var reserved []models.AnsibleJob
+			if err := h.db.Raw(`
+				UPDATE ansible_jobs SET runner_id = ?, updated_at = now()
+				WHERE id IN (
+					SELECT id FROM ansible_jobs
+					WHERE status = ? AND agent_pool_id = ? AND queued_at IS NOT NULL AND runner_id IS NULL
+					ORDER BY created_at ASC
+					LIMIT ?
+					FOR UPDATE SKIP LOCKED
+				)
+				RETURNING *`,
+				runner.ID, models.AnsibleJobStatusPending, runner.AgentPoolID, capacity).
+				Scan(&reserved).Error; err != nil {
+				return pendingJobs, err
+			}
+			for i := range reserved {
 				pendingJobs = append(pendingJobs, PendingJob{
-					JobID:         job.ID.String(),
+					JobID:         reserved[i].ID.String(),
 					JobType:       "ansible_job",
-					WorkspaceName: job.Project.Name,
+					WorkspaceName: h.projectNameByID(reserved[i].ProjectID),
 				})
 			}
 		}
@@ -1662,6 +1720,7 @@ func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]
 	// Query Terraform runs if runner can execute them.
 	// Only return runs whose workspace is still agent (execution_mode = 'agent'); if workspace
 	// was switched to remote, the run may still have agent_pool_id set until orchestrator clears it.
+	// (Terraform distribution is deferred to the platform-runner rework.)
 	if runner.CanExecuteTerraform() {
 		var runs []models.Run
 		if err := h.db.Joins("JOIN workspaces ON workspaces.id = runs.workspace_id").
