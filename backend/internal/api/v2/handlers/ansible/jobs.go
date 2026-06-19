@@ -1239,6 +1239,8 @@ func formatJobResponse(job *models.AnsibleJob) gin.H {
 		"become-enabled":    job.BecomeEnabled,
 		"slice-number":      job.SliceNumber,
 		"slice-count":       job.SliceCount,
+		"slice-group-id":    nil,
+		"runner-id":         nil,
 		"diff-mode":         job.DiffMode,
 		"ansible-version":   job.AnsibleVersion,
 		"exit-code":         job.ExitCode,
@@ -1269,6 +1271,15 @@ func formatJobResponse(job *models.AnsibleJob) gin.H {
 	}
 	if job.FinishedAt != nil {
 		attributes["finished-at"] = job.FinishedAt.Format("2006-01-02T15:04:05Z")
+	}
+	// Slice group ties sibling slices of one launch together; runner-id reveals
+	// which agent executed the slice. Both are needed to verify, end-to-end, that
+	// slicing fans out across distinct runners with a correct host partition.
+	if job.SliceGroupID != nil {
+		attributes["slice-group-id"] = job.SliceGroupID.String()
+	}
+	if job.RunnerID != nil {
+		attributes["runner-id"] = job.RunnerID.String()
 	}
 
 	relationships := gin.H{

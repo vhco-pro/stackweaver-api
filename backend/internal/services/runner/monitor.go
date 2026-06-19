@@ -64,6 +64,13 @@ func (s *MonitorService) markStaleRunners() {
 	if count > 0 {
 		logger.Infof("Marked %d runner(s) as offline (no heartbeat for %v)", count, s.threshold)
 	}
+	// Free any ansible jobs reserved by runners that just went offline so they
+	// can be picked up elsewhere rather than stranded.
+	if released, err := s.runnerRepo.ReleaseStaleAnsibleReservations(); err != nil {
+		logger.Warnf("Failed to release stale ansible reservations: %v", err)
+	} else if released > 0 {
+		logger.Infof("Released %d stranded ansible job reservation(s)", released)
+	}
 }
 
 // SetInterval sets the check interval
