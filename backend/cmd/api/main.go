@@ -307,9 +307,17 @@ func main() {
 			hasStateDataCol = false // fail safe: skip on uncertainty
 		}
 		if hasStateDataCol {
+			// Encrypt sensitive output values during backfill too (#95), so an upgrading
+			// deployment's legacy plaintext sensitive outputs land encrypted in the new
+			// table rather than waiting for the next state write. nil key = plaintext.
+			var backfillCrypto *crypto.CryptoService
+			if keyBytes := encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")); len(keyBytes) > 0 {
+				backfillCrypto, _ = crypto.NewCryptoService(keyBytes)
+			}
 			materializer := statesvc.NewMaterializer(
 				repository.NewStateVersionOutputRepository(db),
 				repository.NewStateVersionResourceRepository(db),
+				backfillCrypto,
 			)
 			type pendingRow struct {
 				ID        string

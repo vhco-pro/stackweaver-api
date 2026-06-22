@@ -163,16 +163,25 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		tokenExpiresAt = &parsed
 	}
 
-	// TODO: Encrypt access token and refresh token before storage
 	connection := &models.VCSConnection{
 		OrganizationID: org.ID,
 		Provider:       provider,
 		InstallationID: req.InstallationID,
-		AccessToken:    req.AccessToken,  // TODO: Encrypt
-		RefreshToken:   req.RefreshToken, // TODO: Encrypt
+		AccessToken:    req.AccessToken,
+		RefreshToken:   req.RefreshToken,
 		TokenExpiresAt: tokenExpiresAt,
 		AccountName:    req.AccountName,
 		AccountType:    req.AccountType,
+	}
+
+	// Encrypt tokens at rest (#95) before persisting. No-op when encryption is disabled.
+	if h.vcsRegistry != nil {
+		if err := h.vcsRegistry.EncryptTokens(connection); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt VCS tokens"}},
+			})
+			return
+		}
 	}
 
 	if err := h.vcsConnectionRepo.Create(connection); err != nil {

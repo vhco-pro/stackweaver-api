@@ -58,6 +58,19 @@ func SetupV2Routes(
 	// user belongs to. JWT/session identities pass straight through.
 	v2.Use(middleware.OrgResolutionWall(middleware.NewDBOrgResolver(db)))
 
+	// Shared AES-256-GCM service for encryption at rest (#95): state objects, sensitive
+	// output values, and VCS connection tokens all encrypt under the single ENCRYPTION_KEY.
+	// nil when no valid key is configured (dev/legacy) — every consumer treats nil as
+	// "store plaintext", preserving backward compatibility with pre-encryption data.
+	var atRestCrypto *crypto.CryptoService
+	if keyBytes := encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")); len(keyBytes) > 0 {
+		if cs, cErr := crypto.NewCryptoService(keyBytes); cErr == nil {
+			atRestCrypto = cs
+		} else {
+			logger.Warnf("Encryption at rest disabled: %v", cErr)
+		}
+	}
+
 	// VCS Provider Registry (multi-provider support)
 	azureDevOpsManager, err := vcs.NewAzureDevOpsManager()
 	if err != nil {
@@ -71,7 +84,7 @@ func SetupV2Routes(
 	}
 	vcsRegistry := vcs.NewProviderRegistry(githubAppManager, azureDevOpsManager, func(conn *models.VCSConnection) error {
 		return repository.NewVCSConnectionRepository(db).Update(conn)
-	})
+	}, atRestCrypto)
 
 	// Repositories
 	orgRepo := repository.NewOrganizationRepository(db)
@@ -399,7 +412,7 @@ func SetupV2Routes(
 	stateVersionRepo := repository.NewStateVersionRepository(db)
 	stateOutputRepo := repository.NewStateVersionOutputRepository(db)
 	stateResourceRepo := repository.NewStateVersionResourceRepository(db)
-	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo, stateOutputRepo)
+	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo, stateOutputRepo, atRestCrypto)
 
 	// Terraform Runs (TFE-compatible)
 	// TFE expects: /api/v2/runs/:id
@@ -471,11 +484,11 @@ func SetupV2Routes(
 	// Materializer keeps the state_version_outputs / state_version_resources tables in
 	// sync on every state write (State Storage Rework). Shared by the state service and
 	// the state-write handlers.
-	stateMaterializer := state.NewMaterializer(stateOutputRepo, stateResourceRepo)
+	stateMaterializer := state.NewMaterializer(stateOutputRepo, stateResourceRepo, atRestCrypto)
 
 	// State Service (for lock checking and state management)
 	// Use same storage client as configuration versions (state stored in same bucket, different paths)
-	stateService := state.NewService(stateVersionRepo, stateLockRepo, workspaceRepo, storageClient, stateMaterializer)
+	stateService := state.NewService(stateVersionRepo, stateLockRepo, workspaceRepo, storageClient, stateMaterializer, atRestCrypto)
 
 	// State Versions Handlers (reuse same storage client as configuration versions)
 	stateVersionHandler := terraformHandlers.NewStateVersionHandlerV2(stateVersionRepo, workspaceRepo, projectRepo, authService, rbacService, stateService, storageClient, stateOutputRepo, stateResourceRepo)
@@ -1090,6 +1103,8 @@ func SetupV2Routes(
 
 	// Self-hosted runner state uploads materialize outputs/resources too (State Storage Rework).
 	runnerAgentHandler.SetStateMaterializer(stateMaterializer)
+	// Route self-hosted-runner state reads/writes through the encryption-at-rest chokepoint (#95).
+	runnerAgentHandler.SetStateService(stateService)
 
 	runnerAgent := v2.Group("/runner")
 	{

@@ -21,6 +21,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/logbuffer"
@@ -43,6 +44,7 @@ type RunHandlerV2 struct {
 	rbacService       *rbac.Service
 	stateVersionRepo  *repository.StateVersionRepository
 	stateOutputRepo   *repository.StateVersionOutputRepository
+	cryptoSvc         *crypto.CryptoService // decrypts sensitive output values at rest (#95); nil = disabled
 }
 
 func NewRunHandlerV2(
@@ -59,6 +61,7 @@ func NewRunHandlerV2(
 	rbacService *rbac.Service,
 	stateVersionRepo *repository.StateVersionRepository,
 	stateOutputRepo *repository.StateVersionOutputRepository,
+	cryptoSvc *crypto.CryptoService,
 ) *RunHandlerV2 {
 	return &RunHandlerV2{
 		runRepo:           runRepo,
@@ -74,6 +77,7 @@ func NewRunHandlerV2(
 		rbacService:       rbacService,
 		stateVersionRepo:  stateVersionRepo,
 		stateOutputRepo:   stateOutputRepo,
+		cryptoSvc:         cryptoSvc,
 	}
 }
 
@@ -922,7 +926,7 @@ func (h *RunHandlerV2) GetOutputs(c *gin.Context) {
 		return
 	}
 
-	outputs := materializedOutputs(h.stateOutputRepo, version, true)
+	outputs := materializedOutputs(h.stateOutputRepo, version, true, h.cryptoSvc)
 	c.JSON(http.StatusOK, gin.H{"data": outputs})
 }
 
