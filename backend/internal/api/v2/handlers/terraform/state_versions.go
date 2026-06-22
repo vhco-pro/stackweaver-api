@@ -13,6 +13,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/state"
@@ -53,6 +54,15 @@ func NewStateVersionHandlerV2(
 		stateOutputRepo:   stateOutputRepo,
 		stateResourceRepo: stateResourceRepo,
 	}
+}
+
+// outputCrypto returns the encryption-at-rest service used to decrypt sensitive
+// materialized output values, or nil when encryption is disabled.
+func (h *StateVersionHandlerV2) outputCrypto() *crypto.CryptoService {
+	if h.stateService == nil {
+		return nil
+	}
+	return h.stateService.Crypto()
 }
 
 type CreateStateVersionRequestV2 struct {
@@ -428,7 +438,7 @@ func (h *StateVersionHandlerV2) Download(c *gin.Context) {
 	}
 
 	var stateJSON []byte
-	if h.storageClient == nil {
+	if h.stateService == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{"status": "500", "title": "Internal Server Error", "detail": "State storage unavailable"},
@@ -436,8 +446,9 @@ func (h *StateVersionHandlerV2) Download(c *gin.Context) {
 		})
 		return
 	}
-	key := fmt.Sprintf("workspaces/%s/state/%d.json", version.WorkspaceID, version.Version)
-	stateJSON, err = h.storageClient.Get(c.Request.Context(), key)
+	// Route through the state service so encrypted-at-rest state is decrypted to plain
+	// JSON for Terraform (legacy plain JSON is tolerated transparently).
+	stateJSON, err = h.stateService.GetStateObject(c.Request.Context(), version.WorkspaceID, version.Version)
 	if err != nil {
 		logger.Warnf("State version %s download: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -540,7 +551,7 @@ func (h *StateVersionHandlerV2) GetOutputs(c *gin.Context) {
 	}
 
 	// TFE-compatible: mask sensitive values (return nil); see current-state-version-outputs.
-	outputs := materializedOutputs(h.stateOutputRepo, version, true)
+	outputs := materializedOutputs(h.stateOutputRepo, version, true, h.outputCrypto())
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": outputs,
@@ -577,7 +588,7 @@ func (h *StateVersionHandlerV2) CurrentStateVersionOutputs(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "No state version for this workspace"}}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": materializedOutputs(h.stateOutputRepo, version, true)})
+	c.JSON(http.StatusOK, gin.H{"data": materializedOutputs(h.stateOutputRepo, version, true, h.outputCrypto())})
 }
 
 // CurrentStateVersionResources serves the resources of a workspace's current (latest) state
@@ -646,7 +657,9 @@ func buildMaterializedResources(rows []models.StateVersionResource) []gin.H {
 
 // materializedOutputs returns TFE-compatible outputs for a state version, read from the
 // materialized state_version_outputs table (State Storage Rework — the single source of truth).
-func materializedOutputs(repo *repository.StateVersionOutputRepository, version *models.StateVersion, maskSensitive bool) []gin.H {
+// cryptoSvc decrypts sensitive output values stored encrypted at rest (#95); pass nil when
+// encryption is disabled.
+func materializedOutputs(repo *repository.StateVersionOutputRepository, version *models.StateVersion, maskSensitive bool, cryptoSvc *crypto.CryptoService) []gin.H {
 	if repo == nil || version == nil {
 		return []gin.H{}
 	}
@@ -654,18 +667,31 @@ func materializedOutputs(repo *repository.StateVersionOutputRepository, version 
 	if err != nil {
 		return []gin.H{}
 	}
-	return buildMaterializedOutputs(outs, maskSensitive)
+	return buildMaterializedOutputs(outs, maskSensitive, cryptoSvc)
 }
 
 // buildMaterializedOutputs renders TFE state-version-outputs JSON:API objects from the
 // materialized rows. Value/Type are stored JSON-encoded, so they are decoded back into
-// real JSON values for the response. Sensitive values are nulled when maskSensitive.
-func buildMaterializedOutputs(outs []models.StateVersionOutput, maskSensitive bool) []gin.H {
+// real JSON values for the response. Values encrypted at rest (#95, sensitive outputs)
+// are decrypted with cryptoSvc first; if a value is encrypted and cannot be decrypted
+// (no key) it is nulled so ciphertext never leaks. Sensitive values are nulled when
+// maskSensitive.
+func buildMaterializedOutputs(outs []models.StateVersionOutput, maskSensitive bool, cryptoSvc *crypto.CryptoService) []gin.H {
 	result := []gin.H{}
 	for _, o := range outs {
+		raw := o.Value
+		if o.ValueEncrypted {
+			if cryptoSvc == nil {
+				raw = ""
+			} else if dec, err := cryptoSvc.Decrypt(o.Value); err == nil {
+				raw = dec
+			} else {
+				raw = "" // never emit ciphertext
+			}
+		}
 		var value any
-		if o.Value != "" {
-			_ = json.Unmarshal([]byte(o.Value), &value)
+		if raw != "" {
+			_ = json.Unmarshal([]byte(raw), &value)
 		}
 		if maskSensitive && o.Sensitive {
 			value = nil
@@ -839,9 +865,9 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	storageKey := fmt.Sprintf("workspaces/%s/state/%d.json", workspaceID, nextVersion)
-	if h.storageClient != nil {
-		if err := h.storageClient.Put(c.Request.Context(), storageKey, stateJSON); err != nil {
+	// Route through the state service so state is encrypted at rest before storage.
+	if h.stateService != nil {
+		if err := h.stateService.PutStateObject(c.Request.Context(), workspaceID, nextVersion, stateJSON); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"errors": []gin.H{
 					{

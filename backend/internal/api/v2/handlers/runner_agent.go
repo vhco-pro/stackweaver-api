@@ -53,6 +53,9 @@ type RunnerAgentHandler struct {
 	db               *gorm.DB
 	// State materialization (outputs/resources) — optional, injected after creation
 	stateMaterializer *state.Materializer
+	// State object access (encryption at rest) — optional, injected after creation.
+	// Routes self-hosted-runner state reads/writes through the encrypt/decrypt chokepoint.
+	stateService *state.Service
 }
 
 // NewRunnerAgentHandler creates a new runner agent handler
@@ -123,6 +126,13 @@ func (h *RunnerAgentHandler) SetOIDCServices(
 // Rework). Optional: when unset, state uploads simply skip materialization.
 func (h *RunnerAgentHandler) SetStateMaterializer(m *state.Materializer) {
 	h.stateMaterializer = m
+}
+
+// SetStateService injects the state service so self-hosted-runner state reads/writes
+// route through the encryption-at-rest chokepoint (#95). Optional: when unset, state
+// objects are read/written directly via the storage client (legacy/dev behaviour).
+func (h *RunnerAgentHandler) SetStateService(s *state.Service) {
+	h.stateService = s
 }
 
 // RegisterRequest is the request body for runner registration
@@ -1634,15 +1644,15 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	// TFE-compatible: Include latest state so the self-hosted runner can restore it.
 	// Self-hosted runners use fresh temp dirs per job, so they need the current state
 	// to know about existing resources and avoid re-creating them.
-	if h.storageClient != nil {
+	if h.stateService != nil {
 		// Find the latest state version for this workspace
 		var latestState models.StateVersion
 		if err := h.db.Where("workspace_id = ?", run.WorkspaceID).
 			Order("version DESC").First(&latestState).Error; err == nil {
-			// Read state from object storage (the authoritative copy).
-			stateKey := fmt.Sprintf("workspaces/%s/state/%d.json", run.WorkspaceID, latestState.Version)
+			// Read state from object storage (the authoritative copy), decrypting at rest
+			// state to plaintext before base64-encoding it into the job payload.
 			ctx := context.Background()
-			if stateData, err := h.storageClient.Get(ctx, stateKey); err == nil && len(stateData) > 0 {
+			if stateData, err := h.stateService.GetStateObject(ctx, run.WorkspaceID, latestState.Version); err == nil && len(stateData) > 0 {
 				response["state_json"] = base64.StdEncoding.EncodeToString(stateData)
 				logger.Infof("Including state version %d (%d bytes) in artifacts for run %s", latestState.Version, len(stateData), runID)
 			}
@@ -1932,9 +1942,9 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 	// so this Put must succeed before we record the version). Writing it before the
 	// DB row means a failed Put returns 500 without creating a row, so the runner's
 	// retry recomputes the same nextVersion instead of producing a duplicate version.
-	if h.storageClient != nil {
-		key := fmt.Sprintf("workspaces/%s/state/%d.json", run.WorkspaceID, nextVersion)
-		if err := h.storageClient.Put(c.Request.Context(), key, stateData); err != nil {
+	if h.stateService != nil {
+		// Encrypt at rest before persisting (the state service owns the crypto + key format).
+		if err := h.stateService.PutStateObject(c.Request.Context(), run.WorkspaceID, nextVersion, stateData); err != nil {
 			logger.Errorf("Failed to save state to object storage for run %s: %v", jobIDStr, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to persist state to object storage"}}})
 			return
