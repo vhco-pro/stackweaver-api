@@ -9,60 +9,27 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 )
 
-func TestExtractOutputsFromStateData_Nil(t *testing.T) {
-	result := extractOutputsFromStateData(nil, false)
-	if len(result) != 0 {
-		t.Errorf("expected 0 outputs for nil version, got %d", len(result))
+// buildMaterializedOutputs renders TFE state-version-outputs from the materialized rows
+// (the State Storage Rework single source of truth). Value/Type are stored JSON-encoded
+// and decoded back into real JSON values for the response. Extraction from raw state is
+// covered by core/services/state extractor tests.
+
+func TestBuildMaterializedOutputs_Empty(t *testing.T) {
+	if result := buildMaterializedOutputs(nil, false); len(result) != 0 {
+		t.Errorf("expected 0 outputs for nil rows, got %d", len(result))
 	}
 }
 
-func TestExtractOutputsFromStateData_NilStateData(t *testing.T) {
-	v := &models.StateVersion{
-		ID:        "sv-test",
-		StateData: nil,
+func TestBuildMaterializedOutputs_ValueAndType(t *testing.T) {
+	rows := []models.StateVersionOutput{
+		{ID: "wsout-vpc", Name: "vpc_id", Value: `"vpc-abc123"`, Type: `"string"`},
+		{ID: "wsout-cnt", Name: "instance_count", Value: `3`, Type: `"number"`},
 	}
-	result := extractOutputsFromStateData(v, false)
-	if len(result) != 0 {
-		t.Errorf("expected 0 outputs for nil state data, got %d", len(result))
-	}
-}
-
-func TestExtractOutputsFromStateData_NoOutputs(t *testing.T) {
-	v := &models.StateVersion{
-		ID: "sv-test",
-		StateData: models.StateData{
-			"version": float64(4),
-		},
-	}
-	result := extractOutputsFromStateData(v, false)
-	if len(result) != 0 {
-		t.Errorf("expected 0 outputs when no outputs key, got %d", len(result))
-	}
-}
-
-func TestExtractOutputsFromStateData_BasicOutputs(t *testing.T) {
-	v := &models.StateVersion{
-		ID: "sv-test123",
-		StateData: models.StateData{
-			"outputs": map[string]interface{}{
-				"vpc_id": map[string]interface{}{
-					"value": "vpc-abc123",
-					"type":  "string",
-				},
-				"instance_count": map[string]interface{}{
-					"value": float64(3),
-					"type":  "number",
-				},
-			},
-		},
-	}
-
-	result := extractOutputsFromStateData(v, false)
+	result := buildMaterializedOutputs(rows, false)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 outputs, got %d", len(result))
 	}
 
-	// Find vpc_id output — attributes is gin.H
 	found := false
 	for _, output := range result {
 		attrs, ok := output["attributes"].(gin.H)
@@ -72,13 +39,16 @@ func TestExtractOutputsFromStateData_BasicOutputs(t *testing.T) {
 		if attrs["name"] == "vpc_id" {
 			found = true
 			if attrs["value"] != "vpc-abc123" {
-				t.Errorf("vpc_id value = %v, want vpc-abc123", attrs["value"])
+				t.Errorf("vpc_id value = %v, want vpc-abc123 (decoded)", attrs["value"])
 			}
 			if attrs["type"] != "string" {
 				t.Errorf("vpc_id type = %v, want string", attrs["type"])
 			}
 			if output["type"] != "state-version-outputs" {
 				t.Errorf("output type = %v, want state-version-outputs", output["type"])
+			}
+			if output["id"] != "wsout-vpc" {
+				t.Errorf("output id = %v, want wsout-vpc", output["id"])
 			}
 		}
 	}
@@ -87,32 +57,29 @@ func TestExtractOutputsFromStateData_BasicOutputs(t *testing.T) {
 	}
 }
 
-func TestExtractOutputsFromStateData_SensitiveMasked(t *testing.T) {
-	v := &models.StateVersion{
-		ID: "sv-sens",
-		StateData: models.StateData{
-			"outputs": map[string]interface{}{
-				"db_password": map[string]interface{}{
-					"value":     "secret123",
-					"type":      "string",
-					"sensitive": true,
-				},
-				"public_ip": map[string]interface{}{
-					"value": "10.0.0.1",
-					"type":  "string",
-				},
-			},
-		},
+func TestBuildMaterializedOutputs_NumberDecoded(t *testing.T) {
+	result := buildMaterializedOutputs([]models.StateVersionOutput{
+		{ID: "wsout-n", Name: "count", Value: `3`},
+	}, false)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(result))
 	}
+	attrs := result[0]["attributes"].(gin.H)
+	// JSON numbers decode to float64.
+	if v, ok := attrs["value"].(float64); !ok || v != 3 {
+		t.Errorf("count value = %v (%T), want float64(3)", attrs["value"], attrs["value"])
+	}
+}
 
-	// With masking enabled
-	result := extractOutputsFromStateData(v, true)
+func TestBuildMaterializedOutputs_SensitiveMasked(t *testing.T) {
+	rows := []models.StateVersionOutput{
+		{ID: "wsout-pw", Name: "db_password", Value: `"secret123"`, Type: `"string"`, Sensitive: true},
+		{ID: "wsout-ip", Name: "public_ip", Value: `"10.0.0.1"`, Type: `"string"`},
+	}
+	result := buildMaterializedOutputs(rows, true)
 
 	for _, output := range result {
-		attrs, ok := output["attributes"].(gin.H)
-		if !ok {
-			continue
-		}
+		attrs := output["attributes"].(gin.H)
 		if attrs["name"] == "db_password" {
 			if attrs["value"] != nil {
 				t.Errorf("sensitive value should be nil when masked, got %v", attrs["value"])
@@ -121,81 +88,21 @@ func TestExtractOutputsFromStateData_SensitiveMasked(t *testing.T) {
 				t.Errorf("sensitive flag should be true, got %v", attrs["sensitive"])
 			}
 		}
-		if attrs["name"] == "public_ip" {
-			if attrs["value"] != "10.0.0.1" {
-				t.Errorf("non-sensitive value should be preserved, got %v", attrs["value"])
-			}
+		if attrs["name"] == "public_ip" && attrs["value"] != "10.0.0.1" {
+			t.Errorf("non-sensitive value should be preserved, got %v", attrs["value"])
 		}
 	}
 }
 
-func TestExtractOutputsFromStateData_SensitiveNotMasked(t *testing.T) {
-	v := &models.StateVersion{
-		ID: "sv-nomask",
-		StateData: models.StateData{
-			"outputs": map[string]interface{}{
-				"db_password": map[string]interface{}{
-					"value":     "secret123",
-					"sensitive": true,
-				},
-			},
-		},
-	}
-
-	// With masking disabled
-	result := extractOutputsFromStateData(v, false)
+func TestBuildMaterializedOutputs_SensitiveNotMasked(t *testing.T) {
+	result := buildMaterializedOutputs([]models.StateVersionOutput{
+		{ID: "wsout-pw", Name: "db_password", Value: `"secret123"`, Sensitive: true},
+	}, false)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 output, got %d", len(result))
 	}
-
-	attrs, ok := result[0]["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes not found")
-	}
+	attrs := result[0]["attributes"].(gin.H)
 	if attrs["value"] != "secret123" {
 		t.Errorf("value should be visible when not masked, got %v", attrs["value"])
-	}
-}
-
-func TestExtractOutputsFromStateData_OutputID(t *testing.T) {
-	v := &models.StateVersion{
-		ID: "sv-id-test",
-		StateData: models.StateData{
-			"outputs": map[string]interface{}{
-				"my_output": map[string]interface{}{
-					"value": "test",
-				},
-			},
-		},
-	}
-
-	result := extractOutputsFromStateData(v, false)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 output, got %d", len(result))
-	}
-
-	expectedID := "sv-id-test-my_output"
-	if result[0]["id"] != expectedID {
-		t.Errorf("output id = %v, want %v", result[0]["id"], expectedID)
-	}
-}
-
-func TestExtractOutputsFromStateData_InvalidOutputEntries(t *testing.T) {
-	v := &models.StateVersion{
-		ID: "sv-invalid",
-		StateData: models.StateData{
-			"outputs": map[string]interface{}{
-				"valid": map[string]interface{}{
-					"value": "ok",
-				},
-				"invalid": "not-a-map",
-			},
-		},
-	}
-
-	result := extractOutputsFromStateData(v, false)
-	// Should only get the valid output, skip the invalid one
-	if len(result) != 1 {
-		t.Fatalf("expected 1 output (skip invalid), got %d", len(result))
 	}
 }

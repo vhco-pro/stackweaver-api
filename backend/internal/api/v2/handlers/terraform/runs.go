@@ -42,6 +42,7 @@ type RunHandlerV2 struct {
 	phaseStateRepo    *repository.RunPhaseStateRepository
 	rbacService       *rbac.Service
 	stateVersionRepo  *repository.StateVersionRepository
+	stateOutputRepo   *repository.StateVersionOutputRepository
 }
 
 func NewRunHandlerV2(
@@ -57,6 +58,7 @@ func NewRunHandlerV2(
 	phaseStateRepo *repository.RunPhaseStateRepository,
 	rbacService *rbac.Service,
 	stateVersionRepo *repository.StateVersionRepository,
+	stateOutputRepo *repository.StateVersionOutputRepository,
 ) *RunHandlerV2 {
 	return &RunHandlerV2{
 		runRepo:           runRepo,
@@ -71,6 +73,7 @@ func NewRunHandlerV2(
 		phaseStateRepo:    phaseStateRepo,
 		rbacService:       rbacService,
 		stateVersionRepo:  stateVersionRepo,
+		stateOutputRepo:   stateOutputRepo,
 	}
 }
 
@@ -919,7 +922,7 @@ func (h *RunHandlerV2) GetOutputs(c *gin.Context) {
 		return
 	}
 
-	outputs := extractOutputsFromStateData(version, true)
+	outputs := materializedOutputs(h.stateOutputRepo, version, true)
 	c.JSON(http.StatusOK, gin.H{"data": outputs})
 }
 

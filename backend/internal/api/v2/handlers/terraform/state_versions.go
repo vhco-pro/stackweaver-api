@@ -20,13 +20,15 @@ import (
 )
 
 type StateVersionHandlerV2 struct {
-	stateVersionRepo *repository.StateVersionRepository
-	workspaceRepo    *repository.WorkspaceRepository
-	projectRepo      *repository.ProjectRepository
-	authService      *auth.Service
-	rbacService      *rbac.Service
-	stateService     *state.Service
-	storageClient    storage.Client
+	stateVersionRepo  *repository.StateVersionRepository
+	workspaceRepo     *repository.WorkspaceRepository
+	projectRepo       *repository.ProjectRepository
+	authService       *auth.Service
+	rbacService       *rbac.Service
+	stateService      *state.Service
+	storageClient     storage.Client
+	stateOutputRepo   *repository.StateVersionOutputRepository
+	stateResourceRepo *repository.StateVersionResourceRepository
 }
 
 func NewStateVersionHandlerV2(
@@ -37,15 +39,19 @@ func NewStateVersionHandlerV2(
 	rbacService *rbac.Service,
 	stateService *state.Service,
 	storageClient storage.Client,
+	stateOutputRepo *repository.StateVersionOutputRepository,
+	stateResourceRepo *repository.StateVersionResourceRepository,
 ) *StateVersionHandlerV2 {
 	return &StateVersionHandlerV2{
-		stateVersionRepo: stateVersionRepo,
-		workspaceRepo:    workspaceRepo,
-		projectRepo:      projectRepo,
-		authService:      authService,
-		rbacService:      rbacService,
-		stateService:     stateService,
-		storageClient:    storageClient,
+		stateVersionRepo:  stateVersionRepo,
+		workspaceRepo:     workspaceRepo,
+		projectRepo:       projectRepo,
+		authService:       authService,
+		rbacService:       rbacService,
+		stateService:      stateService,
+		storageClient:     storageClient,
+		stateOutputRepo:   stateOutputRepo,
+		stateResourceRepo: stateResourceRepo,
 	}
 }
 
@@ -422,13 +428,7 @@ func (h *StateVersionHandlerV2) Download(c *gin.Context) {
 	}
 
 	var stateJSON []byte
-	switch {
-	case len(version.StateData) > 0:
-		stateJSON, err = json.Marshal(version.StateData)
-	case h.storageClient != nil:
-		key := fmt.Sprintf("workspaces/%s/state/%d.json", version.WorkspaceID, version.Version)
-		stateJSON, err = h.storageClient.Get(c.Request.Context(), key)
-	default:
+	if h.storageClient == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{"status": "500", "title": "Internal Server Error", "detail": "State storage unavailable"},
@@ -436,6 +436,8 @@ func (h *StateVersionHandlerV2) Download(c *gin.Context) {
 		})
 		return
 	}
+	key := fmt.Sprintf("workspaces/%s/state/%d.json", version.WorkspaceID, version.Version)
+	stateJSON, err = h.storageClient.Get(c.Request.Context(), key)
 	if err != nil {
 		logger.Warnf("State version %s download: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -538,50 +540,150 @@ func (h *StateVersionHandlerV2) GetOutputs(c *gin.Context) {
 	}
 
 	// TFE-compatible: mask sensitive values (return nil); see current-state-version-outputs.
-	outputs := extractOutputsFromStateData(version, true)
+	outputs := materializedOutputs(h.stateOutputRepo, version, true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": outputs,
 	})
 }
 
-// extractOutputsFromStateData builds the TFE-compatible outputs array from state.
-// When maskSensitive is true, sensitive output values are set to nil (TFE behaviour for list endpoints).
-func extractOutputsFromStateData(version *models.StateVersion, maskSensitive bool) []gin.H {
-	outputs := []gin.H{}
-	if version == nil || version.StateData == nil {
-		return outputs
+// CurrentStateVersionOutputs serves the outputs of a workspace's current (latest) state
+// version from the materialized table (TFE current-state-version-outputs parity). Gated by
+// the lower "read-outputs" permission so output values can be read without state-read access.
+// GET /api/v2/workspaces/:id/current-state-version-outputs
+func (h *StateVersionHandlerV2) CurrentStateVersionOutputs(c *gin.Context) {
+	workspaceID := c.Param("id")
+	if workspaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid workspace ID"}}})
+		return
 	}
-	stateData, ok := version.StateData["outputs"].(map[string]interface{})
-	if !ok {
-		return outputs
+	workspace, err := h.workspaceRepo.GetByID(workspaceID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Workspace not found"}}})
+		return
 	}
-	for name, outputData := range stateData {
-		outputMap, ok := outputData.(map[string]interface{})
-		if !ok {
-			continue
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		return
+	}
+	ok, err := h.rbacService.CheckStateVersionPermission(c.Request.Context(), user.ID, workspace.ID, workspace.ProjectID, "read-outputs")
+	if err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "Insufficient permissions to view outputs"}}})
+		return
+	}
+	version, err := h.stateVersionRepo.GetLatest(workspace.ID)
+	if err != nil || version == nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "No state version for this workspace"}}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": materializedOutputs(h.stateOutputRepo, version, true)})
+}
+
+// CurrentStateVersionResources serves the resources of a workspace's current (latest) state
+// version from the materialized table. Optional ?mode=managed|data filters; default all.
+// Backs the workspace Resources and Data Sources tabs without parsing the raw state blob.
+// GET /api/v2/workspaces/:id/current-state-version-resources
+func (h *StateVersionHandlerV2) CurrentStateVersionResources(c *gin.Context) {
+	workspaceID := c.Param("id")
+	if workspaceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid workspace ID"}}})
+		return
+	}
+	workspace, err := h.workspaceRepo.GetByID(workspaceID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Workspace not found"}}})
+		return
+	}
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		return
+	}
+	ok, err := h.rbacService.CheckStateVersionPermission(c.Request.Context(), user.ID, workspace.ID, workspace.ProjectID, "read")
+	if err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "Insufficient permissions to view resources"}}})
+		return
+	}
+	version, err := h.stateVersionRepo.GetLatest(workspace.ID)
+	if err != nil || version == nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "No state version for this workspace"}}})
+		return
+	}
+	mode := c.Query("mode")
+	resources := []gin.H{}
+	if h.stateResourceRepo != nil {
+		rows, listErr := h.stateResourceRepo.ListByStateVersion(version.ID, mode)
+		if listErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list resources"}}})
+			return
 		}
-		outputID := fmt.Sprintf("%s-%s", version.ID, name)
-		value := outputMap["value"]
-		if maskSensitive {
-			if sens, ok := outputMap["sensitive"].(bool); ok && sens {
-				value = nil
+		resources = buildMaterializedResources(rows)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": resources})
+}
+
+// buildMaterializedResources renders state-version-resources JSON:API objects from rows.
+func buildMaterializedResources(rows []models.StateVersionResource) []gin.H {
+	result := []gin.H{}
+	for _, r := range rows {
+		result = append(result, gin.H{
+			"id":   r.ID,
+			"type": "state-version-resources",
+			"attributes": gin.H{
+				"address":        r.Address,
+				"mode":           r.Mode,
+				"type":           r.Type,
+				"name":           r.Name,
+				"provider":       r.Provider,
+				"module":         r.Module,
+				"instance-count": r.InstanceCount,
+			},
+		})
+	}
+	return result
+}
+
+// materializedOutputs returns TFE-compatible outputs for a state version, read from the
+// materialized state_version_outputs table (State Storage Rework — the single source of truth).
+func materializedOutputs(repo *repository.StateVersionOutputRepository, version *models.StateVersion, maskSensitive bool) []gin.H {
+	if repo == nil || version == nil {
+		return []gin.H{}
+	}
+	outs, err := repo.ListByStateVersion(version.ID)
+	if err != nil {
+		return []gin.H{}
+	}
+	return buildMaterializedOutputs(outs, maskSensitive)
+}
+
+// buildMaterializedOutputs renders TFE state-version-outputs JSON:API objects from the
+// materialized rows. Value/Type are stored JSON-encoded, so they are decoded back into
+// real JSON values for the response. Sensitive values are nulled when maskSensitive.
+func buildMaterializedOutputs(outs []models.StateVersionOutput, maskSensitive bool) []gin.H {
+	result := []gin.H{}
+	for _, o := range outs {
+		var value any
+		if o.Value != "" {
+			_ = json.Unmarshal([]byte(o.Value), &value)
+		}
+		if maskSensitive && o.Sensitive {
+			value = nil
+		}
+		attrs := gin.H{"name": o.Name, "value": value, "sensitive": o.Sensitive}
+		if o.Type != "" {
+			var t any
+			if err := json.Unmarshal([]byte(o.Type), &t); err == nil {
+				attrs["type"] = t
 			}
 		}
-		attrs := gin.H{"name": name, "value": value}
-		if outputType, hasType := outputMap["type"]; hasType {
-			attrs["type"] = outputType
-		}
-		if sensitive, hasSensitive := outputMap["sensitive"]; hasSensitive {
-			attrs["sensitive"] = sensitive
-		}
-		outputs = append(outputs, gin.H{
-			"id":         outputID,
+		result = append(result, gin.H{
+			"id":         o.ID,
 			"type":       "state-version-outputs",
 			"attributes": attrs,
 		})
 	}
-	return outputs
+	return result
 }
 
 // Create creates a new state version for a workspace (TFE-compatible)
@@ -758,7 +860,6 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 	stateVersion := &models.StateVersion{
 		WorkspaceID: workspaceID,
 		Version:     nextVersion,
-		StateData:   models.StateData{}, // Empty - state is in MinIO
 		Serial:      req.Serial,
 		Lineage:     req.Lineage,
 	}
@@ -774,6 +875,14 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// Materialize outputs/resources from the pushed state (State Storage Rework).
+	// Best-effort: the raw state is already persisted in object storage authoritatively.
+	if h.stateService != nil {
+		if err := h.stateService.Materialize(stateVersion.ID, req.StateData); err != nil {
+			logger.Warnf("Failed to materialize outputs/resources for state version %s: %v", stateVersion.ID, err)
+		}
 	}
 
 	// TFE-compatible response format

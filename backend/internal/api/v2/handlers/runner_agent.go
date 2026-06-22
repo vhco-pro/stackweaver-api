@@ -22,6 +22,7 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/oidc"
+	"github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/storage"
@@ -50,6 +51,8 @@ type RunnerAgentHandler struct {
 	azureOIDCRepo    *repository.AzureOIDCConfigurationRepository
 	oidcTokenService *oidc.TokenService
 	db               *gorm.DB
+	// State materialization (outputs/resources) — optional, injected after creation
+	stateMaterializer *state.Materializer
 }
 
 // NewRunnerAgentHandler creates a new runner agent handler
@@ -114,6 +117,12 @@ func (h *RunnerAgentHandler) SetOIDCServices(
 ) {
 	h.azureOIDCRepo = azureOIDCRepo
 	h.oidcTokenService = oidcTokenService
+}
+
+// SetStateMaterializer injects the state outputs/resources materializer (State Storage
+// Rework). Optional: when unset, state uploads simply skip materialization.
+func (h *RunnerAgentHandler) SetStateMaterializer(m *state.Materializer) {
+	h.stateMaterializer = m
 }
 
 // RegisterRequest is the request body for runner registration
@@ -1630,18 +1639,12 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		var latestState models.StateVersion
 		if err := h.db.Where("workspace_id = ?", run.WorkspaceID).
 			Order("version DESC").First(&latestState).Error; err == nil {
-			// Try to get state from object storage first (more complete)
+			// Read state from object storage (the authoritative copy).
 			stateKey := fmt.Sprintf("workspaces/%s/state/%d.json", run.WorkspaceID, latestState.Version)
 			ctx := context.Background()
 			if stateData, err := h.storageClient.Get(ctx, stateKey); err == nil && len(stateData) > 0 {
 				response["state_json"] = base64.StdEncoding.EncodeToString(stateData)
 				logger.Infof("Including state version %d (%d bytes) in artifacts for run %s", latestState.Version, len(stateData), runID)
-			} else if latestState.StateData != nil {
-				// Fallback to state data from DB
-				if stateJSON, err := json.Marshal(latestState.StateData); err == nil {
-					response["state_json"] = base64.StdEncoding.EncodeToString(stateJSON)
-					logger.Infof("Including state version %d from DB in artifacts for run %s", latestState.Version, runID)
-				}
 			}
 		}
 	}
@@ -1924,13 +1927,26 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		}
 	}
 
+	// Persist raw state to object storage FIRST — it is the authoritative copy
+	// (the State Storage Rework makes object storage the single source of truth,
+	// so this Put must succeed before we record the version). Writing it before the
+	// DB row means a failed Put returns 500 without creating a row, so the runner's
+	// retry recomputes the same nextVersion instead of producing a duplicate version.
+	if h.storageClient != nil {
+		key := fmt.Sprintf("workspaces/%s/state/%d.json", run.WorkspaceID, nextVersion)
+		if err := h.storageClient.Put(c.Request.Context(), key, stateData); err != nil {
+			logger.Errorf("Failed to save state to object storage for run %s: %v", jobIDStr, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to persist state to object storage"}}})
+			return
+		}
+	}
+
 	// Create state version record
 	runID := jobIDStr
 	stateVersion := models.StateVersion{
 		WorkspaceID: run.WorkspaceID,
 		RunID:       &runID,
 		Version:     nextVersion,
-		StateData:   models.StateData(stateJSON),
 		Serial:      serial,
 		Lineage:     lineage,
 		CommitHash:  commitHash,
@@ -1943,13 +1959,10 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		return
 	}
 
-	// Also save to object storage (MinIO)
-	if h.storageClient != nil {
-		key := fmt.Sprintf("workspaces/%s/state/%d.json", run.WorkspaceID, nextVersion)
-		if err := h.storageClient.Put(c.Request.Context(), key, stateData); err != nil {
-			logger.Warnf("Failed to save state to object storage for run %s: %v", jobIDStr, err)
-			// Don't fail the request - state is already in DB
-		}
+	// Materialize outputs/resources for fast serving (State Storage Rework).
+	// Best-effort: the raw state is already persisted in object storage authoritatively.
+	if err := h.stateMaterializer.Materialize(stateVersion.ID, stateJSON); err != nil {
+		logger.Warnf("Failed to materialize outputs/resources for state version %s: %v", stateVersion.ID, err)
 	}
 
 	logger.Infof("State version %d saved for run %s (workspace %s, serial=%v)", nextVersion, jobIDStr, run.WorkspaceID, serial)

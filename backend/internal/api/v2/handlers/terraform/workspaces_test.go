@@ -11,6 +11,25 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 )
 
+func TestFormatWorkspaceResponse_ResourceCount(t *testing.T) {
+	// resource-count reflects the denormalized workspace.ResourceCount (maintained by the
+	// state materializer on every state write), not a hardcoded 0.
+	ws := &models.Workspace{ID: "ws-rc", Name: "rc", ResourceCount: 7}
+	attrs, ok := formatWorkspaceResponse(ws)["attributes"].(gin.H)
+	if !ok {
+		t.Fatal("attributes is not gin.H")
+	}
+	if attrs["resource-count"] != 7 {
+		t.Errorf("resource-count = %v, want 7", attrs["resource-count"])
+	}
+
+	// Default (no resources) is 0.
+	attrs0 := formatWorkspaceResponse(&models.Workspace{ID: "ws-z", Name: "z"})["attributes"].(gin.H)
+	if attrs0["resource-count"] != 0 {
+		t.Errorf("resource-count = %v, want 0", attrs0["resource-count"])
+	}
+}
+
 func TestFormatWorkspaceResponse_Basic(t *testing.T) {
 	ws := &models.Workspace{
 		ID:               "ws-abcdef1234567890",

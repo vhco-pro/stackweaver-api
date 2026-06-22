@@ -125,6 +125,8 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/workspaces/:id/state-versions":                                      resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/state-versions/remove-resource":                      resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/current-state-version":                               resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/current-state-version-outputs":                       resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/current-state-version-resources":                     resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/vars":                                                resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/vars/:variable_id":                                   resource("variable_id", rVariable),
 	"/api/v2/workspaces/:id/platform-variables":                                  resource("id", rWorkspace),
