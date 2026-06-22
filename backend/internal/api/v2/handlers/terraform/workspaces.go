@@ -507,7 +507,7 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 	attributes["environment"] = "default" // TFE default
 	attributes["file-triggers-enabled"] = workspace.FileTriggersEnabled
 	attributes["global-remote-state"] = workspace.GlobalRemoteState
-	attributes["resource-count"] = 0
+	attributes["resource-count"] = workspace.ResourceCount
 	if workspace.SourceName != "" {
 		attributes["source-name"] = workspace.SourceName
 	}

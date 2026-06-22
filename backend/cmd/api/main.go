@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,6 +34,7 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/oidc"
+	statesvc "github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"gopkg.in/yaml.v3"
@@ -187,6 +189,8 @@ func main() {
 		&models.VariableSetWorkspace{},
 		&models.VariableSetProject{},
 		&models.StateVersion{},
+		&models.StateVersionOutput{},
+		&models.StateVersionResource{},
 		&models.StateLock{},
 		&models.AuditLog{},
 		&models.APIKey{},
@@ -292,6 +296,87 @@ func main() {
 	} else if err := db.Exec("UPDATE ansible_job_templates SET schedule_enabled = false WHERE schedule_enabled = true").Error; err != nil {
 		logger.Warnf("Failed to clear embedded template schedule flags: %v", err)
 	}
+	// State Storage Rework: object storage is now the single source of truth for raw state.
+	// The legacy state_versions.state_data jsonb column is dropped. On a deployment upgrading
+	// from an older release the column still exists with data, so FIRST materialize any
+	// not-yet-materialized history from it (raw SQL — the model no longer maps the column),
+	// THEN drop it. Guarded by column existence so this is a no-op on already-migrated DBs.
+	{
+		var hasStateDataCol bool
+		if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'state_versions' AND column_name = 'state_data')").Scan(&hasStateDataCol).Error; err != nil {
+			hasStateDataCol = false // fail safe: skip on uncertainty
+		}
+		if hasStateDataCol {
+			materializer := statesvc.NewMaterializer(
+				repository.NewStateVersionOutputRepository(db),
+				repository.NewStateVersionResourceRepository(db),
+			)
+			type pendingRow struct {
+				ID        string
+				StateData []byte
+			}
+			var rows []pendingRow
+			if err := db.Raw(`SELECT id, state_data FROM state_versions
+				WHERE state_data IS NOT NULL AND state_data::text NOT IN ('null', '{}')
+				  AND NOT EXISTS (SELECT 1 FROM state_version_resources r WHERE r.state_version_id = state_versions.id)
+				  AND NOT EXISTS (SELECT 1 FROM state_version_outputs o WHERE o.state_version_id = state_versions.id)`).Scan(&rows).Error; err != nil {
+				logger.Warnf("Failed to query state versions for materialization backfill: %v", err)
+			} else if len(rows) > 0 {
+				backfilled := 0
+				for _, row := range rows {
+					var sd map[string]any
+					if err := json.Unmarshal(row.StateData, &sd); err != nil {
+						logger.Warnf("Backfill: failed to parse state_data for %s: %v", row.ID, err)
+						continue
+					}
+					if err := materializer.Materialize(row.ID, sd); err != nil {
+						logger.Warnf("Backfill: failed to materialize state version %s: %v", row.ID, err)
+						continue
+					}
+					backfilled++
+				}
+				logger.Infof("Backfilled materialized outputs/resources for %d state version(s)", backfilled)
+			}
+			// Drop the duplicate column now that history is materialized.
+			if err := db.Exec("ALTER TABLE state_versions DROP COLUMN IF EXISTS state_data").Error; err != nil {
+				logger.Warnf("Failed to drop state_versions.state_data column: %v", err)
+			} else {
+				logger.Info("Dropped legacy state_versions.state_data column (state is in object storage)")
+			}
+		}
+	}
+
+	// Initialize the denormalized workspace.resource_count from each workspace's latest
+	// state version's materialized managed resources. Self-healing guard: runs only when a
+	// workspace has materialized managed resources but a zero count (i.e. not yet initialized),
+	// so it fires once after the resource_count column is added and is a no-op thereafter.
+	// Live state writes keep the count current via the materializer (SyncWorkspaceResourceCount).
+	{
+		var needsResourceCountInit bool
+		if err := db.Raw(`SELECT EXISTS (
+			SELECT 1 FROM workspaces w
+			WHERE w.resource_count = 0
+			  AND EXISTS (SELECT 1 FROM state_versions sv
+			              JOIN state_version_resources r ON r.state_version_id = sv.id
+			              WHERE sv.workspace_id = w.id AND r.mode = 'managed')
+		)`).Scan(&needsResourceCountInit).Error; err != nil {
+			needsResourceCountInit = false // fail safe
+		}
+		if needsResourceCountInit {
+			if err := db.Exec(`
+				UPDATE workspaces w SET resource_count = COALESCE((
+					SELECT count(*) FROM state_version_resources r
+					JOIN state_versions sv ON r.state_version_id = sv.id
+					WHERE sv.workspace_id = w.id AND r.mode = 'managed'
+					  AND sv.version = (SELECT max(version) FROM state_versions sv2 WHERE sv2.workspace_id = w.id)
+				), 0)`).Error; err != nil {
+				logger.Warnf("Failed to initialize workspace resource counts: %v", err)
+			} else {
+				logger.Info("Initialized workspace resource_count from materialized resources")
+			}
+		}
+	}
+
 	logger.Info("Database migrations completed successfully")
 
 	// Seed official Terraform versions (like TFE's built-in version catalog)

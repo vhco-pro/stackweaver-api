@@ -397,7 +397,9 @@ func SetupV2Routes(
 	// Add VCS connection repository and GitHub app manager for automatic configuration version creation from VCS
 	phaseStateRepo := repository.NewRunPhaseStateRepository(db)
 	stateVersionRepo := repository.NewStateVersionRepository(db)
-	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo)
+	stateOutputRepo := repository.NewStateVersionOutputRepository(db)
+	stateResourceRepo := repository.NewStateVersionResourceRepository(db)
+	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo, stateOutputRepo)
 
 	// Terraform Runs (TFE-compatible)
 	// TFE expects: /api/v2/runs/:id
@@ -462,16 +464,21 @@ func SetupV2Routes(
 	uploadEndpoint.PUT("/:id/upload", configVersionHandler.Upload)
 
 	// Repositories for state versions, variables, and tokens
-	// stateVersionRepo created earlier for runHandler
+	// stateVersionRepo, stateOutputRepo, stateResourceRepo created earlier for runHandler
 	stateLockRepo := repository.NewStateLockRepository(db)
 	variableRepo := repository.NewVariableRepository(db)
 
+	// Materializer keeps the state_version_outputs / state_version_resources tables in
+	// sync on every state write (State Storage Rework). Shared by the state service and
+	// the state-write handlers.
+	stateMaterializer := state.NewMaterializer(stateOutputRepo, stateResourceRepo)
+
 	// State Service (for lock checking and state management)
 	// Use same storage client as configuration versions (state stored in same bucket, different paths)
-	stateService := state.NewService(stateVersionRepo, stateLockRepo, workspaceRepo, storageClient)
+	stateService := state.NewService(stateVersionRepo, stateLockRepo, workspaceRepo, storageClient, stateMaterializer)
 
 	// State Versions Handlers (reuse same storage client as configuration versions)
-	stateVersionHandler := terraformHandlers.NewStateVersionHandlerV2(stateVersionRepo, workspaceRepo, projectRepo, authService, rbacService, stateService, storageClient)
+	stateVersionHandler := terraformHandlers.NewStateVersionHandlerV2(stateVersionRepo, workspaceRepo, projectRepo, authService, rbacService, stateService, storageClient, stateOutputRepo, stateResourceRepo)
 
 	// State Versions (TFE-compatible)
 	// TFE expects: /api/v2/workspaces/:id/state-versions
@@ -479,6 +486,9 @@ func SetupV2Routes(
 	v2.POST("/workspaces/:id/state-versions/remove-resource", stateVersionHandler.RemoveResource)
 	// TFE: GET /workspaces/:id/current-state-version — latest state version + hosted-state-download-url (fixes tfe_* drift)
 	v2.GET("/workspaces/:id/current-state-version", stateVersionHandler.CurrentStateVersion)
+	// Current state version outputs/resources served from the materialized tables (State Storage Rework).
+	v2.GET("/workspaces/:id/current-state-version-outputs", stateVersionHandler.CurrentStateVersionOutputs)
+	v2.GET("/workspaces/:id/current-state-version-resources", stateVersionHandler.CurrentStateVersionResources)
 
 	stateVersions := v2.Group("/workspaces/:id/state-versions")
 	{
@@ -1077,6 +1087,9 @@ func SetupV2Routes(
 		oidcTokenService := oidc.NewTokenService(oidcSigningKey, issuerURL)
 		runnerAgentHandler.SetOIDCServices(azureOIDCRepo, oidcTokenService)
 	}
+
+	// Self-hosted runner state uploads materialize outputs/resources too (State Storage Rework).
+	runnerAgentHandler.SetStateMaterializer(stateMaterializer)
 
 	runnerAgent := v2.Group("/runner")
 	{
