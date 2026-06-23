@@ -1457,6 +1457,24 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 	})
 }
 
+// sliceLogBytes applies a TFE-style byte offset/limit window to a full log buffer
+// read from object storage (the Redis path slices server-side via GETRANGE, so it does
+// not need this). offset and limit are byte positions; limit <= 0 means "to the end";
+// an offset at or beyond the end yields an empty slice ("no new bytes yet").
+func sliceLogBytes(logs []byte, offset, limit int) []byte {
+	if offset <= 0 && limit <= 0 {
+		return logs
+	}
+	if offset >= len(logs) {
+		return []byte{}
+	}
+	end := len(logs)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return logs[offset:end]
+}
+
 // GetLogs returns the logs for a run (TFE-compatible)
 // GET /api/v2/runs/:id/logs
 // Supports all execution modes: remote, local, and agent
@@ -1658,18 +1676,9 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 				return
 			}
 
-			// Apply offset/limit to MinIO logs (if they weren't applied by Redis)
-			if len(logs) > 0 && (offset > 0 || limit > 0) {
-				if offset >= len(logs) {
-					logs = []byte("")
-				} else {
-					end := offset + limit
-					if limit <= 0 || end > len(logs) {
-						end = len(logs)
-					}
-					logs = logs[offset:end]
-				}
-			}
+			// Apply the byte offset/limit window to the full object read from
+			// storage (the Redis path already sliced server-side via GETRANGE).
+			logs = sliceLogBytes(logs, offset, limit)
 		}
 
 	case "local":
@@ -1702,6 +1711,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
 		}
+		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
@@ -1713,6 +1723,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
 				return
 			}
+			logs = sliceLogBytes(logs, offset, limit)
 		} else {
 			// No storage client available, return 200 OK with empty body
 			c.Data(http.StatusOK, "text/plain", []byte(""))
@@ -1720,14 +1731,9 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		}
 	}
 
-	// TFE behavior: Return empty when offset is beyond log length (signals end of stream)
-	// Note: offset/limit already applied if logs came from Redis or MinIO
-	if offset >= len(logs) {
-		c.Data(http.StatusOK, "text/plain", []byte(""))
-		return
-	}
-
-	// Return the logs (offset/limit already applied by Redis or MinIO handler)
+	// Every path above has already applied the byte offset/limit window (Redis via
+	// GETRANGE, object storage via sliceLogBytes). Return the windowed chunk; an empty
+	// body signals "no new bytes yet" / end of stream, per TFE.
 	c.Data(http.StatusOK, "text/plain", logs)
 }
 
@@ -1861,18 +1867,9 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 				return
 			}
 
-			// Apply offset/limit to MinIO logs (if they weren't applied by Redis)
-			if len(logs) > 0 && (offset > 0 || limit > 0) {
-				if offset >= len(logs) {
-					logs = []byte("")
-				} else {
-					end := offset + limit
-					if limit <= 0 || end > len(logs) {
-						end = len(logs)
-					}
-					logs = logs[offset:end]
-				}
-			}
+			// Apply the byte offset/limit window to the full object read from
+			// storage (the Redis path already sliced server-side via GETRANGE).
+			logs = sliceLogBytes(logs, offset, limit)
 		}
 
 	case "local":
@@ -1901,6 +1898,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
 		}
+		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
@@ -1911,19 +1909,16 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
 				return
 			}
+			logs = sliceLogBytes(logs, offset, limit)
 		} else {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
 		}
 	}
 
-	// TFE behavior: Return empty when offset is beyond log length
-	if offset >= len(logs) {
-		c.Data(http.StatusOK, "text/plain", []byte(""))
-		return
-	}
-
-	// Return the logs
+	// Every path above has already applied the byte offset/limit window (Redis via
+	// GETRANGE, object storage via sliceLogBytes). An empty body signals "no new bytes
+	// yet" / end of stream, per TFE.
 	c.Data(http.StatusOK, "text/plain", logs)
 }
 
@@ -2073,18 +2068,9 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 				return
 			}
 
-			// Apply offset/limit to MinIO logs (if they weren't applied by Redis)
-			if len(logs) > 0 && (offset > 0 || limit > 0) {
-				if offset >= len(logs) {
-					logs = []byte("")
-				} else {
-					end := offset + limit
-					if limit <= 0 || end > len(logs) {
-						end = len(logs)
-					}
-					logs = logs[offset:end]
-				}
-			}
+			// Apply the byte offset/limit window to the full object read from
+			// storage (the Redis path already sliced server-side via GETRANGE).
+			logs = sliceLogBytes(logs, offset, limit)
 		}
 
 	case "local":
@@ -2113,6 +2099,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
 		}
+		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
@@ -2123,19 +2110,16 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
 				return
 			}
+			logs = sliceLogBytes(logs, offset, limit)
 		} else {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
 		}
 	}
 
-	// TFE behavior: Return empty when offset is beyond log length
-	if offset >= len(logs) {
-		c.Data(http.StatusOK, "text/plain", []byte(""))
-		return
-	}
-
-	// Return the logs
+	// Every path above has already applied the byte offset/limit window (Redis via
+	// GETRANGE, object storage via sliceLogBytes). An empty body signals "no new bytes
+	// yet" / end of stream, per TFE.
 	c.Data(http.StatusOK, "text/plain", logs)
 }
 
