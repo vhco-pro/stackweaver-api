@@ -21,6 +21,7 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
+	"github.com/michielvha/stackweaver/core/services/logbuffer"
 	"github.com/michielvha/stackweaver/core/services/oidc"
 	"github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
@@ -576,11 +577,12 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 			if req.Stream == "apply" {
 				phase = "apply"
 			}
-			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", jobIDStr, phase)
-			// Read existing, append, write back (simple approach for streaming)
-			existing, _ := h.storageClient.Get(ctx, logsKey)
-			updated := string(existing) + req.Output + "\n"
-			_ = h.storageClient.Put(ctx, logsKey, []byte(updated))
+			// Stream output to the run's phase log in object storage, prepending the
+			// STX start-of-text marker on first write so the framing matches the
+			// Redis-backed remote-runner path. ETX is appended at JobComplete.
+			if err := logbuffer.AppendStorageLog(ctx, h.storageClient, jobIDStr, phase, req.Output); err != nil {
+				logger.Warnf("Failed to append agent output to storage for %s phase %s: %v", jobIDStr, phase, err)
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "received"})
 		return
@@ -949,6 +951,19 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
 		}
 		return
+	}
+
+	// JobComplete is terminal for whichever phase this job ran, so no more output will
+	// follow: append the ETX end-of-text marker to the phase logs. Finalizing both
+	// phases is safe — it is idempotent (a missing or already-terminated object is left
+	// untouched), so the plan job finalizes plan.log while apply.log is still absent,
+	// and the later apply job finalizes apply.log without touching the framed plan.log.
+	if h.storageClient != nil {
+		for _, phase := range []string{"plan", "apply"} {
+			if err := logbuffer.FinalizeStorageLog(c.Request.Context(), h.storageClient, runID, phase); err != nil {
+				logger.Warnf("Failed to finalize agent log for run %s phase %s: %v", runID, phase, err)
+			}
+		}
 	}
 
 	now := time.Now()
