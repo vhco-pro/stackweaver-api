@@ -1020,6 +1020,49 @@ func (h *PlaybookHandler) DeletePlaybook(c *gin.Context) {
 		return
 	}
 
+	// ?force=true cascades over every dependent resource (job templates, jobs,
+	// schedules, workflow nodes). It deletes resources well beyond the playbook
+	// itself, so it additionally requires org-level Ansible manage. The playbook
+	// has no direct org, so resolve it via its project.
+	if c.Query("force") == "true" {
+		project, err := h.projectRepo.GetByID(playbook.ProjectID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{"status": "500", "title": "Internal Server Error", "detail": "Failed to resolve organization for force delete"},
+				},
+			})
+			return
+		}
+		canManage, err := h.rbacService.CheckOrgManageAnsible(c.Request.Context(), user.ID, project.OrganizationID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
+				},
+			})
+			return
+		}
+		if !canManage {
+			c.JSON(http.StatusForbidden, gin.H{
+				"errors": []gin.H{
+					{"status": "403", "title": "Forbidden", "detail": "Force delete requires organization-level Ansible management permission"},
+				},
+			})
+			return
+		}
+		if err := h.playbookRepo.ForceDelete(id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
+				},
+			})
+			return
+		}
+		c.Status(http.StatusNoContent)
+		return
+	}
+
 	// Check for dependencies before deleting
 	templateCount, err := h.playbookRepo.CountJobTemplatesByPlaybook(id)
 	if err != nil {
