@@ -52,6 +52,7 @@ type RunnerAgentHandler struct {
 	azureOIDCRepo    *repository.AzureOIDCConfigurationRepository
 	awsOIDCRepo      *repository.AWSOIDCConfigurationRepository
 	gcpOIDCRepo      *repository.GCPOIDCConfigurationRepository
+	vaultOIDCRepo    *repository.VaultOIDCConfigurationRepository
 	oidcTokenService *oidc.TokenService
 	db               *gorm.DB
 	// State materialization (outputs/resources) — optional, injected after creation
@@ -121,11 +122,13 @@ func (h *RunnerAgentHandler) SetOIDCServices(
 	azureOIDCRepo *repository.AzureOIDCConfigurationRepository,
 	awsOIDCRepo *repository.AWSOIDCConfigurationRepository,
 	gcpOIDCRepo *repository.GCPOIDCConfigurationRepository,
+	vaultOIDCRepo *repository.VaultOIDCConfigurationRepository,
 	oidcTokenService *oidc.TokenService,
 ) {
 	h.azureOIDCRepo = azureOIDCRepo
 	h.awsOIDCRepo = awsOIDCRepo
 	h.gcpOIDCRepo = gcpOIDCRepo
+	h.vaultOIDCRepo = vaultOIDCRepo
 	h.oidcTokenService = oidcTokenService
 }
 
@@ -1748,6 +1751,54 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					envVars["GCP_OIDC_PROJECT_NUMBER"] = gcpConfig.ProjectNumber
 					response["environment_vars"] = envVars
 					logger.Infof("Injected GCP OIDC workload identity for self-hosted runner (run %s, org=%s, sa=%s)", runID, org.Name, gcpConfig.ServiceAccountEmail)
+				}
+			}
+		}
+	}
+
+	// Vault OIDC (self-hosted runner): inject the raw token + Vault config so the agent can perform the
+	// JWT login itself. Only the agent's host can reach the customer's Vault, so — unlike Azure/AWS/GCP
+	// where the cloud provider does the exchange — the agent runs the login (materializeVaultToken) and
+	// exports VAULT_ADDR + VAULT_TOKEN for the run's vault provider.
+	if h.vaultOIDCRepo != nil && h.oidcTokenService != nil {
+		var project models.Project
+		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
+			configs, oidcErr := h.vaultOIDCRepo.GetByOrganization(project.OrganizationID)
+			if oidcErr != nil {
+				logger.Warnf("Failed to look up Vault OIDC configurations for self-hosted runner (run %s): %v", runID, oidcErr)
+			} else if len(configs) > 0 {
+				vaultConfig := configs[0]
+				runPhase := "plan"
+				if run.Status == models.RunStatusApplying {
+					runPhase = "apply"
+				}
+				var org models.Organization
+				_ = h.db.First(&org, "id = ?", project.OrganizationID)
+				// Vault JWT auth validates the token's aud against the role's bound_audiences.
+				token, tokenErr := h.oidcTokenService.GenerateToken(
+					oidc.VaultWorkloadIdentityAudience,
+					org.Name,
+					project.Name,
+					run.Workspace.Name,
+					run.ID,
+					runPhase,
+				)
+				if tokenErr != nil {
+					logger.Warnf("Failed to generate Vault OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
+				} else {
+					envVars, _ := response["environment_vars"].(map[string]string)
+					if envVars == nil {
+						envVars = make(map[string]string)
+					}
+					// Raw token + attrs: the agent performs the Vault login and sets VAULT_TOKEN.
+					envVars["VAULT_OIDC_RAW_TOKEN"] = token
+					envVars["VAULT_OIDC_ADDRESS"] = vaultConfig.Address
+					envVars["VAULT_OIDC_ROLE"] = vaultConfig.RoleName
+					envVars["VAULT_OIDC_NAMESPACE"] = vaultConfig.Namespace
+					envVars["VAULT_OIDC_AUTH_PATH"] = vaultConfig.JWTAuthPath
+					envVars["VAULT_OIDC_ENCODED_CACERT"] = vaultConfig.TLSCACertificate
+					response["environment_vars"] = envVars
+					logger.Infof("Injected Vault OIDC workload identity for self-hosted runner (run %s, org=%s, addr=%s)", runID, org.Name, vaultConfig.Address)
 				}
 			}
 		}

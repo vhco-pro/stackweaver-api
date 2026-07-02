@@ -27,6 +27,7 @@ type OIDCConfigDispatchHandler struct {
 	azure       *AzureOIDCConfigurationHandlerV2
 	aws         *AWSOIDCConfigurationHandlerV2
 	gcp         *GCPOIDCConfigurationHandlerV2
+	vault       *VaultOIDCConfigurationHandlerV2
 	orgRepo     *repository.OrganizationRepository
 	authService *auth.Service
 	rbacService *rbac.Service
@@ -37,6 +38,7 @@ func NewOIDCConfigDispatchHandler(
 	azure *AzureOIDCConfigurationHandlerV2,
 	aws *AWSOIDCConfigurationHandlerV2,
 	gcp *GCPOIDCConfigurationHandlerV2,
+	vault *VaultOIDCConfigurationHandlerV2,
 	orgRepo *repository.OrganizationRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
@@ -45,6 +47,7 @@ func NewOIDCConfigDispatchHandler(
 		azure:       azure,
 		aws:         aws,
 		gcp:         gcp,
+		vault:       vault,
 		orgRepo:     orgRepo,
 		authService: authService,
 		rbacService: rbacService,
@@ -90,6 +93,12 @@ func (h *OIDCConfigDispatchHandler) List(c *gin.Context) {
 		return
 	}
 	data = append(data, gcpData...)
+	vaultData, err := h.vault.listData(org.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list OIDC configurations"}}})
+		return
+	}
+	data = append(data, vaultData...)
 
 	c.JSON(http.StatusOK, gin.H{"data": data})
 }
@@ -119,8 +128,10 @@ func (h *OIDCConfigDispatchHandler) Create(c *gin.Context) {
 		h.aws.Create(c)
 	case gcpOIDCConfigType:
 		h.gcp.Create(c)
+	case vaultOIDCConfigType:
+		h.vault.Create(c)
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be one of: " + azureOIDCConfigType + ", " + awsOIDCConfigType + ", " + gcpOIDCConfigType}}})
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be one of: " + azureOIDCConfigType + ", " + awsOIDCConfigType + ", " + gcpOIDCConfigType + ", " + vaultOIDCConfigType}}})
 	}
 }
 
@@ -134,6 +145,8 @@ func (h *OIDCConfigDispatchHandler) Read(c *gin.Context) {
 		h.aws.Read(c)
 	case h.gcp:
 		h.gcp.Read(c)
+	case h.vault:
+		h.vault.Read(c)
 	default:
 		oidcUnknownID(c)
 	}
@@ -149,6 +162,8 @@ func (h *OIDCConfigDispatchHandler) Update(c *gin.Context) {
 		h.aws.Update(c)
 	case h.gcp:
 		h.gcp.Update(c)
+	case h.vault:
+		h.vault.Update(c)
 	default:
 		oidcUnknownID(c)
 	}
@@ -164,19 +179,25 @@ func (h *OIDCConfigDispatchHandler) Delete(c *gin.Context) {
 		h.aws.Delete(c)
 	case h.gcp:
 		h.gcp.Delete(c)
+	case h.vault:
+		h.vault.Delete(c)
 	default:
 		oidcUnknownID(c)
 	}
 }
 
-// providerForID returns the provider handler matching the ID prefix (azoidc- / awsoidc- / gcpoidc-),
-// or nil.
+// providerForID returns the provider handler matching the ID prefix
+// (azoidc- / awsoidc- / gcpoidc- / vaultoidc-), or nil.
 func (h *OIDCConfigDispatchHandler) providerForID(id string) any {
 	switch {
 	case strings.HasPrefix(id, "azoidc-"):
 		return h.azure
 	case strings.HasPrefix(id, "awsoidc-"):
 		return h.aws
+	// vaultoidc- must be checked before gcpoidc- would be a problem only if prefixes overlapped; they
+	// don't, but keep the vault check explicit and independent.
+	case strings.HasPrefix(id, "vaultoidc-"):
+		return h.vault
 	case strings.HasPrefix(id, "gcpoidc-"):
 		return h.gcp
 	default:

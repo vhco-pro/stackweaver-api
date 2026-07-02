@@ -29,6 +29,7 @@ type dbOrgResolver struct {
 	oidcConfig       *repository.AzureOIDCConfigurationRepository
 	awsOIDCConfig    *repository.AWSOIDCConfigurationRepository
 	gcpOIDCConfig    *repository.GCPOIDCConfigurationRepository
+	vaultOIDCConfig  *repository.VaultOIDCConfigurationRepository
 	gpgKey           *repository.GPGKeyRepository
 	ansibleInventory *repository.AnsibleInventoryRepository
 	ansibleInvSource *repository.AnsibleInventorySourceRepository
@@ -60,6 +61,7 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		oidcConfig:       repository.NewAzureOIDCConfigurationRepository(db),
 		awsOIDCConfig:    repository.NewAWSOIDCConfigurationRepository(db),
 		gcpOIDCConfig:    repository.NewGCPOIDCConfigurationRepository(db),
+		vaultOIDCConfig:  repository.NewVaultOIDCConfigurationRepository(db),
 		gpgKey:           repository.NewGPGKeyRepository(db),
 		ansibleInventory: repository.NewAnsibleInventoryRepository(db),
 		ansibleInvSource: repository.NewAnsibleInventorySourceRepository(db),
@@ -289,6 +291,13 @@ func (r *dbOrgResolver) ByOIDCConfigID(id string) (uuid.UUID, error) {
 	}
 	if strings.HasPrefix(id, "gcpoidc-") {
 		cfg, err := r.gcpOIDCConfig.GetByID(id)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return cfg.OrganizationID, nil
+	}
+	if strings.HasPrefix(id, "vaultoidc-") {
+		cfg, err := r.vaultOIDCConfig.GetByID(id)
 		if err != nil {
 			return uuid.Nil, err
 		}
