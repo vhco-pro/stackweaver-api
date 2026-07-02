@@ -28,6 +28,7 @@ type dbOrgResolver struct {
 	vcsConnection    *repository.VCSConnectionRepository
 	oidcConfig       *repository.AzureOIDCConfigurationRepository
 	awsOIDCConfig    *repository.AWSOIDCConfigurationRepository
+	gcpOIDCConfig    *repository.GCPOIDCConfigurationRepository
 	gpgKey           *repository.GPGKeyRepository
 	ansibleInventory *repository.AnsibleInventoryRepository
 	ansibleInvSource *repository.AnsibleInventorySourceRepository
@@ -58,6 +59,7 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		vcsConnection:    repository.NewVCSConnectionRepository(db),
 		oidcConfig:       repository.NewAzureOIDCConfigurationRepository(db),
 		awsOIDCConfig:    repository.NewAWSOIDCConfigurationRepository(db),
+		gcpOIDCConfig:    repository.NewGCPOIDCConfigurationRepository(db),
 		gpgKey:           repository.NewGPGKeyRepository(db),
 		ansibleInventory: repository.NewAnsibleInventoryRepository(db),
 		ansibleInvSource: repository.NewAnsibleInventorySourceRepository(db),
@@ -277,9 +279,16 @@ func (r *dbOrgResolver) ByVCSConnectionID(id string) (uuid.UUID, error) {
 
 func (r *dbOrgResolver) ByOIDCConfigID(id string) (uuid.UUID, error) {
 	// OIDC configurations share the /oidc-configurations/:id path across providers; resolve the
-	// owning org by ID prefix (azoidc- / awsoidc-; extend as GCP/Vault land).
+	// owning org by ID prefix (azoidc- / awsoidc- / gcpoidc-; extend as Vault lands).
 	if strings.HasPrefix(id, "awsoidc-") {
 		cfg, err := r.awsOIDCConfig.GetByID(id)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return cfg.OrganizationID, nil
+	}
+	if strings.HasPrefix(id, "gcpoidc-") {
+		cfg, err := r.gcpOIDCConfig.GetByID(id)
 		if err != nil {
 			return uuid.Nil, err
 		}

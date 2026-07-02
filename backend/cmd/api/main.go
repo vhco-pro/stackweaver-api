@@ -232,6 +232,7 @@ func main() {
 		// OIDC configuration models
 		&models.AzureOIDCConfiguration{},
 		&models.AWSOIDCConfiguration{},
+		&models.GCPOIDCConfiguration{},
 	); err != nil {
 		logger.Fatalf("Failed to run database migrations: %v", err)
 	}

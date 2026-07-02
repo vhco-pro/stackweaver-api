@@ -51,6 +51,7 @@ type RunnerAgentHandler struct {
 	// OIDC workload identity support for self-hosted runners
 	azureOIDCRepo    *repository.AzureOIDCConfigurationRepository
 	awsOIDCRepo      *repository.AWSOIDCConfigurationRepository
+	gcpOIDCRepo      *repository.GCPOIDCConfigurationRepository
 	oidcTokenService *oidc.TokenService
 	db               *gorm.DB
 	// State materialization (outputs/resources) — optional, injected after creation
@@ -119,10 +120,12 @@ func NewRunnerAgentHandlerWithRepos(
 func (h *RunnerAgentHandler) SetOIDCServices(
 	azureOIDCRepo *repository.AzureOIDCConfigurationRepository,
 	awsOIDCRepo *repository.AWSOIDCConfigurationRepository,
+	gcpOIDCRepo *repository.GCPOIDCConfigurationRepository,
 	oidcTokenService *oidc.TokenService,
 ) {
 	h.azureOIDCRepo = azureOIDCRepo
 	h.awsOIDCRepo = awsOIDCRepo
+	h.gcpOIDCRepo = gcpOIDCRepo
 	h.oidcTokenService = oidcTokenService
 }
 
@@ -1697,6 +1700,54 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					envVars["AWS_WEB_IDENTITY_TOKEN"] = token
 					response["environment_vars"] = envVars
 					logger.Infof("Injected AWS OIDC workload identity for self-hosted runner (run %s, org=%s, role=%s)", runID, org.Name, awsConfig.RoleARN)
+				}
+			}
+		}
+	}
+
+	// GCP OIDC (self-hosted runner): inject keyless-auth env for the google provider via Workload
+	// Identity Federation. GCP reads an external-account credential-config JSON (referenced by
+	// GOOGLE_APPLICATION_CREDENTIALS) that in turn points at a token file — neither of which we can
+	// write on the agent's host. So we pass the raw token + the config attrs and the agent
+	// materializes both files (materializeGCPWorkloadIdentity).
+	if h.gcpOIDCRepo != nil && h.oidcTokenService != nil {
+		var project models.Project
+		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
+			configs, oidcErr := h.gcpOIDCRepo.GetByOrganization(project.OrganizationID)
+			if oidcErr != nil {
+				logger.Warnf("Failed to look up GCP OIDC configurations for self-hosted runner (run %s): %v", runID, oidcErr)
+			} else if len(configs) > 0 {
+				gcpConfig := configs[0]
+				runPhase := "plan"
+				if run.Status == models.RunStatusApplying {
+					runPhase = "apply"
+				}
+				var org models.Organization
+				_ = h.db.First(&org, "id = ?", project.OrganizationID)
+				// WIF audience is the full provider resource name prefixed with //iam.googleapis.com/.
+				token, tokenErr := h.oidcTokenService.GenerateToken(
+					"//iam.googleapis.com/"+gcpConfig.WorkloadProviderName,
+					org.Name,
+					project.Name,
+					run.Workspace.Name,
+					run.ID,
+					runPhase,
+				)
+				if tokenErr != nil {
+					logger.Warnf("Failed to generate GCP OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
+				} else {
+					envVars, _ := response["environment_vars"].(map[string]string)
+					if envVars == nil {
+						envVars = make(map[string]string)
+					}
+					// Raw token + attrs: the agent writes the token + credential-config files and sets
+					// GOOGLE_APPLICATION_CREDENTIALS (materializeGCPWorkloadIdentity).
+					envVars["GCP_OIDC_RAW_TOKEN"] = token
+					envVars["GCP_OIDC_SERVICE_ACCOUNT_EMAIL"] = gcpConfig.ServiceAccountEmail
+					envVars["GCP_OIDC_WORKLOAD_PROVIDER_NAME"] = gcpConfig.WorkloadProviderName
+					envVars["GCP_OIDC_PROJECT_NUMBER"] = gcpConfig.ProjectNumber
+					response["environment_vars"] = envVars
+					logger.Infof("Injected GCP OIDC workload identity for self-hosted runner (run %s, org=%s, sa=%s)", runID, org.Name, gcpConfig.ServiceAccountEmail)
 				}
 			}
 		}
