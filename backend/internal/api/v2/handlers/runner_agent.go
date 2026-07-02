@@ -50,6 +50,7 @@ type RunnerAgentHandler struct {
 	storageClient   storage.Client
 	// OIDC workload identity support for self-hosted runners
 	azureOIDCRepo    *repository.AzureOIDCConfigurationRepository
+	awsOIDCRepo      *repository.AWSOIDCConfigurationRepository
 	oidcTokenService *oidc.TokenService
 	db               *gorm.DB
 	// State materialization (outputs/resources) — optional, injected after creation
@@ -117,9 +118,11 @@ func NewRunnerAgentHandlerWithRepos(
 // Called after handler creation because OIDC is optional (may not be configured).
 func (h *RunnerAgentHandler) SetOIDCServices(
 	azureOIDCRepo *repository.AzureOIDCConfigurationRepository,
+	awsOIDCRepo *repository.AWSOIDCConfigurationRepository,
 	oidcTokenService *oidc.TokenService,
 ) {
 	h.azureOIDCRepo = azureOIDCRepo
+	h.awsOIDCRepo = awsOIDCRepo
 	h.oidcTokenService = oidcTokenService
 }
 
@@ -1651,6 +1654,49 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					envVars["ARM_USE_OIDC"] = "true"
 					response["environment_vars"] = envVars
 					logger.Infof("Injected OIDC workload identity token for self-hosted runner (run %s, org=%s)", runID, org.Name)
+				}
+			}
+		}
+	}
+
+	// AWS OIDC (self-hosted runner): inject keyless-auth env for the aws provider. AWS reads the token
+	// from a file, which we can't write on the agent's host — so we pass the raw token as
+	// AWS_WEB_IDENTITY_TOKEN and the agent materializes it (materializeAWSWebIdentityToken).
+	if h.awsOIDCRepo != nil && h.oidcTokenService != nil {
+		var project models.Project
+		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
+			configs, oidcErr := h.awsOIDCRepo.GetByOrganization(project.OrganizationID)
+			if oidcErr != nil {
+				logger.Warnf("Failed to look up AWS OIDC configurations for self-hosted runner (run %s): %v", runID, oidcErr)
+			} else if len(configs) > 0 {
+				awsConfig := configs[0]
+				runPhase := "plan"
+				if run.Status == models.RunStatusApplying {
+					runPhase = "apply"
+				}
+				var org models.Organization
+				_ = h.db.First(&org, "id = ?", project.OrganizationID)
+				token, tokenErr := h.oidcTokenService.GenerateToken(
+					"sts.amazonaws.com",
+					org.Name,
+					project.Name,
+					run.Workspace.Name,
+					run.ID,
+					runPhase,
+				)
+				if tokenErr != nil {
+					logger.Warnf("Failed to generate AWS OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
+				} else {
+					envVars, _ := response["environment_vars"].(map[string]string)
+					if envVars == nil {
+						envVars = make(map[string]string)
+					}
+					envVars["AWS_ROLE_ARN"] = awsConfig.RoleARN
+					envVars["AWS_ROLE_SESSION_NAME"] = fmt.Sprintf("stackweaver-%s", run.ID)
+					// Raw token: the agent writes it to a file and sets AWS_WEB_IDENTITY_TOKEN_FILE.
+					envVars["AWS_WEB_IDENTITY_TOKEN"] = token
+					response["environment_vars"] = envVars
+					logger.Infof("Injected AWS OIDC workload identity for self-hosted runner (run %s, org=%s, role=%s)", runID, org.Name, awsConfig.RoleARN)
 				}
 			}
 		}

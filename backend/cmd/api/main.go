@@ -231,6 +231,7 @@ func main() {
 		&models.TerraformVersion{},
 		// OIDC configuration models
 		&models.AzureOIDCConfiguration{},
+		&models.AWSOIDCConfiguration{},
 	); err != nil {
 		logger.Fatalf("Failed to run database migrations: %v", err)
 	}

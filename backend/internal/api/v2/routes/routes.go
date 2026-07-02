@@ -215,20 +215,24 @@ func SetupV2Routes(
 		agentPools.DELETE("/:id", agentPoolHandler.Delete)
 	}
 
-	// Azure OIDC Configurations (TFE-compatible)
-	// Reference: go-tfe/azure_oidc_configuration.go
+	// OIDC Configurations (TFE-compatible, keyless cloud auth). terraform-provider-tfe uses one set of
+	// URLs for every provider and distinguishes them by data.type (create) / ID prefix (by-id), so a
+	// dispatcher owns the routes and delegates to the per-provider handlers.
+	// Reference: go-tfe/{azure,aws}_oidc_configuration.go
 	azureOIDCRepo := repository.NewAzureOIDCConfigurationRepository(db)
 	azureOIDCHandler := handlers.NewAzureOIDCConfigurationHandlerV2(azureOIDCRepo, orgRepo, authService, rbacService)
-	// Create: org-scoped
-	v2.POST("/organizations/:name/oidc-configurations", azureOIDCHandler.Create)
-	// List: org-scoped
-	v2.GET("/organizations/:name/oidc-configurations", azureOIDCHandler.List)
-	// Read/Update/Delete: by ID (shared OIDCConfigPathFormat across Azure/AWS/GCP/Vault)
+	awsOIDCRepo := repository.NewAWSOIDCConfigurationRepository(db)
+	awsOIDCHandler := handlers.NewAWSOIDCConfigurationHandlerV2(awsOIDCRepo, orgRepo, authService, rbacService)
+	oidcDispatch := handlers.NewOIDCConfigDispatchHandler(azureOIDCHandler, awsOIDCHandler, orgRepo, authService, rbacService)
+	// Create + List: org-scoped
+	v2.POST("/organizations/:name/oidc-configurations", oidcDispatch.Create)
+	v2.GET("/organizations/:name/oidc-configurations", oidcDispatch.List)
+	// Read/Update/Delete: by ID (shared path across Azure/AWS/GCP/Vault, dispatched by ID prefix)
 	oidcConfigs := v2.Group("/oidc-configurations")
 	{
-		oidcConfigs.GET("/:id", azureOIDCHandler.Read)
-		oidcConfigs.PATCH("/:id", azureOIDCHandler.Update)
-		oidcConfigs.DELETE("/:id", azureOIDCHandler.Delete)
+		oidcConfigs.GET("/:id", oidcDispatch.Read)
+		oidcConfigs.PATCH("/:id", oidcDispatch.Update)
+		oidcConfigs.DELETE("/:id", oidcDispatch.Delete)
 	}
 
 	// Admin: Terraform Versions (TFE-compatible)
@@ -1098,7 +1102,7 @@ func SetupV2Routes(
 			issuerURL = "http://localhost:8022"
 		}
 		oidcTokenService := oidc.NewTokenService(oidcSigningKey, issuerURL)
-		runnerAgentHandler.SetOIDCServices(azureOIDCRepo, oidcTokenService)
+		runnerAgentHandler.SetOIDCServices(azureOIDCRepo, awsOIDCRepo, oidcTokenService)
 	}
 
 	// Self-hosted runner state uploads materialize outputs/resources too (State Storage Rework).
