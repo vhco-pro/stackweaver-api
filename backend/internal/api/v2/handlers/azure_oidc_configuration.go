@@ -6,12 +6,16 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
 )
+
+// azureOIDCConfigType is the JSON:API resource type expected by go-tfe/terraform-provider-tfe.
+const azureOIDCConfigType = "azure-oidc-configurations"
 
 // AzureOIDCConfigurationHandlerV2 handles TFE-compatible Azure OIDC configuration API.
 // Reference: go-tfe/azure_oidc_configuration.go
@@ -70,7 +74,7 @@ func formatAzureOIDCConfigResponse(config *models.AzureOIDCConfiguration) gin.H 
 
 	return gin.H{
 		"id":   config.ID,
-		"type": "azure-oidc-configurations",
+		"type": azureOIDCConfigType,
 		"attributes": gin.H{
 			"client-id":       config.ClientID,
 			"subscription-id": config.SubscriptionID,
@@ -87,40 +91,18 @@ func formatAzureOIDCConfigResponse(config *models.AzureOIDCConfiguration) gin.H 
 	}
 }
 
-// List returns all Azure OIDC configurations for an organization.
-// GET /api/v2/organizations/:name/oidc-configurations
-func (h *AzureOIDCConfigurationHandlerV2) List(c *gin.Context) {
-	orgName := c.Param("name")
-	org, err := h.orgRepo.GetByName(orgName)
+// listData returns the org's Azure OIDC configs formatted as JSON:API resource objects (used by the
+// dispatcher's merged List across providers).
+func (h *AzureOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]gin.H, error) {
+	configs, err := h.configRepo.GetByOrganization(orgID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
-		return
+		return nil, err
 	}
-
-	// RBAC: user must be in the organization
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
-		return
-	}
-	ok, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, org.ID)
-	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to read OIDC configurations"}}})
-		return
-	}
-
-	configs, err := h.configRepo.GetByOrganization(org.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list OIDC configurations"}}})
-		return
-	}
-
-	data := make([]gin.H, 0, len(configs))
+	out := make([]gin.H, 0, len(configs))
 	for i := range configs {
-		data = append(data, formatAzureOIDCConfigResponse(&configs[i]))
+		out = append(out, formatAzureOIDCConfigResponse(&configs[i]))
 	}
-
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	return out, nil
 }
 
 // Create creates a new Azure OIDC configuration.
@@ -151,7 +133,7 @@ func (h *AzureOIDCConfigurationHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	if req.Data.Type != "azure-oidc-configurations" {
+	if req.Data.Type != azureOIDCConfigType {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'azure-oidc-configurations'"}}})
 		return
 	}
@@ -255,7 +237,7 @@ func (h *AzureOIDCConfigurationHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
-	if req.Data.Type != "azure-oidc-configurations" {
+	if req.Data.Type != azureOIDCConfigType {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'azure-oidc-configurations'"}}})
 		return
 	}

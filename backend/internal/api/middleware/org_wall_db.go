@@ -3,6 +3,8 @@
 package middleware
 
 import (
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -25,6 +27,7 @@ type dbOrgResolver struct {
 	runner           *repository.RunnerRepository
 	vcsConnection    *repository.VCSConnectionRepository
 	oidcConfig       *repository.AzureOIDCConfigurationRepository
+	awsOIDCConfig    *repository.AWSOIDCConfigurationRepository
 	gpgKey           *repository.GPGKeyRepository
 	ansibleInventory *repository.AnsibleInventoryRepository
 	ansibleInvSource *repository.AnsibleInventorySourceRepository
@@ -54,6 +57,7 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		runner:           repository.NewRunnerRepository(db),
 		vcsConnection:    repository.NewVCSConnectionRepository(db),
 		oidcConfig:       repository.NewAzureOIDCConfigurationRepository(db),
+		awsOIDCConfig:    repository.NewAWSOIDCConfigurationRepository(db),
 		gpgKey:           repository.NewGPGKeyRepository(db),
 		ansibleInventory: repository.NewAnsibleInventoryRepository(db),
 		ansibleInvSource: repository.NewAnsibleInventorySourceRepository(db),
@@ -272,6 +276,15 @@ func (r *dbOrgResolver) ByVCSConnectionID(id string) (uuid.UUID, error) {
 }
 
 func (r *dbOrgResolver) ByOIDCConfigID(id string) (uuid.UUID, error) {
+	// OIDC configurations share the /oidc-configurations/:id path across providers; resolve the
+	// owning org by ID prefix (azoidc- / awsoidc-; extend as GCP/Vault land).
+	if strings.HasPrefix(id, "awsoidc-") {
+		cfg, err := r.awsOIDCConfig.GetByID(id)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return cfg.OrganizationID, nil
+	}
 	cfg, err := r.oidcConfig.GetByID(id)
 	if err != nil {
 		return uuid.Nil, err
