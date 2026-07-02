@@ -225,7 +225,9 @@ func SetupV2Routes(
 	awsOIDCHandler := handlers.NewAWSOIDCConfigurationHandlerV2(awsOIDCRepo, orgRepo, authService, rbacService)
 	gcpOIDCRepo := repository.NewGCPOIDCConfigurationRepository(db)
 	gcpOIDCHandler := handlers.NewGCPOIDCConfigurationHandlerV2(gcpOIDCRepo, orgRepo, authService, rbacService)
-	oidcDispatch := handlers.NewOIDCConfigDispatchHandler(azureOIDCHandler, awsOIDCHandler, gcpOIDCHandler, orgRepo, authService, rbacService)
+	vaultOIDCRepo := repository.NewVaultOIDCConfigurationRepository(db)
+	vaultOIDCHandler := handlers.NewVaultOIDCConfigurationHandlerV2(vaultOIDCRepo, orgRepo, authService, rbacService)
+	oidcDispatch := handlers.NewOIDCConfigDispatchHandler(azureOIDCHandler, awsOIDCHandler, gcpOIDCHandler, vaultOIDCHandler, orgRepo, authService, rbacService)
 	// Create + List: org-scoped
 	v2.POST("/organizations/:name/oidc-configurations", oidcDispatch.Create)
 	v2.GET("/organizations/:name/oidc-configurations", oidcDispatch.List)
@@ -1104,7 +1106,7 @@ func SetupV2Routes(
 			issuerURL = "http://localhost:8022"
 		}
 		oidcTokenService := oidc.NewTokenService(oidcSigningKey, issuerURL)
-		runnerAgentHandler.SetOIDCServices(azureOIDCRepo, awsOIDCRepo, gcpOIDCRepo, oidcTokenService)
+		runnerAgentHandler.SetOIDCServices(azureOIDCRepo, awsOIDCRepo, gcpOIDCRepo, vaultOIDCRepo, oidcTokenService)
 	}
 
 	// Self-hosted runner state uploads materialize outputs/resources too (State Storage Rework).
