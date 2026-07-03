@@ -202,6 +202,25 @@ func TestFormatWorkspaceResponse_ResponseStructure(t *testing.T) {
 	}
 }
 
+// TestFormatWorkspaceResponse_CanForceDelete guards the safe-delete drop-in: terraform-provider-tfe
+// uses the presence of permissions.can-force-delete to decide whether this backend supports workspace
+// safe-delete. Omitting it makes `terraform destroy` refuse unless the user sets force_delete=true,
+// which breaks drop-in compatibility.
+func TestFormatWorkspaceResponse_CanForceDelete(t *testing.T) {
+	resp := formatWorkspaceResponse(&models.Workspace{ID: "ws-perm", Name: "perm-test"})
+	attrs, ok := resp["attributes"].(gin.H)
+	if !ok {
+		t.Fatalf("attributes not a gin.H: %T", resp["attributes"])
+	}
+	perms, ok := attrs["permissions"].(gin.H)
+	if !ok {
+		t.Fatalf("permissions not a gin.H: %T", attrs["permissions"])
+	}
+	if perms["can-force-delete"] != true {
+		t.Errorf("permissions[can-force-delete] = %v, want true (provider needs it to enable safe-delete)", perms["can-force-delete"])
+	}
+}
+
 func TestFormatRunForInclusion_Basic(t *testing.T) {
 	run := &models.Run{
 		ID:          "run-abc123",
