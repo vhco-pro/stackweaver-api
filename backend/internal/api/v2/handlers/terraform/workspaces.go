@@ -565,6 +565,11 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		"can-unlock":          true,
 		"can-force-unlock":    true,
 		"can-read-settings":   true,
+		// terraform-provider-tfe uses the presence of can-force-delete to decide whether this backend
+		// supports workspace safe-delete. Without it, `terraform destroy` refuses unless the user sets
+		// force_delete=true. We DO implement safe-delete (SafeDeleteByID refuses when the workspace has
+		// active infrastructure), so advertise the capability to make tfe_workspace a drop-in.
+		"can-force-delete": true,
 	}
 
 	// Custom extension: run-timeout (TFE clients will ignore unknown attributes)
