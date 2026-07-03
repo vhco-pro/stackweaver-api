@@ -955,12 +955,17 @@ func SetupV2Routes(
 		orgRegistryProviders.POST("/:provider_name/versions/:version/platforms", providerPublishingHandler.PublishProviderPlatform)
 	}
 
-	// GPG Key Management Routes (Authenticated)
-	orgRegistryGPGKeys := v2.Group("/organizations/:name/registry/gpg-keys")
+	// GPG Key Management Routes (Authenticated) — TFE-compatible private-registry paths.
+	// go-tfe hardcodes /api/registry/{registry}/v2/gpg-keys (registry is always "private";
+	// namespace is the org name), so these live on the engine root rather than under /api/v2.
+	registryGPGKeys := r.Group("/api/registry/:registry/v2/gpg-keys")
+	registryGPGKeys.Use(middleware.AuthMiddleware(authService))
 	{
-		orgRegistryGPGKeys.POST("", gpgKeyHandler.CreateGPGKey)
-		orgRegistryGPGKeys.GET("", gpgKeyHandler.ListGPGKeys)
-		orgRegistryGPGKeys.DELETE("/:key_id", gpgKeyHandler.DeleteGPGKey)
+		registryGPGKeys.POST("", gpgKeyHandler.CreateGPGKey)
+		registryGPGKeys.GET("", gpgKeyHandler.ListGPGKeys)
+		registryGPGKeys.GET("/:namespace/:key_id", gpgKeyHandler.GetGPGKey)
+		registryGPGKeys.PATCH("/:namespace/:key_id", gpgKeyHandler.UpdateGPGKey)
+		registryGPGKeys.DELETE("/:namespace/:key_id", gpgKeyHandler.DeleteGPGKey)
 	}
 
 	// Activity/Audit Log Routes (activityService already created above)
