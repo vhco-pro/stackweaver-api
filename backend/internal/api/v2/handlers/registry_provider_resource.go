@@ -3,15 +3,18 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 // RegistryProviderResourceHandler implements the tfe_registry_provider resource, TFE-compatible
@@ -24,17 +27,20 @@ type RegistryProviderResourceHandler struct {
 	providerRepo *repository.ProviderRepository
 	orgRepo      *repository.OrganizationRepository
 	authService  *auth.Service
+	storage      storage.Client
 }
 
 func NewRegistryProviderResourceHandler(
 	providerRepo *repository.ProviderRepository,
 	orgRepo *repository.OrganizationRepository,
 	authService *auth.Service,
+	storageClient storage.Client,
 ) *RegistryProviderResourceHandler {
 	return &RegistryProviderResourceHandler{
 		providerRepo: providerRepo,
 		orgRepo:      orgRepo,
 		authService:  authService,
+		storage:      storageClient,
 	}
 }
 
@@ -193,6 +199,7 @@ func (h *RegistryProviderResourceHandler) DeleteProvider(c *gin.Context) {
 		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
+	h.gcProviderStorage(c.Request.Context(), provider)
 	c.Status(http.StatusNoContent)
 }
 
@@ -215,7 +222,35 @@ func (h *RegistryProviderResourceHandler) DeleteProviderByID(c *gin.Context) {
 		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
+	h.gcProviderStorage(c.Request.Context(), provider)
 	c.Status(http.StatusNoContent)
+}
+
+// gcProviderStorage best-effort deletes a deleted provider's artifacts (binaries, SHA256SUMS,
+// signatures) from object storage. The DB cascade has already removed the rows, so any failure here
+// only leaves orphaned objects — it is logged, never fatal. Objects live under
+// providers/{org}/{name}/... ; the trailing slash keeps "foo" from also matching "foobar".
+func (h *RegistryProviderResourceHandler) gcProviderStorage(ctx context.Context, provider *models.Provider) {
+	if h.storage == nil {
+		return
+	}
+	prefix := fmt.Sprintf("providers/%s/%s/", provider.Organization.Name, provider.Name)
+	objs, err := h.storage.List(ctx, prefix)
+	if err != nil {
+		logger.Warnf("registry provider delete: failed to list storage for GC (%s): %v", prefix, err)
+		return
+	}
+	removed := 0
+	for _, o := range objs {
+		if err := h.storage.Delete(ctx, o.Key); err != nil {
+			logger.Warnf("registry provider delete: failed to GC storage object %s: %v", o.Key, err)
+			continue
+		}
+		removed++
+	}
+	if len(objs) > 0 {
+		logger.Infof("registry provider delete: GC'd %d/%d storage objects under %s", removed, len(objs), prefix)
+	}
 }
 
 // resolveComposite authenticates, resolves the org from :name, and loads the provider by the
