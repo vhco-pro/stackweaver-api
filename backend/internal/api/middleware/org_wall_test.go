@@ -43,6 +43,7 @@ func (f *fakeResolver) ByRunnerID(string) (uuid.UUID, error)                 { r
 func (f *fakeResolver) ByVCSConnectionID(string) (uuid.UUID, error)          { return f.resolve() }
 func (f *fakeResolver) ByOIDCConfigID(string) (uuid.UUID, error)             { return f.resolve() }
 func (f *fakeResolver) ByGPGKeyID(string) (uuid.UUID, error)                 { return f.resolve() }
+func (f *fakeResolver) ByRegistryProviderID(string) (uuid.UUID, error)       { return f.resolve() }
 func (f *fakeResolver) ByAnsibleInventoryID(string) (uuid.UUID, error)       { return f.resolve() }
 func (f *fakeResolver) ByAnsibleHostID(string) (uuid.UUID, error)            { return f.resolve() }
 func (f *fakeResolver) ByAnsibleGroupID(string) (uuid.UUID, error)           { return f.resolve() }

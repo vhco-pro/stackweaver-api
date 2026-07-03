@@ -23,6 +23,7 @@ var (
 	rRunner                 = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunnerID(v) }
 	rVCSConnection          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByVCSConnectionID(v) }
 	rOIDCConfig             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByOIDCConfigID(v) }
+	rRegistryProvider       = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRegistryProviderID(v) }
 	rAnsibleInventory       = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleInventoryID(v) }
 	rAnsibleHost            = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleHostID(v) }
 	rAnsibleGroup           = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleGroupID(v) }
@@ -195,15 +196,16 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/vcs-connections/:id/repositories/:owner/:repo/inventory-files":             resource("id", rVCSConnection),
 
 	// --- registry: modules / providers / gpg keys (all org-in-URL) ---
-	"/api/v2/organizations/:name/registry/modules":                                              orgByName(),
-	"/api/v2/organizations/:name/registry/modules/:module_name/:provider":                       orgByName(),
-	"/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions":              orgByName(),
-	"/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions/:version":     orgByName(),
-	"/api/v2/organizations/:name/registry/providers":                                            orgByName(),
-	"/api/v2/organizations/:name/registry/providers/:provider_name":                             orgByName(),
-	"/api/v2/organizations/:name/registry/providers/:provider_name/versions/:version/platforms": orgByName(),
-	"/api/v2/organizations/:name/registry/gpg-keys":                                             orgByName(),
-	"/api/v2/organizations/:name/registry/gpg-keys/:key_id":                                     orgByName(),
+	"/api/v2/organizations/:name/registry/modules":                                                                        orgByName(),
+	"/api/v2/organizations/:name/registry/modules/:module_name/:provider":                                                 orgByName(),
+	"/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions":                                        orgByName(),
+	"/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions/:version":                               orgByName(),
+	"/api/v2/organizations/:name/registry-providers":                                                                      orgByName(),
+	"/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name":                             orgByName(),
+	"/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name/versions/:version/platforms": orgByName(),
+	"/api/v2/registry-providers/:id":                                                                                      resource("id", rRegistryProvider),
+	"/api/v2/organizations/:name/registry/gpg-keys":                                                                       orgByName(),
+	"/api/v2/organizations/:name/registry/gpg-keys/:key_id":                                                               orgByName(),
 
 	// --- runner agent control plane (api-key auth from runner agents) ---
 	// The runner registers with an org-scoped key, so its own bound org is

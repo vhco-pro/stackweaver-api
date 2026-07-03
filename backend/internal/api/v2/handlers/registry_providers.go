@@ -3,21 +3,35 @@
 package handlers
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage"
 )
 
 type RegistryProviderHandler struct {
 	providerService *registry.ProviderService
+	gpgKeyRepo      *repository.GPGKeyRepository
+	storage         storage.Client
 }
 
-func NewRegistryProviderHandler(providerService *registry.ProviderService) *RegistryProviderHandler {
+func NewRegistryProviderHandler(
+	providerService *registry.ProviderService,
+	gpgKeyRepo *repository.GPGKeyRepository,
+	storageClient storage.Client,
+) *RegistryProviderHandler {
 	return &RegistryProviderHandler{
 		providerService: providerService,
+		gpgKeyRepo:      gpgKeyRepo,
+		storage:         storageClient,
 	}
 }
 
@@ -147,6 +161,7 @@ func (h *RegistryProviderHandler) GetProviderVersions(c *gin.Context) {
 
 		versionList[i] = gin.H{
 			"version":   v.Version,
+			"protocols": protocolList(v.Protocols),
 			"platforms": platforms,
 		}
 	}
@@ -208,53 +223,201 @@ func (h *RegistryProviderHandler) GetProviderVersion(c *gin.Context) {
 }
 
 // DownloadProvider handles GET /v1/providers/:namespace/:name/:version/download/:os/:arch
-// and GET /v1/providers/:namespace/:name/download/:os/:arch (latest version)
+// and GET /v1/providers/:namespace/:name/download/:os/:arch (latest version).
+//
+// This implements the Terraform provider-install "find a package" step: it returns the package
+// metadata JSON (protocols, download_url, shasums_url, shasums_signature_url, shasum, signing_keys)
+// so Terraform can download the zip, verify its checksum against SHA256SUMS, and verify the
+// SHA256SUMS signature against the advertised GPG public key. The URLs point back at this API so
+// everything is reachable over the same host Terraform used for discovery.
 func (h *RegistryProviderHandler) DownloadProvider(c *gin.Context) {
 	namespace := c.Param("namespace")
 	name := c.Param("name")
 	version := c.Param("version")
-	os := c.Param("os")
+	osParam := c.Param("os")
 	arch := c.Param("arch")
 
-	// If version is empty, get latest version
 	if version == "" {
 		latestVersion, err := h.providerService.GetLatestVersion(namespace, name)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []string{"Provider or version not found"},
-			})
+			c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider or version not found"}})
 			return
 		}
 		version = latestVersion.Version
 	}
 
-	// Get download URL (presigned)
-	downloadURL, err := h.providerService.GetDownloadURL(c.Request.Context(), namespace, name, version, os, arch)
+	provider, err := h.providerService.GetProvider(namespace, name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Provider binary not available for download"},
-		})
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider not found"}})
+		return
+	}
+	providerVersion, err := h.providerService.GetProviderVersion(namespace, name, version)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider version not found"}})
 		return
 	}
 
-	// Track download asynchronously
-	go func() {
-		providerVersion, err := h.providerService.GetProviderVersion(namespace, name, version)
-		if err == nil && len(providerVersion.Platforms) > 0 {
-			// Find the matching platform
-			for _, platform := range providerVersion.Platforms {
-				if platform.OS == os && platform.Arch == arch {
-					ipAddress := c.ClientIP()
-					userAgent := c.GetHeader("User-Agent")
-					_ = h.providerService.TrackDownload(platform.ID, ipAddress, userAgent)
-					break
-				}
-			}
+	var platform *models.ProviderPlatform
+	for i := range providerVersion.Platforms {
+		if providerVersion.Platforms[i].OS == osParam && providerVersion.Platforms[i].Arch == arch {
+			platform = &providerVersion.Platforms[i]
+			break
 		}
+	}
+	if platform == nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider binary not available for this platform"}})
+		return
+	}
+
+	// Resolve the signing key advertised to Terraform (the public half uploaded via
+	// tfe_registry_gpg_key that the publisher signed SHA256SUMS with).
+	gpgKeys := make([]gin.H, 0, 1)
+	if providerVersion.KeyID != "" {
+		if key, kerr := h.gpgKeyRepo.GetByKeyID(provider.OrganizationID, providerVersion.KeyID); kerr == nil && key != nil {
+			gpgKeys = append(gpgKeys, gin.H{
+				"key_id":          key.KeyID,
+				"ascii_armor":     key.ASCIIArmor,
+				"trust_signature": "",
+				"source":          "",
+				"source_url":      nil,
+			})
+		}
+	}
+
+	base := fmt.Sprintf("%s/v1/providers/%s/%s/%s", externalBaseURL(c), namespace, name, version)
+
+	// Track the download without blocking the response.
+	platformID := platform.ID
+	go func() {
+		ip := c.ClientIP()
+		ua := c.GetHeader("User-Agent")
+		_ = h.providerService.TrackDownload(platformID, ip, ua)
 	}()
 
-	// Redirect to presigned URL (302 as per Terraform Registry spec)
-	c.Redirect(http.StatusFound, downloadURL)
+	c.JSON(http.StatusOK, gin.H{
+		"protocols":             protocolList(providerVersion.Protocols),
+		"os":                    platform.OS,
+		"arch":                  platform.Arch,
+		"filename":              platform.Filename,
+		"download_url":          fmt.Sprintf("%s/binary/%s/%s", base, osParam, arch),
+		"shasums_url":           base + "/sha256sums",
+		"shasums_signature_url": base + "/sha256sums.sig",
+		"shasum":                platform.Shasum,
+		"signing_keys":          gin.H{"gpg_public_keys": gpgKeys},
+	})
+}
+
+// DownloadBinary streams a provider zip: GET /v1/providers/:namespace/:name/:version/binary/:os/:arch.
+func (h *RegistryProviderHandler) DownloadBinary(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	version := c.Param("version")
+	osParam := c.Param("os")
+	arch := c.Param("arch")
+
+	providerVersion, err := h.providerService.GetProviderVersion(namespace, name, version)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider version not found"}})
+		return
+	}
+	for i := range providerVersion.Platforms {
+		p := &providerVersion.Platforms[i]
+		if p.OS == osParam && p.Arch == arch {
+			h.streamObject(c, p.BinaryPath, "application/zip", p.Filename)
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider binary not available for this platform"}})
+}
+
+// DownloadShasums streams the SHA256SUMS file: GET /v1/providers/:namespace/:name/:version/sha256sums.
+func (h *RegistryProviderHandler) DownloadShasums(c *gin.Context) {
+	pv, ok := h.versionForShasums(c)
+	if !ok {
+		return
+	}
+	h.streamObject(c, pv.ShasumsPath, "text/plain", "SHA256SUMS")
+}
+
+// DownloadShasumsSig streams the detached signature: GET /v1/providers/:namespace/:name/:version/sha256sums.sig.
+func (h *RegistryProviderHandler) DownloadShasumsSig(c *gin.Context) {
+	pv, ok := h.versionForShasums(c)
+	if !ok {
+		return
+	}
+	h.streamObject(c, pv.ShasumsSigPath, "application/octet-stream", "SHA256SUMS.sig")
+}
+
+func (h *RegistryProviderHandler) versionForShasums(c *gin.Context) (*models.ProviderVersion, bool) {
+	pv, err := h.providerService.GetProviderVersion(c.Param("namespace"), c.Param("name"), c.Param("version"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider version not found"}})
+		return nil, false
+	}
+	if pv.ShasumsPath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"SHA256SUMS not available for this version"}})
+		return nil, false
+	}
+	return pv, true
+}
+
+// streamObject pipes an object-storage key to the response with the given content type and
+// download filename.
+func (h *RegistryProviderHandler) streamObject(c *gin.Context, key, contentType, filename string) {
+	if key == "" {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Object not available"}})
+		return
+	}
+	obj, err := h.storage.GetStream(c.Request.Context(), key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Object not available"}})
+		return
+	}
+	defer func() {
+		if cerr := obj.Close(); cerr != nil {
+			logger.Warnf("Failed to close storage stream %s: %v", key, cerr)
+		}
+	}()
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	c.Header("Content-Type", contentType)
+	if _, err := io.Copy(c.Writer, obj); err != nil {
+		logger.Warnf("Failed to stream object %s: %v", key, err)
+	}
+}
+
+// protocolList splits a stored comma-separated protocols string into the JSON array Terraform
+// expects, e.g. "5.0,6.0" -> ["5.0","6.0"]. Empty input defaults to ["5.0"].
+func protocolList(protocols string) []string {
+	if strings.TrimSpace(protocols) == "" {
+		return []string{"5.0"}
+	}
+	parts := strings.Split(protocols, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"5.0"}
+	}
+	return out
+}
+
+// externalBaseURL reconstructs the scheme+host Terraform used to reach this API, honoring the
+// reverse-proxy / tunnel forwarded headers so download URLs are reachable from the client.
+func externalBaseURL(c *gin.Context) string {
+	scheme := "https"
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if c.Request.TLS == nil {
+		scheme = "http"
+	}
+	host := c.Request.Host
+	if fwd := c.GetHeader("X-Forwarded-Host"); fwd != "" {
+		host = fwd
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
 }
 
 // GetProviderDownloadsSummary handles GET /v2/providers/:namespace/:name/downloads/summary

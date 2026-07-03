@@ -3,13 +3,12 @@
 package handlers
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
@@ -20,7 +19,14 @@ import (
 	"github.com/michielvha/stackweaver/core/storage"
 )
 
-// RegistryProviderPublishingHandler handles provider publishing operations
+// RegistryProviderPublishingHandler publishes provider versions and platforms into an org's
+// private registry. Provider *shell* CRUD lives in RegistryProviderResourceHandler; this handler
+// only uploads binaries and their publisher-provided SHA256SUMS + detached signature.
+//
+// Signing model (matches HashiCorp's): the PUBLISHER signs the SHA256SUMS file offline with the
+// private half of a GPG key whose public half was uploaded via tfe_registry_gpg_key, then uploads
+// the binary, SHA256SUMS and SHA256SUMS.sig. The server never holds a private key — it stores and
+// serves these artifacts and advertises the public key to Terraform at install time.
 type RegistryProviderPublishingHandler struct {
 	providerRepo         *repository.ProviderRepository
 	providerVersionRepo  *repository.ProviderVersionRepository
@@ -29,7 +35,6 @@ type RegistryProviderPublishingHandler struct {
 	gpgKeyRepo           *repository.GPGKeyRepository
 	authService          *auth.Service
 	storage              storage.Client
-	gpgService           *registry.GPGService
 }
 
 func NewRegistryProviderPublishingHandler(
@@ -49,342 +54,145 @@ func NewRegistryProviderPublishingHandler(
 		gpgKeyRepo:           gpgKeyRepo,
 		authService:          authService,
 		storage:              storageClient,
-		gpgService:           registry.NewGPGService(),
 	}
 }
 
-// CreateProvider handles POST /api/v2/organizations/:name/registry/providers
-func (h *RegistryProviderPublishingHandler) CreateProvider(c *gin.Context) {
-	orgName := c.Param("name")
-
-	// Get authenticated user
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
-		return
-	}
-
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
-		return
-	}
-
-	// Parse request body
-	var req struct {
-		Name        string `json:"name" binding:"required"`
-		Description string `json:"description"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
-		return
-	}
-
-	// Check if provider already exists
-	existing, err := h.providerRepo.GetByOrganizationAndName(org.ID, req.Name)
-	if err == nil && existing != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Provider %s already exists", req.Name)}},
-		})
-		return
-	}
-
-	// Create provider
-	provider := &models.Provider{
-		OrganizationID: org.ID,
-		Name:           req.Name,
-		Description:    req.Description,
-		PublishedBy:    user.ID,
-	}
-
-	if err := h.providerRepo.Create(provider); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
-		return
-	}
-
-	// Format response (TFE-compatible)
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   provider.ID.String(),
-			"type": "registry-providers",
-			"attributes": gin.H{
-				"name":        provider.Name,
-				"description": provider.Description,
-			},
-		},
-	})
+// storagePrefix is the object-storage prefix for a provider version's artifacts.
+func storagePrefix(org, provider, version string) string {
+	return fmt.Sprintf("providers/%s/%s/%s", org, provider, version)
 }
 
-// ListProviders handles GET /api/v2/organizations/:name/registry/providers
-func (h *RegistryProviderPublishingHandler) ListProviders(c *gin.Context) {
-	orgName := c.Param("name")
-
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
-		return
-	}
-
-	providers, _, err := h.providerRepo.List(&org.ID, nil, 100, 0)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
-		return
-	}
-
-	// Format response
-	data := make([]gin.H, len(providers))
-	for i, p := range providers {
-		data[i] = gin.H{
-			"id":   p.ID.String(),
-			"type": "registry-providers",
-			"attributes": gin.H{
-				"name":        p.Name,
-				"description": p.Description,
-			},
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"data": data})
-}
-
-// GetProvider handles GET /api/v2/organizations/:name/registry/providers/:name
-func (h *RegistryProviderPublishingHandler) GetProvider(c *gin.Context) {
-	orgName := c.Param("name")
-	providerName := c.Param("provider_name")
-
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
-		return
-	}
-
-	provider, err := h.providerRepo.GetByOrganizationAndName(org.ID, providerName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Provider not found"}},
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   provider.ID.String(),
-			"type": "registry-providers",
-			"attributes": gin.H{
-				"name":        provider.Name,
-				"description": provider.Description,
-			},
-		},
-	})
-}
-
-// PublishProviderPlatform handles POST /api/v2/organizations/:name/registry/providers/:name/versions/:version/platforms
+// PublishProviderPlatform handles
+// POST /api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name/versions/:version/platforms
+//
+// Multipart form fields:
+//   - file        (required) the provider zip
+//   - os, arch    (required) the target platform
+//   - shasums     (required) the SHA256SUMS file listing the zip's checksum
+//   - shasums_sig (required) the detached GPG signature of SHA256SUMS
+//   - key_id      (required) the uploaded GPG key id that signed SHA256SUMS
+//   - protocols   (optional) comma-separated plugin protocols, default "5.0"
 func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Context) {
-	orgName := c.Param("name")
-	providerName := c.Param("provider_name")
-	version := c.Param("version")
-
-	// Get authenticated user
-	_, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+	if _, err := h.authService.GetUserFromContext(c); err != nil {
+		regProvErr(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
+	org, err := h.orgRepo.GetByName(c.Param("name"))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+		regProvErr(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
-	// Get provider
-	provider, err := h.providerRepo.GetByOrganizationAndName(org.ID, providerName)
+	provider, err := h.providerRepo.GetByComposite(org.ID, c.Param("registry_name"), c.Param("namespace"), c.Param("provider_name"))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Provider not found"}},
-		})
+		regProvErr(c, http.StatusNotFound, "Not Found", "Registry provider not found")
 		return
 	}
 
-	// Validate version
-	normalizedVersion := registry.NormalizeVersion(version)
-	if err := registry.ValidateSemanticVersion(normalizedVersion); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
+	version := registry.NormalizeVersion(c.Param("version"))
+	if err := registry.ValidateSemanticVersion(version); err != nil {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 		return
 	}
 
-	// Get or create provider version
-	providerVersion, err := h.providerVersionRepo.GetByProviderAndVersion(provider.ID, normalizedVersion)
-	if err != nil {
-		// Create new version
-		providerVersion = &models.ProviderVersion{
-			ProviderID:  provider.ID,
-			Version:     normalizedVersion,
-			PublishedAt: time.Now(), // Will be set by BeforeCreate if zero
-		}
-		if err := h.providerVersionRepo.Create(providerVersion); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-			})
-			return
-		}
-	}
-
-	// Get platform info from form
 	os := c.PostForm("os")
 	arch := c.PostForm("arch")
 	if os == "" || arch == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "os and arch are required"}},
-		})
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "os and arch are required")
 		return
 	}
 
-	// Check if platform already exists
-	existingPlatform, err := h.providerPlatformRepo.GetByVersionAndPlatform(providerVersion.ID, os, arch)
-	if err == nil && existingPlatform != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Platform %s/%s already exists for this version", os, arch)}},
-		})
+	keyID := c.PostForm("key_id")
+	if keyID == "" {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "key_id is required (the GPG key that signed SHA256SUMS)")
+		return
+	}
+	if _, err := h.gpgKeyRepo.GetByKeyID(org.ID, keyID); err != nil {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", fmt.Sprintf("GPG key %s not found in this organization", keyID))
 		return
 	}
 
-	// Get binary file
+	protocols := c.PostForm("protocols")
+	if protocols == "" {
+		protocols = "5.0"
+	}
+
+	prefix := storagePrefix(org.Name, provider.Name, version)
+
+	// --- binary --------------------------------------------------------------
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "file is required"}},
-		})
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "file is required")
 		return
 	}
-
-	// Open uploaded file
-	src, err := file.Open()
+	shasum, err := h.storeUpload(c, file, fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, file.Filename), true)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		return // storeUpload already wrote the error
+	}
+
+	// --- SHA256SUMS + detached signature (publisher-provided) ----------------
+	shasumsFile, err := c.FormFile("shasums")
+	if err != nil {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "shasums (the SHA256SUMS file) is required")
 		return
 	}
-	defer func() {
-		if err := src.Close(); err != nil {
-			logger.Warnf("Failed to close source file: %v", err)
-		}
-	}()
-
-	// Calculate SHA256 checksum
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, src); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to calculate checksum"}},
-		})
-		return
-	}
-	shasum := hex.EncodeToString(hasher.Sum(nil))
-
-	// Reset file reader
-	if _, err := src.Seek(0, 0); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to reset file reader"}},
-		})
+	shasumsPath := prefix + "/SHA256SUMS"
+	if _, err := h.storeUpload(c, shasumsFile, shasumsPath, false); err != nil {
 		return
 	}
 
-	// Upload to storage
-	storagePath := fmt.Sprintf("providers/%s/%s/%s/%s_%s/%s",
-		org.Name, provider.Name, normalizedVersion, os, arch, file.Filename)
-
-	if err := h.storage.PutStream(c.Request.Context(), storagePath, src, file.Size); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to upload to storage"}},
-		})
+	sigFile, err := c.FormFile("shasums_sig")
+	if err != nil {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "shasums_sig (the detached SHA256SUMS signature) is required")
+		return
+	}
+	shasumsSigPath := prefix + "/SHA256SUMS.sig"
+	if _, err := h.storeUpload(c, sigFile, shasumsSigPath, false); err != nil {
 		return
 	}
 
-	// GPG signing (optional - if GPG key ID is provided)
-	var gpgSignaturePath string
-	var gpgKeyID string
-	gpgKeyIDParam := c.PostForm("gpg_key_id")
-	if gpgKeyIDParam != "" {
-		// Get GPG key
-		gpgKey, err := h.gpgKeyRepo.GetByKeyID(org.ID, gpgKeyIDParam)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("GPG key %s not found", gpgKeyIDParam)}},
-			})
+	// --- version (get-or-create) + signing metadata --------------------------
+	providerVersion, err := h.providerVersionRepo.GetByProviderAndVersion(provider.ID, version)
+	if err != nil {
+		providerVersion = &models.ProviderVersion{ProviderID: provider.ID, Version: version}
+		providerVersion.Protocols = protocols
+		providerVersion.KeyID = keyID
+		providerVersion.ShasumsPath = shasumsPath
+		providerVersion.ShasumsSigPath = shasumsSigPath
+		if err := h.providerVersionRepo.Create(providerVersion); err != nil {
+			regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 			return
 		}
-
-		// Reset file reader again for signing
-		if _, err := src.Seek(0, 0); err != nil {
-			logger.Warnf("Failed to reset file reader for GPG signing: %v", err)
-		}
-
-		// Sign binary
-		signature, err := h.gpgService.SignBinary(gpgKey.KeyID, src)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to sign binary: %v", err)}},
-			})
+	} else {
+		providerVersion.Protocols = protocols
+		providerVersion.KeyID = keyID
+		providerVersion.ShasumsPath = shasumsPath
+		providerVersion.ShasumsSigPath = shasumsSigPath
+		if err := h.providerVersionRepo.Update(providerVersion); err != nil {
+			regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 			return
 		}
-
-		// Upload signature to storage
-		signaturePath := fmt.Sprintf("providers/%s/%s/%s/%s_%s/%s.sig",
-			org.Name, provider.Name, normalizedVersion, os, arch, file.Filename)
-
-		signatureReader := bytes.NewReader(signature)
-		if err := h.storage.PutStream(c.Request.Context(), signaturePath, signatureReader, int64(len(signature))); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to upload signature to storage"}},
-			})
-			return
-		}
-
-		gpgSignaturePath = signaturePath
-		gpgKeyID = gpgKey.KeyID
 	}
 
-	// Create platform record
+	// --- platform ------------------------------------------------------------
+	if existing, err := h.providerPlatformRepo.GetByVersionAndPlatform(providerVersion.ID, os, arch); err == nil && existing != nil {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", fmt.Sprintf("platform %s/%s already exists for this version", os, arch))
+		return
+	}
+
 	platform := &models.ProviderPlatform{
 		ProviderVersionID: providerVersion.ID,
 		OS:                os,
 		Arch:              arch,
 		Filename:          file.Filename,
 		Shasum:            shasum,
-		BinaryPath:        storagePath,
+		BinaryPath:        fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, file.Filename),
 		BinarySize:        file.Size,
-		GPGSignaturePath:  gpgSignaturePath,
-		GPGKeyID:          gpgKeyID,
+		GPGKeyID:          keyID,
 	}
-
 	if err := h.providerPlatformRepo.Create(platform); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -393,28 +201,47 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 			"id":   platform.ID.String(),
 			"type": "registry-provider-platforms",
 			"attributes": gin.H{
-				"os":       platform.OS,
-				"arch":     platform.Arch,
-				"filename": platform.Filename,
-				"shasum":   platform.Shasum,
-				"signing_keys": func() gin.H {
-					if platform.GPGKeyID != "" {
-						// Get GPG key to include in response
-						gpgKey, err := h.gpgKeyRepo.GetByKeyID(org.ID, platform.GPGKeyID)
-						if err == nil && gpgKey != nil {
-							return gin.H{
-								"gpg_public_keys": []gin.H{
-									{
-										"key_id":      gpgKey.KeyID,
-										"ascii_armor": gpgKey.ASCIIArmor,
-									},
-								},
-							}
-						}
-					}
-					return gin.H{"gpg_public_keys": []gin.H{}}
-				}(),
+				"os":                       platform.OS,
+				"arch":                     platform.Arch,
+				"filename":                 platform.Filename,
+				"shasum":                   platform.Shasum,
+				"provider-binary-uploaded": true,
 			},
 		},
 	})
+}
+
+// storeUpload streams a multipart file into object storage at key. When wantSha is true it also
+// returns the file's SHA256 (hex). On any failure it writes the JSON error and returns an error.
+func (h *RegistryProviderPublishingHandler) storeUpload(c *gin.Context, fh *multipart.FileHeader, key string, wantSha bool) (string, error) {
+	src, err := fh.Open()
+	if err != nil {
+		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		return "", err
+	}
+	defer func() {
+		if cerr := src.Close(); cerr != nil {
+			logger.Warnf("Failed to close upload %s: %v", key, cerr)
+		}
+	}()
+
+	var sha string
+	if wantSha {
+		hasher := sha256.New()
+		if _, err := io.Copy(hasher, src); err != nil {
+			regProvErr(c, http.StatusInternalServerError, "Internal Server Error", "failed to hash upload")
+			return "", err
+		}
+		sha = hex.EncodeToString(hasher.Sum(nil))
+		if _, err := src.Seek(0, io.SeekStart); err != nil {
+			regProvErr(c, http.StatusInternalServerError, "Internal Server Error", "failed to rewind upload")
+			return "", err
+		}
+	}
+
+	if err := h.storage.PutStream(c.Request.Context(), key, src, fh.Size); err != nil {
+		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", "failed to upload to storage")
+		return "", err
+	}
+	return sha, nil
 }
