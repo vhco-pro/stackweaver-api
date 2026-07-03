@@ -41,6 +41,7 @@ type OrgResolver interface {
 	ByVCSConnectionID(id string) (uuid.UUID, error)
 	ByOIDCConfigID(id string) (uuid.UUID, error)
 	ByGPGKeyID(id string) (uuid.UUID, error)
+	ByRegistryProviderID(id string) (uuid.UUID, error)
 	ByAnsibleInventoryID(id string) (uuid.UUID, error)
 	ByAnsibleHostID(id string) (uuid.UUID, error)
 	ByAnsibleGroupID(id string) (uuid.UUID, error)

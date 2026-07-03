@@ -891,13 +891,19 @@ func SetupV2Routes(
 	providerPlatformRepo := repository.NewProviderPlatformRepository(db)
 	providerDownloadRepo := repository.NewProviderDownloadRepository(db)
 	providerService := registry.NewProviderService(providerRepo, providerVersionRepo, providerPlatformRepo, providerDownloadRepo, orgRepo, storageClient)
-	providerHandler := handlers.NewRegistryProviderHandler(providerService)
 
-	// GPG Key Repository and Handler
+	// GPG Key Repository and Handler (declared before the provider handlers, which need the repo
+	// to advertise signing keys and validate publish requests).
 	gpgKeyRepo := repository.NewGPGKeyRepository(db)
 	gpgKeyHandler := handlers.NewGPGKeyHandler(gpgKeyRepo, orgRepo, authService)
 
-	// Provider Publishing Handler
+	// v1 provider-install protocol handler (public download/discovery + signed SHA256SUMS streaming).
+	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, storageClient)
+
+	// tfe_registry_provider resource CRUD (go-tfe registry-providers surface).
+	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService)
+
+	// Provider Publishing Handler (version/platform uploads with publisher-signed SHA256SUMS)
 	providerPublishingHandler := handlers.NewRegistryProviderPublishingHandler(
 		providerRepo,
 		providerVersionRepo,
@@ -932,6 +938,10 @@ func SetupV2Routes(
 		registryV1Providers.GET("/:namespace/:name/:version", providerHandler.GetProviderVersion)
 		registryV1Providers.GET("/:namespace/:name/:version/download/:os/:arch", providerHandler.DownloadProvider)
 		registryV1Providers.GET("/:namespace/:name/download/:os/:arch", providerHandler.DownloadProvider)
+		// Terraform provider-install byte streams (referenced by the download JSON above).
+		registryV1Providers.GET("/:namespace/:name/:version/binary/:os/:arch", providerHandler.DownloadBinary)
+		registryV1Providers.GET("/:namespace/:name/:version/sha256sums", providerHandler.DownloadShasums)
+		registryV1Providers.GET("/:namespace/:name/:version/sha256sums.sig", providerHandler.DownloadShasumsSig)
 	}
 
 	// Module Registry (v2) - Metrics endpoints
@@ -946,13 +956,22 @@ func SetupV2Routes(
 		registryV2Providers.GET("/:namespace/:name/downloads/summary", providerHandler.GetProviderDownloadsSummary)
 	}
 
-	// Provider Publishing Routes (Authenticated)
-	orgRegistryProviders := v2.Group("/organizations/:name/registry/providers")
+	// tfe_registry_provider resource CRUD (Authenticated) — go-tfe registry-providers surface.
+	// List/Create on the org collection; Read/Delete by the composite :registry_name/:namespace/:name;
+	// version/platform publishing hangs off the composite provider address.
+	orgRegistryProviders := v2.Group("/organizations/:name/registry-providers")
 	{
-		orgRegistryProviders.POST("", providerPublishingHandler.CreateProvider)
-		orgRegistryProviders.GET("", providerPublishingHandler.ListProviders)
-		orgRegistryProviders.GET("/:provider_name", providerPublishingHandler.GetProvider)
-		orgRegistryProviders.POST("/:provider_name/versions/:version/platforms", providerPublishingHandler.PublishProviderPlatform)
+		orgRegistryProviders.POST("", providerResourceHandler.CreateProvider)
+		orgRegistryProviders.GET("", providerResourceHandler.ListProviders)
+		orgRegistryProviders.GET("/:registry_name/:namespace/:provider_name", providerResourceHandler.GetProvider)
+		orgRegistryProviders.DELETE("/:registry_name/:namespace/:provider_name", providerResourceHandler.DeleteProvider)
+		orgRegistryProviders.POST("/:registry_name/:namespace/:provider_name/versions/:version/platforms", providerPublishingHandler.PublishProviderPlatform)
+	}
+	// go-tfe read/delete-by-id form.
+	registryProvidersByID := v2.Group("/registry-providers")
+	{
+		registryProvidersByID.GET("/:id", providerResourceHandler.GetProviderByID)
+		registryProvidersByID.DELETE("/:id", providerResourceHandler.DeleteProviderByID)
 	}
 
 	// GPG Key Management Routes (Authenticated) — TFE-compatible private-registry paths.
