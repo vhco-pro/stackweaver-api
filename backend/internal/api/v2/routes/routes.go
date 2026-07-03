@@ -901,7 +901,7 @@ func SetupV2Routes(
 	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, storageClient)
 
 	// tfe_registry_provider resource CRUD (go-tfe registry-providers surface).
-	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService)
+	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, storageClient)
 
 	// Provider Publishing Handler (version/platform uploads with publisher-signed SHA256SUMS)
 	providerPublishingHandler := handlers.NewRegistryProviderPublishingHandler(

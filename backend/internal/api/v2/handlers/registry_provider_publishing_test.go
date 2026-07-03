@@ -99,7 +99,7 @@ func TestCreateRegistryProvider(t *testing.T) {
 	providerRepo := repository.NewProviderRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
-	handler := NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService)
+	handler := NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, registry.NewMockStorage())
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
