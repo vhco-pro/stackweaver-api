@@ -19,6 +19,10 @@ import (
 //     JSON responses into executable types.
 //   - Referrer-Policy: origin-when-cross-origin prevents query strings
 //     (auth_request, tokens in URLs) from leaking on outbound navigation.
+//   - X-XSS-Protection: 0 disables the legacy, buggy XSS auditor (CSP is the
+//     modern replacement). Mirrors the frontend nginx set.
+//   - Permissions-Policy: deny browser features the API never uses. Mirrors
+//     the frontend nginx set.
 //   - Content-Security-Policy: connect-src 'self' — tight default so the
 //     login SPA can only talk to the same origin. Harmless on JSON
 //     responses (browsers apply CSP to the document that initiated the
@@ -30,6 +34,12 @@ import (
 //     can wedge the browser into refusing subsequent plain-http sessions
 //     for that host.
 //
+// Cross-Origin-Opener-Policy and Cross-Origin-Resource-Policy are deliberately
+// NOT set here. They are document/window isolation headers meant for the HTML
+// app shell (the frontend nginx layer sets them); CORP: same-origin on the JSON
+// API would break legitimate cross-origin consumers (the SPA on a split-host
+// deployment, and browser-based API clients that rely on CORS).
+//
 // This middleware does NOT honour getSecuritySettings().iframe_enabled yet;
 // iframe-embed support is tracked in AC-39 and requires relaxing
 // X-Frame-Options + switching the session cookie to SameSite=None.
@@ -39,6 +49,8 @@ func SecurityHeaders() gin.HandlerFunc {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "origin-when-cross-origin")
+		h.Set("X-XSS-Protection", "0")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 		h.Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; frame-ancestors 'none'")
 
 		if isTLS(c.Request) {

@@ -23,6 +23,8 @@ func TestSecurityHeaders_SetsBaseHeaders(t *testing.T) {
 		"X-Frame-Options":         "DENY",
 		"X-Content-Type-Options":  "nosniff",
 		"Referrer-Policy":         "origin-when-cross-origin",
+		"X-XSS-Protection":        "0",
+		"Permissions-Policy":      "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
 		"Content-Security-Policy": "default-src 'self'; connect-src 'self'; frame-ancestors 'none'",
 	}
 	for k, want := range wantHeaders {
