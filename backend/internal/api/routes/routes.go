@@ -61,6 +61,11 @@ func SetupRoutes(
 	// Middleware
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.NewIPRateLimiter(100, 200).Middleware())
+	// Security headers on every response (JSON API + auth proxy). CSP is inert on
+	// JSON but nosniff/HSTS/etc. are real defense-in-depth. Applied globally after
+	// CORS so preflight (OPTIONS) short-circuits before it, and so the /auth group
+	// no longer needs its own SecurityHeaders() registration.
+	r.Use(middleware.SecurityHeaders())
 
 	// Health check (supports both GET and HEAD for healthchecks)
 	r.GET("/health", func(c *gin.Context) {
@@ -215,7 +220,8 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 	}
 
 	auth := r.Group("/auth")
-	auth.Use(middleware.SecurityHeaders())
+	// SecurityHeaders() is applied globally (see r.Use above), so the /auth
+	// group no longer registers it here.
 	// Round 25c Finding C-2 (CRITICAL): cap request bodies on the
 	// unauth /auth/* surface. Every legitimate auth body is small
 	// (loginName, password, TOTP, passkey assertion); 64KiB is
