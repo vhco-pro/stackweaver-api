@@ -1113,7 +1113,7 @@ func SetupV2Routes(
 	runnerInventoryService := ansible.NewInventoryService(ansibleInventoryRepo, orgRepo)
 
 	runnerAgentHandler := handlers.NewRunnerAgentHandlerWithRepos(
-		runnerRepo, runnerJobExecRepo, agentPoolRepo, nil,
+		runnerRepo, runnerJobExecRepo, agentPoolRepo, tokenAPIKeyService,
 		ansibleJobRepo, ansiblePlaybookRepo, ansibleInventoryRepo,
 		ansibleCredentialRepo, ansibleConfigRepo, runnerInventoryService, vcsRegistry, runnerCryptoSvc,
 		variableService, storageClient, db,
@@ -1140,15 +1140,27 @@ func SetupV2Routes(
 
 	runnerAgent := v2.Group("/runner")
 	{
+		// Registration bootstraps the runner identity, so it stays on the org-scoped
+		// runner:register key path (the runner has no per-runner token yet).
 		runnerAgent.POST("/register", runnerAgentHandler.Register)
-		runnerAgent.POST("/heartbeat", runnerAgentHandler.Heartbeat)
-		runnerAgent.POST("/deregister", runnerAgentHandler.Deregister)
-		runnerAgent.POST("/jobs/:id/start", runnerAgentHandler.JobStart)
-		runnerAgent.POST("/jobs/:id/output", runnerAgentHandler.JobOutput)
-		runnerAgent.POST("/jobs/:id/complete", runnerAgentHandler.JobComplete)
-		runnerAgent.POST("/jobs/:id/state", runnerAgentHandler.UploadState)
-		runnerAgent.GET("/jobs/:id/artifacts", runnerAgentHandler.GetJobArtifacts)
-		runnerAgent.GET("/jobs/:id/status", runnerAgentHandler.GetJobStatus)
+
+		// AUD-001: every other runner control-plane route requires a runner-scoped
+		// token (minted at registration). RunnerAuth authenticates the caller as one
+		// specific runner and rejects JWT/browser identities outright; the handlers
+		// then bind each job to that runner's org/pool/assignment. Registered after
+		// /register so the middleware does not apply to it.
+		runnerAuthed := runnerAgent.Group("")
+		runnerAuthed.Use(middleware.RunnerAuth(runnerRepo))
+		{
+			runnerAuthed.POST("/heartbeat", runnerAgentHandler.Heartbeat)
+			runnerAuthed.POST("/deregister", runnerAgentHandler.Deregister)
+			runnerAuthed.POST("/jobs/:id/start", runnerAgentHandler.JobStart)
+			runnerAuthed.POST("/jobs/:id/output", runnerAgentHandler.JobOutput)
+			runnerAuthed.POST("/jobs/:id/complete", runnerAgentHandler.JobComplete)
+			runnerAuthed.POST("/jobs/:id/state", runnerAgentHandler.UploadState)
+			runnerAuthed.GET("/jobs/:id/artifacts", runnerAgentHandler.GetJobArtifacts)
+			runnerAuthed.GET("/jobs/:id/status", runnerAgentHandler.GetJobStatus)
+		}
 	}
 
 	// Zitadel Actions V2 Webhooks (unauthenticated — Zitadel calls these directly)

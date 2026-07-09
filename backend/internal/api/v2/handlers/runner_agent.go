@@ -4,9 +4,7 @@ package handlers
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -222,6 +220,10 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// The runner-scoped token is owned by the same user as the registering key.
+	registeringUserID, _ := c.Get("user_id")
+	registeringUserUUID, _ := registeringUserID.(uuid.UUID)
+
 	// Check if runner with this name already exists — if so, re-register (update and reuse)
 	existing, _ := h.runnerRepo.GetByName(pool.OrganizationID, req.Name)
 	if existing != nil {
@@ -245,6 +247,15 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		}
 		logger.Infof("Runner re-registered: %s (ID: %s, pool: %s)", existing.Name, existing.ID, existing.AgentPoolID)
 
+		// Mint a fresh runner-scoped token on every registration (AUD-001): the
+		// runner authenticates the control plane with it, not the org registration
+		// key. Old tokens for this runner id are revoked inside generateRunnerAPIKey.
+		reRegKey, keyErr := h.generateRunnerAPIKey(existing, registeringUserUUID)
+		if keyErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to mint runner token"}}})
+			return
+		}
+
 		// On re-registration, also check for pending jobs (same as heartbeat) so
 		// runners that re-register on each cycle still pick up work.
 		pendingJobs := []PendingJob{}
@@ -253,9 +264,10 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"runner_id":    existing.ID.String(),
-			"status":       "re-registered",
-			"pending_jobs": pendingJobs,
+			"runner_id":      existing.ID.String(),
+			"runner_api_key": reRegKey,
+			"status":         "re-registered",
+			"pending_jobs":   pendingJobs,
 		})
 		return
 	}
@@ -307,14 +319,15 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 
 	// Generate a runner-specific API key
 	// This key is scoped to only this runner: runner:<runner_id>:*
-	runnerAPIKey, err := h.generateRunnerAPIKey(runner)
+	runnerAPIKey, err := h.generateRunnerAPIKey(runner, registeringUserUUID)
 	if err != nil {
-		// Runner was created but key generation failed - not ideal but runner can re-register
-		c.JSON(http.StatusCreated, gin.H{
-			"runner_id":             runner.ID.String(),
-			"runner_api_key":        "", // Empty, runner should use original key
-			"poll_interval_seconds": 10,
-			"warning":               "Failed to generate runner-specific API key. Use original key for heartbeats.",
+		// The runner-scoped credential is mandatory now (AUD-001): without it the
+		// runner cannot authenticate the control plane. Fail registration so the
+		// agent retries rather than silently falling back to the org key.
+		logger.Errorf("Runner registration: failed to mint runner token for %s: %v", runner.ID, err)
+		_ = h.runnerRepo.Delete(runner.ID)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "failed to mint runner token"}},
 		})
 		return
 	}
@@ -326,23 +339,21 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	})
 }
 
-// generateRunnerAPIKey creates a runner-specific API key
-func (h *RunnerAgentHandler) generateRunnerAPIKey(runner *models.Runner) (string, error) {
-	// Generate a random key
-	keyBytes := make([]byte, 32)
-	if _, err := rand.Read(keyBytes); err != nil {
+// generateRunnerAPIKey mints and persists a runner-scoped API key (AUD-001).
+// The key binds to this runner via runner:<id>:* scopes and to the runner's org;
+// the runner authenticates every subsequent /runner/* call with it, and
+// middleware.RunnerAuth recovers the runner identity from the scopes. Any stale
+// tokens for the same runner id (re-registration) are revoked first so a runner
+// never has more than one live credential.
+func (h *RunnerAgentHandler) generateRunnerAPIKey(runner *models.Runner, userID uuid.UUID) (string, error) {
+	if h.apiKeyService == nil {
+		return "", fmt.Errorf("api key service not configured for runner token minting")
+	}
+	_ = h.apiKeyService.DeleteAPIKeysForRunner(runner.ID)
+	_, rawKey, err := h.apiKeyService.CreateRunnerToken(userID, runner.ID, runner.OrganizationID, "runner-"+runner.Name)
+	if err != nil {
 		return "", err
 	}
-	rawKey := "tfe-" + hex.EncodeToString(keyBytes)
-
-	// The scopes for this key - only access to this runner
-	// TODO: In a full implementation, we'd create an actual api_key record with these scopes
-	// For MVP, runners will continue using their registration key
-	_ = []string{
-		"runner:" + runner.ID.String() + ":heartbeat",
-		"runner:" + runner.ID.String() + ":jobs",
-	}
-
 	return rawKey, nil
 }
 
@@ -378,19 +389,18 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 		return
 	}
 
-	runnerID, err := uuid.Parse(req.RunnerID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid runner_id"}}})
+	// AUD-001: the authenticated runner (from its runner-scoped token) is the only
+	// identity we trust. A runner may only heartbeat as itself, so the body
+	// runner_id must match — otherwise a runner could drive another runner's job
+	// offers/reservations.
+	runner, ok := callingRunner(c)
+	if !ok {
+		writeRunnerForbidden(c, "runner identity required")
 		return
 	}
-
-	runner, err := h.runnerRepo.GetByID(runnerID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Runner not found"}}})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
-		}
+	runnerID := runner.ID
+	if req.RunnerID != "" && req.RunnerID != runner.ID.String() {
+		writeRunnerForbidden(c, "runner_id does not match authenticated runner")
 		return
 	}
 
@@ -454,7 +464,7 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 	// Determine if this is a Terraform run (ID starts with "run-") or Ansible job (UUID)
 	if strings.HasPrefix(jobIDStr, "run-") {
 		// Terraform run
-		h.jobStartTerraformRun(c, jobIDStr, req)
+		h.jobStartTerraformRun(c, jobIDStr)
 		return
 	}
 
@@ -465,14 +475,26 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 		return
 	}
 
-	runnerID, err := uuid.Parse(req.RunnerID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid runner_id"}}})
+	if h.ansibleJobRepo == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
 		return
 	}
 
-	if h.ansibleJobRepo == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+	// AUD-001: the runner is the authenticated identity, never the body runner_id.
+	runnerCaller, ok := callingRunner(c)
+	if !ok {
+		writeRunnerForbidden(c, "runner identity required")
+		return
+	}
+	runnerID := runnerCaller.ID
+
+	// Authorize the runner for this job (same org + agent pool) before claiming.
+	job, err := h.ansibleJobRepo.GetByID(jobID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+		return
+	}
+	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
 		return
 	}
 
@@ -527,7 +549,7 @@ func (h *RunnerAgentHandler) upsertJobExecution(jobID, runnerID uuid.UUID) {
 }
 
 // jobStartTerraformRun handles job start for Terraform runs
-func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string, req JobStartRequest) {
+func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) {
 	var run models.Run
 	if err := h.db.First(&run, "id = ?", runID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -538,8 +560,20 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string, 
 		return
 	}
 
+	// AUD-001: authorize the authenticated runner for this run (same org + agent
+	// pool; run may still be unassigned — this is the assignment point) and bind
+	// the run to the authenticated runner, not the body runner_id.
+	runnerCaller, ok := callingRunner(c)
+	if !ok {
+		writeRunnerForbidden(c, "runner identity required")
+		return
+	}
+	if !h.authorizeRunnerForRun(c, &run, false) {
+		return
+	}
+	runnerID := runnerCaller.ID
+
 	now := time.Now()
-	runnerID, _ := uuid.Parse(req.RunnerID)
 
 	// Update run status based on current phase
 	switch run.Status { //nolint:exhaustive // only pending and applying need action on job start
@@ -576,6 +610,16 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 
 	// Terraform run output - store in MinIO logs for the run
 	if strings.HasPrefix(jobIDStr, "run-") {
+		// AUD-001: only the assigned runner may append to a run's logs — otherwise
+		// any runner could poison another tenant's plan/apply output.
+		var run models.Run
+		if err := h.db.First(&run, "id = ?", jobIDStr).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Run not found"}}})
+			return
+		}
+		if !h.authorizeRunnerForRun(c, &run, true) {
+			return
+		}
 		if h.storageClient != nil && req.Output != "" {
 			ctx := context.Background()
 			// Append output to the run's log in storage
@@ -605,6 +649,16 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 
 	if h.ansibleJobRepo == nil {
 		c.JSON(http.StatusOK, gin.H{"status": "received"})
+		return
+	}
+
+	// AUD-001: only the runner that owns the job may write its output/events.
+	outputJob, err := h.ansibleJobRepo.GetByID(jobID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+		return
+	}
+	if !h.authorizeRunnerForAnsibleJob(c, outputJob, true) {
 		return
 	}
 
@@ -880,6 +934,19 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 		return
 	}
 
+	// AUD-001: only the runner that owns the job may complete it — otherwise a
+	// caller could force-complete/fail another tenant's job. Gate on the job's
+	// org/pool/reservation before mutating any status.
+	if completeJob, jErr := h.ansibleJobRepo.GetByID(jobID); jErr == nil {
+		if !h.authorizeRunnerForAnsibleJob(c, completeJob, true) {
+			return
+		}
+	} else if runner, rok := callingRunner(c); !rok || exec.RunnerID != runner.ID {
+		// Job row gone but the exec record must still belong to the caller.
+		writeRunnerForbidden(c, "job is not owned by this runner")
+		return
+	}
+
 	// Map status string to enum
 	var status models.JobExecutionStatus
 	switch req.Status {
@@ -940,11 +1007,13 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 		}
 	}
 
-	// Update runner status back to online (if it was busy)
-	runnerID, _ := uuid.Parse(req.RunnerID)
-	activeJobs, _ := h.jobExecRepo.CountActiveByRunner(runnerID)
-	if activeJobs == 0 {
-		_ = h.runnerRepo.UpdateStatus(runnerID, models.RunnerStatusOnline)
+	// Update runner status back to online (if it was busy). Use the authenticated
+	// runner, not the body runner_id (AUD-001).
+	if runner, ok := callingRunner(c); ok {
+		activeJobs, _ := h.jobExecRepo.CountActiveByRunner(runner.ID)
+		if activeJobs == 0 {
+			_ = h.runnerRepo.UpdateStatus(runner.ID, models.RunnerStatusOnline)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "completed"})
@@ -959,6 +1028,12 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
 		}
+		return
+	}
+
+	// AUD-001: only the assigned runner may complete a run — this handler flips run
+	// status (planned/applied/failed), can trigger auto-apply, and finalizes logs.
+	if !h.authorizeRunnerForRun(c, &run, true) {
 		return
 	}
 
@@ -1079,11 +1154,13 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		return
 	}
 
-	// Update runner status back to online (if it was busy)
-	runnerID, _ := uuid.Parse(req.RunnerID)
-	activeJobs, _ := h.jobExecRepo.CountActiveByRunner(runnerID)
-	if activeJobs == 0 {
-		_ = h.runnerRepo.UpdateStatus(runnerID, models.RunnerStatusOnline)
+	// Update runner status back to online (if it was busy). Use the authenticated
+	// runner, not the body runner_id (AUD-001).
+	if runner, ok := callingRunner(c); ok {
+		activeJobs, _ := h.jobExecRepo.CountActiveByRunner(runner.ID)
+		if activeJobs == 0 {
+			_ = h.runnerRepo.UpdateStatus(runner.ID, models.RunnerStatusOnline)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "completed"})
@@ -1093,18 +1170,24 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 // POST /api/v2/runner/deregister
 func (h *RunnerAgentHandler) Deregister(c *gin.Context) {
 	var req struct {
-		RunnerID string `json:"runner_id" binding:"required"`
+		RunnerID string `json:"runner_id"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
-		return
-	}
+	_ = c.ShouldBindJSON(&req)
 
-	runnerID, err := uuid.Parse(req.RunnerID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid runner_id"}}})
+	// AUD-001: a runner may only deregister itself. Ignore the body runner_id as an
+	// authority and act on the authenticated runner; also revoke its tokens so the
+	// credential cannot outlive the runner.
+	runner, ok := callingRunner(c)
+	if !ok {
+		writeRunnerForbidden(c, "runner identity required")
 		return
 	}
+	if req.RunnerID != "" && req.RunnerID != runner.ID.String() {
+		writeRunnerForbidden(c, "runner_id does not match authenticated runner")
+		return
+	}
+	runnerID := runner.ID
+	_ = h.apiKeyService.DeleteAPIKeysForRunner(runnerID)
 
 	// Simply mark the runner as offline rather than deleting
 	// Admins can delete through the management API
@@ -1187,13 +1270,17 @@ func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 	}
 	// Terraform jobs use run ID (run-xxx)
 	if strings.HasPrefix(jobIDStr, "run-") {
+		// Select the fields the authorization check needs (AUD-001) in addition to status.
 		var run models.Run
-		if err := h.db.Select("status").First(&run, "id = ?", jobIDStr).Error; err != nil {
+		if err := h.db.Select("status", "workspace_id", "agent_pool_id", "runner_id").First(&run, "id = ?", jobIDStr).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found"}}})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			return
+		}
+		if !h.authorizeRunnerForRun(c, &run, false) {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": string(run.Status)})
@@ -1212,6 +1299,9 @@ func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 	job, getErr := h.ansibleJobRepo.GetByID(jobID)
 	if getErr != nil || job == nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found"}}})
+		return
+	}
+	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": string(job.Status)})
@@ -1248,6 +1338,13 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
 		}
+		return
+	}
+
+	// AUD-001: artifacts contain decrypted credentials, vault passwords, and minted
+	// OIDC tokens. Only a runner in the job's org+pool (and, once claimed, the
+	// assignee) may fetch them. This is the crown-jewel disclosure the finding names.
+	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
 		return
 	}
 
@@ -1528,6 +1625,13 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
 		}
+		return
+	}
+
+	// AUD-001: this response embeds decrypted cloud credentials, a fresh VCS clone
+	// token, minted OIDC workload-identity tokens, all variables (incl. sensitive),
+	// and the config tarball. Only a runner in the run's org+pool may fetch it.
+	if !h.authorizeRunnerForRun(c, &run, false) {
 		return
 	}
 
@@ -2063,6 +2167,13 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
 		}
+		return
+	}
+
+	// AUD-001: writing state to a workspace is the highest-impact write on this
+	// plane (a poisoned state hijacks the next apply). Only the assigned runner in
+	// the run's org+pool may upload it. The body runner_id is not trusted.
+	if !h.authorizeRunnerForRun(c, &run, true) {
 		return
 	}
 

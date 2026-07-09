@@ -208,10 +208,12 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/registry/gpg-keys/:key_id":                                                               orgByName(),
 
 	// --- runner agent control plane (api-key auth from runner agents) ---
-	// The runner registers with an org-scoped key, so its own bound org is
-	// the only org it can act in. Job routes are validated by the handler
-	// against the runner's assignment; org resolution from the job exec id
-	// is a future refinement (TODO).
+	// These routes carry their own enforcement (AUD-001): /register requires an
+	// org-scoped runner:register key, and every other route runs behind
+	// middleware.RunnerAuth, which authenticates the caller as one specific runner
+	// (via its runner-scoped token) and rejects JWT/browser identities. The handlers
+	// then bind each job to the runner's org/pool/assignment, so the wall treats
+	// them as agnostic — org resolution happens against the runner identity.
 	"/api/v2/runner/register":           agnostic(),
 	"/api/v2/runner/heartbeat":          agnostic(),
 	"/api/v2/runner/deregister":         agnostic(),
