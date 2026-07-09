@@ -811,6 +811,35 @@ func (s *Service) CheckOrgManageTeams(ctx context.Context, userID, organizationI
 	return false, nil
 }
 
+// IsOrgOwner checks if the user is a member of the organization's "owners" team.
+// Some operations must be restricted to owners even when the caller holds ManageTeams
+// or ManageMembership grants — e.g. managing the owners team's own membership, where
+// anything weaker allows privilege escalation to owner (AUD-003).
+func (s *Service) IsOrgOwner(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	// Tenant isolation: user must have at least one team in the org (team-based access)
+	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	if err != nil || !inOrg {
+		return false, nil
+	}
+
+	if s.teamRepo == nil {
+		return false, fmt.Errorf("team repository not available")
+	}
+
+	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	if err != nil {
+		return false, err
+	}
+
+	for _, team := range teams {
+		if team.Name == "owners" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // CheckOrgManageProjects checks if user can manage projects (create/update/delete projects)
 // Team-based: Check if user has manage-projects permission from any team
 func (s *Service) CheckOrgManageProjects(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {

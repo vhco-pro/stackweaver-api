@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -20,6 +21,7 @@ type TeamMemberHandlerV2 struct {
 	orgRepo     *repository.OrganizationRepository
 	userRepo    *repository.UserRepository
 	authService *auth.Service
+	rbacService *rbac.Service
 }
 
 func NewTeamMemberHandlerV2(
@@ -27,13 +29,71 @@ func NewTeamMemberHandlerV2(
 	orgRepo *repository.OrganizationRepository,
 	userRepo *repository.UserRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 ) *TeamMemberHandlerV2 {
 	return &TeamMemberHandlerV2{
 		teamRepo:    teamRepo,
 		orgRepo:     orgRepo,
 		userRepo:    userRepo,
 		authService: authService,
+		rbacService: rbacService,
 	}
+}
+
+// requireTeamMembershipManagement gates team-membership mutations (AUD-003). The owners
+// team is only manageable by owners themselves — a ManageTeams/ManageMembership grant is
+// not enough, since owners hold every permission and adding yourself would be escalation.
+// Other teams accept either org-level grant (TFE semantics). Writes the JSON:API error
+// response and returns false when the caller is not allowed.
+func (h *TeamMemberHandlerV2) requireTeamMembershipManagement(c *gin.Context, team *models.Team) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "401",
+					"title":  "Unauthorized",
+					"detail": "Authentication required",
+				},
+			},
+		})
+		return false
+	}
+
+	ctx := c.Request.Context()
+	if team.Name == "owners" {
+		isOwner, err := h.rbacService.IsOrgOwner(ctx, user.ID, team.OrganizationID)
+		if err == nil && isOwner {
+			return true
+		}
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "403",
+					"title":  "Forbidden",
+					"detail": "Only organization owners can manage the owners team",
+				},
+			},
+		})
+		return false
+	}
+
+	if hasPermission, err := h.rbacService.CheckOrgManageTeams(ctx, user.ID, team.OrganizationID); err == nil && hasPermission {
+		return true
+	}
+	if hasPermission, err := h.rbacService.CheckOrgManageMembership(ctx, user.ID, team.OrganizationID); err == nil && hasPermission {
+		return true
+	}
+	c.JSON(http.StatusForbidden, gin.H{
+		"errors": []gin.H{
+			{
+				"status": "403",
+				"title":  "Forbidden",
+				"detail": "Only organization admins can manage team membership",
+			},
+		},
+	})
+	return false
 }
 
 // ListOrganizationMemberships handles GET /api/v2/teams/:id/relationships/organization-memberships
@@ -75,6 +135,35 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 					"status": "500",
 					"title":  "Internal Server Error",
 					"detail": "Failed to retrieve team",
+				},
+			},
+		})
+		return
+	}
+
+	// AUD-003 (read side): team rosters carry usernames + emails — tenant data.
+	// Require the caller to be a member of the team's organization.
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "401",
+					"title":  "Unauthorized",
+					"detail": "Authentication required",
+				},
+			},
+		})
+		return
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, team.OrganizationID)
+	if err != nil || !inOrg {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "403",
+					"title":  "Forbidden",
+					"detail": "You are not a member of this team's organization",
 				},
 			},
 		})
@@ -196,6 +285,12 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 				},
 			},
 		})
+		return
+	}
+
+	// AUD-003: mutating team membership requires team-management permission —
+	// without this check any org member could add themselves to the owners team.
+	if !h.requireTeamMembershipManagement(c, team) {
 		return
 	}
 
@@ -349,7 +444,7 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 	}
 
 	// Get team (verify it exists)
-	_, err = h.teamRepo.GetByID(teamID)
+	team, err := h.teamRepo.GetByID(teamID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -372,6 +467,12 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 				},
 			},
 		})
+		return
+	}
+
+	// AUD-003: removing members requires the same permission as adding them —
+	// without this check any org member could strip all owners from a team (lockout).
+	if !h.requireTeamMembershipManagement(c, team) {
 		return
 	}
 

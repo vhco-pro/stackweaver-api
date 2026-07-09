@@ -172,7 +172,7 @@ func SetupV2Routes(
 		// Team Organization Memberships (TFE-compatible)
 		// TFE uses /api/v2/teams/:id/relationships/organization-memberships
 		// Reference: go-tfe/team_member.go - TeamMembers.Add with OrganizationMembershipIDs
-		teamMemberHandler := handlers.NewTeamMemberHandlerV2(teamRepo, orgRepo, userRepo, authService)
+		teamMemberHandler := handlers.NewTeamMemberHandlerV2(teamRepo, orgRepo, userRepo, authService, rbacService)
 		// GET endpoint for listing organization memberships (frontend-specific)
 		teamsById.GET("/:id/relationships/organization-memberships", teamMemberHandler.ListOrganizationMemberships)
 		teamsById.POST("/:id/relationships/organization-memberships", teamMemberHandler.AddOrganizationMemberships)
