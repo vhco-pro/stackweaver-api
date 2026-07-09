@@ -83,12 +83,14 @@ func setupRunAuthzFixture(t *testing.T) *runAuthzFixture {
 		}
 	}
 	t.Cleanup(func() {
+		// Delete children before parents to satisfy FK constraints (team_project_access
+		// references both team and project; projects reference organizations).
 		db.Where("id = ?", runA.ID).Delete(&models.Run{})
 		db.Where("id = ?", wsA.ID).Delete(&models.Workspace{})
-		db.Where("id = ?", projA.ID).Delete(&models.Project{})
 		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamProjectAccess{})
 		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamMember{})
 		db.Where("id = ?", ownersTeam.ID).Delete(&models.Team{})
+		db.Where("id = ?", projA.ID).Delete(&models.Project{})
 		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.OrganizationMember{})
 		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.Organization{})
 		db.Where("id IN ?", []uuid.UUID{owner.ID, outsider.ID}).Delete(&models.User{})
