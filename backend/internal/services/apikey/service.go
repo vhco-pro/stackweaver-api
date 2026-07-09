@@ -261,6 +261,59 @@ func (s *Service) CreateUserToken(userID uuid.UUID, name string, expiresAt *time
 	return apiKey, key, nil
 }
 
+// CreateRunnerToken mints a runner-scoped automation token bound to a single
+// runner and its organization. It is the credential a self-hosted runner uses
+// to authenticate on the /runner/* control plane after registration; the runner
+// id is recoverable from the token's scopes (see ScopeChecker.GetScopedRunners).
+//
+// Unlike CreateAPIKey it does NOT require the user to be an org member and does
+// not go through the generic single-org scope validation: a runner is a machine
+// identity minted by an already-authorized registration (the caller presented an
+// org-scoped key carrying runner:register). The token is org-bound so every
+// downstream authorization check can compare the runner's org to the target job.
+func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name string) (*models.APIKey, string, error) {
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate runner token: %w", err)
+	}
+
+	keyHash, err := HashKey(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to hash runner token: %w", err)
+	}
+
+	// Explicit per-permission runner scopes (no wildcards — those are rejected by
+	// the scope validator). GetScopedRunners keys off the "runner" scope type, so
+	// any of these lets the runner-auth middleware recover this runner's id.
+	scopes := models.StringArray{
+		"runner:" + runnerID.String() + ":heartbeat",
+		"runner:" + runnerID.String() + ":jobs",
+	}
+
+	apiKey := &models.APIKey{
+		UserID:         userID,
+		Name:           name,
+		Kind:           models.APIKeyKindOrg,
+		KeyHash:        keyHash,
+		KeyPrefix:      GetKeyPrefix(key),
+		Scopes:         scopes,
+		OrganizationID: &orgID,
+	}
+
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("failed to create runner token: %w", err)
+	}
+
+	return apiKey, key, nil
+}
+
+// DeleteAPIKeysForRunner removes every token minted for a runner (by its
+// runner:<id>:* scopes). Called when a runner is deregistered/deleted so its
+// credentials cannot outlive it.
+func (s *Service) DeleteAPIKeysForRunner(runnerID uuid.UUID) error {
+	return s.apiKeyRepo.DeleteByScopePrefix("runner:" + runnerID.String() + ":")
+}
+
 // ListAPIKeys lists a user's org-bound automation keys (kind="org").
 // User-bound tokens are listed separately via ListUserTokens.
 func (s *Service) ListAPIKeys(userID uuid.UUID) ([]*models.APIKey, error) {
