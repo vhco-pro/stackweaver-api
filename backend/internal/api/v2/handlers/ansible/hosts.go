@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
@@ -19,6 +20,7 @@ type HostHandler struct {
 	inventoryService *ansible.InventoryService
 	inventoryRepo    *repository.AnsibleInventoryRepository
 	authService      *auth.Service
+	rbacService      *rbac.Service
 }
 
 // NewHostHandler creates a new host handler
@@ -26,12 +28,52 @@ func NewHostHandler(
 	inventoryService *ansible.InventoryService,
 	inventoryRepo *repository.AnsibleInventoryRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 ) *HostHandler {
 	return &HostHandler{
 		inventoryService: inventoryService,
 		inventoryRepo:    inventoryRepo,
 		authService:      authService,
+		rbacService:      rbacService,
 	}
+}
+
+// authorizeHost resolves the host's parent inventory and gates the caller against
+// it (AUD-100). Returns the host and true when authorized; writes the JSON:API
+// error and returns false otherwise (404 host/inventory not found, else the
+// authorizeInventoryResource verdict).
+func (h *HostHandler) authorizeHost(c *gin.Context, hostID uuid.UUID, write bool) (*models.AnsibleInventoryHost, bool) {
+	host, err := h.inventoryService.GetHost(hostID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Host not found"}},
+		})
+		return nil, false
+	}
+	inventory, err := h.inventoryService.GetInventory(host.InventoryID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
+		})
+		return nil, false
+	}
+	if !authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write) {
+		return nil, false
+	}
+	return host, true
+}
+
+// authorizeInventoryByID loads the inventory named by the :id path param and gates
+// the caller against it (used by the collection routes List/Create). AUD-100.
+func (h *HostHandler) authorizeInventoryByID(c *gin.Context, inventoryID uuid.UUID, write bool) bool {
+	inventory, err := h.inventoryService.GetInventory(inventoryID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
+		})
+		return false
+	}
+	return authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write)
 }
 
 // CreateHostRequest represents the request to create a host
@@ -85,6 +127,10 @@ func (h *HostHandler) List(c *gin.Context) {
 	}
 	offset := (page - 1) * perPage
 
+	if !h.authorizeInventoryByID(c, inventoryID, false) {
+		return
+	}
+
 	hosts, total, err := h.inventoryService.ListHosts(inventoryID, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -119,6 +165,10 @@ func (h *HostHandler) Create(c *gin.Context) {
 				{"status": "400", "title": "Bad Request", "detail": "Invalid inventory ID"},
 			},
 		})
+		return
+	}
+
+	if !h.authorizeInventoryByID(c, inventoryID, true) {
 		return
 	}
 
@@ -179,13 +229,8 @@ func (h *HostHandler) Get(c *gin.Context) {
 		return
 	}
 
-	host, err := h.inventoryService.GetHost(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Host not found"},
-			},
-		})
+	host, ok := h.authorizeHost(c, id, false)
+	if !ok {
 		return
 	}
 
@@ -205,6 +250,10 @@ func (h *HostHandler) Update(c *gin.Context) {
 				{"status": "400", "title": "Bad Request", "detail": "Invalid host ID"},
 			},
 		})
+		return
+	}
+
+	if _, ok := h.authorizeHost(c, id, true); !ok {
 		return
 	}
 
@@ -255,6 +304,10 @@ func (h *HostHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	if _, ok := h.authorizeHost(c, id, true); !ok {
+		return
+	}
+
 	if err := h.inventoryService.DeleteHost(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -292,6 +345,10 @@ func (h *HostHandler) AddToGroup(c *gin.Context) {
 		return
 	}
 
+	if _, ok := h.authorizeHost(c, hostID, true); !ok {
+		return
+	}
+
 	if err := h.inventoryService.AddHostToGroup(hostID, groupID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -326,6 +383,10 @@ func (h *HostHandler) RemoveFromGroup(c *gin.Context) {
 				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
 			},
 		})
+		return
+	}
+
+	if _, ok := h.authorizeHost(c, hostID, true); !ok {
 		return
 	}
 

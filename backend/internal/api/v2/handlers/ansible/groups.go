@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
@@ -19,6 +20,7 @@ type GroupHandler struct {
 	inventoryService *ansible.InventoryService
 	inventoryRepo    *repository.AnsibleInventoryRepository
 	authService      *auth.Service
+	rbacService      *rbac.Service
 }
 
 // NewGroupHandler creates a new group handler
@@ -26,12 +28,51 @@ func NewGroupHandler(
 	inventoryService *ansible.InventoryService,
 	inventoryRepo *repository.AnsibleInventoryRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 ) *GroupHandler {
 	return &GroupHandler{
 		inventoryService: inventoryService,
 		inventoryRepo:    inventoryRepo,
 		authService:      authService,
+		rbacService:      rbacService,
 	}
+}
+
+// authorizeGroup resolves the group's parent inventory and gates the caller against
+// it (AUD-100). Returns the group and true when authorized; writes the JSON:API
+// error and returns false otherwise.
+func (h *GroupHandler) authorizeGroup(c *gin.Context, groupID uuid.UUID, write bool) (*models.AnsibleInventoryGroup, bool) {
+	group, err := h.inventoryService.GetGroup(groupID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Group not found"}},
+		})
+		return nil, false
+	}
+	inventory, err := h.inventoryService.GetInventory(group.InventoryID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
+		})
+		return nil, false
+	}
+	if !authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write) {
+		return nil, false
+	}
+	return group, true
+}
+
+// authorizeInventoryByID loads the inventory named by the :id path param and gates
+// the caller against it (used by the collection routes List/Create). AUD-100.
+func (h *GroupHandler) authorizeInventoryByID(c *gin.Context, inventoryID uuid.UUID, write bool) bool {
+	inventory, err := h.inventoryService.GetInventory(inventoryID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
+		})
+		return false
+	}
+	return authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write)
 }
 
 // CreateGroupRequest represents the request to create a group
@@ -95,6 +136,10 @@ func (h *GroupHandler) List(c *gin.Context) {
 	}
 	offset := (page - 1) * perPage
 
+	if !h.authorizeInventoryByID(c, inventoryID, false) {
+		return
+	}
+
 	groups, total, err := h.inventoryService.ListGroups(inventoryID, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -129,6 +174,10 @@ func (h *GroupHandler) Create(c *gin.Context) {
 				{"status": "400", "title": "Bad Request", "detail": "Invalid inventory ID"},
 			},
 		})
+		return
+	}
+
+	if !h.authorizeInventoryByID(c, inventoryID, true) {
 		return
 	}
 
@@ -191,13 +240,8 @@ func (h *GroupHandler) Get(c *gin.Context) {
 		return
 	}
 
-	group, err := h.inventoryService.GetGroup(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Group not found"},
-			},
-		})
+	group, ok := h.authorizeGroup(c, id, false)
+	if !ok {
 		return
 	}
 
@@ -217,6 +261,10 @@ func (h *GroupHandler) Update(c *gin.Context) {
 				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
 			},
 		})
+		return
+	}
+
+	if _, ok := h.authorizeGroup(c, id, true); !ok {
 		return
 	}
 
@@ -277,6 +325,10 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
 			},
 		})
+		return
+	}
+
+	if _, ok := h.authorizeGroup(c, id, true); !ok {
 		return
 	}
 

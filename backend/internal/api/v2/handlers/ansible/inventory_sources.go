@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/services/ansible"
@@ -25,16 +27,59 @@ type InventorySourceSyncMessage struct {
 
 // InventorySourceHandler handles inventory source API requests
 type InventorySourceHandler struct {
-	sourceService *ansible.InventorySourceService
-	queue         queue.Queue
+	sourceService    *ansible.InventorySourceService
+	inventoryService *ansible.InventoryService
+	authService      *auth.Service
+	rbacService      *rbac.Service
+	queue            queue.Queue
 }
 
 // NewInventorySourceHandler creates a new inventory source handler
-func NewInventorySourceHandler(sourceService *ansible.InventorySourceService, redisQueue queue.Queue) *InventorySourceHandler {
+func NewInventorySourceHandler(
+	sourceService *ansible.InventorySourceService,
+	inventoryService *ansible.InventoryService,
+	authService *auth.Service,
+	rbacService *rbac.Service,
+	redisQueue queue.Queue,
+) *InventorySourceHandler {
 	return &InventorySourceHandler{
-		sourceService: sourceService,
-		queue:         redisQueue,
+		sourceService:    sourceService,
+		inventoryService: inventoryService,
+		authService:      authService,
+		rbacService:      rbacService,
+		queue:            redisQueue,
 	}
+}
+
+// authorizeInventoryByID loads the inventory named by the :id path param and gates
+// the caller against it (collection routes Create/List). AUD-100.
+func (h *InventorySourceHandler) authorizeInventoryByID(c *gin.Context, inventoryID uuid.UUID, write bool) bool {
+	inventory, err := h.inventoryService.GetInventory(inventoryID)
+	if err != nil {
+		response.NotFound(c, "Inventory not found")
+		return false
+	}
+	return authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write)
+}
+
+// authorizeSource resolves the source's parent inventory and gates the caller
+// against it (item routes Get/Update/Delete/Sync). Returns the source and true
+// when authorized. AUD-100.
+func (h *InventorySourceHandler) authorizeSource(c *gin.Context, sourceID uuid.UUID, write bool) (*models.AnsibleInventorySource, bool) {
+	source, err := h.sourceService.GetInventorySource(sourceID)
+	if err != nil {
+		response.NotFound(c, "Inventory source not found")
+		return nil, false
+	}
+	inventory, err := h.inventoryService.GetInventory(source.InventoryID)
+	if err != nil {
+		response.NotFound(c, "Inventory not found")
+		return nil, false
+	}
+	if !authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write) {
+		return nil, false
+	}
+	return source, true
 }
 
 // CreateInventorySourceRequest represents the JSON:API request to create an inventory source
@@ -114,6 +159,10 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
 		response.BadRequest(c, "Invalid inventory_id")
+		return
+	}
+
+	if !h.authorizeInventoryByID(c, inventoryID, true) {
 		return
 	}
 
@@ -201,9 +250,8 @@ func (h *InventorySourceHandler) Get(c *gin.Context) {
 		return
 	}
 
-	source, err := h.sourceService.GetInventorySource(id)
-	if err != nil {
-		response.NotFound(c, "Inventory source not found")
+	source, ok := h.authorizeSource(c, id, false)
+	if !ok {
 		return
 	}
 
@@ -232,6 +280,10 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
 		response.BadRequest(c, "Invalid inventory_id")
+		return
+	}
+
+	if !h.authorizeInventoryByID(c, inventoryID, false) {
 		return
 	}
 
@@ -276,6 +328,10 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid inventory source ID")
+		return
+	}
+
+	if _, ok := h.authorizeSource(c, id, true); !ok {
 		return
 	}
 
@@ -345,6 +401,10 @@ func (h *InventorySourceHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	if _, ok := h.authorizeSource(c, id, true); !ok {
+		return
+	}
+
 	if err := h.sourceService.DeleteInventorySource(id); err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -370,10 +430,9 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 		return
 	}
 
-	// Verify source exists and mark as syncing
-	source, err := h.sourceService.GetInventorySource(id)
-	if err != nil {
-		response.NotFound(c, "Inventory source not found")
+	// Verify source exists, authorize the caller, and mark as syncing
+	source, ok := h.authorizeSource(c, id, true)
+	if !ok {
 		return
 	}
 

@@ -239,8 +239,8 @@ func SetupAnsibleRoutes(
 
 	// Initialize Ansible Handlers
 	inventoryHandler := ansibleHandlers.NewInventoryHandler(inventoryService, inventoryRepo, orgRepo, projectRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo)
-	hostHandler := ansibleHandlers.NewHostHandler(inventoryService, inventoryRepo, authService)
-	groupHandler := ansibleHandlers.NewGroupHandler(inventoryService, inventoryRepo, authService)
+	hostHandler := ansibleHandlers.NewHostHandler(inventoryService, inventoryRepo, authService, rbacService)
+	groupHandler := ansibleHandlers.NewGroupHandler(inventoryService, inventoryRepo, authService, rbacService)
 	credentialHandler := ansibleHandlers.NewCredentialHandler(credentialService, orgRepo, projectRepo, authService, rbacService)
 	agentPoolRepo := repository.NewAgentPoolRepository(db)
 	playbookHandler := ansibleHandlers.NewPlaybookHandler(playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo)
@@ -250,14 +250,14 @@ func SetupAnsibleRoutes(
 	adHocHandler := ansibleHandlers.NewAdHocHandler(inventoryRepo, orgRepo, credentialRepo, projectRepo, agentPoolRepo, jobService, authService, rbacService)
 
 	// Initialize new handlers
-	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, redisQueue)
+	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, inventoryService, authService, rbacService, redisQueue)
 	inventorySyncHandler := ansibleHandlers.NewInventorySyncHandler(inventorySyncRepo, inventoryRepo, authService, rbacService)
 	scheduleHandler := ansibleHandlers.NewScheduleHandler(schedulerService, orgRepo, authService, rbacService)
 	collectionsHandler := ansibleHandlers.NewCollectionsHandler()
 
 	// Initialize job template variable handler
 	// Note: Template variables use project-level permissions (similar to other Ansible resources)
-	templateVariableHandler := ansibleHandlers.NewJobTemplateVariableHandlerV2(templateVariableRepo, templateRepo, authService, nil, variableService)
+	templateVariableHandler := ansibleHandlers.NewJobTemplateVariableHandlerV2(templateVariableRepo, templateRepo, authService, rbacService, variableService)
 	templateVariableHandler.SetRepositories(orgRepo, projectRepo)
 
 	// ==========================================
