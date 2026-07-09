@@ -310,6 +310,23 @@ func (h *ProjectHandlerV2) Get(c *gin.Context) {
 		return
 	}
 
+	// AUD-046: gate the read on org membership, mirroring GetByID. Without this the
+	// by-name read leaked project configuration cross-tenant to any authenticated user.
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	if err != nil || !inOrg {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization (via team membership)"}},
+		})
+		return
+	}
+
 	// Get project with all resources for counts
 	projectWithResources, err := h.projectRepo.GetByIDWithResources(project.ID)
 	if err != nil {
