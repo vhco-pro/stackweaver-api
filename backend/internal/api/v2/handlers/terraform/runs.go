@@ -825,34 +825,56 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	})
 }
 
+// authorizeRun loads a run by ID and enforces the caller's run permission at the
+// given level ("read" for views, "apply" for lifecycle actions) — AUD-010. The
+// run action/read endpoints previously performed no RBAC check, so any
+// authenticated user (incl. JWT identities, which bypass the org wall) could read
+// another tenant's plan/apply logs or cancel/discard/force-execute their runs by
+// run ID. Returns the loaded run on success; writes the JSON:API error and returns
+// (nil, false) otherwise.
+func (h *RunHandlerV2) authorizeRun(c *gin.Context, runID, level string) (*models.Run, bool) {
+	if runID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid run ID"}},
+		})
+		return nil, false
+	}
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return nil, false
+	}
+	run, err := h.runRepo.GetByID(runID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Run not found"}},
+		})
+		return nil, false
+	}
+	workspace, err := h.workspaceRepo.GetByID(run.WorkspaceID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Workspace not found"}},
+		})
+		return nil, false
+	}
+	allowed, err := h.rbacService.CheckRunPermission(c.Request.Context(), user.ID, run.WorkspaceID, workspace.ProjectID, level)
+	if err != nil || !allowed {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to " + level + " this run"}},
+		})
+		return nil, false
+	}
+	return run, true
+}
+
 // Get returns a single run by ID (TFE-compatible)
 // GET /api/v2/runs/:id
 func (h *RunHandlerV2) Get(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "read")
+	if !ok {
 		return
 	}
 
@@ -933,31 +955,8 @@ func (h *RunHandlerV2) GetOutputs(c *gin.Context) {
 // GetPlan returns the plan output for a run (TFE-compatible)
 // GET /api/v2/runs/:id/plan
 func (h *RunHandlerV2) GetPlan(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "read")
+	if !ok {
 		return
 	}
 
@@ -1197,33 +1196,9 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 // Per TFE API docs: https://developer.hashicorp.com/terraform/enterprise/api-docs/applies
 // Apply ID = Run ID (for plan-and-apply runs)
 func (h *RunHandlerV2) GetApply(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid apply ID",
-				},
-			},
-		})
-		return
-	}
-
 	// Apply ID = Run ID (same pattern as Plan ID = Run ID)
-	// Need PlanOutput for extracting planned resources for log parsing
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Apply not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "read")
+	if !ok {
 		return
 	}
 
@@ -1504,31 +1479,8 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		c.Set("user_id", user.ID)
 	}
 
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "read")
+	if !ok {
 		return
 	}
 
@@ -1762,31 +1714,8 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 		c.Set("user_id", user.ID)
 	}
 
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "read")
+	if !ok {
 		return
 	}
 
@@ -1947,31 +1876,8 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 		c.Set("user_id", user.ID)
 	}
 
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "read")
+	if !ok {
 		return
 	}
 
@@ -2374,31 +2280,8 @@ func (h *RunHandlerV2) ListByWorkspace(c *gin.Context) {
 // Cancel cancels a run (TFE-compatible)
 // POST /api/v2/runs/:id/actions/cancel
 func (h *RunHandlerV2) Cancel(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "apply")
+	if !ok {
 		return
 	}
 
@@ -2456,31 +2339,8 @@ func (h *RunHandlerV2) Cancel(c *gin.Context) {
 // Discard discards a run (TFE-compatible)
 // POST /api/v2/runs/:id/actions/discard
 func (h *RunHandlerV2) Discard(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "apply")
+	if !ok {
 		return
 	}
 
@@ -2524,31 +2384,8 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 // ForceCancel forcefully cancels a run (TFE-compatible)
 // POST /api/v2/runs/:id/actions/force-cancel
 func (h *RunHandlerV2) ForceCancel(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "apply")
+	if !ok {
 		return
 	}
 
@@ -2592,31 +2429,8 @@ func (h *RunHandlerV2) ForceCancel(c *gin.Context) {
 // ForceExecute forcefully executes a run (TFE-compatible)
 // POST /api/v2/runs/:id/actions/force-execute
 func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid run ID",
-				},
-			},
-		})
-		return
-	}
-
-	run, err := h.runRepo.GetByID(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Run not found",
-				},
-			},
-		})
+	run, ok := h.authorizeRun(c, c.Param("id"), "apply")
+	if !ok {
 		return
 	}
 
