@@ -723,6 +723,10 @@ func (h *WorkspaceHandlerV2) GetByOrganizationAndName(c *gin.Context) {
 		return
 	}
 
+	if !h.authorizeWorkspaceRead(c, workspace) {
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": formatWorkspaceResponse(workspace, h.vcsConnectionRepo),
 	})
@@ -1819,6 +1823,37 @@ func (h *WorkspaceHandlerV2) authorizeWorkspaceWriteByID(c *gin.Context, workspa
 	return true
 }
 
+// authorizeWorkspaceRead gates a read of a workspace on organization membership,
+// resolving the owning org from the workspace's project. It mirrors
+// ProjectHandlerV2.GetByID's UserInOrg check. It writes the JSON:API error and
+// returns false when unauthorized — 401 (no auth), 403 (not a member), 500 (lookup
+// failure). AUD-046: the read-by-name/ID endpoints returned workspace configuration
+// (VCS repo, agent pool, execution mode) to any authenticated user cross-tenant.
+func (h *WorkspaceHandlerV2) authorizeWorkspaceRead(c *gin.Context, workspace *models.Workspace) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return false
+	}
+	project, err := h.projectRepo.GetByID(workspace.ProjectID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to resolve workspace organization"}},
+		})
+		return false
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, project.OrganizationID)
+	if err != nil || !inOrg {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization (via team membership)"}},
+		})
+		return false
+	}
+	return true
+}
+
 // DeleteByID deletes a workspace by its ID (TFE-compatible force delete)
 // DELETE /api/v2/workspaces/:id
 func (h *WorkspaceHandlerV2) DeleteByID(c *gin.Context) {
@@ -2249,6 +2284,10 @@ func (h *WorkspaceHandlerV2) GetByID(c *gin.Context) {
 				},
 			},
 		})
+		return
+	}
+
+	if !h.authorizeWorkspaceRead(c, workspace) {
 		return
 	}
 
