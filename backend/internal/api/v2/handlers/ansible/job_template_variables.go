@@ -47,6 +47,50 @@ func (h *JobTemplateVariableHandlerV2) SetRepositories(orgRepo *repository.Organ
 	h.projectRepo = projectRepo
 }
 
+// authorizeTemplate loads the job template named by the :id path param and gates the
+// caller against it via the template's project-scoped RBAC. AUD-100: every method
+// here previously "checked RBAC" with only `c.Get("user_id")` (any authenticated
+// user, any org), because the handler was constructed with a nil rbacService — so
+// any JWT identity could read/mutate/delete extra-vars on any tenant's job template
+// by UUID. write=true requires job-template-write, else read. Returns the template
+// and true when authorized; writes the JSON:API error and returns false otherwise.
+func (h *JobTemplateVariableHandlerV2) authorizeTemplate(c *gin.Context, templateID uuid.UUID, write bool) (*models.AnsibleJobTemplate, bool) {
+	template, err := h.templateRepo.GetByID(templateID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Job template not found"}},
+		})
+		return nil, false
+	}
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return nil, false
+	}
+	perm := rbac.PermissionAnsibleJobTemplateRead
+	if write {
+		perm = rbac.PermissionAnsibleJobTemplateWrite
+	}
+	hasPermission, err := h.rbacService.CheckAnsibleResourcePermission(
+		c.Request.Context(), user.ID, rbac.ResourceTypeAnsibleJobTemplate, template.ID.String(), perm, &template.ProjectID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}},
+		})
+		return nil, false
+	}
+	if !hasPermission {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage this job template's variables"}},
+		})
+		return nil, false
+	}
+	return template, true
+}
+
 // formatVariableResponse formats a template variable in TFE-compatible JSON:API format
 func (h *JobTemplateVariableHandlerV2) formatVariableResponse(variable *models.AnsibleJobTemplateVariable, templateID uuid.UUID) gin.H {
 	// TFE-compatible response format
@@ -122,17 +166,8 @@ func (h *JobTemplateVariableHandlerV2) ListByJobTemplate(c *gin.Context) {
 		return
 	}
 
-	// Get template to verify it exists
-	_, err = h.templateRepo.GetByID(templateID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Job template not found"})
-		return
-	}
-
-	// Check RBAC permissions - verify user is authenticated
-	_, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	// AUD-100: gate on the template's project-scoped read permission.
+	if _, ok := h.authorizeTemplate(c, templateID, false); !ok {
 		return
 	}
 
@@ -167,17 +202,8 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Get template to verify it exists
-	_, err = h.templateRepo.GetByID(templateID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Job template not found"})
-		return
-	}
-
-	// Check RBAC permissions - verify user is authenticated
-	_, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	// AUD-100: gate on the template's project-scoped write permission.
+	if _, ok := h.authorizeTemplate(c, templateID, true); !ok {
 		return
 	}
 
@@ -258,17 +284,8 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
-	// Get template to verify it exists
-	_, err = h.templateRepo.GetByID(templateID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Job template not found"})
-		return
-	}
-
-	// Check RBAC permissions - verify user is authenticated
-	_, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	// AUD-100: gate on the template's project-scoped write permission.
+	if _, ok := h.authorizeTemplate(c, templateID, true); !ok {
 		return
 	}
 
@@ -373,17 +390,8 @@ func (h *JobTemplateVariableHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	// Get template to verify it exists
-	_, err = h.templateRepo.GetByID(templateID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Job template not found"})
-		return
-	}
-
-	// Check RBAC permissions - verify user is authenticated
-	_, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	// AUD-100: gate on the template's project-scoped write permission.
+	if _, ok := h.authorizeTemplate(c, templateID, true); !ok {
 		return
 	}
 
