@@ -43,6 +43,7 @@ const (
 	ResourceTypeAnsibleJobTemplate ResourceType = "ansible:job-template"
 	ResourceTypeAnsibleJob         ResourceType = "ansible:job"
 	ResourceTypeAnsibleSchedule    ResourceType = "ansible:schedule"
+	ResourceTypeVariableSet        ResourceType = "terraform:variable-set"
 )
 
 type Permission string
@@ -89,6 +90,9 @@ const (
 	PermissionSentinelMocks    Permission = "sentinel_mocks"
 	PermissionWorkspaceLocking Permission = "workspace_locking"
 	PermissionRunTasks         Permission = "run_tasks"
+	// Variable set permissions mirror TFE's project "Manage variable sets" (none/read/write).
+	PermissionVariableSetsRead Permission = "variable_sets_read"
+	PermissionVariableSets     Permission = "variable_sets" // write/manage
 
 	// Ansible permissions (StackWeaver-specific)
 	PermissionAnsiblePlaybookRead     Permission = "ansible:playbook:read"
@@ -282,6 +286,9 @@ func (s *Service) getPermissionsFromOrganizationAccess(orgAccess *models.TeamOrg
 		// ManageProjects implies ReadProjects (if you can manage projects, you can read them)
 		perms[PermissionOrgReadProjects] = true
 		perms[PermissionProjectRead] = true
+		// TFE: "Manage all projects" also manages project-owned variable sets.
+		perms[PermissionVariableSets] = true
+		perms[PermissionVariableSetsRead] = true
 	}
 	if orgAccess.ReadWorkspaces {
 		perms[PermissionOrgReadWorkspaces] = true
@@ -290,6 +297,7 @@ func (s *Service) getPermissionsFromOrganizationAccess(orgAccess *models.TeamOrg
 	if orgAccess.ReadProjects {
 		perms[PermissionOrgReadProjects] = true
 		perms[PermissionProjectRead] = true // Implies project read
+		perms[PermissionVariableSetsRead] = true
 	}
 	if orgAccess.ManageMembership {
 		perms[PermissionOrgManageMembership] = true
@@ -475,6 +483,17 @@ func (s *Service) getPermissionsFromProjectAccess(projectAccess *models.TeamProj
 			perms[PermissionAnsibleJobRead] = true
 			perms[PermissionAnsibleScheduleRead] = true
 		}
+
+		// Variable sets: TFE grants project-owned variable-set management to
+		// write/maintain/admin, and read visibility to read (mirrors the project
+		// "Manage variable sets" permission).
+		switch accessLevel {
+		case "admin", "maintain", "write":
+			perms[PermissionVariableSets] = true
+			perms[PermissionVariableSetsRead] = true
+		case "read":
+			perms[PermissionVariableSetsRead] = true
+		}
 	}
 
 	// Add custom permissions if access is "custom" or custom fields are set
@@ -515,6 +534,16 @@ func (s *Service) getPermissionsFromProjectAccess(projectAccess *models.TeamProj
 		}
 		if projectAccess.WorkspaceRunTasks != nil && *projectAccess.WorkspaceRunTasks {
 			perms[PermissionRunTasks] = true
+		}
+		// Project "Manage variable sets" granular permission: none / read / write.
+		if projectAccess.ProjectVariableSets != nil {
+			switch *projectAccess.ProjectVariableSets {
+			case "read":
+				perms[PermissionVariableSetsRead] = true
+			case "write":
+				perms[PermissionVariableSetsRead] = true
+				perms[PermissionVariableSets] = true
+			}
 		}
 	}
 
@@ -678,6 +707,47 @@ func (s *Service) CheckVariablePermission(
 		return s.CheckWorkspacePermission(ctx, userID, workspaceID, PermissionWorkspaceWrite, projectID)
 	default:
 		return false, fmt.Errorf("invalid variable permission level: %s", level)
+	}
+}
+
+// CheckVariableSetPermission gates access to a variable set, mirroring TFE's model
+// (see docs: managing-variables / go-tfe ProjectVariableSetsPermissionType):
+//
+//   - Owners always manage everything in their org.
+//   - Organization-owned sets (ProjectID == nil): any org member may read; writes
+//     require "Manage all workspaces" or "Manage all projects".
+//   - Project-owned sets (ProjectID != nil): resolved through the project's team
+//     access — read requires PermissionVariableSetsRead, write requires
+//     PermissionVariableSets — which also picks up org "Manage all projects" via the
+//     org-access mapping.
+//
+// level is "read" or "write".
+func (s *Service) CheckVariableSetPermission(ctx context.Context, userID uuid.UUID, variableSet *models.VariableSet, level string) (bool, error) {
+	// Owners team shortcut (CheckResourcePermission has no owner bypass of its own).
+	if owner, err := s.IsOrgOwner(ctx, userID, variableSet.OrganizationID); err != nil {
+		return false, err
+	} else if owner {
+		return true, nil
+	}
+
+	switch level {
+	case "read":
+		if variableSet.ProjectID != nil {
+			return s.CheckResourcePermission(ctx, userID, ResourceTypeVariableSet, variableSet.ID, PermissionVariableSetsRead, variableSet.ProjectID)
+		}
+		// Organization-owned: any member of the org may view (sensitive values are masked).
+		return s.orgRepo.UserInOrg(userID, variableSet.OrganizationID)
+	case "write":
+		if variableSet.ProjectID != nil {
+			return s.CheckResourcePermission(ctx, userID, ResourceTypeVariableSet, variableSet.ID, PermissionVariableSets, variableSet.ProjectID)
+		}
+		// Organization-owned: "Manage all workspaces" or "Manage all projects".
+		if ok, err := s.checkOrgPermission(ctx, userID, variableSet.OrganizationID, PermissionOrgManageWorkspaces); err != nil || ok {
+			return ok, err
+		}
+		return s.checkOrgPermission(ctx, userID, variableSet.OrganizationID, PermissionOrgManageProjects)
+	default:
+		return false, fmt.Errorf("invalid variable set permission level: %s", level)
 	}
 }
 
