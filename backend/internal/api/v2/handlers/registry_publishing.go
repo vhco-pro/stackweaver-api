@@ -15,7 +15,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/security/gitargs"
 	"github.com/michielvha/stackweaver/core/services/vcs"
@@ -28,6 +30,7 @@ type RegistryPublishingHandler struct {
 	orgRepo           *repository.OrganizationRepository
 	vcsConnectionRepo *repository.VCSConnectionRepository
 	authService       *auth.Service
+	rbacService       *rbac.Service
 	githubAppManager  *vcs.GitHubAppManager
 	publisher         *registry.ModulePublisher
 }
@@ -38,6 +41,7 @@ func NewRegistryPublishingHandler(
 	orgRepo *repository.OrganizationRepository,
 	vcsConnectionRepo *repository.VCSConnectionRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 	githubAppManager *vcs.GitHubAppManager,
 	publisher *registry.ModulePublisher,
 ) *RegistryPublishingHandler {
@@ -47,30 +51,77 @@ func NewRegistryPublishingHandler(
 		orgRepo:           orgRepo,
 		vcsConnectionRepo: vcsConnectionRepo,
 		authService:       authService,
+		rbacService:       rbacService,
 		githubAppManager:  githubAppManager,
 		publisher:         publisher,
 	}
+}
+
+// requireModuleManage gates registry-module mutations (AUD-004): only a caller with
+// org manage-modules permission may create/publish/delete modules. Returns the
+// authenticated user + org on success; writes the JSON:API error and returns ok=false
+// otherwise. JWT identities bypass the org wall, so this per-handler check is what
+// actually enforces tenant isolation on the publish plane.
+func (h *RegistryPublishingHandler) requireModuleManage(c *gin.Context, orgName string) (*models.User, *models.Organization, bool) {
+	user, org, ok := h.resolveUserAndOrg(c, orgName)
+	if !ok {
+		return nil, nil, false
+	}
+	hasPermission, err := h.rbacService.CheckOrgManageModules(c.Request.Context(), user.ID, org.ID)
+	if err != nil || !hasPermission {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage modules in this organization"}},
+		})
+		return nil, nil, false
+	}
+	return user, org, true
+}
+
+// requireModuleRead gates registry-module reads on org membership (AUD-004): module
+// listings expose VCS repo wiring and publish topology, so a non-member of the org
+// must not read them.
+func (h *RegistryPublishingHandler) requireModuleRead(c *gin.Context, orgName string) (*models.User, *models.Organization, bool) {
+	user, org, ok := h.resolveUserAndOrg(c, orgName)
+	if !ok {
+		return nil, nil, false
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	if err != nil || !inOrg {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You are not a member of this organization"}},
+		})
+		return nil, nil, false
+	}
+	return user, org, true
+}
+
+// resolveUserAndOrg fetches the authenticated user and the named organization,
+// writing the appropriate 401/404 on failure.
+func (h *RegistryPublishingHandler) resolveUserAndOrg(c *gin.Context, orgName string) (*models.User, *models.Organization, bool) {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return nil, nil, false
+	}
+	org, err := h.orgRepo.GetByName(orgName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
+		})
+		return nil, nil, false
+	}
+	return user, org, true
 }
 
 // CreateModule handles POST /api/v2/organizations/:name/registry/modules
 func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 	orgName := c.Param("name")
 
-	// Get authenticated user
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
-		return
-	}
-
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: creating a module requires org manage-modules permission.
+	user, org, ok := h.requireModuleManage(c, orgName)
+	if !ok {
 		return
 	}
 
@@ -194,21 +245,9 @@ func (h *RegistryPublishingHandler) DeleteModule(c *gin.Context) {
 	moduleName := c.Param("module_name")
 	provider := c.Param("provider")
 
-	// Get authenticated user
-	_, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
-		return
-	}
-
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: publishing/deleting a module requires org manage-modules permission.
+	_, org, ok := h.requireModuleManage(c, orgName)
+	if !ok {
 		return
 	}
 
@@ -236,21 +275,9 @@ func (h *RegistryPublishingHandler) DeleteModule(c *gin.Context) {
 func (h *RegistryPublishingHandler) DeleteAllModules(c *gin.Context) {
 	orgName := c.Param("name")
 
-	// Get authenticated user
-	_, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
-		return
-	}
-
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: wiping an org's module registry requires org manage-modules permission.
+	_, org, ok := h.requireModuleManage(c, orgName)
+	if !ok {
 		return
 	}
 
@@ -282,11 +309,9 @@ func (h *RegistryPublishingHandler) DeleteAllModules(c *gin.Context) {
 func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 	orgName := c.Param("name")
 
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: module listings expose VCS wiring — require org membership.
+	_, org, ok := h.requireModuleRead(c, orgName)
+	if !ok {
 		return
 	}
 
@@ -345,11 +370,9 @@ func (h *RegistryPublishingHandler) GetModule(c *gin.Context) {
 	moduleName := c.Param("module_name")
 	provider := c.Param("provider")
 
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: module detail exposes VCS wiring — require org membership.
+	_, org, ok := h.requireModuleRead(c, orgName)
+	if !ok {
 		return
 	}
 
@@ -388,21 +411,9 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 	moduleName := c.Param("module_name")
 	provider := c.Param("provider")
 
-	// Get authenticated user
-	_, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
-		return
-	}
-
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: module version listings are tenant data — require org membership.
+	_, org, ok := h.requireModuleRead(c, orgName)
+	if !ok {
 		return
 	}
 
@@ -476,21 +487,9 @@ func (h *RegistryPublishingHandler) PublishVersion(c *gin.Context) {
 	moduleName := c.Param("module_name")
 	provider := c.Param("provider")
 
-	// Get authenticated user
-	_, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
-		return
-	}
-
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: publishing/deleting a module requires org manage-modules permission.
+	_, org, ok := h.requireModuleManage(c, orgName)
+	if !ok {
 		return
 	}
 
@@ -678,21 +677,9 @@ func (h *RegistryPublishingHandler) DeleteModuleVersion(c *gin.Context) {
 	provider := c.Param("provider")
 	versionStr := c.Param("version")
 
-	// Get authenticated user
-	_, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
-		return
-	}
-
-	// Get organization
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+	// AUD-004: publishing/deleting a module requires org manage-modules permission.
+	_, org, ok := h.requireModuleManage(c, orgName)
+	if !ok {
 		return
 	}
 

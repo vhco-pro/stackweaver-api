@@ -654,6 +654,7 @@ func SetupV2Routes(
 		orgRepo,
 		vcsConnectionRepo,
 		authService,
+		rbacService,
 		githubAppManager,
 		modulePublisher,
 	)

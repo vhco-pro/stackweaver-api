@@ -33,6 +33,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -69,15 +70,22 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// setupTestOrg creates a test organization
+// setupTestOrg creates a test organization with a unique name and registers a
+// row-scoped cleanup. It must NOT drop shared tables — these tests run against
+// $TEST_DATABASE_URL, which may be a live database.
 func setupTestOrg(t *testing.T, db *gorm.DB) *models.Organization {
 	org := &models.Organization{
 		ID:   uuid.New(),
-		Name: "test-org",
+		Name: "test-org-" + uuid.NewString()[:8],
 	}
 	if err := db.Create(org).Error; err != nil {
 		t.Fatalf("Failed to create test organization: %v", err)
 	}
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM module_versions WHERE module_id IN (SELECT id FROM modules WHERE organization_id = ?)", org.ID)
+		db.Where("organization_id = ?", org.ID).Delete(&models.Module{})
+		db.Where("id = ?", org.ID).Delete(&models.Organization{})
+	})
 	return org
 }
 
@@ -118,13 +126,6 @@ resource "aws_instance" "test" {
 
 func TestListModules(t *testing.T) {
 	db := setupTestDB(t)
-	defer func() {
-		// Cleanup
-		db.Exec("DROP TABLE IF EXISTS module_downloads CASCADE")
-		db.Exec("DROP TABLE IF EXISTS module_versions CASCADE")
-		db.Exec("DROP TABLE IF EXISTS modules CASCADE")
-		db.Exec("DROP TABLE IF EXISTS organizations CASCADE")
-	}()
 
 	org := setupTestOrg(t, db)
 
@@ -197,13 +198,6 @@ func TestListModules(t *testing.T) {
 
 func TestGetModuleVersions(t *testing.T) {
 	db := setupTestDB(t)
-	defer func() {
-		// Cleanup
-		db.Exec("DROP TABLE IF EXISTS module_downloads CASCADE")
-		db.Exec("DROP TABLE IF EXISTS module_versions CASCADE")
-		db.Exec("DROP TABLE IF EXISTS modules CASCADE")
-		db.Exec("DROP TABLE IF EXISTS organizations CASCADE")
-	}()
 
 	org := setupTestOrg(t, db)
 
@@ -279,13 +273,6 @@ func TestGetModuleVersions(t *testing.T) {
 
 func TestPublishModuleVersion(t *testing.T) {
 	db := setupTestDB(t)
-	defer func() {
-		// Cleanup
-		db.Exec("DROP TABLE IF EXISTS module_downloads CASCADE")
-		db.Exec("DROP TABLE IF EXISTS module_versions CASCADE")
-		db.Exec("DROP TABLE IF EXISTS modules CASCADE")
-		db.Exec("DROP TABLE IF EXISTS organizations CASCADE")
-	}()
 
 	org := setupTestOrg(t, db)
 
@@ -312,21 +299,41 @@ func TestPublishModuleVersion(t *testing.T) {
 	userRepo := repository.NewUserRepository(db)
 	authService := auth.NewService(userRepo)
 
+	// AUD-004: PublishVersion now requires manage-modules permission. Set up an owner
+	// (owners team → all permissions) and authenticate the request as that user.
+	if err := db.AutoMigrate(&models.User{}, &models.OrganizationMember{}, &models.Team{}, &models.TeamMember{}, &models.TeamOrganizationAccess{}); err != nil {
+		t.Fatalf("migrate rbac models: %v", err)
+	}
+	ownerUser := &models.User{ID: uuid.New(), ZitadelSubject: "reg-pub-owner-" + uuid.NewString()[:8], Email: "reg-pub-owner-" + uuid.NewString()[:8] + "@test.local"}
+	db.Create(ownerUser)
+	ownersTeam := &models.Team{ID: uuid.New(), OrganizationID: org.ID, Name: "owners"}
+	db.Create(ownersTeam)
+	db.Create(&models.OrganizationMember{ID: uuid.New(), OrganizationID: org.ID, UserID: ownerUser.ID})
+	db.Create(&models.TeamMember{ID: uuid.New(), TeamID: ownersTeam.ID, UserID: ownerUser.ID})
+	rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db))
+	t.Cleanup(func() {
+		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamMember{})
+		db.Where("id = ?", ownersTeam.ID).Delete(&models.Team{})
+		db.Where("user_id = ?", ownerUser.ID).Delete(&models.OrganizationMember{})
+		db.Where("id = ?", ownerUser.ID).Delete(&models.User{})
+	})
+
 	handler := NewRegistryPublishingHandler(
 		moduleRepo,
 		moduleVersionRepo,
 		orgRepo,
 		vcsConnectionRepo,
 		authService,
+		rbacService,
 		nil, // githubAppManager can be nil for tests
 		modulePublisher,
 	)
 
-	// Setup router with auth middleware
+	// Setup router: authenticate every request as the owner user.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("user_id", ownerUser.ID); c.Next() })
 
-	// For testing, we'll skip auth middleware
 	authGroup := router.Group("/api/v2/organizations/:name/registry/modules/:module_name/:provider")
 	{
 		authGroup.POST("/versions", handler.PublishVersion)

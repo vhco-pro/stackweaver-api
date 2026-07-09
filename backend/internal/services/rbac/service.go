@@ -872,6 +872,11 @@ func (s *Service) CheckOrgManageAgentPools(ctx context.Context, userID, organiza
 	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageAgentPools)
 }
 
+// CheckOrgManageModules checks if user can manage registry modules (publish/delete)
+func (s *Service) CheckOrgManageModules(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageModules)
+}
+
 // CheckOrgManageAnsible checks if user can manage all Ansible resources (create/update/delete)
 func (s *Service) CheckOrgManageAnsible(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
 	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageAnsible)

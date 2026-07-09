@@ -77,12 +77,23 @@ func setupTestUserForProvider(t *testing.T, db *gorm.DB) *models.User {
 	return user
 }
 
+// cleanupProviderTables removes only this test's rows. Every delete is scoped to
+// the test org — these tests run against $TEST_DATABASE_URL, which in dev points
+// at the live app database, so an unscoped `DELETE FROM providers` would wipe real
+// registry data. Deletes bottom-up through the provider → version → platform →
+// download FK chain, then the org-scoped providers/gpg_keys, then the org + user.
 func cleanupProviderTables(db *gorm.DB, org *models.Organization, user *models.User) {
-	db.Exec("DELETE FROM provider_downloads")
-	db.Exec("DELETE FROM provider_platforms")
-	db.Exec("DELETE FROM provider_versions")
-	db.Exec("DELETE FROM providers")
-	db.Exec("DELETE FROM gpg_keys")
+	db.Exec(`DELETE FROM provider_downloads WHERE provider_platform_id IN (
+		SELECT pp.id FROM provider_platforms pp
+		JOIN provider_versions pv ON pv.id = pp.provider_version_id
+		JOIN providers p ON p.id = pv.provider_id WHERE p.organization_id = ?)`, org.ID)
+	db.Exec(`DELETE FROM provider_platforms WHERE provider_version_id IN (
+		SELECT pv.id FROM provider_versions pv
+		JOIN providers p ON p.id = pv.provider_id WHERE p.organization_id = ?)`, org.ID)
+	db.Exec(`DELETE FROM provider_versions WHERE provider_id IN (
+		SELECT id FROM providers WHERE organization_id = ?)`, org.ID)
+	db.Exec("DELETE FROM providers WHERE organization_id = ?", org.ID)
+	db.Exec("DELETE FROM gpg_keys WHERE organization_id = ?", org.ID)
 	db.Exec("DELETE FROM organizations WHERE id = ?", org.ID)
 	db.Exec("DELETE FROM users WHERE id = ?", user.ID)
 }
