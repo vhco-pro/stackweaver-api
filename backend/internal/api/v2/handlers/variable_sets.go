@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -24,6 +25,7 @@ type VariableSetHandlerV2 struct {
 	workspaceRepo           *repository.WorkspaceRepository
 	jobTemplateRepo         *repository.AnsibleJobTemplateRepository
 	authService             *auth.Service
+	rbacService             *rbac.Service
 }
 
 func NewVariableSetHandlerV2(
@@ -34,6 +36,7 @@ func NewVariableSetHandlerV2(
 	workspaceRepo *repository.WorkspaceRepository,
 	jobTemplateRepo *repository.AnsibleJobTemplateRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 ) *VariableSetHandlerV2 {
 	return &VariableSetHandlerV2{
 		variableSetRepo:         variableSetRepo,
@@ -43,7 +46,27 @@ func NewVariableSetHandlerV2(
 		workspaceRepo:           workspaceRepo,
 		jobTemplateRepo:         jobTemplateRepo,
 		authService:             authService,
+		rbacService:             rbacService,
 	}
+}
+
+// authorizeVarset gates the caller (already resolved from the context) against a
+// variable set at the given level ("read"/"write") via rbac.CheckVariableSetPermission.
+// It writes the JSON:API error and returns false when unauthorized. AUD-101: every
+// endpoint here previously fetched the user and then discarded it (`_ = user`) under a
+// TODO, so any authenticated JWT identity could read/write variable sets — including
+// by-ID routes that carry no org name — in any organization.
+func (h *VariableSetHandlerV2) authorizeVarset(c *gin.Context, userID uuid.UUID, variableSet *models.VariableSet, level string) bool {
+	allowed, err := h.rbacService.CheckVariableSetPermission(c.Request.Context(), userID, variableSet, level)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}}})
+		return false
+	}
+	if !allowed {
+		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to access this variable set"}}})
+		return false
+	}
+	return true
 }
 
 // CreateVariableSetRequestV2 uses JSON:API format (TFE-compatible)
@@ -111,7 +134,6 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
@@ -119,8 +141,10 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		return
 	}
 
-	// TODO: Check user has permission to view variable sets in this organization
-	_ = user
+	// Listing an org's variable sets requires org membership (AUD-101).
+	if !h.authorizeVarset(c, user.ID, &models.VariableSet{OrganizationID: org.ID}, "read") {
+		return
+	}
 
 	variableSets, err := h.variableSetRepo.ListByOrganization(org.ID)
 	if err != nil {
@@ -259,7 +283,6 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -284,6 +307,10 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
 			return
 		}
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "read") {
+		return
 	}
 
 	// Get variables for this set
@@ -421,7 +448,6 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
@@ -477,6 +503,12 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Parent organization must match URL organization"}}})
 			return
 		}
+	}
+
+	// Creating a variable set requires write on the target scope (AUD-101):
+	// project-owned needs project varset write, org-owned needs manage workspaces/projects.
+	if !h.authorizeVarset(c, user.ID, &models.VariableSet{OrganizationID: org.ID, ProjectID: projectID}, "write") {
+		return
 	}
 
 	variableSet := &models.VariableSet{
@@ -619,7 +651,6 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -647,6 +678,10 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 	}
 	// Note: org is only needed when orgName is provided for validation
 	// When orgName is empty, we don't need to fetch org
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
+		return
+	}
 
 	var req UpdateVariableSetRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -776,7 +811,6 @@ func (h *VariableSetHandlerV2) DeleteVariableSet(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -804,6 +838,10 @@ func (h *VariableSetHandlerV2) DeleteVariableSet(c *gin.Context) {
 	}
 	// Note: org is only needed when orgName is provided for validation
 	// When orgName is empty, we don't need to fetch org
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
+		return
+	}
 
 	if err := h.variableSetRepo.Delete(variableSetID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to delete variable set"}}})
@@ -841,7 +879,6 @@ func (h *VariableSetHandlerV2) AssignWorkspace(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -857,6 +894,10 @@ func (h *VariableSetHandlerV2) AssignWorkspace(c *gin.Context) {
 	// Only workspace-scoped variable sets can be assigned to workspaces
 	if variableSet.Scope != "workspace" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only workspace-scoped variable sets can be assigned to workspaces"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 
@@ -923,7 +964,6 @@ func (h *VariableSetHandlerV2) UnassignWorkspace(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -931,9 +971,13 @@ func (h *VariableSetHandlerV2) UnassignWorkspace(c *gin.Context) {
 	}
 
 	// Verify variable set exists
-	_, err = h.variableSetRepo.GetByID(variableSetID)
+	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 
@@ -987,7 +1031,6 @@ func (h *VariableSetHandlerV2) AssignProject(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1003,6 +1046,10 @@ func (h *VariableSetHandlerV2) AssignProject(c *gin.Context) {
 	// Only organization-scoped variable sets can be assigned to projects
 	if variableSet.Scope != "organization" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only organization-scoped variable sets can be assigned to projects"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 
@@ -1068,7 +1115,6 @@ func (h *VariableSetHandlerV2) UnassignProject(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1076,9 +1122,13 @@ func (h *VariableSetHandlerV2) UnassignProject(c *gin.Context) {
 	}
 
 	// Verify variable set exists
-	_, err = h.variableSetRepo.GetByID(variableSetID)
+	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 
@@ -1129,7 +1179,6 @@ func (h *VariableSetHandlerV2) AssignJobTemplate(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1139,6 +1188,10 @@ func (h *VariableSetHandlerV2) AssignJobTemplate(c *gin.Context) {
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 
@@ -1202,7 +1255,6 @@ func (h *VariableSetHandlerV2) UnassignJobTemplate(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1210,9 +1262,13 @@ func (h *VariableSetHandlerV2) UnassignJobTemplate(c *gin.Context) {
 	}
 
 	// Verify variable set exists
-	_, err = h.variableSetRepo.GetByID(variableSetID)
+	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 
@@ -1253,12 +1309,19 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	// Verify job template exists and get its project
 	template, err := h.jobTemplateRepo.GetByID(jobTemplateID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Job template not found"}}})
+		return
+	}
+
+	// Reading a job template's variable sets requires varset read in its project (AUD-101).
+	if proj, perr := h.projectRepo.GetByID(template.ProjectID); perr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Project not found"}}})
+		return
+	} else if !h.authorizeVarset(c, user.ID, &models.VariableSet{OrganizationID: proj.OrganizationID, ProjectID: &template.ProjectID}, "read") {
 		return
 	}
 
@@ -1376,7 +1439,6 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1404,6 +1466,10 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 	}
 	// Note: org is only needed when orgName is provided for validation
 	// When orgName is empty, we don't need to fetch org
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "read") {
+		return
+	}
 
 	variables, err := h.variableSetVariableRepo.ListByVariableSet(variableSetID)
 	if err != nil {
@@ -1461,7 +1527,6 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" || variableID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set or variable ID"}}})
@@ -1493,6 +1558,10 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 	}
 	if variable.VariableSetID != variableSetID {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "read") {
 		return
 	}
 
@@ -1536,7 +1605,6 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1568,6 +1636,10 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
 			return
 		}
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
+		return
 	}
 
 	var req CreateVariableSetVariableRequestV2
@@ -1696,7 +1768,6 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1743,6 +1814,10 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 
 	if variable.VariableSetID != variableSetID {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 
@@ -1836,7 +1911,6 @@ func (h *VariableSetHandlerV2) DeleteVariableSetVariable(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
 		return
 	}
-	_ = user
 
 	if variableSetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
@@ -1883,6 +1957,10 @@ func (h *VariableSetHandlerV2) DeleteVariableSetVariable(c *gin.Context) {
 
 	if variable.VariableSetID != variableSetID {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		return
+	}
+
+	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
 	}
 

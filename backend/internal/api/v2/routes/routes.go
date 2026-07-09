@@ -561,7 +561,7 @@ func SetupV2Routes(
 	variableSetVariableRepo := repository.NewVariableSetVariableRepository(db)
 	jobTemplateRepo := repository.NewAnsibleJobTemplateRepository(db)
 	// projectRepo already declared above, reuse it
-	variableSetHandler := handlers.NewVariableSetHandlerV2(variableSetRepo, variableSetVariableRepo, orgRepo, projectRepo, workspaceRepo, jobTemplateRepo, authService)
+	variableSetHandler := handlers.NewVariableSetHandlerV2(variableSetRepo, variableSetVariableRepo, orgRepo, projectRepo, workspaceRepo, jobTemplateRepo, authService, rbacService)
 
 	// Update variable service to include variable set repo (for variable set support in GetVariablesForRun)
 	// This allows platform variables + variable sets to work together
