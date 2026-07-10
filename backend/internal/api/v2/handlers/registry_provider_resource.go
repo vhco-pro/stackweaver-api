@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/storage"
@@ -27,6 +28,7 @@ type RegistryProviderResourceHandler struct {
 	providerRepo *repository.ProviderRepository
 	orgRepo      *repository.OrganizationRepository
 	authService  *auth.Service
+	rbacService  *rbac.Service
 	storage      storage.Client
 }
 
@@ -34,14 +36,48 @@ func NewRegistryProviderResourceHandler(
 	providerRepo *repository.ProviderRepository,
 	orgRepo *repository.OrganizationRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 	storageClient storage.Client,
 ) *RegistryProviderResourceHandler {
 	return &RegistryProviderResourceHandler{
 		providerRepo: providerRepo,
 		orgRepo:      orgRepo,
 		authService:  authService,
+		rbacService:  rbacService,
 		storage:      storageClient,
 	}
+}
+
+// requireManageProviders authorizes the caller to manage the org's provider
+// registry (create/delete providers, publish binaries). AUD-103. Returns false and
+// writes the error when unauthorized.
+func (h *RegistryProviderResourceHandler) requireManageProviders(c *gin.Context, orgID uuid.UUID) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		regProvErr(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return false
+	}
+	ok, err := h.rbacService.CheckOrgManageProviders(c.Request.Context(), user.ID, orgID)
+	if err != nil || !ok {
+		regProvErr(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage this organization's registry")
+		return false
+	}
+	return true
+}
+
+// requireMember authorizes the caller as a member of the org (provider reads). AUD-103.
+func (h *RegistryProviderResourceHandler) requireMember(c *gin.Context, orgID uuid.UUID) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		regProvErr(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return false
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, orgID)
+	if err != nil || !inOrg {
+		regProvErr(c, http.StatusForbidden, "Forbidden", "You are not a member of this organization")
+		return false
+	}
+	return true
 }
 
 const registryProviderType = "registry-providers"
@@ -87,6 +123,10 @@ func (h *RegistryProviderResourceHandler) CreateProvider(c *gin.Context) {
 	org, err := h.orgRepo.GetByName(c.Param("name"))
 	if err != nil {
 		regProvErr(c, http.StatusNotFound, "Not Found", "Organization not found")
+		return
+	}
+
+	if !h.requireManageProviders(c, org.ID) {
 		return
 	}
 
@@ -166,6 +206,10 @@ func (h *RegistryProviderResourceHandler) ListProviders(c *gin.Context) {
 		return
 	}
 
+	if !h.requireMember(c, org.ID) {
+		return
+	}
+
 	registryName := c.Query("filter[registry_name]")
 	providers, _, err := h.providerRepo.ListByOrganization(org.ID, registryName, 100, 0)
 	if err != nil {
@@ -186,6 +230,9 @@ func (h *RegistryProviderResourceHandler) GetProvider(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !h.requireMember(c, provider.OrganizationID) {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": formatRegistryProviderResponse(provider)})
 }
 
@@ -193,6 +240,9 @@ func (h *RegistryProviderResourceHandler) GetProvider(c *gin.Context) {
 func (h *RegistryProviderResourceHandler) DeleteProvider(c *gin.Context) {
 	provider, ok := h.resolveComposite(c)
 	if !ok {
+		return
+	}
+	if !h.requireManageProviders(c, provider.OrganizationID) {
 		return
 	}
 	if err := h.providerRepo.Delete(provider.ID); err != nil {
@@ -209,6 +259,9 @@ func (h *RegistryProviderResourceHandler) GetProviderByID(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !h.requireMember(c, provider.OrganizationID) {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": formatRegistryProviderResponse(provider)})
 }
 
@@ -216,6 +269,9 @@ func (h *RegistryProviderResourceHandler) GetProviderByID(c *gin.Context) {
 func (h *RegistryProviderResourceHandler) DeleteProviderByID(c *gin.Context) {
 	provider, ok := h.resolveByID(c)
 	if !ok {
+		return
+	}
+	if !h.requireManageProviders(c, provider.OrganizationID) {
 		return
 	}
 	if err := h.providerRepo.Delete(provider.ID); err != nil {

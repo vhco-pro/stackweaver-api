@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -34,6 +35,7 @@ type RegistryProviderPublishingHandler struct {
 	orgRepo              *repository.OrganizationRepository
 	gpgKeyRepo           *repository.GPGKeyRepository
 	authService          *auth.Service
+	rbacService          *rbac.Service
 	storage              storage.Client
 }
 
@@ -44,6 +46,7 @@ func NewRegistryProviderPublishingHandler(
 	orgRepo *repository.OrganizationRepository,
 	gpgKeyRepo *repository.GPGKeyRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 	storageClient storage.Client,
 ) *RegistryProviderPublishingHandler {
 	return &RegistryProviderPublishingHandler{
@@ -53,6 +56,7 @@ func NewRegistryProviderPublishingHandler(
 		orgRepo:              orgRepo,
 		gpgKeyRepo:           gpgKeyRepo,
 		authService:          authService,
+		rbacService:          rbacService,
 		storage:              storageClient,
 	}
 }
@@ -73,7 +77,8 @@ func storagePrefix(org, provider, version string) string {
 //   - key_id      (required) the uploaded GPG key id that signed SHA256SUMS
 //   - protocols   (optional) comma-separated plugin protocols, default "5.0"
 func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Context) {
-	if _, err := h.authService.GetUserFromContext(c); err != nil {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
 		regProvErr(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
@@ -81,6 +86,14 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 	org, err := h.orgRepo.GetByName(c.Param("name"))
 	if err != nil {
 		regProvErr(c, http.StatusNotFound, "Not Found", "Organization not found")
+		return
+	}
+
+	// AUD-103: publishing a binary into the org's registry requires manage-providers.
+	// Previously this only checked authentication, so any authenticated user could
+	// publish arbitrary binaries under any org's trusted namespace.
+	if allowed, err := h.rbacService.CheckOrgManageProviders(c.Request.Context(), user.ID, org.ID); err != nil || !allowed {
+		regProvErr(c, http.StatusForbidden, "Forbidden", "You do not have permission to publish to this organization's registry")
 		return
 	}
 
