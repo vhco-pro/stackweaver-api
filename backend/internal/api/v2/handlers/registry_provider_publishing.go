@@ -58,6 +58,7 @@ type RegistryProviderPublishingHandler struct {
 	gpgKeyRepo           *repository.GPGKeyRepository
 	authService          *auth.Service
 	rbacService          *rbac.Service
+	gpgService           *registry.GPGService
 	storage              storage.Client
 }
 
@@ -79,6 +80,7 @@ func NewRegistryProviderPublishingHandler(
 		gpgKeyRepo:           gpgKeyRepo,
 		authService:          authService,
 		rbacService:          rbacService,
+		gpgService:           registry.NewGPGService(),
 		storage:              storageClient,
 	}
 }
@@ -149,7 +151,8 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "key_id is required (the GPG key that signed SHA256SUMS)")
 		return
 	}
-	if _, err := h.gpgKeyRepo.GetByKeyID(org.ID, keyID); err != nil {
+	gpgKey, err := h.gpgKeyRepo.GetByKeyID(org.ID, keyID)
+	if err != nil {
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", fmt.Sprintf("GPG key %s not found in this organization", keyID))
 		return
 	}
@@ -161,7 +164,7 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 
 	prefix := storagePrefix(org.Name, provider.Name, version)
 
-	// --- binary --------------------------------------------------------------
+	// --- gather the three uploads --------------------------------------------
 	file, err := c.FormFile("file")
 	if err != nil {
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "file is required")
@@ -174,25 +177,55 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "invalid provider filename")
 		return
 	}
-	shasum, err := h.storeUpload(c, file, fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, filename), true)
-	if err != nil {
-		return // storeUpload already wrote the error
-	}
-
-	// --- SHA256SUMS + detached signature (publisher-provided) ----------------
 	shasumsFile, err := c.FormFile("shasums")
 	if err != nil {
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "shasums (the SHA256SUMS file) is required")
 		return
 	}
-	shasumsPath := prefix + "/SHA256SUMS"
-	if _, err := h.storeUpload(c, shasumsFile, shasumsPath, false); err != nil {
-		return
-	}
-
 	sigFile, err := c.FormFile("shasums_sig")
 	if err != nil {
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "shasums_sig (the detached SHA256SUMS signature) is required")
+		return
+	}
+
+	// --- AUD-106: verify the publisher's signature BEFORE storing anything ----
+	// The publisher signs SHA256SUMS offline with the private half of the registered
+	// GPG key. The server must confirm (a) the detached signature is valid for THIS
+	// org's key and (b) the binary just received is actually the one that signed
+	// SHA256SUMS lists — otherwise the registry would serve, and vouch for, artifacts
+	// it never checked. Verifying first also avoids leaving objects behind on rejection.
+	shasum, err := hashUpload(file)
+	if err != nil {
+		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", "failed to hash provider binary")
+		return
+	}
+	shasumsBytes, err := readUpload(shasumsFile)
+	if err != nil {
+		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", "failed to read SHA256SUMS")
+		return
+	}
+	sigBytes, err := readUpload(sigFile)
+	if err != nil {
+		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", "failed to read SHA256SUMS signature")
+		return
+	}
+	if err := h.gpgService.VerifyDetachedSignature(gpgKey.ASCIIArmor, shasumsBytes, sigBytes); err != nil {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			fmt.Sprintf("SHA256SUMS signature does not verify against GPG key %s: %v", keyID, err))
+		return
+	}
+	if !shasumsListsBinary(shasumsBytes, shasum, filename) {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			fmt.Sprintf("the uploaded binary's checksum (%s  %s) is not listed in the signed SHA256SUMS", shasum, filename))
+		return
+	}
+
+	// --- store (signature verified) ------------------------------------------
+	if _, err := h.storeUpload(c, file, fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, filename), false); err != nil {
+		return // storeUpload already wrote the error
+	}
+	shasumsPath := prefix + "/SHA256SUMS"
+	if _, err := h.storeUpload(c, shasumsFile, shasumsPath, false); err != nil {
 		return
 	}
 	shasumsSigPath := prefix + "/SHA256SUMS.sig"
@@ -261,6 +294,57 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 
 // storeUpload streams a multipart file into object storage at key. When wantSha is true it also
 // returns the file's SHA256 (hex). On any failure it writes the JSON error and returns an error.
+// readUpload reads a small uploaded file (SHA256SUMS or its detached signature) fully
+// into memory for signature verification.
+func readUpload(fh *multipart.FileHeader) ([]byte, error) {
+	f, err := fh.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			logger.Warnf("failed to close upload: %v", cerr)
+		}
+	}()
+	return io.ReadAll(f)
+}
+
+// hashUpload streams an uploaded file through SHA-256 without buffering it, returning the
+// lowercase hex digest — used to confirm the provider binary is the one SHA256SUMS covers.
+func hashUpload(fh *multipart.FileHeader) (string, error) {
+	f, err := fh.Open()
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			logger.Warnf("failed to close upload: %v", cerr)
+		}
+	}()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// shasumsListsBinary reports whether the signed SHA256SUMS contains a line pairing the
+// binary's hex digest with its filename. It tolerates both the `<sha>  <name>` (coreutils
+// text) and `<sha> *<name>` (binary-mode) layouts that gpg's sha256sum emits.
+func shasumsListsBinary(shasums []byte, sha, filename string) bool {
+	for _, line := range strings.Split(string(shasums), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimPrefix(fields[len(fields)-1], "*")
+		if strings.EqualFold(fields[0], sha) && name == filename {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *RegistryProviderPublishingHandler) storeUpload(c *gin.Context, fh *multipart.FileHeader, key string, wantSha bool) (string, error) {
 	src, err := fh.Open()
 	if err != nil {
