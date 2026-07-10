@@ -427,6 +427,16 @@ func main() {
 	if err := authService.InitializeZitadel(zitadelIssuer, zitadelClientID, zitadelClientSecret, zitadelInternalAddr); err != nil {
 		logger.Fatalf("Failed to initialize Zitadel verifier: %v", err)
 	}
+	// AUD-012: register the Stackweaver client_ids an access token may carry in `aud`. Real
+	// user tokens are issued to the frontend PKCE client, so its id must be accepted; the API
+	// client id covers any future service-to-service token. Tokens for other clients on the
+	// same Zitadel instance are rejected.
+	authService.RegisterAudience(zitadelClientID)
+	zitadelFrontendClientID := os.Getenv("ZITADEL_FRONTEND_CLIENT_ID")
+	if zitadelFrontendClientID == "" {
+		logger.Warn("ZITADEL_FRONTEND_CLIENT_ID not set — access-token audience enforcement (AUD-012) may reject real user tokens. Set it to the frontend OIDC client_id.")
+	}
+	authService.RegisterAudience(zitadelFrontendClientID)
 
 	loginServicePAT := os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN")
 	if loginServicePAT == "" {

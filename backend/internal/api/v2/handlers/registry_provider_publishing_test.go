@@ -19,6 +19,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +30,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/armor"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
@@ -221,9 +224,17 @@ func TestPublishProviderPlatform(t *testing.T) {
 	if err := db.Create(provider).Error; err != nil {
 		t.Fatalf("Failed to create test provider: %v", err)
 	}
-	// A GPG key must exist for the org; the publish endpoint only checks existence (the publisher
-	// signs offline, so the armor/sig contents are not verified server-side).
-	gpgKey := &models.GPGKey{OrganizationID: org.ID, KeyID: "ABCD1234", ASCIIArmor: "-----BEGIN PGP PUBLIC KEY BLOCK-----\ndummy\n-----END PGP PUBLIC KEY BLOCK-----", CreatedBy: user.ID}
+	// AUD-106: the publisher signs SHA256SUMS offline with the private half of a key whose
+	// public half is registered here; the server verifies that signature against THIS key at
+	// publish time, so the fixtures must be genuinely signed (dummy armor/sig would 422).
+	binaryName := "terraform-provider-test_1.0.0_linux_amd64.zip"
+	binaryContent := []byte("dummy provider zip")
+	sum := sha256.Sum256(binaryContent)
+	shasumsContent := []byte(fmt.Sprintf("%x  %s\n", sum, binaryName))
+	asciiArmor, keyID, sign := freshPublisherKey(t)
+	sig := sign(shasumsContent, false)
+
+	gpgKey := &models.GPGKey{OrganizationID: org.ID, KeyID: keyID, ASCIIArmor: asciiArmor, CreatedBy: user.ID}
 	if err := db.Create(gpgKey).Error; err != nil {
 		t.Fatalf("Failed to create test gpg key: %v", err)
 	}
@@ -246,7 +257,7 @@ func TestPublishProviderPlatform(t *testing.T) {
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	for k, v := range map[string]string{"os": "linux", "arch": "amd64", "key_id": gpgKey.KeyID, "protocols": "5.0"} {
+	for k, v := range map[string]string{"os": "linux", "arch": "amd64", "key_id": keyID, "protocols": "5.0"} {
 		if err := writer.WriteField(k, v); err != nil {
 			t.Fatalf("write field: %v", err)
 		}
@@ -260,9 +271,9 @@ func TestPublishProviderPlatform(t *testing.T) {
 			t.Fatalf("write file %s: %v", field, err)
 		}
 	}
-	writeFile("file", "terraform-provider-test_1.0.0_linux_amd64.zip", []byte("dummy provider zip"))
-	writeFile("shasums", "SHA256SUMS", []byte("abc123  terraform-provider-test_1.0.0_linux_amd64.zip\n"))
-	writeFile("shasums_sig", "SHA256SUMS.sig", []byte("dummy detached signature bytes"))
+	writeFile("file", binaryName, binaryContent)
+	writeFile("shasums", "SHA256SUMS", shasumsContent)
+	writeFile("shasums_sig", "SHA256SUMS.sig", sig)
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
@@ -393,5 +404,154 @@ func TestPublishProviderPlatform_RejectsPathInjection(t *testing.T) {
 		if strings.Contains(obj.Key, "..") || strings.Contains(obj.Key, "other-org") {
 			t.Fatalf("storage key escaped the prefix: %q", obj.Key)
 		}
+	}
+}
+
+// freshPublisherKey generates a throwaway OpenPGP key in-process (no gpg binary) and returns
+// its ASCII-armored public half (to register as the org's GPG key), the 16-char long key id,
+// and a sign closure that produces a detached signature over a payload with that same key —
+// so a test can register one key and sign multiple payloads with it. armored selects the
+// ASCII-armored detached signature form (SHA256SUMS.sig is conventionally binary).
+func freshPublisherKey(t *testing.T) (asciiArmor, keyID string, sign func(payload []byte, armored bool) []byte) {
+	t.Helper()
+	entity, err := openpgp.NewEntity("Stackweaver Publisher", "aud106", "publisher@stackweaver.local", nil)
+	if err != nil {
+		t.Fatalf("NewEntity: %v", err)
+	}
+	var pub bytes.Buffer
+	w, err := armor.Encode(&pub, openpgp.PublicKeyType, nil)
+	if err != nil {
+		t.Fatalf("armor.Encode: %v", err)
+	}
+	if err := entity.Serialize(w); err != nil {
+		t.Fatalf("serialize public key: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close armor: %v", err)
+	}
+	sign = func(payload []byte, armored bool) []byte {
+		var sig bytes.Buffer
+		var serr error
+		if armored {
+			serr = openpgp.ArmoredDetachSign(&sig, entity, bytes.NewReader(payload), nil)
+		} else {
+			serr = openpgp.DetachSign(&sig, entity, bytes.NewReader(payload), nil)
+		}
+		if serr != nil {
+			t.Fatalf("DetachSign: %v", serr)
+		}
+		return sig.Bytes()
+	}
+	return pub.String(), strings.ToUpper(entity.PrimaryKey.KeyIdString()), sign
+}
+
+// TestPublishProviderPlatform_RejectsUnverifiedSignature is the AUD-106 assertion: publish
+// must reject an artifact whose SHA256SUMS signature does not verify against the org's
+// registered key, or whose (validly signed) SHA256SUMS does not list the uploaded binary.
+// Before the fix the publisher-supplied signature was stored blind — a provider signed by
+// nobody the org trusts (or covering different bytes) was accepted 201 and then served as if
+// the registry vouched for it.
+func TestPublishProviderPlatform_RejectsUnverifiedSignature(t *testing.T) {
+	db := setupTestDBForProvider(t)
+	org := setupTestOrgForProvider(t, db)
+	user := setupTestUserForProvider(t, db)
+	makeUserOrgOwner(t, db, org, user)
+	defer cleanupProviderTables(db, org, user)
+
+	provider := &models.Provider{ID: uuid.New(), OrganizationID: org.ID, Name: "test-provider", RegistryName: "private", Namespace: org.Name}
+	if err := db.Create(provider).Error; err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+
+	binaryName := "terraform-provider-test_1.0.0_linux_amd64.zip"
+	binaryContent := []byte("dummy provider zip")
+	sum := sha256.Sum256(binaryContent)
+	shasumsContent := []byte(fmt.Sprintf("%x  %s\n", sum, binaryName))
+
+	// The org registers ONE key.
+	registeredArmor, keyID, registeredSign := freshPublisherKey(t)
+	gpgKey := &models.GPGKey{OrganizationID: org.ID, KeyID: keyID, ASCIIArmor: registeredArmor, CreatedBy: user.ID}
+	if err := db.Create(gpgKey).Error; err != nil {
+		t.Fatalf("create gpg key: %v", err)
+	}
+	// An attacker's key that is NOT registered to the org, signing the correct SHA256SUMS.
+	_, _, foreignSign := freshPublisherKey(t)
+	// A SHA256SUMS that does NOT list the uploaded binary, signed by the registered key.
+	otherShasums := []byte(fmt.Sprintf("%x  some-other-artifact.zip\n", sha256.Sum256([]byte("something else"))))
+
+	mockStore := registry.NewMockStorage()
+	handler := NewRegistryProviderPublishingHandler(
+		repository.NewProviderRepository(db), repository.NewProviderVersionRepository(db),
+		repository.NewProviderPlatformRepository(db), repository.NewOrganizationRepository(db),
+		repository.NewGPGKeyRepository(db), auth.NewService(repository.NewUserRepository(db)),
+		newProviderRBAC(db), mockStore,
+	)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("user_id", user.ID); c.Next() })
+	router.POST("/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name/versions/:version/platforms", handler.PublishProviderPlatform)
+
+	cases := []struct {
+		name    string
+		shasums []byte
+		sig     []byte
+	}{
+		{"signature by unregistered key", shasumsContent, foreignSign(shasumsContent, false)},
+		{"binary not listed in signed SHA256SUMS", otherShasums, registeredSign(otherShasums, false)},
+		{"garbage signature", shasumsContent, []byte("not a signature")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &bytes.Buffer{}
+			writer := multipart.NewWriter(body)
+			for k, v := range map[string]string{"os": "linux", "arch": "amd64", "key_id": keyID} {
+				if err := writer.WriteField(k, v); err != nil {
+					t.Fatalf("write field: %v", err)
+				}
+			}
+			for _, f := range []struct {
+				field, fn string
+				data      []byte
+			}{
+				{"file", binaryName, binaryContent},
+				{"shasums", "SHA256SUMS", tc.shasums},
+				{"shasums_sig", "SHA256SUMS.sig", tc.sig},
+			} {
+				p, err := writer.CreateFormFile(f.field, f.fn)
+				if err != nil {
+					t.Fatalf("create %s: %v", f.field, err)
+				}
+				if _, err := io.Copy(p, bytes.NewReader(f.data)); err != nil {
+					t.Fatalf("copy %s: %v", f.field, err)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatalf("close writer: %v", err)
+			}
+
+			url := fmt.Sprintf("/api/v2/organizations/%s/registry-providers/private/%s/%s/versions/1.0.0/platforms", org.Name, org.Name, provider.Name)
+			req := httptest.NewRequestWithContext(context.Background(), "POST", url, body)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("%s: got %d, want 422. Body: %s", tc.name, w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// A rejected publish must leave no artifacts and no version/platform rows behind.
+	objs, err := mockStore.List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("list storage: %v", err)
+	}
+	if len(objs) != 0 {
+		t.Errorf("rejected publish wrote %d object(s) to storage; want 0", len(objs))
+	}
+	var versions int64
+	db.Model(&models.ProviderVersion{}).Where("provider_id = ?", provider.ID).Count(&versions)
+	if versions != 0 {
+		t.Errorf("rejected publish created %d provider version(s); want 0", versions)
 	}
 }
