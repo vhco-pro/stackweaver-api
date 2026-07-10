@@ -896,13 +896,13 @@ func SetupV2Routes(
 	// GPG Key Repository and Handler (declared before the provider handlers, which need the repo
 	// to advertise signing keys and validate publish requests).
 	gpgKeyRepo := repository.NewGPGKeyRepository(db)
-	gpgKeyHandler := handlers.NewGPGKeyHandler(gpgKeyRepo, orgRepo, authService)
+	gpgKeyHandler := handlers.NewGPGKeyHandler(gpgKeyRepo, orgRepo, authService, rbacService)
 
 	// v1 provider-install protocol handler (public download/discovery + signed SHA256SUMS streaming).
 	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, storageClient)
 
 	// tfe_registry_provider resource CRUD (go-tfe registry-providers surface).
-	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, storageClient)
+	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, rbacService, storageClient)
 
 	// Provider Publishing Handler (version/platform uploads with publisher-signed SHA256SUMS)
 	providerPublishingHandler := handlers.NewRegistryProviderPublishingHandler(
@@ -912,6 +912,7 @@ func SetupV2Routes(
 		orgRepo,
 		gpgKeyRepo,
 		authService,
+		rbacService,
 		storageClient,
 	)
 

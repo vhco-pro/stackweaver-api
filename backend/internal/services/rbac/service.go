@@ -947,6 +947,12 @@ func (s *Service) CheckOrgManageModules(ctx context.Context, userID, organizatio
 	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageModules)
 }
 
+// CheckOrgManageProviders checks if user can manage the registry provider trust
+// plane — provider shells, published binaries, and the org's GPG trust anchors.
+func (s *Service) CheckOrgManageProviders(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageProviders)
+}
+
 // CheckOrgManageAnsible checks if user can manage all Ansible resources (create/update/delete)
 func (s *Service) CheckOrgManageAnsible(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
 	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageAnsible)

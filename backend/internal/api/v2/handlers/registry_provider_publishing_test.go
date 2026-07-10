@@ -31,6 +31,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -50,6 +51,10 @@ func setupTestDBForProvider(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&models.Organization{},
 		&models.User{},
+		&models.Team{},
+		&models.TeamMember{},
+		&models.TeamOrganizationAccess{},
+		&models.Project{},
 		&models.Provider{},
 		&models.ProviderVersion{},
 		&models.ProviderPlatform{},
@@ -59,6 +64,30 @@ func setupTestDBForProvider(t *testing.T) *gorm.DB {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 	return db
+}
+
+// makeUserOrgOwner puts the user in the org's "owners" team so that
+// CheckOrgManageProviders (owners-team shortcut) authorizes registry mutations.
+// Returns the team id for cleanup.
+func makeUserOrgOwner(t *testing.T, db *gorm.DB, org *models.Organization, user *models.User) uuid.UUID {
+	t.Helper()
+	team := &models.Team{ID: uuid.New(), OrganizationID: org.ID, Name: "owners"}
+	if err := db.Create(team).Error; err != nil {
+		t.Fatalf("create owners team: %v", err)
+	}
+	if err := db.Create(&models.TeamMember{ID: uuid.New(), TeamID: team.ID, UserID: user.ID}).Error; err != nil {
+		t.Fatalf("create team member: %v", err)
+	}
+	return team.ID
+}
+
+// newProviderRBAC builds an rbac.Service wired to the test DB.
+func newProviderRBAC(db *gorm.DB) *rbac.Service {
+	return rbac.NewServiceWithTeams(
+		repository.NewOrganizationRepository(db),
+		repository.NewTeamRepository(db),
+		repository.NewProjectRepository(db),
+	)
 }
 
 func setupTestOrgForProvider(t *testing.T, db *gorm.DB) *models.Organization {
@@ -94,6 +123,9 @@ func cleanupProviderTables(db *gorm.DB, org *models.Organization, user *models.U
 		SELECT id FROM providers WHERE organization_id = ?)`, org.ID)
 	db.Exec("DELETE FROM providers WHERE organization_id = ?", org.ID)
 	db.Exec("DELETE FROM gpg_keys WHERE organization_id = ?", org.ID)
+	db.Exec("DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE organization_id = ?)", org.ID)
+	db.Exec("DELETE FROM team_organization_accesses WHERE team_id IN (SELECT id FROM teams WHERE organization_id = ?)", org.ID)
+	db.Exec("DELETE FROM teams WHERE organization_id = ?", org.ID)
 	db.Exec("DELETE FROM organizations WHERE id = ?", org.ID)
 	db.Exec("DELETE FROM users WHERE id = ?", user.ID)
 }
@@ -105,12 +137,13 @@ func TestCreateRegistryProvider(t *testing.T) {
 	db := setupTestDBForProvider(t)
 	org := setupTestOrgForProvider(t, db)
 	user := setupTestUserForProvider(t, db)
+	makeUserOrgOwner(t, db, org, user)
 	defer cleanupProviderTables(db, org, user)
 
 	providerRepo := repository.NewProviderRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
-	handler := NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, registry.NewMockStorage())
+	handler := NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, newProviderRBAC(db), registry.NewMockStorage())
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -174,6 +207,7 @@ func TestPublishProviderPlatform(t *testing.T) {
 	db := setupTestDBForProvider(t)
 	org := setupTestOrgForProvider(t, db)
 	user := setupTestUserForProvider(t, db)
+	makeUserOrgOwner(t, db, org, user)
 	defer cleanupProviderTables(db, org, user)
 
 	provider := &models.Provider{
@@ -200,6 +234,7 @@ func TestPublishProviderPlatform(t *testing.T) {
 		repository.NewOrganizationRepository(db),
 		repository.NewGPGKeyRepository(db),
 		auth.NewService(repository.NewUserRepository(db)),
+		newProviderRBAC(db),
 		registry.NewMockStorage(),
 	)
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -23,6 +24,7 @@ type GPGKeyHandler struct {
 	gpgKeyRepo  *repository.GPGKeyRepository
 	orgRepo     *repository.OrganizationRepository
 	authService *auth.Service
+	rbacService *rbac.Service
 	gpgService  *registry.GPGService
 }
 
@@ -30,13 +32,49 @@ func NewGPGKeyHandler(
 	gpgKeyRepo *repository.GPGKeyRepository,
 	orgRepo *repository.OrganizationRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 ) *GPGKeyHandler {
 	return &GPGKeyHandler{
 		gpgKeyRepo:  gpgKeyRepo,
 		orgRepo:     orgRepo,
 		authService: authService,
+		rbacService: rbacService,
 		gpgService:  registry.NewGPGService(),
 	}
+}
+
+// requireOrgManageProviders authorizes the caller to manage the org's registry
+// trust plane (create/delete GPG keys). AUD-103: these endpoints previously
+// authenticated but never checked membership or role, so any authenticated user
+// could register or delete any org's trust anchors. Returns false (and writes the
+// error) when unauthorized.
+func (h *GPGKeyHandler) requireOrgManageProviders(c *gin.Context, org *models.Organization) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		gpgError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return false
+	}
+	ok, err := h.rbacService.CheckOrgManageProviders(c.Request.Context(), user.ID, org.ID)
+	if err != nil || !ok {
+		gpgError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage this organization's registry")
+		return false
+	}
+	return true
+}
+
+// requireOrgMember authorizes the caller as a member of org (GPG key reads).
+func (h *GPGKeyHandler) requireOrgMember(c *gin.Context, org *models.Organization) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		gpgError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return false
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	if err != nil || !inOrg {
+		gpgError(c, http.StatusForbidden, "Forbidden", "You are not a member of this organization")
+		return false
+	}
+	return true
 }
 
 // gpgKeyType is the JSON:API primary type for GPG keys (matches go-tfe).
@@ -116,6 +154,10 @@ func (h *GPGKeyHandler) CreateGPGKey(c *gin.Context) {
 		return
 	}
 
+	if !h.requireOrgManageProviders(c, org) {
+		return
+	}
+
 	keyID, err := h.gpgService.ParseGPGKey(req.Data.Attributes.ASCIIArmor)
 	if err != nil {
 		gpgError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid GPG key: %v", err))
@@ -148,6 +190,12 @@ func (h *GPGKeyHandler) ListGPGKeys(c *gin.Context) {
 		return
 	}
 
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		gpgError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return
+	}
+
 	namespaces := c.QueryArray("filter[namespace]")
 	if len(namespaces) == 0 {
 		gpgError(c, http.StatusBadRequest, "Bad Request", "at least one filter[namespace] is required")
@@ -159,6 +207,10 @@ func (h *GPGKeyHandler) ListGPGKeys(c *gin.Context) {
 		org, err := h.orgRepo.GetByName(namespace)
 		if err != nil {
 			// Skip namespaces that don't resolve rather than failing the whole list.
+			continue
+		}
+		// AUD-103: only disclose keys for orgs the caller is a member of.
+		if inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID); err != nil || !inOrg {
 			continue
 		}
 		keys, err := h.gpgKeyRepo.GetByOrganization(org.ID)
@@ -180,6 +232,9 @@ func (h *GPGKeyHandler) GetGPGKey(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !h.requireOrgMember(c, org) {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": formatGPGKeyResponse(key, org.Name)})
 }
 
@@ -192,13 +247,19 @@ func (h *GPGKeyHandler) UpdateGPGKey(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !h.requireOrgMember(c, org) {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"data": formatGPGKeyResponse(key, org.Name)})
 }
 
 // DeleteGPGKey handles DELETE /api/registry/:registry/v2/gpg-keys/:namespace/:key_id.
 func (h *GPGKeyHandler) DeleteGPGKey(c *gin.Context) {
-	key, _, ok := h.resolveKey(c)
+	key, org, ok := h.resolveKey(c)
 	if !ok {
+		return
+	}
+	if !h.requireOrgManageProviders(c, org) {
 		return
 	}
 	if err := h.gpgKeyRepo.Delete(key.ID); err != nil {
