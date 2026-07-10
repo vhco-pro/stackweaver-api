@@ -9,6 +9,9 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
@@ -19,6 +22,25 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/storage"
 )
+
+// AUD-107: os/arch (from PostForm) and the upload filename (from the multipart
+// header) are concatenated into object-storage keys, so they must be constrained to
+// safe single path segments or an attacker can escape the providers/<org>/… prefix
+// (e.g. arch=../../other-org) and overwrite or plant objects in another namespace.
+var (
+	platformSegmentRE  = regexp.MustCompile(`^[a-z0-9_]+$`)      // os / arch
+	providerFilenameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`) // upload filename
+)
+
+// safeStorageFilename returns the filename reduced to a safe single path segment
+// (no directory separators, no `..` traversal), or ok=false if it is unsafe. AUD-107.
+func safeStorageFilename(name string) (string, bool) {
+	base := filepath.Base(name)
+	if base != name || base == "." || base == ".." || strings.Contains(base, "..") || !providerFilenameRE.MatchString(base) {
+		return "", false
+	}
+	return base, true
+}
 
 // RegistryProviderPublishingHandler publishes provider versions and platforms into an org's
 // private registry. Provider *shell* CRUD lives in RegistryProviderResourceHandler; this handler
@@ -115,6 +137,12 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "os and arch are required")
 		return
 	}
+	// AUD-107: os/arch become path segments in the storage key — reject anything
+	// but a lowercase alphanumeric/underscore token so they cannot escape the prefix.
+	if !platformSegmentRE.MatchString(os) || !platformSegmentRE.MatchString(arch) {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "os and arch must match [a-z0-9_]+")
+		return
+	}
 
 	keyID := c.PostForm("key_id")
 	if keyID == "" {
@@ -139,7 +167,14 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "file is required")
 		return
 	}
-	shasum, err := h.storeUpload(c, file, fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, file.Filename), true)
+	// AUD-107: the multipart filename becomes the final path segment of the storage
+	// key — reduce it to a safe base name so it cannot inject separators or traversal.
+	filename, ok := safeStorageFilename(file.Filename)
+	if !ok {
+		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "invalid provider filename")
+		return
+	}
+	shasum, err := h.storeUpload(c, file, fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, filename), true)
 	if err != nil {
 		return // storeUpload already wrote the error
 	}
@@ -198,9 +233,9 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		ProviderVersionID: providerVersion.ID,
 		OS:                os,
 		Arch:              arch,
-		Filename:          file.Filename,
+		Filename:          filename,
 		Shasum:            shasum,
-		BinaryPath:        fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, file.Filename),
+		BinaryPath:        fmt.Sprintf("%s/%s_%s/%s", prefix, os, arch, filename),
 		BinarySize:        file.Size,
 		GPGKeyID:          keyID,
 	}
