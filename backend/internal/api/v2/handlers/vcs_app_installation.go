@@ -6,6 +6,9 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -418,9 +421,40 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 	})
 }
 
+// verifyAzureDevOpsWebhook authenticates an Azure DevOps service-hook delivery via the
+// Basic-auth password configured on the subscription (AUD-002). Fails closed: a missing
+// secret, missing Basic-auth header, or password mismatch each yield 401.
+func (h *VCSAppInstallationHandlerV2) verifyAzureDevOpsWebhook(c *gin.Context) bool {
+	secret := h.azureDevOpsManager.GetWebhookSecret()
+	if secret == "" {
+		logger.Errorf("Azure DevOps webhook rejected: AZURE_DEVOPS_WEBHOOK_SECRET is not configured")
+		webhookUnauthorized(c, "webhook authentication is not configured")
+		return false
+	}
+	_, password, ok := c.Request.BasicAuth()
+	if !ok {
+		webhookUnauthorized(c, "missing webhook credentials")
+		return false
+	}
+	if !hmac.Equal([]byte(password), []byte(secret)) {
+		logger.Warnf("Azure DevOps webhook rejected: credential mismatch")
+		webhookUnauthorized(c, "invalid webhook credentials")
+		return false
+	}
+	return true
+}
+
 // HandleAzureDevOpsWebhook handles Azure DevOps Service Hook events (push and pull request)
 // POST /api/v2/vcs-connections/azure-devops/webhook
 func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
+	// AUD-002: authenticate the delivery before parsing. Azure DevOps service hooks carry no
+	// HMAC; they authenticate with the Basic-auth credential configured on the subscription.
+	// Fail closed: reject unless AZURE_DEVOPS_WEBHOOK_SECRET is set and matches the request's
+	// Basic-auth password.
+	if !h.verifyAzureDevOpsWebhook(c) {
+		return // verifyAzureDevOpsWebhook already wrote the 401
+	}
+
 	payload, err := c.GetRawData()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -991,6 +1025,98 @@ func (h *VCSAppInstallationHandlerV2) recordWebhookEvent(eventType, provider, re
 	}
 }
 
+// webhookUnauthorized writes a JSON:API 401 for a rejected webhook delivery.
+func webhookUnauthorized(c *gin.Context, detail string) {
+	c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": detail}}})
+}
+
+// verifyGitHubWebhook authenticates an incoming GitHub webhook via HMAC-SHA256 of the raw
+// body against the configured secret (AUD-002). It fails closed: a missing secret, a missing
+// X-Hub-Signature-256 header, or a signature mismatch each yield 401. Returns true only when
+// the delivery is authentic.
+func (h *VCSAppInstallationHandlerV2) verifyGitHubWebhook(c *gin.Context, payload []byte) bool {
+	secret := ""
+	if h.githubAppManager != nil {
+		secret = h.githubAppManager.GetWebhookSecret()
+	}
+	if secret == "" {
+		logger.Errorf("GitHub webhook rejected: GITHUB_WEBHOOK_SECRET is not configured")
+		webhookUnauthorized(c, "webhook signature verification is not configured")
+		return false
+	}
+	signature := c.GetHeader("X-Hub-Signature-256")
+	if signature == "" {
+		webhookUnauthorized(c, "missing webhook signature")
+		return false
+	}
+	if !validGitHubSignature(payload, signature, secret) {
+		logger.Warnf("GitHub webhook rejected: signature mismatch")
+		webhookUnauthorized(c, "invalid webhook signature")
+		return false
+	}
+	return true
+}
+
+// validGitHubSignature reports whether signatureHeader ("sha256=<hex>") is a valid HMAC-SHA256
+// of payload under secret, compared in constant time.
+func validGitHubSignature(payload []byte, signatureHeader, secret string) bool {
+	const prefix = "sha256="
+	if !strings.HasPrefix(signatureHeader, prefix) {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(payload)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(signatureHeader[len(prefix):]), []byte(expected))
+}
+
+// filterWorkspacesByInstallation drops workspaces whose VCS connection does not belong to the
+// webhook delivery's GitHub App installation (AUD-102). Matching by repo full_name + branch
+// alone lets an attacker who installs the app on a same-named repo trigger runs in a victim
+// org (VCS runs auto-apply); binding to the installation the workspace was actually connected
+// through closes that. A workspace with no connection, an unloadable connection, or a
+// mismatched/empty installation id is skipped and logged, never run.
+func (h *VCSAppInstallationHandlerV2) filterWorkspacesByInstallation(workspaces []models.Workspace, installationID string) []models.Workspace {
+	kept := make([]models.Workspace, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.VCSConnectionID == nil {
+			logger.Warnf("webhook: workspace %s has no VCS connection; skipping (AUD-102)", ws.ID)
+			continue
+		}
+		conn, err := h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+		if err != nil || conn == nil {
+			logger.Warnf("webhook: workspace %s VCS connection load failed; skipping", ws.ID)
+			continue
+		}
+		if conn.InstallationID == "" || conn.InstallationID != installationID {
+			logger.Warnf("webhook: workspace %s connection installation %q != delivery installation %q; skipping cross-org trigger (AUD-102)", ws.ID, conn.InstallationID, installationID)
+			continue
+		}
+		kept = append(kept, ws)
+	}
+	return kept
+}
+
+// filterInventoriesByInstallation is the ansible counterpart of filterWorkspacesByInstallation
+// (AUD-102): it drops VCS inventories whose connection is not the delivery's installation, so a
+// forged/foreign push cannot trigger another org's inventory sync (which runs cloud inventory
+// plugins with that org's credentials).
+func (h *VCSAppInstallationHandlerV2) filterInventoriesByInstallation(inventories []models.AnsibleInventory, installationID string) []models.AnsibleInventory {
+	kept := make([]models.AnsibleInventory, 0, len(inventories))
+	for _, inv := range inventories {
+		if inv.VCSConnectionID == nil {
+			continue
+		}
+		conn, err := h.vcsConnectionRepo.GetByID(*inv.VCSConnectionID)
+		if err != nil || conn == nil || conn.InstallationID == "" || conn.InstallationID != installationID {
+			logger.Warnf("webhook: inventory %s connection installation does not match delivery installation %q; skipping (AUD-102)", inv.ID, installationID)
+			continue
+		}
+		kept = append(kept, inv)
+	}
+	return kept
+}
+
 // HandleInstallationWebhook handles GitHub App installation webhook events
 // POST /api/v2/vcs-connections/github/webhook
 func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) {
@@ -1014,12 +1140,14 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 
 	logger.Infof("Received payload (size: %d bytes)", len(payload))
 
-	// TODO: Verify GitHub webhook signature
-	// signature := c.GetHeader("X-Hub-Signature-256")
-	// if !verifyWebhookSignature(payload, signature, h.githubWebhookSecret) {
-	// 	c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid signature"})
-	// 	return
-	// }
+	// AUD-002: authenticate the delivery via HMAC-SHA256 of the raw body BEFORE parsing
+	// anything. This webhook secret is the only authentication on the endpoint — without
+	// this check an unauthenticated attacker could forge push/PR events and trigger
+	// plan-and-apply runs. Fail closed: reject when the secret is unset or the signature is
+	// missing/invalid (the routes sit outside the auth middleware group).
+	if !h.verifyGitHubWebhook(c, payload) {
+		return // verifyGitHubWebhook already wrote the 401
+	}
 
 	// Parse webhook event
 	eventType := c.GetHeader("X-GitHub-Event")
@@ -1465,6 +1593,8 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("No workspaces found or error: %v", err)})
 		return
 	}
+	// AUD-102: only trigger workspaces connected through THIS delivery's installation.
+	workspaces = h.filterWorkspacesByInstallation(workspaces, strconv.FormatInt(pushEvent.Installation.ID, 10))
 
 	if len(workspaces) == 0 {
 		logger.Infof("No workspaces found for repository %s, branch %s with AutoQueueRuns enabled", repositoryFullName, branchName)
@@ -1796,6 +1926,10 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 
 	// Also sync VCS inventories that match this repository and branch
 	inventories, err := h.inventoryRepo.FindByVCSRepositoryAndBranch(repositoryFullName, branchName)
+	if err == nil {
+		// AUD-102: only sync inventories connected through THIS delivery's installation.
+		inventories = h.filterInventoriesByInstallation(inventories, strconv.FormatInt(pushEvent.Installation.ID, 10))
+	}
 	if err != nil {
 		logger.Errorf("Error finding inventories for repository %s, branch %s: %v", repositoryFullName, branchName, err)
 	} else if len(inventories) > 0 {
@@ -1963,6 +2097,8 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("No workspaces found or error: %v", err)})
 		return
 	}
+	// AUD-102: only workspaces connected through THIS delivery's installation.
+	workspaces = h.filterWorkspacesByInstallation(workspaces, strconv.FormatInt(prEvent.Installation.ID, 10))
 
 	if len(workspaces) == 0 {
 		logger.Infof("No workspaces found for repository %s, branch %s", repositoryFullName, baseBranch)
