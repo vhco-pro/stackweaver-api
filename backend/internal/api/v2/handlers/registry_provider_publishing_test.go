@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -292,5 +293,105 @@ func TestPublishProviderPlatform(t *testing.T) {
 	}
 	if platform.Shasum == "" {
 		t.Error("platform shasum was not computed")
+	}
+}
+
+// TestPublishProviderPlatform_RejectsPathInjection is the AUD-107 assertion: os/arch
+// and the upload filename become object-storage path segments, so values that could
+// escape the providers/<org>/… prefix must be rejected with 422 before anything is
+// written.
+func TestPublishProviderPlatform_RejectsPathInjection(t *testing.T) {
+	db := setupTestDBForProvider(t)
+	org := setupTestOrgForProvider(t, db)
+	user := setupTestUserForProvider(t, db)
+	makeUserOrgOwner(t, db, org, user)
+	defer cleanupProviderTables(db, org, user)
+
+	provider := &models.Provider{ID: uuid.New(), OrganizationID: org.ID, Name: "test-provider", RegistryName: "private", Namespace: org.Name}
+	if err := db.Create(provider).Error; err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	gpgKey := &models.GPGKey{OrganizationID: org.ID, KeyID: "ABCD1234", ASCIIArmor: "-----BEGIN PGP PUBLIC KEY BLOCK-----\ndummy\n-----END PGP PUBLIC KEY BLOCK-----", CreatedBy: user.ID}
+	if err := db.Create(gpgKey).Error; err != nil {
+		t.Fatalf("create gpg key: %v", err)
+	}
+
+	mockStore := registry.NewMockStorage()
+	handler := NewRegistryProviderPublishingHandler(
+		repository.NewProviderRepository(db), repository.NewProviderVersionRepository(db),
+		repository.NewProviderPlatformRepository(db), repository.NewOrganizationRepository(db),
+		repository.NewGPGKeyRepository(db), auth.NewService(repository.NewUserRepository(db)),
+		newProviderRBAC(db), mockStore,
+	)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("user_id", user.ID); c.Next() })
+	router.POST("/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name/versions/:version/platforms", handler.PublishProviderPlatform)
+
+	// os/arch come from PostForm and are NOT sanitized by the stdlib, so traversal there
+	// is the real injectable vector. The multipart filename is already reduced to its base
+	// by Go's mime/multipart before the handler sees it, so it can't carry separators — but
+	// the handler's charset allowlist still rejects a filename with disallowed characters
+	// (and embedded `..`) as defense in depth.
+	cases := []struct{ name, os, arch, filename string }{
+		{"arch traversal", "linux", "../../other-org", "p.zip"},
+		{"os traversal", "../../etc", "amd64", "p.zip"},
+		{"arch separator", "linux", "amd64/sub", "p.zip"},
+		{"arch uppercase", "linux", "AMD64", "p.zip"},
+		{"filename bad char", "linux", "amd64", "evil;rm.zip"},
+		{"filename embedded traversal", "linux", "amd64", "evil..zip"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &bytes.Buffer{}
+			writer := multipart.NewWriter(body)
+			for k, v := range map[string]string{"os": tc.os, "arch": tc.arch, "key_id": gpgKey.KeyID} {
+				if err := writer.WriteField(k, v); err != nil {
+					t.Fatalf("write field: %v", err)
+				}
+			}
+			part, err := writer.CreateFormFile("file", tc.filename)
+			if err != nil {
+				t.Fatalf("create form file: %v", err)
+			}
+			if _, err := io.Copy(part, bytes.NewReader([]byte("dummy"))); err != nil {
+				t.Fatalf("copy: %v", err)
+			}
+			// shasums/shasums_sig use fixed server-side names; include them so the only
+			// rejection reason is the injected os/arch/filename.
+			for _, f := range []struct{ field, fn string }{{"shasums", "SHA256SUMS"}, {"shasums_sig", "SHA256SUMS.sig"}} {
+				p, err := writer.CreateFormFile(f.field, f.fn)
+				if err != nil {
+					t.Fatalf("create %s: %v", f.field, err)
+				}
+				if _, err := io.Copy(p, bytes.NewReader([]byte("x"))); err != nil {
+					t.Fatalf("copy %s: %v", f.field, err)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatalf("close writer: %v", err)
+			}
+
+			url := fmt.Sprintf("/api/v2/organizations/%s/registry-providers/private/%s/%s/versions/1.0.0/platforms", org.Name, org.Name, provider.Name)
+			req := httptest.NewRequestWithContext(context.Background(), "POST", url, body)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("%s: got %d, want 422. Body: %s", tc.name, w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// Nothing should have been written to storage under a traversal key.
+	objs, err := mockStore.List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("list storage: %v", err)
+	}
+	for _, obj := range objs {
+		if strings.Contains(obj.Key, "..") || strings.Contains(obj.Key, "other-org") {
+			t.Fatalf("storage key escaped the prefix: %q", obj.Key)
+		}
 	}
 }
