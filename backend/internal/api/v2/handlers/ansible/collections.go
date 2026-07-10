@@ -6,6 +6,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/services/ansible"
 )
 
 // CollectionInfo represents an installed Ansible Galaxy collection
@@ -18,11 +22,19 @@ type CollectionInfo struct {
 }
 
 // CollectionsHandler handles Galaxy collection-related endpoints
-type CollectionsHandler struct{}
+type CollectionsHandler struct {
+	jobService  *ansible.JobService
+	authService *auth.Service
+	rbacService *rbac.Service
+}
 
 // NewCollectionsHandler creates a new CollectionsHandler
-func NewCollectionsHandler() *CollectionsHandler {
-	return &CollectionsHandler{}
+func NewCollectionsHandler(jobService *ansible.JobService, authService *auth.Service, rbacService *rbac.Service) *CollectionsHandler {
+	return &CollectionsHandler{
+		jobService:  jobService,
+		authService: authService,
+		rbacService: rbacService,
+	}
 }
 
 // ListPreInstalledCollections returns the list of pre-installed collections in the runner
@@ -103,10 +115,44 @@ func (h *CollectionsHandler) ListPreInstalledCollections(c *gin.Context) {
 // ListJobCollections returns collections installed for a specific job
 // GET /ansible/jobs/:id/collections
 func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
-	jobID := c.Param("id")
-	if jobID == "" {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []map[string]string{{"detail": "job ID is required"}},
+			"errors": []map[string]string{{"status": "400", "detail": "Invalid job ID"}},
+		})
+		return
+	}
+
+	// AUD-128: gate on the job's read permission (mirrors jobs.go Get). The listing is
+	// static today, but the endpoint is keyed by job ID and will track per-job
+	// installations — so authorize the caller against the job now, before real data
+	// is wired in.
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []map[string]string{{"status": "401", "detail": "Authentication required"}},
+		})
+		return
+	}
+	job, err := h.jobService.GetJob(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []map[string]string{{"status": "404", "detail": "Job not found"}},
+		})
+		return
+	}
+	hasPermission, err := h.rbacService.CheckAnsibleResourcePermission(
+		c.Request.Context(), user.ID, rbac.ResourceTypeAnsibleJob, job.ID.String(), rbac.PermissionAnsibleJobRead, &job.ProjectID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []map[string]string{{"status": "500", "detail": "Failed to check permissions"}},
+		})
+		return
+	}
+	if !hasPermission {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []map[string]string{{"status": "403", "detail": "You don't have permission to view this job"}},
 		})
 		return
 	}

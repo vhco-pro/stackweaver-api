@@ -253,7 +253,7 @@ func SetupAnsibleRoutes(
 	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, inventoryService, authService, rbacService, redisQueue)
 	inventorySyncHandler := ansibleHandlers.NewInventorySyncHandler(inventorySyncRepo, inventoryRepo, authService, rbacService)
 	scheduleHandler := ansibleHandlers.NewScheduleHandler(schedulerService, orgRepo, authService, rbacService)
-	collectionsHandler := ansibleHandlers.NewCollectionsHandler()
+	collectionsHandler := ansibleHandlers.NewCollectionsHandler(jobService, authService, rbacService)
 
 	// Initialize job template variable handler
 	// Note: Template variables use project-level permissions (similar to other Ansible resources)
