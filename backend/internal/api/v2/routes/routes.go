@@ -884,7 +884,7 @@ func SetupV2Routes(
 	// Registry Routes (Public - No Auth Required for Terraform CLI)
 	// These endpoints are outside the authenticated v2 group
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, storageClient)
-	moduleHandler := handlers.NewRegistryModuleHandler(moduleService)
+	moduleHandler := handlers.NewRegistryModuleHandler(moduleService, authService, orgRepo)
 
 	// Initialize provider repositories and services
 	providerRepo := repository.NewProviderRepository(db)
@@ -899,7 +899,8 @@ func SetupV2Routes(
 	gpgKeyHandler := handlers.NewGPGKeyHandler(gpgKeyRepo, orgRepo, authService, rbacService)
 
 	// v1 provider-install protocol handler (public download/discovery + signed SHA256SUMS streaming).
-	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, storageClient)
+	// authService + orgRepo let it gate PRIVATE providers on org membership (AUD-123).
+	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, authService, orgRepo, storageClient)
 
 	// tfe_registry_provider resource CRUD (go-tfe registry-providers surface).
 	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, rbacService, storageClient)
