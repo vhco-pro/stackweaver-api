@@ -14,8 +14,14 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/variable"
 	"gorm.io/gorm"
 )
+
+// maskedValue is the placeholder returned for a sensitive variable value on every read
+// path — the real value is never sent to clients (TFE-compatible). It is defined once so
+// the write paths (AUD-105) can reliably detect a round-tripped masked value and skip it.
+const maskedValue = "••••••••"
 
 type VariableSetHandlerV2 struct {
 	variableSetRepo         *repository.VariableSetRepository
@@ -26,6 +32,7 @@ type VariableSetHandlerV2 struct {
 	jobTemplateRepo         *repository.AnsibleJobTemplateRepository
 	authService             *auth.Service
 	rbacService             *rbac.Service
+	variableService         *variable.Service
 }
 
 func NewVariableSetHandlerV2(
@@ -37,6 +44,7 @@ func NewVariableSetHandlerV2(
 	jobTemplateRepo *repository.AnsibleJobTemplateRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	variableService *variable.Service,
 ) *VariableSetHandlerV2 {
 	return &VariableSetHandlerV2{
 		variableSetRepo:         variableSetRepo,
@@ -47,7 +55,29 @@ func NewVariableSetHandlerV2(
 		jobTemplateRepo:         jobTemplateRepo,
 		authService:             authService,
 		rbacService:             rbacService,
+		variableService:         variableService,
 	}
+}
+
+// encryptVarsetValue encrypts a variable-set variable's value in place when it is
+// sensitive, setting the Encrypted flag — mirroring the workspace-variable path
+// (variable.Service.CreateVariable). Non-sensitive values are stored verbatim with
+// Encrypted=false. When no variable service is configured the value is left as-is so
+// callers degrade to the previous (plaintext) behavior rather than erroring; in
+// production the encryption key fails loud at startup (AUD-013), so this never triggers.
+// AUD-104: sensitive variable-set values were previously stored in cleartext at rest.
+func (h *VariableSetHandlerV2) encryptVarsetValue(v *models.VariableSetVariable) error {
+	if !v.Sensitive || h.variableService == nil {
+		v.Encrypted = false
+		return nil
+	}
+	enc, err := h.variableService.Encrypt(v.Value)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt variable value: %w", err)
+	}
+	v.Value = enc
+	v.Encrypted = true
+	return nil
 }
 
 // authorizeVarset gates the caller (already resolved from the context) against a
@@ -159,7 +189,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		for j, v := range vs.Variables {
 			value := v.Value
 			if v.Sensitive {
-				value = "••••••••"
+				value = maskedValue
 			}
 			variablesData[j] = gin.H{
 				"id":   v.ID,
@@ -324,7 +354,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	for i, v := range variables {
 		value := v.Value
 		if v.Sensitive {
-			value = "••••••••"
+			value = maskedValue
 		}
 		variablesData[i] = gin.H{
 			"id":   v.ID,
@@ -572,6 +602,12 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 				Category:      category,
 				HCL:           hcl,
 				Sensitive:     sensitive,
+			}
+			// AUD-104: encrypt sensitive values before storage. On failure, skip the
+			// variable rather than persist a sensitive value in cleartext.
+			if err := h.encryptVarsetValue(variable); err != nil {
+				logger.Warnf("Skipping variable %q: %v", key, err)
+				continue
 			}
 
 			_ = h.variableSetVariableRepo.Create(variable) // Ignore errors for now
@@ -1481,7 +1517,7 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 	for i, v := range variables {
 		value := v.Value
 		if v.Sensitive {
-			value = "••••••••"
+			value = maskedValue
 		}
 		data[i] = gin.H{
 			"id":   v.ID,
@@ -1567,7 +1603,7 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 	data := gin.H{
 		"id":   variable.ID,
@@ -1674,7 +1710,11 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		Category:      category,
 		HCL:           attrs.HCL,
 		Sensitive:     attrs.Sensitive,
-		Encrypted:     false, // Legacy field, not in TFE spec
+	}
+	// AUD-104: encrypt the value at rest when the variable is sensitive.
+	if err := h.encryptVarsetValue(variable); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+		return
 	}
 
 	if err := h.variableSetVariableRepo.Create(variable); err != nil {
@@ -1722,7 +1762,7 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -1838,9 +1878,6 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if attrs.Key != nil {
 		variable.Key = *attrs.Key
 	}
-	if attrs.Value != nil {
-		variable.Value = *attrs.Value
-	}
 	if attrs.Description != nil {
 		variable.Description = *attrs.Description
 	}
@@ -1854,8 +1891,22 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if attrs.HCL != nil {
 		variable.HCL = *attrs.HCL
 	}
+	// Resolve the final sensitivity before touching the value so it is encrypted correctly.
 	if attrs.Sensitive != nil {
 		variable.Sensitive = *attrs.Sensitive
+	}
+	// AUD-105: a nil value means "unchanged"; a value equal to the masked placeholder means
+	// the client round-tripped a masked read (the SPA and the TFE provider resubmit the whole
+	// resource when editing an unrelated field) — writing it would silently overwrite the real
+	// secret with bullets and break every consuming run. Only overwrite when a genuine new
+	// value is supplied, and (AUD-104) encrypt it at rest when sensitive. Leaving the value
+	// untouched preserves the existing stored ciphertext/plaintext and its Encrypted flag.
+	if attrs.Value != nil && *attrs.Value != maskedValue {
+		variable.Value = *attrs.Value
+		if err := h.encryptVarsetValue(variable); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+			return
+		}
 	}
 
 	if err := h.variableSetVariableRepo.Update(variable); err != nil {
@@ -1865,7 +1916,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 
 	c.JSON(http.StatusOK, gin.H{
