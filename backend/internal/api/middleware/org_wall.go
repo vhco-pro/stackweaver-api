@@ -180,11 +180,23 @@ func OrgResolutionWall(resolver OrgResolver) gin.HandlerFunc {
 }
 
 // scopeAllowsMethod reports whether the org-bound token in context may perform
-// the current request's HTTP method within targetOrg. It returns true (allow)
-// when the token carries no org-level scope for targetOrg, deferring that case
-// to per-handler authorization; it returns false only when an org-level scope
-// is present but does not grant the coarse level the method requires.
+// the current request's HTTP method within targetOrg (the token has already been
+// confirmed bound to targetOrg by the caller). It enforces the token's coarse
+// scope level and, per AUD-042, fails closed for mutating methods when it cannot
+// affirmatively authorize the request:
+//
+//   - malformed/unparseable scopes → deny mutations (allow reads);
+//   - unrestricted (empty or wildcard) scopes → allow (backward compatible);
+//   - an org-level scope for targetOrg → honor it (read < write < admin);
+//   - no org-level scope but a project/team scope → defer to per-handler
+//     authorization (the wall cannot match the resource to the scoped
+//     project/team here);
+//   - no org-level and no project/team scope → deny mutations (allow reads),
+//     rather than defer to a handler that may not check.
 func scopeAllowsMethod(c *gin.Context, targetOrg uuid.UUID) bool {
+	required := apikey.CoarseLevelForMethod(c.Request.Method)
+	mutating := required != "read"
+
 	apiKeyVal, ok := c.Get("api_key")
 	if !ok {
 		return true
@@ -195,14 +207,23 @@ func scopeAllowsMethod(c *gin.Context, targetOrg uuid.UUID) bool {
 	}
 	checker, err := apikey.NewScopeChecker([]string(apiKey.Scopes))
 	if err != nil {
+		// Malformed scopes cannot authorize a mutating request.
+		return !mutating
+	}
+	// Empty or wildcard scopes are unrestricted by design (backward compatible).
+	if checker.IsUnrestricted() {
 		return true
 	}
-	required := apikey.CoarseLevelForMethod(c.Request.Method)
 	granted, hasOrgScope := checker.GrantsOrgLevel(targetOrg, required)
-	if !hasOrgScope {
+	if hasOrgScope {
+		return granted
+	}
+	// No org-level scope for targetOrg. Project/team-scoped tokens are deferred to
+	// per-handler authorization; a token with neither has no basis to mutate here.
+	if len(checker.GetScopedProjects()) > 0 || len(checker.GetScopedTeams()) > 0 {
 		return true
 	}
-	return granted
+	return !mutating
 }
 
 func denyWall(c *gin.Context, status int, detail string) {

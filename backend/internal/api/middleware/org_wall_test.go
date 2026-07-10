@@ -352,3 +352,102 @@ func TestOrgWall_ProjectScopedTokenDefersToHandler(t *testing.T) {
 		t.Fatalf("project-scoped token POST: got %d, want 200 (deferred)", code)
 	}
 }
+
+// AUD-042: a token bound to the target org whose scopes are malformed cannot be
+// authorized — it must fail closed for mutating methods (previously it failed
+// open and was allowed to write).
+func TestOrgWall_MalformedScopeDeniedWrite(t *testing.T) {
+	org := uuid.New()
+	key := &models.APIKey{
+		Kind:           models.APIKeyKindOrg,
+		Scopes:         models.StringArray{"org:not-a-uuid:write"}, // unparseable resource id
+		OrganizationID: &org,
+	}
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/workspaces/:id",
+		reqPath:    "/api/v2/workspaces/ws-1",
+		method:     http.MethodPost,
+		tokenKind:  models.APIKeyKindOrg,
+		tokenOrgID: &org,
+		apiKey:     key,
+		resolver:   &fakeResolver{org: org},
+		wantStatus: http.StatusForbidden,
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("malformed-scope token POST: got %d, want 403", code)
+	}
+}
+
+// A malformed-scope token may still perform reads (the token is bound to this org
+// and reads are lower risk) — only mutations fail closed.
+func TestOrgWall_MalformedScopeAllowedRead(t *testing.T) {
+	org := uuid.New()
+	key := &models.APIKey{
+		Kind:           models.APIKeyKindOrg,
+		Scopes:         models.StringArray{"org:not-a-uuid:write"},
+		OrganizationID: &org,
+	}
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/workspaces/:id",
+		reqPath:    "/api/v2/workspaces/ws-1",
+		method:     http.MethodGet,
+		tokenKind:  models.APIKeyKindOrg,
+		tokenOrgID: &org,
+		apiKey:     key,
+		resolver:   &fakeResolver{org: org},
+		wantStatus: http.StatusOK,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("malformed-scope token GET: got %d, want 200", code)
+	}
+}
+
+// AUD-042: a token bound to the target org but carrying no scope applicable to it
+// (no org-level scope for this org, no project/team scope) has no basis to mutate
+// — it must fail closed for mutating methods rather than defer to a handler.
+func TestOrgWall_NoApplicableScopeDeniedWrite(t *testing.T) {
+	org := uuid.New()
+	otherOrg := uuid.New()
+	key := &models.APIKey{
+		Kind:           models.APIKeyKindOrg,
+		Scopes:         models.StringArray{"org:" + otherOrg.String() + ":write"}, // scope for a different org
+		OrganizationID: &org,
+	}
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/workspaces/:id",
+		reqPath:    "/api/v2/workspaces/ws-1",
+		method:     http.MethodDelete,
+		tokenKind:  models.APIKeyKindOrg,
+		tokenOrgID: &org,
+		apiKey:     key,
+		resolver:   &fakeResolver{org: org},
+		wantStatus: http.StatusForbidden,
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("no-applicable-scope token DELETE: got %d, want 403", code)
+	}
+}
+
+// An unrestricted (empty-scopes) org-bound token retains full access — the
+// backward-compatible default must not be tightened by AUD-042.
+func TestOrgWall_UnrestrictedTokenAllowedWrite(t *testing.T) {
+	org := uuid.New()
+	key := &models.APIKey{
+		Kind:           models.APIKeyKindOrg,
+		Scopes:         models.StringArray{}, // empty = unrestricted
+		OrganizationID: &org,
+	}
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/workspaces/:id",
+		reqPath:    "/api/v2/workspaces/ws-1",
+		method:     http.MethodPost,
+		tokenKind:  models.APIKeyKindOrg,
+		tokenOrgID: &org,
+		apiKey:     key,
+		resolver:   &fakeResolver{org: org},
+		wantStatus: http.StatusOK,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("unrestricted token POST: got %d, want 200", code)
+	}
+}
