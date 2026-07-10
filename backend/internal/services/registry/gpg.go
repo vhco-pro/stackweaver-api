@@ -8,9 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 
+	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/michielvha/logger"
 )
 
@@ -27,112 +27,26 @@ func NewGPGService() *GPGService {
 	}
 }
 
-// ParseGPGKey extracts the key ID from a GPG public key in ASCII armor format
-// Uses system GPG to parse the key
+// ParseGPGKey validates an ASCII-armored GPG public key and returns its 16-character
+// (64-bit) long key ID in uppercase hex — the identifier the Terraform registry protocol
+// keys signature verification on. It performs a structured OpenPGP parse and rejects
+// anything that is not a single, well-formed public key. There are deliberately no regex
+// fallbacks and no shelling out to the gpg binary, so arbitrary text can never be accepted
+// as a trust anchor (AUD-122). The complete public key is retained in ASCIIArmor, from
+// which the full fingerprint is always recoverable for signature verification.
 func (s *GPGService) ParseGPGKey(asciiArmor string) (keyID string, err error) {
-	// Use GPG to show keys and get fingerprint
-	// Write key to temp file for gpg --show-keys
-	tmpFile, err := os.CreateTemp("", "gpg-key-*.asc")
+	entities, err := openpgp.ReadArmoredKeyRing(strings.NewReader(asciiArmor))
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
+		return "", fmt.Errorf("failed to parse GPG public key: %w", err)
 	}
-	defer func() {
-		if err := os.Remove(tmpFile.Name()); err != nil { //nolint:gosec // G703: removing temp file we just created
-			logger.Warnf("Failed to remove temp file %s: %v", tmpFile.Name(), err)
-		}
-	}()
-	defer func() {
-		if err := tmpFile.Close(); err != nil {
-			logger.Warnf("Failed to close temp file: %v", err)
-		}
-	}()
-
-	if _, err := tmpFile.WriteString(asciiArmor); err != nil {
-		return "", fmt.Errorf("failed to write key to temp file: %w", err)
+	if len(entities) != 1 {
+		return "", fmt.Errorf("expected exactly one public key, got %d", len(entities))
 	}
-	if err := tmpFile.Close(); err != nil {
-		return "", fmt.Errorf("failed to close temp file: %w", err)
+	primary := entities[0].PrimaryKey
+	if primary == nil {
+		return "", fmt.Errorf("GPG key has no primary public key")
 	}
-
-	// Use --show-keys which works better than --import --dry-run
-	cmd := exec.Command(s.gpgPath, "--show-keys", "--with-colons", tmpFile.Name()) //nolint:gosec,noctx // intentional: executing gpg command, no context needed
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		// Try to extract key ID from stderr output
-		output := stderr.String()
-		// Look for pattern like "gpg: key ABC12345: public key"
-		re := regexp.MustCompile(`key ([A-F0-9]{8}):`)
-		matches := re.FindStringSubmatch(output)
-		if len(matches) > 1 {
-			return strings.ToUpper(matches[1]), nil
-		}
-		// Don't return error yet - try fallback parsing below
-	}
-
-	// Parse stdout (--with-colons format)
-	output := stdout.String()
-	// Look for fingerprint in colon-separated format: fpr:::::::::FINGERPRINT:
-	colonRe := regexp.MustCompile(`fpr:.*:([A-F0-9]{40}):`)
-	colonMatches := colonRe.FindStringSubmatch(output)
-	if len(colonMatches) > 1 {
-		fingerprint := colonMatches[1]
-		// Return last 8 characters (short key ID)
-		return strings.ToUpper(fingerprint[len(fingerprint)-8:]), nil
-	}
-
-	// Alternative: parse from the key itself
-	// Look for "ID" line in colon-separated format
-	lines := strings.Split(asciiArmor, "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "pub:") || strings.HasPrefix(line, "pubu:") {
-			parts := strings.Split(line, ":")
-			if len(parts) >= 5 {
-				keyID = strings.ToUpper(parts[4])
-				if len(keyID) >= 8 {
-					return keyID[len(keyID)-8:], nil
-				}
-				return keyID, nil
-			}
-		}
-	}
-
-	// Fallback: try to extract from fingerprint in the key
-	// Look for 40-character hex fingerprint (full fingerprint)
-	re := regexp.MustCompile(`([A-F0-9]{40})`)
-	matches := re.FindStringSubmatch(asciiArmor)
-	if len(matches) > 1 {
-		fingerprint := matches[1]
-		// Return last 8 characters (short key ID)
-		return strings.ToUpper(fingerprint[len(fingerprint)-8:]), nil
-	}
-
-	// Also try to extract from the key material directly
-	// Look for common key ID patterns in the ASCII armor
-	// The key ID is typically the last 8 characters of the fingerprint
-	// Try to find 8-character hex strings that could be key IDs
-	// Note: The key material is base64-encoded, so hex patterns may not appear directly
-	// But we can still try to find patterns
-	keyIDRe := regexp.MustCompile(`([A-F0-9]{8})`)
-	keyIDMatches := keyIDRe.FindAllStringSubmatch(asciiArmor, -1)
-	// Look for key IDs in specific contexts (like after "key" or in certain positions)
-	// For now, try to find the key ID by looking for it near known patterns
-	// The fingerprint D01A25146CB3BA4B0F3B5456EFD2D04A9FC214C0 has key ID 9FC214C0 (last 8 chars)
-	// Look for patterns that might contain this
-	for _, match := range keyIDMatches {
-		if len(match) > 1 {
-			keyID := strings.ToUpper(match[1])
-			// Basic validation: key IDs are typically uppercase hex
-			// Return the first one found (this is a fallback, so not perfect)
-			// In practice, GPG command should work, but this is a fallback
-			return keyID, nil
-		}
-	}
-
-	return "", fmt.Errorf("could not extract key ID from GPG key")
+	return strings.ToUpper(primary.KeyIdString()), nil
 }
 
 // SignBinary signs a binary file using GPG and returns the signature

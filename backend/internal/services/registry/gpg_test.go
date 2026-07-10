@@ -59,10 +59,10 @@ Expire-Date: 0
 			}
 		}
 	}
-	if len(fpr) < 8 {
+	if len(fpr) < 16 {
 		t.Fatalf("could not parse fingerprint from: %s", listOut.String())
 	}
-	keyID = fpr[len(fpr)-8:]
+	keyID = fpr[len(fpr)-16:] // 16-char long key id — what ParseGPGKey returns
 
 	// Export the ASCII-armored public key.
 	exp := exec.Command("gpg", "--armor", "--export", fpr) //nolint:gosec,noctx // test-only: fpr comes from gpg's own output, not user input
@@ -116,5 +116,66 @@ func TestGPGService_SignAndVerify(t *testing.T) {
 	tampered := []byte("stackweaver-provider-binary-payload-v1-TAMPERED")
 	if err := svc.VerifySignature(publicKey, tampered, sig); err == nil {
 		t.Error("VerifySignature accepted a signature over a tampered payload")
+	}
+}
+
+// aud122FixtureArmor is a real RSA-2048 public key exported with `gpg --armor --export`.
+// Its 40-char fingerprint is 95AE57C99F86E3B15BACBE7F1B2AEEE4F44A48E5, so the 16-char
+// long key id ParseGPGKey must return is 1B2AEEE4F44A48E5. Embedding it keeps the
+// structured-parse assertions runnable in CI's plain `go test` (no gpg binary needed).
+const (
+	aud122FixtureArmor = `-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQENBGpQVAcBCAC1/kCHS4mMXY+Kys/WrrUn0SO+xlUepuG07znv/62qU4imdNM1
+LQON0SBa3gcaENKnva/As4Rcn3aHjywrOgzF5ktaib33/iHqsuoWTYmCJgOsUx83
+DyRO8Mu2udGuN5OyW8MY3QCfZarqsfxrGkmMJP+Ma0ee8cGfkHOL5CsxGEfeyXL3
+gmz97ZE1Yp4fBddywlblnR8KOp7NURVcbSldJU0Z1cWqsvJ3YvVfZx6qn0zQykzy
+UB2ufbTTFPI9Cu2bwemw7Mzuv2Z7nkHqmAOEb9KkhK/9Zd/KDJtsi27QS+AUMFrS
+W7WbdXugPCB8DZ2+UVPdsnwcyY4EYF9qyZXbABEBAAG0NVN0YWNrd2VhdmVyIEFV
+RDEyMiBGaXh0dXJlIDxhdWQxMjJAc3RhY2t3ZWF2ZXIubG9jYWw+iQFSBBMBCgA8
+FiEEla5XyZ+G47FbrL5/Gyru5PRKSOUFAmpQVAcDGy8EBQsJCAcCAiICBhUKCQgL
+AgQWAgMBAh4HAheAAAoJEBsq7uT0SkjlDJUH/2xG8GVoN9rQ9nsKKKff7hkz3hss
+aewWg6wUcKbQcMQh89HqDvhJsQiFQ/NSWOHon11yOsZK8GKSUN3db0ok8BXNIX7I
+bnXNP/SsCvTCSeilGB6xzTVct20Iq3V/7eDrh5oKx5R1BeRvxL1Llw8f5UcqYJi+
+V6mRaVdqsdn9t80B+vwBBsDnyCVLEgkWuGkEHV8sZOAJG0VgGIGfeWfHiaK3rtPB
+NDAt9uGXIWYAxiRrcz7C1Vjz1MXYhRfF/8g2k/XWn7wJQ3NeUBNwUecit7JZ0AlS
+5UqSIwEmiCar/VgdLYwGoKZGmVwmRGSZzyKCHm1asgMeipGdxyKLn+9QU/o=
+=UzsX
+-----END PGP PUBLIC KEY BLOCK-----`
+	aud122FixtureLongKeyID = "1B2AEEE4F44A48E5"
+)
+
+// TestParseGPGKey_StructuredParse locks in the AUD-122 fix: ParseGPGKey performs a
+// structured OpenPGP parse with no regex fallbacks, so it returns the correct 16-char
+// long key id for a real armored key and REJECTS any input that is not a well-formed
+// public key. Before the fix the final fallback returned "the first 8-hex-char run found
+// anywhere in the text", so garbage was silently accepted as a trust anchor. Pure-Go —
+// no gpg binary, runs in CI's plain `go test`.
+func TestParseGPGKey_StructuredParse(t *testing.T) {
+	svc := NewGPGService()
+
+	got, err := svc.ParseGPGKey(aud122FixtureArmor)
+	if err != nil {
+		t.Fatalf("ParseGPGKey(valid armored key) errored: %v", err)
+	}
+	if got != aud122FixtureLongKeyID {
+		t.Errorf("ParseGPGKey = %q, want %q (16-char long key id)", got, aud122FixtureLongKeyID)
+	}
+
+	// Every one of these was accepted by the old fallback chain (each contains an 8-hex
+	// run or looked key-ish); the structured parse must reject them all.
+	garbage := map[string]string{
+		"empty":                 "",
+		"plain text with hex":   "not a key at all DEADBEEF cafe1234 trust me",
+		"bare hex fingerprint":  "95AE57C99F86E3B15BACBE7F1B2AEEE4F44A48E5",
+		"fake colon pub line":   "pub:u:2048:1:DEADBEEFCAFE1234:...",
+		"empty armor block":     "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n=abcd\n-----END PGP PUBLIC KEY BLOCK-----",
+		"corrupt armor payload": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nZZZZnot-base64-at-all!!DEADBEEF\n=UzsX\n-----END PGP PUBLIC KEY BLOCK-----",
+		"truncated armor":       aud122FixtureArmor[:len(aud122FixtureArmor)/2],
+	}
+	for name, in := range garbage {
+		if got, err := svc.ParseGPGKey(in); err == nil {
+			t.Errorf("ParseGPGKey(%s) = %q with nil error; want rejection", name, got)
+		}
 	}
 }
