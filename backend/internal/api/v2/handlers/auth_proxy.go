@@ -2511,7 +2511,42 @@ func (p *AuthProxy) ListIdpProviders(c *gin.Context) {
 // --- User Management Proxy (A6) ---
 
 // CreateUser handles POST /auth/users.
+// registrationAllowed reports whether the Zitadel login policy permits self-registration
+// (`allowRegister: true`). It reads the live policy via the admin PAT and returns true ONLY
+// when registration is affirmatively allowed — a disabled policy, or any error reading it,
+// yields false so the public registration endpoint fails closed (AUD-120). The cache is
+// deliberately bypassed for the same reason as shouldFakeUnknownUser: the policy only changes
+// on rare operator action, and a stale allow would keep the bypass open.
+func (p *AuthProxy) registrationAllowed(c *gin.Context) bool {
+	body, status, err := p.proxyJSON(c.Request.Context(), http.MethodGet, "/v2/settings/login", nil)
+	if err != nil || status != http.StatusOK {
+		return false
+	}
+	// The settings response is wrapped in `{"settings": {...}}` — unwrap before checking.
+	var wrapper struct {
+		Settings json.RawMessage `json:"settings"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil || len(wrapper.Settings) == 0 {
+		return false
+	}
+	var policy struct {
+		AllowRegister bool `json:"allowRegister"`
+	}
+	if err := json.Unmarshal(wrapper.Settings, &policy); err != nil {
+		return false
+	}
+	return policy.AllowRegister
+}
+
 func (p *AuthProxy) CreateUser(c *gin.Context) {
+	// AUD-120: this endpoint is on the unauthenticated /auth surface and forwards to Zitadel
+	// with the admin PAT. Honor the operator's login policy — without this an operator who
+	// disabled self-registration is bypassed (bounded only by the per-IP rate limiter).
+	if !p.registrationAllowed(c) {
+		respondError(c, http.StatusForbidden, "self-registration is disabled")
+		return
+	}
+
 	var reqBody map[string]any
 	if err := c.ShouldBindJSON(&reqBody); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid request body")
