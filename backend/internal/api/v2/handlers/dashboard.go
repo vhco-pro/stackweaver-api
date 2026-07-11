@@ -8,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
-	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
 
@@ -91,81 +90,67 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	// Organization-level stats
 	orgStats := make([]gin.H, 0, len(orgs))
 
-	for _, org := range orgs {
-		// Count projects
-		projects, _, err := h.projectRepo.ListByOrganization(org.ID, 1000, 0)
-		if err != nil {
-			// Log error but continue with other orgs
-			continue
+	// AUD-063: each metric is a single aggregate COUNT rather than loading every row and taking
+	// len() (the old code paged up to 10k runs/jobs into memory per org and ran one ListByProject
+	// per project — an N+1). A repository error now fails the whole request with a 500 instead of a
+	// silent `continue` that under-reported totals as if nothing were wrong.
+	statErr := func(detail string, err error) bool {
+		if err == nil {
+			return false
 		}
-		projectCount := int64(len(projects))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "500",
+					"title":  "Internal Server Error",
+					"detail": detail,
+				},
+			},
+		})
+		return true
+	}
+
+	for _, org := range orgs {
+		projectCount, err := h.projectRepo.CountByOrganization(org.ID)
+		if statErr("Failed to count projects", err) {
+			return
+		}
 		totalProjects += projectCount
 
-		// Count workspaces
-		var workspaceCount int64
-		for _, project := range projects {
-			workspaces, _, err := h.workspaceRepo.ListByProject(project.ID, 1000, 0)
-			if err != nil {
-				continue
-			}
-			workspaceCount += int64(len(workspaces))
+		workspaceCount, err := h.workspaceRepo.CountByOrganization(org.ID)
+		if statErr("Failed to count workspaces", err) {
+			return
 		}
 		totalWorkspaces += workspaceCount
 
-		// Count Ansible playbooks
-		playbooks, _, err := h.ansiblePlaybookRepo.ListByOrganization(org.ID, 1000, 0)
-		if err != nil {
-			continue
+		playbookCount, err := h.ansiblePlaybookRepo.CountByOrganization(org.ID)
+		if statErr("Failed to count playbooks", err) {
+			return
 		}
-		playbookCount := int64(len(playbooks))
 		totalAnsiblePlaybooks += playbookCount
 
-		// Get user's runs for this organization
-		orgRuns, _, err := h.runRepo.ListByOrganizationAndUser(org.ID, user.ID, 10000, 0)
-		if err != nil {
-			continue
-		}
-
-		// Count active Terraform runs (running, planning, applying)
-		var orgActiveRuns int64
-		var orgCompletedRunsThisMonth int64
-		for _, run := range orgRuns {
-			status := run.Status
-			if status == models.RunStatusRunning || status == models.RunStatusPlanning || status == models.RunStatusApplying {
-				orgActiveRuns++
-			}
-			// Count completed runs this month
-			if (status == models.RunStatusApplied || status == models.RunStatusCompleted) && run.CompletedAt != nil {
-				if run.CompletedAt.After(firstDayOfMonth) || run.CompletedAt.Equal(firstDayOfMonth) {
-					orgCompletedRunsThisMonth++
-				}
-			}
+		orgActiveRuns, err := h.runRepo.CountActiveByOrganizationAndUser(org.ID, user.ID)
+		if statErr("Failed to count active runs", err) {
+			return
 		}
 		activeTerraformRuns += orgActiveRuns
+
+		orgCompletedRunsThisMonth, err := h.runRepo.CountCompletedSinceByOrganizationAndUser(org.ID, user.ID, firstDayOfMonth)
+		if statErr("Failed to count completed runs", err) {
+			return
+		}
 		completedTerraformRunsThisMonth += orgCompletedRunsThisMonth
 
-		// Get user's Ansible jobs for this organization
-		orgJobs, _, err := h.ansibleJobRepo.ListByOrganizationAndUser(org.ID, user.ID, 10000, 0)
-		if err != nil {
-			continue
-		}
-
-		// Count active Ansible jobs (running, pending)
-		var orgActiveJobs int64
-		var orgCompletedJobsThisMonth int64
-		for _, job := range orgJobs {
-			status := job.Status
-			if status == models.AnsibleJobStatusRunning || status == models.AnsibleJobStatusPending {
-				orgActiveJobs++
-			}
-			// Count successful jobs this month
-			if status == models.AnsibleJobStatusSuccessful && job.FinishedAt != nil {
-				if job.FinishedAt.After(firstDayOfMonth) || job.FinishedAt.Equal(firstDayOfMonth) {
-					orgCompletedJobsThisMonth++
-				}
-			}
+		orgActiveJobs, err := h.ansibleJobRepo.CountActiveByOrganizationAndUser(org.ID, user.ID)
+		if statErr("Failed to count active jobs", err) {
+			return
 		}
 		activeAnsibleJobs += orgActiveJobs
+
+		orgCompletedJobsThisMonth, err := h.ansibleJobRepo.CountSuccessfulSinceByOrganizationAndUser(org.ID, user.ID, firstDayOfMonth)
+		if statErr("Failed to count completed jobs", err) {
+			return
+		}
 		completedAnsibleJobsThisMonth += orgCompletedJobsThisMonth
 
 		// Add organization stats

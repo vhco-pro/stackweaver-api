@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -20,19 +22,53 @@ import (
 type RegistryProviderHandler struct {
 	providerService *registry.ProviderService
 	gpgKeyRepo      *repository.GPGKeyRepository
+	authService     *auth.Service
+	orgRepo         *repository.OrganizationRepository
 	storage         storage.Client
 }
 
 func NewRegistryProviderHandler(
 	providerService *registry.ProviderService,
 	gpgKeyRepo *repository.GPGKeyRepository,
+	authService *auth.Service,
+	orgRepo *repository.OrganizationRepository,
 	storageClient storage.Client,
 ) *RegistryProviderHandler {
 	return &RegistryProviderHandler{
 		providerService: providerService,
 		gpgKeyRepo:      gpgKeyRepo,
+		authService:     authService,
+		orgRepo:         orgRepo,
 		storage:         storageClient,
 	}
+}
+
+// filterAccessibleProviders keeps every public provider but drops private providers whose org
+// the caller is not a member of (AUD-123), so a list/search never leaks another org's private
+// provider names. Pagination counts stay based on the unfiltered query.
+func (h *RegistryProviderHandler) filterAccessibleProviders(c *gin.Context, providers []models.Provider) []models.Provider {
+	privateOrgIDs := make([]uuid.UUID, 0, len(providers))
+	for i := range providers {
+		if providers[i].RegistryName != "public" {
+			privateOrgIDs = append(privateOrgIDs, providers[i].OrganizationID)
+		}
+	}
+	accessible := registryAccessibleOrgs(c, h.authService, h.orgRepo, privateOrgIDs)
+	kept := make([]models.Provider, 0, len(providers))
+	for _, p := range providers {
+		if p.RegistryName == "public" || accessible[p.OrganizationID] {
+			kept = append(kept, p)
+		}
+	}
+	return kept
+}
+
+// authorizeProviderRead gates a registry-protocol read/download for a resolved provider:
+// a `public` provider stays anonymously reachable; a `private` one requires a Bearer token
+// whose user belongs to the provider's org (AUD-123). Writes the response and returns false
+// on denial.
+func (h *RegistryProviderHandler) authorizeProviderRead(c *gin.Context, provider *models.Provider) bool {
+	return authorizeRegistryRead(c, h.authService, h.orgRepo, provider.OrganizationID, provider.RegistryName == "public")
 }
 
 // ListProviders handles GET /v1/providers
@@ -64,6 +100,7 @@ func (h *RegistryProviderHandler) ListProviders(c *gin.Context) {
 		})
 		return
 	}
+	providers = h.filterAccessibleProviders(c, providers)
 
 	// Format response according to Terraform Registry API spec
 	response := gin.H{
@@ -118,6 +155,7 @@ func (h *RegistryProviderHandler) SearchProviders(c *gin.Context) {
 		})
 		return
 	}
+	providers = h.filterAccessibleProviders(c, providers)
 
 	response := gin.H{
 		"meta": gin.H{
@@ -139,6 +177,17 @@ func (h *RegistryProviderHandler) SearchProviders(c *gin.Context) {
 func (h *RegistryProviderHandler) GetProviderVersions(c *gin.Context) {
 	namespace := c.Param("namespace")
 	name := c.Param("name")
+
+	provider, err := h.providerService.GetProvider(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []string{"Provider not found"},
+		})
+		return
+	}
+	if !h.authorizeProviderRead(c, provider) {
+		return
+	}
 
 	versions, err := h.providerService.GetProviderVersions(namespace, name)
 	if err != nil {
@@ -183,6 +232,9 @@ func (h *RegistryProviderHandler) GetProvider(c *gin.Context) {
 		})
 		return
 	}
+	if !h.authorizeProviderRead(c, provider) {
+		return
+	}
 
 	latestVersion, err := h.providerService.GetLatestVersion(namespace, name)
 	if err != nil {
@@ -207,6 +259,9 @@ func (h *RegistryProviderHandler) GetProviderVersion(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"errors": []string{"Provider not found"},
 		})
+		return
+	}
+	if !h.authorizeProviderRead(c, provider) {
 		return
 	}
 
@@ -251,6 +306,9 @@ func (h *RegistryProviderHandler) DownloadProvider(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider not found"}})
 		return
 	}
+	if !h.authorizeProviderRead(c, provider) {
+		return
+	}
 	providerVersion, err := h.providerService.GetProviderVersion(namespace, name, version)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider version not found"}})
@@ -286,11 +344,12 @@ func (h *RegistryProviderHandler) DownloadProvider(c *gin.Context) {
 
 	base := fmt.Sprintf("%s/v1/providers/%s/%s/%s", externalBaseURL(c), namespace, name, version)
 
-	// Track the download without blocking the response.
+	// Track the download without blocking the response. AUD-062: capture request-derived values
+	// before the goroutine — gin reuses *gin.Context after the handler returns (data race otherwise).
 	platformID := platform.ID
+	ip := c.ClientIP()
+	ua := c.GetHeader("User-Agent")
 	go func() {
-		ip := c.ClientIP()
-		ua := c.GetHeader("User-Agent")
 		_ = h.providerService.TrackDownload(platformID, ip, ua)
 	}()
 
@@ -314,6 +373,15 @@ func (h *RegistryProviderHandler) DownloadBinary(c *gin.Context) {
 	version := c.Param("version")
 	osParam := c.Param("os")
 	arch := c.Param("arch")
+
+	provider, err := h.providerService.GetProvider(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider not found"}})
+		return
+	}
+	if !h.authorizeProviderRead(c, provider) {
+		return
+	}
 
 	providerVersion, err := h.providerService.GetProviderVersion(namespace, name, version)
 	if err != nil {
@@ -349,6 +417,14 @@ func (h *RegistryProviderHandler) DownloadShasumsSig(c *gin.Context) {
 }
 
 func (h *RegistryProviderHandler) versionForShasums(c *gin.Context) (*models.ProviderVersion, bool) {
+	provider, err := h.providerService.GetProvider(c.Param("namespace"), c.Param("name"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider not found"}})
+		return nil, false
+	}
+	if !h.authorizeProviderRead(c, provider) {
+		return nil, false
+	}
 	pv, err := h.providerService.GetProviderVersion(c.Param("namespace"), c.Param("name"), c.Param("version"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Provider version not found"}})
@@ -424,6 +500,17 @@ func externalBaseURL(c *gin.Context) string {
 func (h *RegistryProviderHandler) GetProviderDownloadsSummary(c *gin.Context) {
 	namespace := c.Param("namespace")
 	name := c.Param("name")
+
+	provider, err := h.providerService.GetProvider(namespace, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []string{"Provider not found"},
+		})
+		return
+	}
+	if !h.authorizeProviderRead(c, provider) {
+		return
+	}
 
 	latestVersion, err := h.providerService.GetLatestVersion(namespace, name)
 	if err != nil {

@@ -4,13 +4,13 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
+	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -154,8 +154,7 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := pagination.Parse(c, 20)
 	if perPage > 100 {
 		perPage = 100
 	}
