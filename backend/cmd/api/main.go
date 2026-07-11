@@ -163,78 +163,10 @@ func main() {
 		hasTemplateCredentials = true // fail safe: never backfill on uncertainty
 	}
 
-	// Run GORM AutoMigrate to create/update tables
-	if err := db.AutoMigrate(
-		&models.User{},
-		&models.Organization{},
-		&models.OrganizationMember{},
-		&models.Team{},
-		&models.TeamMember{},
-		&models.TeamProjectAccess{},
-		&models.TeamWorkspaceAccess{},
-		&models.TeamOrganizationAccess{},
-		&models.AgentPool{},
-		&models.Runner{},
-		&models.RunnerJobExecution{},
-		&models.AnsibleConfig{},
-		&models.Project{},
-		&models.VCSConnection{},
-		&models.Workspace{},
-		&models.ConfigurationVersion{},
-		&models.Run{},
-		&models.RunPhaseState{},
-		&models.Variable{},
-		&models.VariableSet{},
-		&models.VariableSetVariable{},
-		&models.VariableSetWorkspace{},
-		&models.VariableSetProject{},
-		&models.StateVersion{},
-		&models.StateVersionOutput{},
-		&models.StateVersionResource{},
-		&models.StateLock{},
-		&models.AuditLog{},
-		&models.APIKey{},
-		&models.WebhookEvent{},
-		// Registry models
-		&models.Module{},
-		&models.ModuleVersion{},
-		&models.ModuleDownload{},
-		&models.Provider{},
-		&models.ProviderVersion{},
-		&models.ProviderPlatform{},
-		&models.ProviderDownload{},
-		&models.GPGKey{},
-		// Ansible models
-		&models.AnsibleInventory{},
-		&models.AnsibleInventoryHost{},
-		&models.AnsibleInventoryGroup{},
-		&models.AnsibleCredential{},
-		&models.AnsiblePlaybook{},
-		&models.AnsibleJobTemplate{},
-		&models.AnsibleJobTemplateVariable{},
-		&models.AnsibleJob{},
-		&models.AnsibleJobEvent{},
-		&models.AnsibleInventorySource{},
-		&models.AnsibleInventorySync{},
-		&models.AnsibleConstructedInput{},
-		&models.AnsibleSchedule{},
-		// Ansible notification models
-		&models.AnsibleNotificationTemplate{},
-		&models.AnsibleNotificationAttachment{},
-		// Ansible Workflow models
-		&models.AnsibleWorkflow{},
-		&models.AnsibleWorkflowNode{},
-		&models.AnsibleWorkflowEdge{},
-		&models.AnsibleWorkflowJob{},
-		&models.AnsibleWorkflowNodeJob{},
-		// Admin models
-		&models.TerraformVersion{},
-		// OIDC configuration models
-		&models.AzureOIDCConfiguration{},
-		&models.AWSOIDCConfiguration{},
-		&models.GCPOIDCConfiguration{},
-		&models.VaultOIDCConfiguration{},
-	); err != nil {
+	// Run GORM AutoMigrate to create/update tables. The model list is the shared
+	// models.AllModels() source of truth (also used by integration tests) so schema drift
+	// between the app and the tests is impossible.
+	if err := models.AutoMigrate(db); err != nil {
 		logger.Fatalf("Failed to run database migrations: %v", err)
 	}
 
@@ -427,6 +359,16 @@ func main() {
 	if err := authService.InitializeZitadel(zitadelIssuer, zitadelClientID, zitadelClientSecret, zitadelInternalAddr); err != nil {
 		logger.Fatalf("Failed to initialize Zitadel verifier: %v", err)
 	}
+	// AUD-012: register the Stackweaver client_ids an access token may carry in `aud`. Real
+	// user tokens are issued to the frontend PKCE client, so its id must be accepted; the API
+	// client id covers any future service-to-service token. Tokens for other clients on the
+	// same Zitadel instance are rejected.
+	authService.RegisterAudience(zitadelClientID)
+	zitadelFrontendClientID := os.Getenv("ZITADEL_FRONTEND_CLIENT_ID")
+	if zitadelFrontendClientID == "" {
+		logger.Warn("ZITADEL_FRONTEND_CLIENT_ID not set — access-token audience enforcement (AUD-012) may reject real user tokens. Set it to the frontend OIDC client_id.")
+	}
+	authService.RegisterAudience(zitadelFrontendClientID)
 
 	loginServicePAT := os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN")
 	if loginServicePAT == "" {

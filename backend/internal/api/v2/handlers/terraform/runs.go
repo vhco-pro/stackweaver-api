@@ -1641,29 +1641,43 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		return
 
 	case "agent":
-		// Agent execution: logs sent by agent to backend, stored in MinIO
-		if h.storageClient == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "503",
-						"title":  "Service Unavailable",
-						"detail": "Storage client not initialized",
-					},
-				},
-			})
-			return
+		// Agent execution: logs are streamed by the agent to the backend. AUD-028: they now go
+		// through the same Redis log buffer as remote runs (O(1) APPEND) and are copied to MinIO
+		// once at completion, so read Redis first (live runs) then fall back to MinIO (completed
+		// or Redis-evicted). This mirrors the "remote" branch above.
+		if h.logBufferService != nil {
+			ctx := context.Background()
+			if logsStr, rErr := h.logBufferService.Get(ctx, run.ID, phase, offset, limit); rErr == nil && logsStr != "" {
+				logs = []byte(logsStr)
+			} else if rErr != nil {
+				logger.Infof("[LOGS] Error getting agent logs from Redis for run %s phase %s: %v", run.ID, phase, rErr)
+			}
 		}
 
-		// Use the phase determined above (either from query parameter or status-based)
-		logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
-		logs, err = h.storageClient.Get(context.Background(), logsKey)
-		if err != nil {
-			// TFE returns 200 OK with empty body when logs don't exist
-			c.Data(http.StatusOK, "text/plain", []byte(""))
-			return
+		if len(logs) == 0 {
+			if h.storageClient == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"errors": []gin.H{
+						{
+							"status": "503",
+							"title":  "Service Unavailable",
+							"detail": "Storage client not initialized",
+						},
+					},
+				})
+				return
+			}
+
+			// Use the phase determined above (either from query parameter or status-based)
+			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
+			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			if err != nil {
+				// TFE returns 200 OK with empty body when logs don't exist
+				c.Data(http.StatusOK, "text/plain", []byte(""))
+				return
+			}
+			logs = sliceLogBytes(logs, offset, limit)
 		}
-		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
@@ -2166,10 +2180,13 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 			return
 		}
 
-		// Transition run to applying phase
+		// Transition run to applying phase. Clear the dispatch claim (AUD-007/112) so the
+		// orchestrator dispatches the apply exactly once — the plan phase set dispatched_at, and
+		// the apply is a fresh dispatch that a runner must pick up.
 		now := time.Now()
 		planRun.Status = models.RunStatusApplying
 		planRun.ApplyStartedAt = &now // Track when apply phase started
+		planRun.DispatchedAt = nil
 		planRun.UpdatedAt = now
 		if err := h.runRepo.Update(planRun); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -2389,33 +2406,40 @@ func (h *RunHandlerV2) ForceCancel(c *gin.Context) {
 		return
 	}
 
-	// Force cancel can only be used on runs that are planning or applying
-	// and have been canceled non-forcefully first
-	if run.Status != models.RunStatusRunning {
-		c.JSON(http.StatusConflict, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "409",
-					"title":  "Conflict",
-					"detail": "Run cannot be force-cancelled in current state",
-				},
-			},
-		})
-		return
-	}
-
-	// Force cancel immediately terminates the run
+	// Force cancel terminates a run that is still in flight. AUD-031: the previous check required
+	// the legacy status "running", which the lifecycle never sets, so this endpoint always 409'd
+	// and was functionally dead. Accept the states a run can actually be in-flight in (pending
+	// before dispatch, planning, applying, or the legacy running). The transition is guarded
+	// (AUD-017) so it cannot resurrect a run that has already reached a terminal state.
 	now := time.Now()
-	run.Status = models.RunStatusCancelled
-	run.CompletedAt = &now
-
-	if err := h.runRepo.Update(run); err != nil {
+	ok, err := h.runRepo.TransitionStatus(
+		run.ID,
+		[]models.RunStatus{
+			models.RunStatusPending, models.RunStatusPlanning,
+			models.RunStatusApplying, models.RunStatusRunning,
+		},
+		models.RunStatusCancelled,
+		map[string]any{"completed_at": now},
+	)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "500",
 					"title":  "Internal Server Error",
 					"detail": "Failed to force-cancel run",
+				},
+			},
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusConflict, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "409",
+					"title":  "Conflict",
+					"detail": "Run cannot be force-cancelled in current state",
 				},
 			},
 		})
@@ -2494,21 +2518,13 @@ func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
 		return
 	}
 
-	// Start the run
-	now := time.Now()
-	run.Status = models.RunStatusRunning
-	run.StartedAt = &now
-	if err := h.runRepo.Update(run); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to start run",
-				},
-			},
-		})
-		return
+	// AUD-031: the run stays `pending` — unlocking the workspace is the whole action. The previous
+	// code set the legacy status `running`, which the orchestrator's dispatch query (which lists
+	// only `pending`/`applying`) never enqueues, so a force-executed run hung until the stuck-run
+	// reaper killed it. Left `pending`, the orchestrator picks it up on its next tick.
+	// Clear any stale dispatch claim (AUD-007/112) so the orchestrator can dispatch it afresh.
+	if err := h.runRepo.ClearDispatch(run.ID); err != nil {
+		logger.Warnf("Failed to clear dispatch claim on force-executed run %s: %v", run.ID, err)
 	}
 
 	// TFE returns 202 Accepted for action endpoints (no body)

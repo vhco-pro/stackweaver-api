@@ -46,10 +46,10 @@ func setupAuthzTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
-		&models.Team{}, &models.TeamMember{}, &models.TeamOrganizationAccess{},
-	); err != nil {
+	// Migrate the full model set: the team-membership handlers load teams through the rbac
+	// service, which preloads project/workspace/org access rows — a partial migrate set only
+	// passes against a DB that already has those tables (dev) and fails on a fresh CI Postgres.
+	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
