@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -348,6 +349,20 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.orgRepo.Create(org); err != nil {
+		// AUD-109: a permanently-reserved name (previously used, now deleted) is a client error,
+		// not a server error — surface it as 422 so the caller knows to pick a different name.
+		if errors.Is(err, repository.ErrOrganizationNameReserved) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "422",
+						"title":  "Unprocessable Entity",
+						"detail": "Organization name is reserved and cannot be reused",
+					},
+				},
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{

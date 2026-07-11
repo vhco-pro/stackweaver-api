@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -58,6 +59,10 @@ type RunnerAgentHandler struct {
 	// State object access (encryption at rest) — optional, injected after creation.
 	// Routes self-hosted-runner state reads/writes through the encrypt/decrypt chokepoint.
 	stateService *state.Service
+	// Redis log buffer — optional, injected after creation. When set, agent job output streams
+	// through Redis (O(1) APPEND) instead of the O(n²) read-modify-write on object storage
+	// (AUD-028), and is copied to MinIO once at completion.
+	logBuffer *logbuffer.RedisLogBuffer
 }
 
 // NewRunnerAgentHandler creates a new runner agent handler
@@ -141,6 +146,13 @@ func (h *RunnerAgentHandler) SetStateMaterializer(m *state.Materializer) {
 // objects are read/written directly via the storage client (legacy/dev behaviour).
 func (h *RunnerAgentHandler) SetStateService(s *state.Service) {
 	h.stateService = s
+}
+
+// SetLogBuffer injects the Redis log buffer so agent job output streams through Redis instead of
+// the O(n²) object-storage read-modify-write (AUD-028). Optional: when unset, output falls back to
+// the direct object-storage append.
+func (h *RunnerAgentHandler) SetLogBuffer(lb *logbuffer.RedisLogBuffer) {
+	h.logBuffer = lb
 }
 
 // RegisterRequest is the request body for runner registration
@@ -573,6 +585,21 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	}
 	runnerID := runnerCaller.ID
 
+	// AUD-007/112: atomically claim this run for dispatch before starting it. The heartbeat offers
+	// the same pending/applying run to every agent runner in the pool; the claim (a conditional
+	// UPDATE that wins for exactly one caller) ensures the run is started — and therefore applied —
+	// on only one machine. A runner that loses the race gets 409 and skips the job. A run that was
+	// canceled in the meantime is no longer pending/applying, so the claim also fails → 409.
+	claimed, err := repository.NewRunRepository(h.db).ClaimForDispatch(runID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to claim run"}}})
+		return
+	}
+	if !claimed {
+		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Run already claimed by another runner or no longer dispatchable"}}})
+		return
+	}
+
 	now := time.Now()
 
 	// Update run status based on current phase
@@ -630,10 +657,15 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 			if req.Stream == "apply" {
 				phase = "apply"
 			}
-			// Stream output to the run's phase log in object storage, prepending the
-			// STX start-of-text marker on first write so the framing matches the
-			// Redis-backed remote-runner path. ETX is appended at JobComplete.
-			if err := logbuffer.AppendStorageLog(ctx, h.storageClient, jobIDStr, phase, req.Output); err != nil {
+			// AUD-028: stream through Redis (O(1) APPEND) when available — the same buffer the
+			// remote-runner path uses — instead of the O(n²) read-modify-write on object storage.
+			// It is copied to MinIO once at JobComplete. Fall back to the object-storage append
+			// when no Redis buffer is configured.
+			if h.logBuffer != nil {
+				if err := h.logBuffer.Append(ctx, jobIDStr, phase, req.Output); err != nil {
+					logger.Warnf("Failed to append agent output to Redis for %s phase %s: %v", jobIDStr, phase, err)
+				}
+			} else if err := logbuffer.AppendStorageLog(ctx, h.storageClient, jobIDStr, phase, req.Output); err != nil {
 				logger.Warnf("Failed to append agent output to storage for %s phase %s: %v", jobIDStr, phase, err)
 			}
 		}
@@ -1042,8 +1074,20 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 	// phases is safe — it is idempotent (a missing or already-terminated object is left
 	// untouched), so the plan job finalizes plan.log while apply.log is still absent,
 	// and the later apply job finalizes apply.log without touching the framed plan.log.
-	if h.storageClient != nil {
-		for _, phase := range []string{"plan", "apply"} {
+	for _, phase := range []string{"plan", "apply"} {
+		// AUD-028: when the Redis buffer is in use, finalize there and copy the completed phase log
+		// to MinIO once (so it persists past Redis eviction and the read path's MinIO fallback
+		// finds it). Otherwise finalize the object-storage log in place.
+		if h.logBuffer != nil {
+			if err := h.logBuffer.Finalize(c.Request.Context(), runID, phase); err != nil {
+				logger.Warnf("Failed to finalize agent Redis log for run %s phase %s: %v", runID, phase, err)
+			}
+			if h.storageClient != nil {
+				if err := h.logBuffer.CopyToStorage(c.Request.Context(), runID, phase, h.storageClient); err != nil {
+					logger.Warnf("Failed to copy agent log to storage for run %s phase %s: %v", runID, phase, err)
+				}
+			}
+		} else if h.storageClient != nil {
 			if err := logbuffer.FinalizeStorageLog(c.Request.Context(), h.storageClient, runID, phase); err != nil {
 				logger.Warnf("Failed to finalize agent log for run %s phase %s: %v", runID, phase, err)
 			}
@@ -1578,7 +1622,9 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 				token, tokenErr := h.oidcTokenService.GenerateWorkloadToken(oidc.WorkloadTokenRequest{
 					Audience:         "api://AzureADTokenExchange",
 					OrganizationName: org.Name,
+					OrganizationID:   project.OrganizationID.String(),
 					ProjectName:      project.Name,
+					ProjectID:        project.ID.String(),
 					ResourceType:     oidc.ResourceTypeJob,
 					ResourceName:     job.Name,
 					ActionKind:       oidc.ActionRun,
@@ -1709,8 +1755,22 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	// Get Terraform variables (category == "terraform")
 	if h.variableService != nil {
 		ctx := context.Background()
-		if vars, err := h.variableService.GetVariablesForRun(ctx, run.WorkspaceID); err == nil && len(vars) > 0 {
+		if varsMeta, err := h.variableService.GetVariablesWithMetaForRun(ctx, run.WorkspaceID); err == nil && len(varsMeta) > 0 {
+			vars := make(map[string]string, len(varsMeta))
+			var hclKeys []string
+			for k, v := range varsMeta {
+				vars[k] = v.Value
+				if v.HCL {
+					hclKeys = append(hclKeys, k)
+				}
+			}
 			response["variables"] = vars
+			// AUD-022: tell the self-hosted agent which variables are HCL-typed so it writes them
+			// unquoted in tfvars. Sent as a separate optional field so older agents (which ignore
+			// unknown fields) keep working with the plain string map.
+			if len(hclKeys) > 0 {
+				response["variables_hcl"] = hclKeys
+			}
 		}
 		// Get environment variables (category == "env")
 		if envVars, err := h.variableService.GetEnvironmentVariablesForRun(ctx, run.WorkspaceID); err == nil && len(envVars) > 0 {
@@ -1740,14 +1800,17 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				var org models.Organization
 				_ = h.db.First(&org, "id = ?", project.OrganizationID)
 
-				token, tokenErr := h.oidcTokenService.GenerateToken(
-					"api://AzureADTokenExchange",
-					org.Name,
-					project.Name,
-					run.Workspace.Name,
-					run.ID,
-					runPhase,
-				)
+				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
+					Audience:         "api://AzureADTokenExchange",
+					OrganizationName: org.Name,
+					OrganizationID:   project.OrganizationID.String(),
+					ProjectName:      project.Name,
+					ProjectID:        project.ID.String(),
+					WorkspaceName:    run.Workspace.Name,
+					WorkspaceID:      run.WorkspaceID,
+					RunID:            run.ID,
+					RunPhase:         runPhase,
+				})
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
@@ -1786,14 +1849,17 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				}
 				var org models.Organization
 				_ = h.db.First(&org, "id = ?", project.OrganizationID)
-				token, tokenErr := h.oidcTokenService.GenerateToken(
-					"sts.amazonaws.com",
-					org.Name,
-					project.Name,
-					run.Workspace.Name,
-					run.ID,
-					runPhase,
-				)
+				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
+					Audience:         "sts.amazonaws.com",
+					OrganizationName: org.Name,
+					OrganizationID:   project.OrganizationID.String(),
+					ProjectName:      project.Name,
+					ProjectID:        project.ID.String(),
+					WorkspaceName:    run.Workspace.Name,
+					WorkspaceID:      run.WorkspaceID,
+					RunID:            run.ID,
+					RunPhase:         runPhase,
+				})
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate AWS OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
@@ -1832,14 +1898,17 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				var org models.Organization
 				_ = h.db.First(&org, "id = ?", project.OrganizationID)
 				// WIF audience is the full provider resource name prefixed with //iam.googleapis.com/.
-				token, tokenErr := h.oidcTokenService.GenerateToken(
-					"//iam.googleapis.com/"+gcpConfig.WorkloadProviderName,
-					org.Name,
-					project.Name,
-					run.Workspace.Name,
-					run.ID,
-					runPhase,
-				)
+				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
+					Audience:         "//iam.googleapis.com/" + gcpConfig.WorkloadProviderName,
+					OrganizationName: org.Name,
+					OrganizationID:   project.OrganizationID.String(),
+					ProjectName:      project.Name,
+					ProjectID:        project.ID.String(),
+					WorkspaceName:    run.Workspace.Name,
+					WorkspaceID:      run.WorkspaceID,
+					RunID:            run.ID,
+					RunPhase:         runPhase,
+				})
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate GCP OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
@@ -1879,14 +1948,17 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				var org models.Organization
 				_ = h.db.First(&org, "id = ?", project.OrganizationID)
 				// Vault JWT auth validates the token's aud against the role's bound_audiences.
-				token, tokenErr := h.oidcTokenService.GenerateToken(
-					oidc.VaultWorkloadIdentityAudience,
-					org.Name,
-					project.Name,
-					run.Workspace.Name,
-					run.ID,
-					runPhase,
-				)
+				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
+					Audience:         oidc.VaultWorkloadIdentityAudience,
+					OrganizationName: org.Name,
+					OrganizationID:   project.OrganizationID.String(),
+					ProjectName:      project.Name,
+					ProjectID:        project.ID.String(),
+					WorkspaceName:    run.Workspace.Name,
+					WorkspaceID:      run.WorkspaceID,
+					RunID:            run.ID,
+					RunPhase:         runPhase,
+				})
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate Vault OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
@@ -2177,19 +2249,7 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		return
 	}
 
-	// Get the next state version number
-	var maxVersion int
-	if err := h.db.Model(&models.StateVersion{}).
-		Where("workspace_id = ?", run.WorkspaceID).
-		Select("COALESCE(MAX(version), 0)").
-		Scan(&maxVersion).Error; err != nil {
-		logger.Warnf("Failed to get next state version for workspace %s: %v", run.WorkspaceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to determine state version"}}})
-		return
-	}
-	nextVersion := maxVersion + 1
-
-	// Extract serial and lineage from state JSON
+	// Extract serial and lineage from state JSON (serial drives regression rejection)
 	var serial *int
 	var lineage string
 	if s, ok := stateJSON["serial"].(float64); ok {
@@ -2211,36 +2271,39 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		}
 	}
 
-	// Persist raw state to object storage FIRST — it is the authoritative copy
-	// (the State Storage Rework makes object storage the single source of truth,
-	// so this Put must succeed before we record the version). Writing it before the
-	// DB row means a failed Put returns 500 without creating a row, so the runner's
-	// retry recomputes the same nextVersion instead of producing a duplicate version.
-	if h.stateService != nil {
-		// Encrypt at rest before persisting (the state service owns the crypto + key format).
-		if err := h.stateService.PutStateObject(c.Request.Context(), run.WorkspaceID, nextVersion, stateData); err != nil {
-			logger.Errorf("Failed to save state to object storage for run %s: %v", jobIDStr, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to persist state to object storage"}}})
-			return
-		}
-	}
-
-	// Create state version record
+	// AUD-018: atomically reserve the next version through the shared path — retries on the
+	// (workspace_id, version) unique-violation instead of the old racy MAX(version)+1, and rejects
+	// a serial regression (a stale push) with 409. Row-first, then object storage keyed on the
+	// reserved version; roll the row back if the object write fails.
 	runID := jobIDStr
 	stateVersion := models.StateVersion{
 		WorkspaceID: run.WorkspaceID,
 		RunID:       &runID,
-		Version:     nextVersion,
 		Serial:      serial,
 		Lineage:     lineage,
 		CommitHash:  commitHash,
 		Committer:   committer,
 	}
-
-	if err := h.db.Create(&stateVersion).Error; err != nil {
-		logger.Warnf("Failed to create state version for run %s: %v", jobIDStr, err)
+	stateVersionRepo := repository.NewStateVersionRepository(h.db)
+	nextVersion, err := stateVersionRepo.CreateNextVersion(&stateVersion)
+	if err != nil {
+		if errors.Is(err, repository.ErrStateSerialRegression) {
+			c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Stale state", "detail": "incoming state serial is older than the current state version"}}})
+			return
+		}
+		logger.Warnf("Failed to reserve state version for run %s: %v", jobIDStr, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to save state version"}}})
 		return
+	}
+
+	if h.stateService != nil {
+		// Encrypt at rest before persisting (the state service owns the crypto + key format).
+		if err := h.stateService.PutStateObject(c.Request.Context(), run.WorkspaceID, nextVersion, stateData); err != nil {
+			_ = stateVersionRepo.Delete(stateVersion.ID)
+			logger.Errorf("Failed to save state to object storage for run %s: %v", jobIDStr, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to persist state to object storage"}}})
+			return
+		}
 	}
 
 	// Materialize outputs/resources for fast serving (State Storage Rework).
