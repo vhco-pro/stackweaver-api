@@ -56,18 +56,46 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
 
-	// Run migrations
+	// Run migrations. The RBAC tables are included because AUD-123 gates the /v1 module
+	// read endpoints on org membership (orgRepo.UserInOrg reads organization_members AND
+	// teams/team_members) — omitting any of them makes the tests pass only against a DB
+	// that already has the tables (dev) and fail on a fresh CI Postgres.
 	if err := db.AutoMigrate(
 		&models.Organization{},
 		&models.Module{},
 		&models.ModuleVersion{},
 		&models.ModuleDownload{},
 		&models.User{},
+		&models.OrganizationMember{},
+		&models.Team{},
+		&models.TeamMember{},
+		&models.TeamOrganizationAccess{},
 	); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
 	return db
+}
+
+// createRegistryTestUser inserts a user with a unique Zitadel subject (the shared helpers leave it
+// empty, which collides on the users' unique subject index once more than one test user exists) and
+// registers a row-scoped cleanup.
+func createRegistryTestUser(t *testing.T, db *gorm.DB) *models.User {
+	t.Helper()
+	u := &models.User{
+		ID:             uuid.New(),
+		Email:          "reg-user-" + uuid.NewString()[:8] + "@test.local",
+		ZitadelSubject: "reg-user-" + uuid.NewString(),
+	}
+	if err := db.Create(u).Error; err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Where("user_id = ?", u.ID).Delete(&models.TeamMember{})
+		db.Where("user_id = ?", u.ID).Delete(&models.OrganizationMember{})
+		db.Where("id = ?", u.ID).Delete(&models.User{})
+	})
+	return u
 }
 
 // setupTestOrg creates a test organization with a unique name and registers a
@@ -84,6 +112,12 @@ func setupTestOrg(t *testing.T, db *gorm.DB) *models.Organization {
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM module_versions WHERE module_id IN (SELECT id FROM modules WHERE organization_id = ?)", org.ID)
 		db.Where("organization_id = ?", org.ID).Delete(&models.Module{})
+		// Teams (+ their members/accesses) and org members created for this org by
+		// makeUserOrgOwner / RBAC-authenticated tests are row-scoped to the org.
+		db.Exec("DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE organization_id = ?)", org.ID)
+		db.Exec("DELETE FROM team_organization_accesses WHERE team_id IN (SELECT id FROM teams WHERE organization_id = ?)", org.ID)
+		db.Where("organization_id = ?", org.ID).Delete(&models.Team{})
+		db.Where("organization_id = ?", org.ID).Delete(&models.OrganizationMember{})
 		db.Where("id = ?", org.ID).Delete(&models.Organization{})
 	})
 	return org
@@ -157,17 +191,25 @@ func TestListModules(t *testing.T) {
 	mockStorage := registry.NewMockStorage()
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage)
 
-	handler := &RegistryModuleHandler{
-		moduleService: moduleService,
-	}
+	// AUD-123: modules are org-private; the /v1 list handler filters to modules the caller can
+	// access, so the handler needs the auth + org deps and the request must come from an org member.
+	authService := auth.NewService(repository.NewUserRepository(db))
+	handler := NewRegistryModuleHandler(moduleService, authService, orgRepo)
 
-	// Setup router
+	owner := createRegistryTestUser(t, db)
+	makeUserOrgOwner(t, db, org, owner)
+
+	// Setup router — the real /v1 group carries no auth middleware, so a stub translates the test
+	// header into the same user_id an upstream would set; the handler's own gate does the work.
+	// testUserAuth (authz_matrix_test.go) reads the X-Test-User header into the user_id context.
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.Use(testUserAuth())
 	router.GET("/v1/modules/:namespace", handler.ListModules)
 
-	// Make request
+	// Make request as the org owner.
 	req := httptest.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("/v1/modules/%s", org.Name), nil)
+	req.Header.Set("X-Test-User", owner.ID.String())
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -176,23 +218,20 @@ func TestListModules(t *testing.T) {
 		t.Errorf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
 	}
 
+	// The TFE registry list format nests results under "modules".
 	var response struct {
-		Data []struct {
-			ID         string `json:"id"`
-			Type       string `json:"type"`
-			Attributes struct {
-				Name     string `json:"name"`
-				Provider string `json:"provider"`
-			} `json:"attributes"`
-		} `json:"data"`
+		Modules []struct {
+			Name     string `json:"name"`
+			Provider string `json:"provider"`
+		} `json:"modules"`
 	}
 
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if len(response.Data) != 2 {
-		t.Errorf("Expected 2 modules, got %d", len(response.Data))
+	if len(response.Modules) != 2 {
+		t.Errorf("Expected 2 modules, got %d. Body: %s", len(response.Modules), w.Body.String())
 	}
 }
 
@@ -232,17 +271,23 @@ func TestGetModuleVersions(t *testing.T) {
 	mockStorage := registry.NewMockStorage()
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage)
 
-	handler := &RegistryModuleHandler{
-		moduleService: moduleService,
-	}
+	// AUD-123: the versions endpoint gates on org membership; construct with the auth deps and
+	// authenticate the request as an org owner.
+	authService := auth.NewService(repository.NewUserRepository(db))
+	handler := NewRegistryModuleHandler(moduleService, authService, orgRepo)
 
-	// Setup router
+	owner := createRegistryTestUser(t, db)
+	makeUserOrgOwner(t, db, org, owner)
+
+	// Setup router (see TestListModules for the X-Test-User stub rationale).
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.Use(testUserAuth())
 	router.GET("/v1/modules/:namespace/:name/:provider/versions", handler.GetModuleVersions)
 
-	// Make request
+	// Make request as the org owner.
 	req := httptest.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("/v1/modules/%s/%s/%s/versions", org.Name, module.Name, module.Provider), nil)
+	req.Header.Set("X-Test-User", owner.ID.String())
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -251,23 +296,30 @@ func TestGetModuleVersions(t *testing.T) {
 		t.Errorf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
 	}
 
+	// TFE registry protocol nests versions under modules[].versions.
 	var response struct {
-		Versions []struct {
-			Version string `json:"version"`
-		} `json:"versions"`
+		Modules []struct {
+			Versions []struct {
+				Version string `json:"version"`
+			} `json:"versions"`
+		} `json:"modules"`
 	}
 
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if len(response.Versions) != 2 {
-		t.Errorf("Expected 2 versions, got %d", len(response.Versions))
+	if len(response.Modules) != 1 {
+		t.Fatalf("Expected 1 module entry, got %d. Body: %s", len(response.Modules), w.Body.String())
+	}
+	versions := response.Modules[0].Versions
+	if len(versions) != 2 {
+		t.Fatalf("Expected 2 versions, got %d. Body: %s", len(versions), w.Body.String())
 	}
 
 	// Check versions are sorted correctly (latest first)
-	if response.Versions[0].Version != "2.0.0" {
-		t.Errorf("Expected latest version to be 2.0.0, got %s", response.Versions[0].Version)
+	if versions[0].Version != "2.0.0" {
+		t.Errorf("Expected latest version to be 2.0.0, got %s", versions[0].Version)
 	}
 }
 

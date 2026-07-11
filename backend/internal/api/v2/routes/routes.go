@@ -389,6 +389,10 @@ func SetupV2Routes(
 	if err != nil {
 		logger.Warnf("Failed to initialize storage: %v (storage features will be limited)", err)
 	}
+	// AUD-053: let workspace deletion prune the workspace's stored state files + run logs.
+	if storageClient != nil {
+		workspaceRepo.SetStorage(storageClient)
+	}
 
 	configVersionHandler := terraformHandlers.NewConfigurationVersionHandlerV2(configVersionRepo, workspaceRepo, authService, storageClient)
 
@@ -561,7 +565,7 @@ func SetupV2Routes(
 	variableSetVariableRepo := repository.NewVariableSetVariableRepository(db)
 	jobTemplateRepo := repository.NewAnsibleJobTemplateRepository(db)
 	// projectRepo already declared above, reuse it
-	variableSetHandler := handlers.NewVariableSetHandlerV2(variableSetRepo, variableSetVariableRepo, orgRepo, projectRepo, workspaceRepo, jobTemplateRepo, authService, rbacService)
+	variableSetHandler := handlers.NewVariableSetHandlerV2(variableSetRepo, variableSetVariableRepo, orgRepo, projectRepo, workspaceRepo, jobTemplateRepo, authService, rbacService, variableService)
 
 	// Update variable service to include variable set repo (for variable set support in GetVariablesForRun)
 	// This allows platform variables + variable sets to work together
@@ -884,7 +888,7 @@ func SetupV2Routes(
 	// Registry Routes (Public - No Auth Required for Terraform CLI)
 	// These endpoints are outside the authenticated v2 group
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, storageClient)
-	moduleHandler := handlers.NewRegistryModuleHandler(moduleService)
+	moduleHandler := handlers.NewRegistryModuleHandler(moduleService, authService, orgRepo)
 
 	// Initialize provider repositories and services
 	providerRepo := repository.NewProviderRepository(db)
@@ -899,7 +903,8 @@ func SetupV2Routes(
 	gpgKeyHandler := handlers.NewGPGKeyHandler(gpgKeyRepo, orgRepo, authService, rbacService)
 
 	// v1 provider-install protocol handler (public download/discovery + signed SHA256SUMS streaming).
-	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, storageClient)
+	// authService + orgRepo let it gate PRIVATE providers on org membership (AUD-123).
+	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, authService, orgRepo, storageClient)
 
 	// tfe_registry_provider resource CRUD (go-tfe registry-providers surface).
 	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, rbacService, storageClient)
@@ -1139,6 +1144,9 @@ func SetupV2Routes(
 	runnerAgentHandler.SetStateMaterializer(stateMaterializer)
 	// Route self-hosted-runner state reads/writes through the encryption-at-rest chokepoint (#95).
 	runnerAgentHandler.SetStateService(stateService)
+	// AUD-028: stream agent job output through the shared Redis log buffer (O(1) APPEND) when
+	// available, copied to MinIO once at completion, instead of the O(n²) object-storage append.
+	runnerAgentHandler.SetLogBuffer(logBufferService)
 
 	runnerAgent := v2.Group("/runner")
 	{

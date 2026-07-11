@@ -392,10 +392,18 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 		return
 	}
 
-	// Update status to uploaded
+	// Update status to uploaded. AUD-023: this is the "status" step of the create -> upload ->
+	// status sequence, and object storage is not transactional with the DB. The store above
+	// succeeded, so if this status write fails we would otherwise leave the object orphaned behind
+	// a configuration version stuck in "pending" (a run would never pick it up, and it is not under
+	// a prefix the workspace-delete prune covers). Compensate by best-effort deleting the object we
+	// just stored so a client retry starts clean, mirroring the org-bootstrap cleanup pattern.
 	configVersion.Status = models.ConfigurationVersionStatusUploaded
 	configVersion.UpdatedAt = time.Now()
 	if err := h.configVersionRepo.Update(configVersion); err != nil {
+		if delErr := h.storageClient.Delete(c.Request.Context(), storageKey); delErr != nil {
+			logger.Warnf("Failed to clean up stored config after status update failure for %s: %v", configVersion.ID, delErr)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{

@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -348,6 +349,20 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.orgRepo.Create(org); err != nil {
+		// AUD-109: a permanently-reserved name (previously used, now deleted) is a client error,
+		// not a server error — surface it as 422 so the caller knows to pick a different name.
+		if errors.Is(err, repository.ErrOrganizationNameReserved) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "422",
+						"title":  "Unprocessable Entity",
+						"detail": "Organization name is reserved and cannot be reused",
+					},
+				},
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
@@ -363,6 +378,7 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	// Create default teams: "owners" and "viewers"
 	if err := h.createDefaultTeams(org.ID); err != nil {
 		logger.Errorf("Failed to create default teams for org %s: %v", org.ID, err)
+		h.cleanupFailedOrgBootstrap(org.ID, org.Name) // AUD-023: don't leave a half-built org
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
@@ -377,59 +393,40 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 
 	// Add creator to organization (no role - roles are deprecated)
 	if err := h.orgRepo.AddMember(org.ID, user.ID); err != nil {
-		logger.Errorf("Failed to add member %s to org %s: %v", user.ID, org.ID, err)
-
-		// Check for duplicate key error (user already a member - shouldn't happen but handle gracefully)
-		if err == gorm.ErrDuplicatedKey {
-			// User is already a member (shouldn't happen, but handle gracefully)
-			logger.Warnf("User %s is already a member of org %s", user.ID, org.ID)
-			// Continue - user is already a member
-			return
-		}
-
 		errStr := strings.ToLower(err.Error())
-		// Check error string patterns (nolint: gocritic - error string checking requires if-else chain)
-		if strings.Contains(errStr, "duplicate key") ||
+		// AUD-023: a benign "already a member" duplicate must CONTINUE the bootstrap (add to the
+		// owners team, create the default project), not `return` out of the handler. The old code
+		// returned here, which both skipped the rest of the bootstrap (half-built org) and sent no
+		// HTTP response at all (an empty 200). Only a genuine failure aborts with a 500.
+		isDuplicate := err == gorm.ErrDuplicatedKey ||
+			strings.Contains(errStr, "duplicate key") ||
 			strings.Contains(errStr, "unique constraint") ||
-			strings.Contains(errStr, "idx_org_user") {
-			// User is already a member (shouldn't happen, but handle gracefully)
-			logger.Warnf("User %s is already a member of org %s", user.ID, org.ID)
-			// Continue - user is already a member
-			return
-		}
-
-		if strings.Contains(errStr, "foreign key") ||
-			strings.Contains(errStr, "violates foreign key constraint") {
-			// Foreign key constraint error (user doesn't exist - shouldn't happen since user is authenticated)
+			strings.Contains(errStr, "idx_org_user")
+		switch {
+		case isDuplicate:
+			logger.Warnf("User %s is already a member of org %s; continuing bootstrap", user.ID, org.ID)
+		case strings.Contains(errStr, "foreign key") || strings.Contains(errStr, "violates foreign key constraint"):
+			logger.Errorf("Failed to add member %s to org %s: %v", user.ID, org.ID, err)
+			h.cleanupFailedOrgBootstrap(org.ID, org.Name) // AUD-023
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to add user to organization: user record not found. Please contact support.",
-					},
-				},
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to add user to organization: user record not found. Please contact support."}},
+			})
+			return
+		default:
+			logger.Errorf("Failed to add member %s to org %s: %v", user.ID, org.ID, err)
+			h.cleanupFailedOrgBootstrap(org.ID, org.Name) // AUD-023
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to add member: %v", err)}},
 			})
 			return
 		}
-
-		// Other error
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": fmt.Sprintf("Failed to add member: %v", err),
-				},
-			},
-		})
-		return
 	}
 
 	// Add creator to "owners" team (replaces old admin role)
 	ownersTeam, err := h.teamRepo.GetByName(org.ID, "owners")
 	if err != nil {
 		logger.Errorf("Failed to find owners team for org %s: %v", org.ID, err)
+		h.cleanupFailedOrgBootstrap(org.ID, org.Name) // AUD-023
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
@@ -443,6 +440,7 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	}
 	if err := h.teamRepo.AddMember(ownersTeam.ID, user.ID); err != nil {
 		logger.Errorf("Failed to add member %s to owners team %s: %v", user.ID, ownersTeam.ID, err)
+		h.cleanupFailedOrgBootstrap(org.ID, org.Name) // AUD-023
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
@@ -459,6 +457,7 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	// This ensures the creator has access to the default project via team project access
 	if err := h.createDefaultProject(org.ID, ownersTeam.ID); err != nil {
 		logger.Errorf("Failed to create default project for org %s: %v", org.ID, err)
+		h.cleanupFailedOrgBootstrap(org.ID, org.Name) // AUD-023
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
@@ -824,6 +823,51 @@ func (h *OrganizationHandlerV2) createDefaultProject(orgID, ownersTeamID uuid.UU
 	}
 
 	return nil
+}
+
+// cleanupFailedOrgBootstrap removes a partially-bootstrapped organization when a step after the org
+// row was created fails (AUD-023). Without this the org create left a half-built organization behind
+// (org row + maybe teams/membership, no default project) and returned a 500 — the operation was not
+// atomic. It also frees the reserved name (AUD-109) so the caller can retry with the same name.
+// Best-effort: it runs in its own transaction and only logs on failure, since the caller is already
+// returning an error to the client.
+func (h *OrganizationHandlerV2) cleanupFailedOrgBootstrap(orgID uuid.UUID, name string) {
+	if h.db == nil {
+		return
+	}
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		// Remove bootstrap children first, then the org row, then release the name reservation.
+		var teamIDs []uuid.UUID
+		if err := tx.Model(&models.Team{}).Where("organization_id = ?", orgID).Pluck("id", &teamIDs).Error; err != nil {
+			return err
+		}
+		if len(teamIDs) > 0 {
+			if err := tx.Where("team_id IN ?", teamIDs).Delete(&models.TeamMember{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("team_id IN ?", teamIDs).Delete(&models.TeamOrganizationAccess{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("team_id IN ?", teamIDs).Delete(&models.TeamProjectAccess{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("organization_id = ?", orgID).Delete(&models.Team{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("organization_id = ?", orgID).Delete(&models.OrganizationMember{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("organization_id = ?", orgID).Delete(&models.Project{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("name = ?", name).Delete(&models.ReservedOrganizationName{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&models.Organization{}, "id = ?", orgID).Error
+	}); err != nil {
+		logger.Errorf("Failed to clean up partially-created organization %s after a bootstrap error: %v", orgID, err)
+	}
 }
 
 // createDefaultTeams creates the default "owners" and "viewers" teams for a new organization
