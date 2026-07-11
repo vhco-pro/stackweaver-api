@@ -14,8 +14,14 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/variable"
 	"gorm.io/gorm"
 )
+
+// maskedValue is the placeholder returned for a sensitive variable value on every read
+// path — the real value is never sent to clients (TFE-compatible). It is defined once so
+// the write paths (AUD-105) can reliably detect a round-tripped masked value and skip it.
+const maskedValue = "••••••••"
 
 type VariableSetHandlerV2 struct {
 	variableSetRepo         *repository.VariableSetRepository
@@ -26,6 +32,7 @@ type VariableSetHandlerV2 struct {
 	jobTemplateRepo         *repository.AnsibleJobTemplateRepository
 	authService             *auth.Service
 	rbacService             *rbac.Service
+	variableService         *variable.Service
 }
 
 func NewVariableSetHandlerV2(
@@ -37,6 +44,7 @@ func NewVariableSetHandlerV2(
 	jobTemplateRepo *repository.AnsibleJobTemplateRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	variableService *variable.Service,
 ) *VariableSetHandlerV2 {
 	return &VariableSetHandlerV2{
 		variableSetRepo:         variableSetRepo,
@@ -47,7 +55,29 @@ func NewVariableSetHandlerV2(
 		jobTemplateRepo:         jobTemplateRepo,
 		authService:             authService,
 		rbacService:             rbacService,
+		variableService:         variableService,
 	}
+}
+
+// encryptVarsetValue encrypts a variable-set variable's value in place when it is
+// sensitive, setting the Encrypted flag — mirroring the workspace-variable path
+// (variable.Service.CreateVariable). Non-sensitive values are stored verbatim with
+// Encrypted=false. When no variable service is configured the value is left as-is so
+// callers degrade to the previous (plaintext) behavior rather than erroring; in
+// production the encryption key fails loud at startup (AUD-013), so this never triggers.
+// AUD-104: sensitive variable-set values were previously stored in cleartext at rest.
+func (h *VariableSetHandlerV2) encryptVarsetValue(v *models.VariableSetVariable) error {
+	if !v.Sensitive || h.variableService == nil {
+		v.Encrypted = false
+		return nil
+	}
+	enc, err := h.variableService.Encrypt(v.Value)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt variable value: %w", err)
+	}
+	v.Value = enc
+	v.Encrypted = true
+	return nil
 }
 
 // authorizeVarset gates the caller (already resolved from the context) against a
@@ -159,7 +189,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		for j, v := range vs.Variables {
 			value := v.Value
 			if v.Sensitive {
-				value = "••••••••"
+				value = maskedValue
 			}
 			variablesData[j] = gin.H{
 				"id":   v.ID,
@@ -324,7 +354,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	for i, v := range variables {
 		value := v.Value
 		if v.Sensitive {
-			value = "••••••••"
+			value = maskedValue
 		}
 		variablesData[i] = gin.H{
 			"id":   v.ID,
@@ -364,9 +394,15 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 		}
 	}
 
-	// Get organization for relationships if not already retrieved
+	// Get organization for relationships if not already retrieved (AUD-129: a missing
+	// org row is an internal FK inconsistency, not a client error — fail loudly rather
+	// than nil-deref on org.Name below).
 	if org == nil {
-		org, _ = h.orgRepo.GetByID(variableSet.OrganizationID)
+		org, err = h.orgRepo.GetByID(variableSet.OrganizationID)
+		if err != nil || org == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to load organization for variable set"}}})
+			return
+		}
 	}
 
 	relationships := gin.H{
@@ -521,12 +557,11 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 		CreatedBy:      user.ID,
 	}
 
-	if err := h.variableSetRepo.Create(variableSet); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create variable set"}}})
-		return
-	}
-
-	// Handle relationships.vars if provided (create variables in the set)
+	// Collect the variables and workspace/project assignments up front, then create the
+	// whole set atomically (AUD-119). Previously each row was created individually with its
+	// error ignored (`// Ignore errors for now`), so a mid-loop failure returned 201 with
+	// variables/assignments silently dropped and no rollback.
+	var variables []*models.VariableSetVariable
 	if len(req.Data.Relationships.Vars.Data) > 0 {
 		for _, varData := range req.Data.Relationships.Vars.Data {
 			varType, _ := varData["type"].(string)
@@ -565,38 +600,48 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 			}
 
 			variable := &models.VariableSetVariable{
-				VariableSetID: variableSet.ID,
-				Key:           key,
-				Value:         value,
-				Description:   description,
-				Category:      category,
-				HCL:           hcl,
-				Sensitive:     sensitive,
+				Key:         key,
+				Value:       value,
+				Description: description,
+				Category:    category,
+				HCL:         hcl,
+				Sensitive:   sensitive,
 			}
-
-			_ = h.variableSetVariableRepo.Create(variable) // Ignore errors for now
+			// AUD-104: encrypt sensitive values before storage. A failure here must abort
+			// the whole create (AUD-119) rather than silently drop the variable or store cleartext.
+			if err := h.encryptVarsetValue(variable); err != nil {
+				logger.Warnf("Failed to encrypt varset variable %q: %v", key, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt sensitive variable"}}})
+				return
+			}
+			variables = append(variables, variable)
 		}
 	}
 
-	// Handle relationships.workspaces if provided
+	var workspaceIDs []string
 	if len(req.Data.Relationships.Workspaces.Data) > 0 {
 		for _, wsData := range req.Data.Relationships.Workspaces.Data {
 			wsID, _ := wsData["id"].(string)
 			if wsID != "" {
-				_ = h.variableSetRepo.AddWorkspace(variableSet.ID, wsID) // Ignore errors for now
+				workspaceIDs = append(workspaceIDs, wsID)
 			}
 		}
 	}
 
-	// Handle relationships.projects if provided
+	var projectIDs []uuid.UUID
 	if len(req.Data.Relationships.Projects.Data) > 0 {
 		for _, projData := range req.Data.Relationships.Projects.Data {
 			projID, _ := projData["id"].(string)
 			projUUID, err := uuid.Parse(projID)
 			if err == nil {
-				_ = h.variableSetRepo.AddProject(variableSet.ID, projUUID) // Ignore errors for now
+				projectIDs = append(projectIDs, projUUID)
 			}
 		}
+	}
+
+	if err := h.variableSetRepo.CreateWithRelations(variableSet, variables, workspaceIDs, projectIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create variable set"}}})
+		return
 	}
 
 	// TFE uses "global" instead of "scope"
@@ -606,14 +651,15 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 			"id":   variableSet.ID,
 			"type": "varsets", // TFE uses "varsets" not "variable-sets"
 			"attributes": gin.H{
-				"name":            variableSet.Name,
-				"description":     variableSet.Description,
-				"global":          global,               // TFE-compatible
-				"priority":        variableSet.Priority, // TFE-compatible
-				"updated-at":      variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				"var-count":       0,
-				"workspace-count": 0,
-				"project-count":   0,
+				"name":        variableSet.Name,
+				"description": variableSet.Description,
+				"global":      global,               // TFE-compatible
+				"priority":    variableSet.Priority, // TFE-compatible
+				"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+				// AUD-129: report real counts from what was just created instead of hardcoded 0.
+				"var-count":       len(variables),
+				"workspace-count": len(workspaceIDs),
+				"project-count":   len(projectIDs),
 			},
 			"relationships": gin.H{
 				"organization": gin.H{
@@ -745,9 +791,14 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 		return
 	}
 
-	// Get organization for relationships (org already declared above, use = not :=)
+	// Get organization for relationships (org already declared above, use = not :=).
+	// AUD-129: guard the ignored-error fetch so a missing org row can't nil-deref on org.Name.
 	if org == nil {
-		org, _ = h.orgRepo.GetByID(variableSet.OrganizationID)
+		org, err = h.orgRepo.GetByID(variableSet.OrganizationID)
+		if err != nil || org == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to load organization for variable set"}}})
+			return
+		}
 	}
 
 	// Build parent relationship - project-owned or organization-owned
@@ -772,14 +823,16 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 			"id":   variableSet.ID,
 			"type": "varsets", // TFE uses "varsets" not "variable-sets"
 			"attributes": gin.H{
-				"name":            variableSet.Name,
-				"description":     variableSet.Description,
-				"global":          global,               // TFE-compatible
-				"priority":        variableSet.Priority, // TFE-compatible
-				"updated-at":      variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				"var-count":       0, // Will be populated if variables are loaded
-				"workspace-count": 0,
-				"project-count":   0,
+				"name":        variableSet.Name,
+				"description": variableSet.Description,
+				"global":      global,               // TFE-compatible
+				"priority":    variableSet.Priority, // TFE-compatible
+				"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+				// AUD-129: report the real counts from the preloaded set rather than
+				// hardcoding 0 (GetByID preloads Variables/Workspaces/Projects).
+				"var-count":       len(variableSet.Variables),
+				"workspace-count": len(variableSet.Workspaces),
+				"project-count":   len(variableSet.Projects),
 			},
 			"relationships": gin.H{
 				"organization": gin.H{
@@ -1481,7 +1534,7 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 	for i, v := range variables {
 		value := v.Value
 		if v.Sensitive {
-			value = "••••••••"
+			value = maskedValue
 		}
 		data[i] = gin.H{
 			"id":   v.ID,
@@ -1567,7 +1620,7 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 	data := gin.H{
 		"id":   variable.ID,
@@ -1674,7 +1727,11 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		Category:      category,
 		HCL:           attrs.HCL,
 		Sensitive:     attrs.Sensitive,
-		Encrypted:     false, // Legacy field, not in TFE spec
+	}
+	// AUD-104: encrypt the value at rest when the variable is sensitive.
+	if err := h.encryptVarsetValue(variable); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+		return
 	}
 
 	if err := h.variableSetVariableRepo.Create(variable); err != nil {
@@ -1722,7 +1779,7 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -1838,9 +1895,6 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if attrs.Key != nil {
 		variable.Key = *attrs.Key
 	}
-	if attrs.Value != nil {
-		variable.Value = *attrs.Value
-	}
 	if attrs.Description != nil {
 		variable.Description = *attrs.Description
 	}
@@ -1854,8 +1908,22 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if attrs.HCL != nil {
 		variable.HCL = *attrs.HCL
 	}
+	// Resolve the final sensitivity before touching the value so it is encrypted correctly.
 	if attrs.Sensitive != nil {
 		variable.Sensitive = *attrs.Sensitive
+	}
+	// AUD-105: a nil value means "unchanged"; a value equal to the masked placeholder means
+	// the client round-tripped a masked read (the SPA and the TFE provider resubmit the whole
+	// resource when editing an unrelated field) — writing it would silently overwrite the real
+	// secret with bullets and break every consuming run. Only overwrite when a genuine new
+	// value is supplied, and (AUD-104) encrypt it at rest when sensitive. Leaving the value
+	// untouched preserves the existing stored ciphertext/plaintext and its Encrypted flag.
+	if attrs.Value != nil && *attrs.Value != maskedValue {
+		variable.Value = *attrs.Value
+		if err := h.encryptVarsetValue(variable); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+			return
+		}
 	}
 
 	if err := h.variableSetVariableRepo.Update(variable); err != nil {
@@ -1865,7 +1933,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 
 	c.JSON(http.StatusOK, gin.H{

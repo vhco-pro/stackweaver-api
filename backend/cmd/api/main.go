@@ -38,6 +38,7 @@ import (
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 )
 
 type Config struct {
@@ -133,6 +134,14 @@ func main() {
 	// per-project.
 	rebuildCompositeIndex("idx_project_playbook", "project_id")
 	rebuildCompositeIndex("idx_project_template", "project_id")
+	// AUD-019: the same single-column-index accident affected workspace, runner,
+	// Ansible credential and Ansible inventory names — all globally unique instead
+	// of scoped to their project/organization. Drop the legacy indexes so AutoMigrate
+	// rebuilds them as the intended composite (scope, name) indexes.
+	rebuildCompositeIndex("idx_project_workspace", "project_id")
+	rebuildCompositeIndex("idx_runner_org_name", "organization_id")
+	rebuildCompositeIndex("idx_org_credential", "organization_id")
+	rebuildCompositeIndex("idx_org_inventory", "organization_id")
 
 	// queued_at (NULL = held by the template concurrency gate) is introduced by
 	// this release. Detect whether the column predates this startup so jobs
@@ -163,78 +172,10 @@ func main() {
 		hasTemplateCredentials = true // fail safe: never backfill on uncertainty
 	}
 
-	// Run GORM AutoMigrate to create/update tables
-	if err := db.AutoMigrate(
-		&models.User{},
-		&models.Organization{},
-		&models.OrganizationMember{},
-		&models.Team{},
-		&models.TeamMember{},
-		&models.TeamProjectAccess{},
-		&models.TeamWorkspaceAccess{},
-		&models.TeamOrganizationAccess{},
-		&models.AgentPool{},
-		&models.Runner{},
-		&models.RunnerJobExecution{},
-		&models.AnsibleConfig{},
-		&models.Project{},
-		&models.VCSConnection{},
-		&models.Workspace{},
-		&models.ConfigurationVersion{},
-		&models.Run{},
-		&models.RunPhaseState{},
-		&models.Variable{},
-		&models.VariableSet{},
-		&models.VariableSetVariable{},
-		&models.VariableSetWorkspace{},
-		&models.VariableSetProject{},
-		&models.StateVersion{},
-		&models.StateVersionOutput{},
-		&models.StateVersionResource{},
-		&models.StateLock{},
-		&models.AuditLog{},
-		&models.APIKey{},
-		&models.WebhookEvent{},
-		// Registry models
-		&models.Module{},
-		&models.ModuleVersion{},
-		&models.ModuleDownload{},
-		&models.Provider{},
-		&models.ProviderVersion{},
-		&models.ProviderPlatform{},
-		&models.ProviderDownload{},
-		&models.GPGKey{},
-		// Ansible models
-		&models.AnsibleInventory{},
-		&models.AnsibleInventoryHost{},
-		&models.AnsibleInventoryGroup{},
-		&models.AnsibleCredential{},
-		&models.AnsiblePlaybook{},
-		&models.AnsibleJobTemplate{},
-		&models.AnsibleJobTemplateVariable{},
-		&models.AnsibleJob{},
-		&models.AnsibleJobEvent{},
-		&models.AnsibleInventorySource{},
-		&models.AnsibleInventorySync{},
-		&models.AnsibleConstructedInput{},
-		&models.AnsibleSchedule{},
-		// Ansible notification models
-		&models.AnsibleNotificationTemplate{},
-		&models.AnsibleNotificationAttachment{},
-		// Ansible Workflow models
-		&models.AnsibleWorkflow{},
-		&models.AnsibleWorkflowNode{},
-		&models.AnsibleWorkflowEdge{},
-		&models.AnsibleWorkflowJob{},
-		&models.AnsibleWorkflowNodeJob{},
-		// Admin models
-		&models.TerraformVersion{},
-		// OIDC configuration models
-		&models.AzureOIDCConfiguration{},
-		&models.AWSOIDCConfiguration{},
-		&models.GCPOIDCConfiguration{},
-		&models.VaultOIDCConfiguration{},
-	); err != nil {
+	// Run GORM AutoMigrate to create/update tables. The model list is the shared
+	// models.AllModels() source of truth (also used by integration tests) so schema drift
+	// between the app and the tests is impossible.
+	if err := models.AutoMigrate(db); err != nil {
 		logger.Fatalf("Failed to run database migrations: %v", err)
 	}
 
@@ -242,6 +183,26 @@ func main() {
 	// NULL constraint, so drop it explicitly (idempotent).
 	if err := db.Exec("ALTER TABLE ansible_jobs ALTER COLUMN playbook_id DROP NOT NULL").Error; err != nil {
 		logger.Warnf("Failed to drop NOT NULL on ansible_jobs.playbook_id: %v", err)
+	}
+
+	// AUD-020: users.email must allow multiple "no email" (empty-string) users. The original full
+	// UNIQUE index on email rejected a second empty email, which forced identity-hijack and
+	// row-deletion workarounds in user provisioning. Replace it with a PARTIAL unique index that
+	// only constrains non-empty emails, so any number of email-less users can coexist. Idempotent:
+	// the legacy full index is replaced once, then the partial index is left in place.
+	var emailIdxDef string
+	if err := db.Raw("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_users_email'").Scan(&emailIdxDef).Error; err != nil {
+		logger.Warnf("Failed to inspect idx_users_email: %v", err)
+	} else if emailIdxDef != "" && !strings.Contains(emailIdxDef, "WHERE") {
+		// Legacy full unique index — drop it so the partial index below replaces it.
+		if err := db.Exec("DROP INDEX IF EXISTS idx_users_email").Error; err != nil {
+			logger.Warnf("Failed to drop legacy idx_users_email: %v", err)
+		} else {
+			logger.Info("Dropped legacy full unique idx_users_email; recreating as partial (WHERE email <> '')")
+		}
+	}
+	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email) WHERE email <> ''").Error; err != nil {
+		logger.Warnf("Failed to create partial unique idx_users_email: %v", err)
 	}
 
 	// One-time backfill: jobs created before queued_at existed were all
@@ -388,6 +349,94 @@ func main() {
 		}
 	}
 
+	// AUD-023: reconcile foreign-key ON DELETE behavior. GORM's AutoMigrate creates foreign keys
+	// but never alters an existing constraint's ON DELETE clause, so every historical constraint is
+	// NO ACTION — which is why deleting a parent relied on long, hand-ordered manual cascades in the
+	// repositories (fragile: one missed child orphans rows or wedges the delete). This converts each
+	// constraint to its intended behavior so the database enforces integrity as a backstop, covering
+	// the full organization/project object graph (an interconnected closure — it must be converted as
+	// one consistent set, since a partial conversion would make a parent delete fail against a
+	// leftover NO ACTION reference). The rules (see models.FKDeleteRules):
+	//   - CASCADE for compositions and junction rows (a child that cannot exist without its parent),
+	//     so a single DELETE reaches every descendant.
+	//   - SET NULL for nullable references whose row outlives the parent — critically the org-scoped
+	//     resources (schedules, variable sets, workflows, inventories, credentials, configs) that
+	//     survive a *project* delete but point at project-scoped rows being removed; without SET NULL
+	//     those surviving references would block the delete.
+	//   - Untouched (NO ACTION): the NOT-NULL "uses" references (job_template -> playbook/inventory,
+	//     job -> inventory, runner -> agent_pool). Both endpoints die together in any org/project
+	//     delete (the deferred end-of-statement check passes), and a standalone delete of an in-use
+	//     resource stays correctly blocked.
+	// Idempotent: a constraint already at the desired behavior is skipped; a missing/renamed
+	// constraint (e.g. a GORM join table that lacks FKs on a fresh migrate) is skipped quietly.
+	reconcileFKOnDelete := func(table, constraint, behavior string) {
+		var def string
+		if err := db.Raw(
+			"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = ? AND conrelid = ?::regclass",
+			constraint, table,
+		).Scan(&def).Error; err != nil {
+			logger.Warnf("FK reconcile: inspect %s.%s: %v", table, constraint, err)
+			return
+		}
+		if def == "" {
+			return // constraint absent on this schema variant — nothing to reconcile
+		}
+		want := "ON DELETE " + behavior
+		if strings.Contains(def, want) {
+			return // already at the desired behavior
+		}
+		base := def
+		if i := strings.Index(base, " ON DELETE "); i >= 0 {
+			base = base[:i] // strip any existing (non-matching) ON DELETE clause
+		}
+		desired := base + " " + want
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", table, constraint)).Error; err != nil {
+				return err
+			}
+			return tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s %s", table, constraint, desired)).Error
+		}); err != nil {
+			logger.Warnf("FK reconcile: convert %s.%s to %s: %v", table, constraint, behavior, err)
+		} else {
+			logger.Infof("FK reconcile: %s.%s -> ON DELETE %s", table, constraint, behavior)
+		}
+	}
+	// Some pure GORM many-to-many join tables (variable_set_projects, variable_set_workspaces) are
+	// created with NO foreign keys at all on a fresh migrate — so deleting a variable set, project,
+	// or workspace leaves orphaned join rows (the reconciliation below can only convert constraints
+	// that already exist). Older DBs migrated by earlier GORM versions do have these FKs (as
+	// NO ACTION), so this only creates what is missing; existing constraints are left for the
+	// reconcile pass to convert to CASCADE. Idempotent: skipped when the named constraint exists.
+	ensureJoinFK := func(table, constraint, column, parent, parentCol string) {
+		var exists bool
+		if err := db.Raw(
+			"SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conname = ? AND conrelid = ?::regclass)",
+			constraint, table,
+		).Scan(&exists).Error; err != nil {
+			logger.Warnf("ensure join FK: inspect %s.%s: %v", table, constraint, err)
+			return
+		}
+		if exists {
+			return
+		}
+		if err := db.Exec(fmt.Sprintf(
+			"ALTER TABLE %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE",
+			table, constraint, column, parent, parentCol,
+		)).Error; err != nil {
+			logger.Warnf("ensure join FK: create %s.%s: %v", table, constraint, err)
+		} else {
+			logger.Infof("ensure join FK: created %s.%s -> %s(%s) ON DELETE CASCADE", table, constraint, parent, parentCol)
+		}
+	}
+	ensureJoinFK("variable_set_projects", "fk_variable_set_projects_variable_set", "variable_set_id", "variable_sets", "id")
+	ensureJoinFK("variable_set_projects", "fk_variable_set_projects_project", "project_id", "projects", "id")
+	ensureJoinFK("variable_set_workspaces", "fk_variable_set_workspaces_variable_set", "variable_set_id", "variable_sets", "id")
+	ensureJoinFK("variable_set_workspaces", "fk_variable_set_workspaces_workspace", "workspace_id", "workspaces", "id")
+
+	for _, r := range models.FKDeleteRules {
+		reconcileFKOnDelete(r.Table, r.Constraint, r.Behavior)
+	}
+
 	logger.Info("Database migrations completed successfully")
 
 	// Seed official Terraform versions (like TFE's built-in version catalog)
@@ -427,6 +476,16 @@ func main() {
 	if err := authService.InitializeZitadel(zitadelIssuer, zitadelClientID, zitadelClientSecret, zitadelInternalAddr); err != nil {
 		logger.Fatalf("Failed to initialize Zitadel verifier: %v", err)
 	}
+	// AUD-012: register the Stackweaver client_ids an access token may carry in `aud`. Real
+	// user tokens are issued to the frontend PKCE client, so its id must be accepted; the API
+	// client id covers any future service-to-service token. Tokens for other clients on the
+	// same Zitadel instance are rejected.
+	authService.RegisterAudience(zitadelClientID)
+	zitadelFrontendClientID := os.Getenv("ZITADEL_FRONTEND_CLIENT_ID")
+	if zitadelFrontendClientID == "" {
+		logger.Warn("ZITADEL_FRONTEND_CLIENT_ID not set — access-token audience enforcement (AUD-012) may reject real user tokens. Set it to the frontend OIDC client_id.")
+	}
+	authService.RegisterAudience(zitadelFrontendClientID)
 
 	loginServicePAT := os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN")
 	if loginServicePAT == "" {
@@ -753,6 +812,20 @@ func main() {
 			}
 		}
 
+		// AUD-113/AUD-071: parse STACKWEAVER_TRUSTED_HOSTS (comma-separated extra
+		// hosts honored in X-Forwarded-Host / X-Zitadel-* headers when building the
+		// OIDC discovery doc + IdP redirect URLs). The hosts of STACKWEAVER_PUBLIC_URL,
+		// STACKWEAVER_APP_URL and the Zitadel issuer are added automatically in
+		// NewAuthProxy; this is for any additional fronting hostname.
+		var trustedForwardHosts []string
+		if v := os.Getenv("STACKWEAVER_TRUSTED_HOSTS"); v != "" {
+			for _, h := range strings.Split(v, ",") {
+				if h = strings.TrimSpace(h); h != "" {
+					trustedForwardHosts = append(trustedForwardHosts, h)
+				}
+			}
+		}
+
 		// Round 25 Wave 6 (item 6 / Round 22 OOS): parse the optional
 		// shared decoy secret for HA deployments. Base64-encoded ≥32
 		// bytes. Empty / unset → NewAuthProxy generates a per-process
@@ -792,6 +865,8 @@ func main() {
 			CustomRequestHeaders:      os.Getenv("CUSTOM_REQUEST_HEADERS"),
 			IsProduction:              isProduction,
 			PublicFrontendURL:         os.Getenv("STACKWEAVER_APP_URL"),
+			PublicAPIBaseURL:          os.Getenv("STACKWEAVER_PUBLIC_URL"),
+			TrustedForwardHosts:       trustedForwardHosts,
 			PostLogoutAllowedHosts:    postLogoutHosts,
 			DecoySecret:               decoySecret,
 			LoginNameLockoutThreshold: lockoutThreshold,

@@ -741,11 +741,40 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 	if attrs.HCL != nil {
 		variable.HCL = *attrs.HCL
 	}
+	// AUD-044: when the sensitivity flag flips but no new value was supplied, reconcile the
+	// stored value's encryption state so the Encrypted flag always tracks how the value is
+	// actually stored. Previously a sensitive→non-sensitive toggle left the value as ciphertext
+	// with Encrypted=true while unmasking it, desyncing the flags (and a non-sensitive→sensitive
+	// toggle left a "sensitive" value in cleartext). A new-value update already sets encryption
+	// correctly above, so this only handles the value-unchanged case.
+	if attrs.Sensitive != nil && *attrs.Sensitive != variable.Sensitive && attrs.Value == "" && h.variableService != nil {
+		switch {
+		case *attrs.Sensitive && !variable.Encrypted:
+			// non-sensitive → sensitive: encrypt the existing plaintext at rest.
+			encryptedValue, err := h.variableService.Encrypt(variable.Value)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to encrypt variable on sensitivity change: %v", err)}},
+				})
+				return
+			}
+			variable.Value = encryptedValue
+			variable.Encrypted = true
+		case !*attrs.Sensitive && variable.Encrypted:
+			// sensitive → non-sensitive: decrypt so we don't keep serving/storing stale ciphertext.
+			plaintext, err := h.variableService.Decrypt(variable.Value)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to decrypt variable on sensitivity change: %v", err)}},
+				})
+				return
+			}
+			variable.Value = plaintext
+			variable.Encrypted = false
+		}
+	}
 	if attrs.Sensitive != nil {
 		variable.Sensitive = *attrs.Sensitive
-		// If changing from sensitive to non-sensitive and value wasn't updated, we need to decrypt
-		// But since we don't have the plaintext, we'll leave it encrypted in the DB
-		// The value will be decrypted when read via the service
 	}
 
 	if err := h.variableRepo.Update(variable); err != nil {

@@ -19,6 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -703,16 +705,9 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		// Create configuration version from VCS
 		createdConfigVersionID, err := h.createConfigurationVersionFromVCS(c.Request.Context(), workspace, vcsConn)
 		if err != nil {
-			logger.Infof("Run creation: Failed to create configuration version from VCS: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": fmt.Sprintf("Failed to create configuration version from VCS: %v", err),
-					},
-				},
-			})
+			// AUD-063: log the real cause server-side; return a generic detail (the raw err may carry
+			// VCS host/path/credential context).
+			apierror.Internal(c, "Failed to create configuration version from VCS", err)
 			return
 		}
 		configVersionID = &createdConfigVersionID
@@ -1141,27 +1136,11 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 		host = "localhost:8022"
 	}
 
-	// TFE uses absolute URLs for log-read-url - include it for all runs
-	// The endpoint will return empty body (200 OK) if logs don't exist yet
-	// According to TFE API docs, all endpoints use Authorization header for authentication
-	// Terraform CLI will use the same Authorization header it uses for other API calls
-	// However, TFE may include token in query parameter for log-read-url as a fallback
-	// Extract token from request (if available) to include in log-read-url as fallback
-	token := ""
-	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) == 2 && parts[0] == "Bearer" {
-			token = parts[1]
-		}
-	}
-
-	// Build log-read-url - TFE includes token in query parameter as fallback authentication
-	// Terraform CLI should use Authorization header, but token in URL provides compatibility
-	if token != "" {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs?token=%s", scheme, host, run.ID, token)
-	} else {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs", scheme, host, run.ID)
-	}
+	// AUD-045: emit a short-TTL, run-scoped log token in the log-read-url instead of the caller's
+	// bearer token (which would leak into proxy logs / history). The CLI still prefers its
+	// Authorization header; the query token is the TFE-compatible fallback. If no scoped token can
+	// be minted (no user in context / signing disabled) the URL is emitted without a token.
+	attributes["log-read-url"] = buildLogReadURL(c, scheme, host, run.ID, "")
 
 	// Build relationships and links according to TFE Plans API spec
 	// TFE Plans API requires relationships.state-versions and links (self, json-output)
@@ -1391,21 +1370,9 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		host = "localhost:8022"
 	}
 
-	// Extract token from request for log-read-url
-	token := ""
-	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) == 2 && parts[0] == "Bearer" {
-			token = parts[1]
-		}
-	}
-
-	// Build log-read-url with phase parameter for apply logs
-	if token != "" {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs?phase=apply&token=%s", scheme, host, run.ID, token)
-	} else {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs?phase=apply", scheme, host, run.ID)
-	}
+	// AUD-045: run-scoped short-TTL log token instead of the caller's bearer token (see the run
+	// response builder above).
+	attributes["log-read-url"] = buildLogReadURL(c, scheme, host, run.ID, "phase=apply")
 
 	// Build relationships according to TFE Applies API spec
 	relationships := gin.H{
@@ -1461,22 +1428,27 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 	// If token is in query, authenticate with it; otherwise rely on standard auth middleware
 	tokenFromQuery := c.Query("token")
 	if tokenFromQuery != "" {
-		// Authenticate using token from query parameter (TFE-compatible)
-		user, err := h.authService.GetUserFromToken(tokenFromQuery)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "401",
-						"title":  "Unauthorized",
-						"detail": "Invalid token",
+		// AUD-045: prefer a run-scoped log token (HMAC-bound to this run ID, short TTL). Fall back to
+		// full-token auth for any client still passing a bearer/API token in the query.
+		if uid, ok := verifyLogToken(tokenFromQuery, c.Param("id")); ok {
+			c.Set("user_id", uid)
+		} else {
+			user, err := h.authService.GetUserFromToken(tokenFromQuery)
+			if err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"errors": []gin.H{
+						{
+							"status": "401",
+							"title":  "Unauthorized",
+							"detail": "Invalid token",
+						},
 					},
-				},
-			})
-			return
+				})
+				return
+			}
+			// Store user in context for potential future use
+			c.Set("user_id", user.ID)
 		}
-		// Store user in context for potential future use
-		c.Set("user_id", user.ID)
 	}
 
 	run, ok := h.authorizeRun(c, c.Param("id"), "read")
@@ -1581,7 +1553,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 
 		// Try Redis first if log buffer service is available
 		if h.logBufferService != nil {
-			ctx := context.Background()
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
 			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
 			if err == nil && logsStr != "" {
 				// Found logs in Redis, convert to bytes
@@ -1616,7 +1588,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 			} else {
 				logsKey = fmt.Sprintf("runs/%s/logs/%s.log", run.ID, run.Operation)
 			}
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// REMOVED: Fallback logic that returned plan logs when apply logs don't exist
 				// This was causing plan logs to appear in apply phase terminal output
@@ -1641,35 +1613,49 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		return
 
 	case "agent":
-		// Agent execution: logs sent by agent to backend, stored in MinIO
-		if h.storageClient == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "503",
-						"title":  "Service Unavailable",
-						"detail": "Storage client not initialized",
-					},
-				},
-			})
-			return
+		// Agent execution: logs are streamed by the agent to the backend. AUD-028: they now go
+		// through the same Redis log buffer as remote runs (O(1) APPEND) and are copied to MinIO
+		// once at completion, so read Redis first (live runs) then fall back to MinIO (completed
+		// or Redis-evicted). This mirrors the "remote" branch above.
+		if h.logBufferService != nil {
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
+			if logsStr, rErr := h.logBufferService.Get(ctx, run.ID, phase, offset, limit); rErr == nil && logsStr != "" {
+				logs = []byte(logsStr)
+			} else if rErr != nil {
+				logger.Infof("[LOGS] Error getting agent logs from Redis for run %s phase %s: %v", run.ID, phase, rErr)
+			}
 		}
 
-		// Use the phase determined above (either from query parameter or status-based)
-		logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
-		logs, err = h.storageClient.Get(context.Background(), logsKey)
-		if err != nil {
-			// TFE returns 200 OK with empty body when logs don't exist
-			c.Data(http.StatusOK, "text/plain", []byte(""))
-			return
+		if len(logs) == 0 {
+			if h.storageClient == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"errors": []gin.H{
+						{
+							"status": "503",
+							"title":  "Service Unavailable",
+							"detail": "Storage client not initialized",
+						},
+					},
+				})
+				return
+			}
+
+			// Use the phase determined above (either from query parameter or status-based)
+			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
+			if err != nil {
+				// TFE returns 200 OK with empty body when logs don't exist
+				c.Data(http.StatusOK, "text/plain", []byte(""))
+				return
+			}
+			logs = sliceLogBytes(logs, offset, limit)
 		}
-		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
 			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, run.Operation)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// Return 200 OK with empty body when logs don't exist
 				c.Data(http.StatusOK, "text/plain", []byte(""))
@@ -1760,7 +1746,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 
 		// Try Redis first if log buffer service is available
 		if h.logBufferService != nil {
-			ctx := context.Background()
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
 			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
 			if err == nil && logsStr != "" {
 				// Found logs in Redis, convert to bytes
@@ -1788,7 +1774,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 
 			// TFE-compatible log path: runs/{run_id}/logs/plan.log
 			logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// TFE returns 200 OK with empty body when logs don't exist
 				logger.Infof("[LOGS] Plan logs not found for run %s: %v", run.ID, err)
@@ -1822,7 +1808,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 		}
 
 		logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-		logs, err = h.storageClient.Get(context.Background(), logsKey)
+		logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 		if err != nil {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
@@ -1833,7 +1819,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
 			logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
 				return
@@ -1936,7 +1922,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 
 		// Try Redis first if log buffer service is available
 		if h.logBufferService != nil {
-			ctx := context.Background()
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
 			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
 			if err == nil && logsStr != "" {
 				// Found logs in Redis, convert to bytes
@@ -1965,7 +1951,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 			// TFE-compatible log path: runs/{run_id}/logs/apply.log
 			// NOTE: No fallback to plan logs - this endpoint only returns apply logs
 			logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// TFE returns 200 OK with empty body when logs don't exist
 				// This is correct behavior - apply logs simply don't exist yet or were cancelled
@@ -2000,7 +1986,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 		}
 
 		logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-		logs, err = h.storageClient.Get(context.Background(), logsKey)
+		logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 		if err != nil {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
@@ -2011,7 +1997,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
 			logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
 				return
@@ -2166,10 +2152,13 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 			return
 		}
 
-		// Transition run to applying phase
+		// Transition run to applying phase. Clear the dispatch claim (AUD-007/112) so the
+		// orchestrator dispatches the apply exactly once — the plan phase set dispatched_at, and
+		// the apply is a fresh dispatch that a runner must pick up.
 		now := time.Now()
 		planRun.Status = models.RunStatusApplying
 		planRun.ApplyStartedAt = &now // Track when apply phase started
+		planRun.DispatchedAt = nil
 		planRun.UpdatedAt = now
 		if err := h.runRepo.Update(planRun); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -2238,14 +2227,13 @@ func (h *RunHandlerV2) ListByWorkspace(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := pagination.Parse(c, 20)
 	if perPage > 100 {
 		perPage = 100
 	}
 	offset := (page - 1) * perPage
 
-	runs, total, err := h.runRepo.ListByWorkspace(workspaceID, perPage, offset)
+	runs, total, err := h.runRepo.WithContext(c.Request.Context()).ListByWorkspace(workspaceID, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -2389,33 +2377,40 @@ func (h *RunHandlerV2) ForceCancel(c *gin.Context) {
 		return
 	}
 
-	// Force cancel can only be used on runs that are planning or applying
-	// and have been canceled non-forcefully first
-	if run.Status != models.RunStatusRunning {
-		c.JSON(http.StatusConflict, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "409",
-					"title":  "Conflict",
-					"detail": "Run cannot be force-cancelled in current state",
-				},
-			},
-		})
-		return
-	}
-
-	// Force cancel immediately terminates the run
+	// Force cancel terminates a run that is still in flight. AUD-031: the previous check required
+	// the legacy status "running", which the lifecycle never sets, so this endpoint always 409'd
+	// and was functionally dead. Accept the states a run can actually be in-flight in (pending
+	// before dispatch, planning, applying, or the legacy running). The transition is guarded
+	// (AUD-017) so it cannot resurrect a run that has already reached a terminal state.
 	now := time.Now()
-	run.Status = models.RunStatusCancelled
-	run.CompletedAt = &now
-
-	if err := h.runRepo.Update(run); err != nil {
+	ok, err := h.runRepo.TransitionStatus(
+		run.ID,
+		[]models.RunStatus{
+			models.RunStatusPending, models.RunStatusPlanning,
+			models.RunStatusApplying, models.RunStatusRunning,
+		},
+		models.RunStatusCancelled,
+		map[string]any{"completed_at": now},
+	)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "500",
 					"title":  "Internal Server Error",
 					"detail": "Failed to force-cancel run",
+				},
+			},
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusConflict, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "409",
+					"title":  "Conflict",
+					"detail": "Run cannot be force-cancelled in current state",
 				},
 			},
 		})
@@ -2494,21 +2489,13 @@ func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
 		return
 	}
 
-	// Start the run
-	now := time.Now()
-	run.Status = models.RunStatusRunning
-	run.StartedAt = &now
-	if err := h.runRepo.Update(run); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to start run",
-				},
-			},
-		})
-		return
+	// AUD-031: the run stays `pending` — unlocking the workspace is the whole action. The previous
+	// code set the legacy status `running`, which the orchestrator's dispatch query (which lists
+	// only `pending`/`applying`) never enqueues, so a force-executed run hung until the stuck-run
+	// reaper killed it. Left `pending`, the orchestrator picks it up on its next tick.
+	// Clear any stale dispatch claim (AUD-007/112) so the orchestrator can dispatch it afresh.
+	if err := h.runRepo.ClearDispatch(run.ID); err != nil {
+		logger.Warnf("Failed to clear dispatch claim on force-executed run %s: %v", run.ID, err)
 	}
 
 	// TFE returns 202 Accepted for action endpoints (no body)
@@ -2534,14 +2521,13 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := pagination.Parse(c, 20)
 	if perPage > 100 {
 		perPage = 100
 	}
 	offset := (page - 1) * perPage
 
-	runs, total, err := h.runRepo.ListByOrganization(org.ID, perPage, offset)
+	runs, total, err := h.runRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
