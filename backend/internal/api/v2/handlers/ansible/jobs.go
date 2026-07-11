@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -459,11 +460,8 @@ func (h *JobHandler) Launch(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		// AUD-063: don't echo the raw service error to the client.
+		apierror.Internal(c, "Failed to launch job", err)
 		return
 	}
 
@@ -641,11 +639,8 @@ func (h *JobHandler) LaunchByOrganization(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		// AUD-063: don't echo the raw service error to the client.
+		apierror.Internal(c, "Failed to launch job", err)
 		return
 	}
 
@@ -864,11 +859,8 @@ func (h *JobHandler) Relaunch(c *gin.Context) {
 
 	job, err := h.jobService.RelaunchJob(context.Background(), id, createdBy)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		// AUD-063: don't echo the raw service error to the client.
+		apierror.Internal(c, "Failed to relaunch job", err)
 		return
 	}
 
@@ -939,11 +931,8 @@ func (h *JobHandler) Delete(c *gin.Context) {
 
 	err = h.jobService.DeleteJob(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		// AUD-063: don't echo the raw service error to the client.
+		apierror.Internal(c, "Failed to delete job", err)
 		return
 	}
 
@@ -1211,11 +1200,8 @@ func (h *JobHandler) LaunchFromTemplate(c *gin.Context) {
 			})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		// AUD-063: don't echo the raw service error to the client.
+		apierror.Internal(c, "Failed to launch job from template", err)
 		return
 	}
 

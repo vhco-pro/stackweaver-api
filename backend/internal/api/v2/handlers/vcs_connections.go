@@ -5,12 +5,12 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -346,8 +346,7 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+	page, perPage := pagination.Parse(c, 30)
 	if perPage > 100 {
 		perPage = 100
 	}
@@ -413,8 +412,7 @@ func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
+	page, perPage := pagination.Parse(c, 100)
 	if perPage > 100 {
 		perPage = 100
 	}
@@ -480,8 +478,7 @@ func (h *VCSConnectionHandlerV2) ListBranches(c *gin.Context) {
 	owner := c.Param("owner")
 	repo := c.Param("repo")
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+	page, perPage := pagination.Parse(c, 30)
 	if perPage > 100 {
 		perPage = 100
 	}

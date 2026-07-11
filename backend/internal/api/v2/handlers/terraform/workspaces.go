@@ -294,7 +294,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 
 	if hasOrgReadWorkspaces {
 		// User has organization-level read-workspaces permission - show all workspaces
-		workspaces, total, err = h.workspaceRepo.ListByOrganization(orgName, pageSize, offset)
+		workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganization(orgName, pageSize, offset)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"errors": []gin.H{
@@ -352,7 +352,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 			}
 
 			// Query workspaces that are in the accessible list
-			workspaces, total, err = h.workspaceRepo.ListByOrganizationAndIDs(orgName, workspaceIDList, pageSize, offset)
+			workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganizationAndIDs(orgName, workspaceIDList, pageSize, offset)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"errors": []gin.H{
