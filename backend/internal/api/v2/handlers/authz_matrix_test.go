@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -46,10 +47,10 @@ func setupAuthzTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
-		&models.Team{}, &models.TeamMember{}, &models.TeamOrganizationAccess{},
-	); err != nil {
+	// Migrate the full model set: the team-membership handlers load teams through the rbac
+	// service, which preloads project/workspace/org access rows — a partial migrate set only
+	// passes against a DB that already has those tables (dev) and fails on a fresh CI Postgres.
+	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -185,6 +186,8 @@ func setupTeamAuthzFixture(t *testing.T) *teamAuthzFixture {
 	router.GET("/api/v2/teams/:id/relationships/organization-memberships", h.ListOrganizationMemberships)
 	router.POST("/api/v2/teams/:id/relationships/organization-memberships", h.AddOrganizationMemberships)
 	router.DELETE("/api/v2/teams/:id/relationships/organization-memberships", h.RemoveOrganizationMemberships)
+	router.POST("/api/v2/teams/:id/relationships/users", h.AddUsers)
+	router.DELETE("/api/v2/teams/:id/relationships/users", h.RemoveUsers)
 
 	return &teamAuthzFixture{
 		router:      router,
@@ -207,6 +210,18 @@ func membershipPayload(membershipID uuid.UUID) map[string]any {
 
 func (f *teamAuthzFixture) teamPath(teamID uuid.UUID) string {
 	return "/api/v2/teams/" + teamID.String() + "/relationships/organization-memberships"
+}
+
+// usernamePayload builds the tfe_team_members wire body: the identifier is the JSON:API resource id
+// of a "users" resource. Stackweaver resolves that id as an email.
+func usernamePayload(identifier string) map[string]any {
+	return map[string]any{
+		"data": []map[string]string{{"type": "users", "id": identifier}},
+	}
+}
+
+func (f *teamAuthzFixture) usersPath(teamID uuid.UUID) string {
+	return "/api/v2/teams/" + teamID.String() + "/relationships/users"
 }
 
 func (f *teamAuthzFixture) userInTeam(t *testing.T, teamID, userID uuid.UUID) bool {
@@ -268,6 +283,95 @@ func TestAuthzTeamMembers_AddOrganizationMemberships(t *testing.T) {
 	if f.userInTeam(t, f.ownersTeam.ID, f.lead.ID) == false {
 		// owner added lead to owners in the last legit case above
 		t.Error("owner-approved addition to owners team did not persist")
+	}
+}
+
+// TestAuthzTeamMembers_AddUsers covers the tfe_team_members (username→email) endpoint: the same
+// AUD-003 permission gate, plus email resolution and the tenant-safety rule that a resolved user must
+// already belong to the team's organization (no cross-org attach).
+func TestAuthzTeamMembers_AddUsers(t *testing.T) {
+	f := setupTeamAuthzFixture(t)
+
+	cases := []struct {
+		name       string
+		caller     uuid.UUID
+		team       uuid.UUID
+		identifier string
+		wantStatus int
+	}{
+		// Permission gate (same as the org-membership path).
+		{"member without perms adds by email -> 403", f.member.ID, f.devTeam.ID, f.lead.Email, http.StatusForbidden},
+		{"anonymous -> 401", uuid.Nil, f.devTeam.ID, f.lead.Email, http.StatusUnauthorized},
+		// Tenant safety: the outsider is an orgB member, not orgA — must not resolve into an orgA team.
+		{"owner adds cross-org user by email -> 422", f.owner.ID, f.devTeam.ID, f.outsider.Email, http.StatusUnprocessableEntity},
+		// Unknown email.
+		{"owner adds unknown email -> 404", f.owner.ID, f.devTeam.ID, "nobody-" + uuid.NewString()[:8] + "@test.local", http.StatusNotFound},
+		// Happy path: owner adds an orgA member by email.
+		{"owner adds lead by email -> 204", f.owner.ID, f.devTeam.ID, f.lead.Email, http.StatusNoContent},
+		// Case-insensitive email resolution.
+		{"owner adds member by UPPERCASE email -> 204", f.owner.ID, f.devTeam.ID, strings.ToUpper(f.member.Email), http.StatusNoContent},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := authzRequest(t, f.router, http.MethodPost, f.usersPath(tc.team), tc.caller, usernamePayload(tc.identifier))
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+		})
+	}
+
+	// The happy-path add must have persisted; the cross-org add must not have.
+	if !f.userInTeam(t, f.devTeam.ID, f.lead.ID) {
+		t.Error("owner-approved add-by-email did not persist")
+	}
+	if f.userInTeam(t, f.devTeam.ID, f.outsider.ID) {
+		t.Error("cross-org user was attached to the team despite the 422 tenant gate")
+	}
+}
+
+// TestAuthzTeamMembers_RemoveUsers covers the tfe_team_members remove path (username→email): it must
+// remove the named member while leaving the rest of the team intact, honor the AUD-003 permission gate,
+// and be forgiving of unknown identifiers (so destroy / out-of-sync state doesn't error).
+func TestAuthzTeamMembers_RemoveUsers(t *testing.T) {
+	f := setupTeamAuthzFixture(t)
+
+	// The developers team starts with `member` on it (see fixture setup). Add `lead` too so we can prove
+	// a targeted removal leaves the other member in place.
+	rec := authzRequest(t, f.router, http.MethodPost, f.usersPath(f.devTeam.ID), f.owner.ID, usernamePayload(f.lead.Email))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("precondition add lead: status %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !f.userInTeam(t, f.devTeam.ID, f.member.ID) || !f.userInTeam(t, f.devTeam.ID, f.lead.ID) {
+		t.Fatal("precondition: developers team should contain both member and lead")
+	}
+
+	cases := []struct {
+		name       string
+		caller     uuid.UUID
+		identifier string
+		wantStatus int
+	}{
+		{"member without perms removes lead -> 403", f.member.ID, f.lead.Email, http.StatusForbidden},
+		{"anonymous -> 401", uuid.Nil, f.lead.Email, http.StatusUnauthorized},
+		{"owner removes unknown email -> 204 (forgiving)", f.owner.ID, "nobody-" + uuid.NewString()[:8] + "@test.local", http.StatusNoContent},
+		{"owner removes member by email -> 204", f.owner.ID, f.member.Email, http.StatusNoContent},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := authzRequest(t, f.router, http.MethodDelete, f.usersPath(f.devTeam.ID), tc.caller, usernamePayload(tc.identifier))
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+		})
+	}
+
+	// Targeted removal must have removed only `member`; `lead` (and the team) remain.
+	if f.userInTeam(t, f.devTeam.ID, f.member.ID) {
+		t.Error("member was not removed from the team")
+	}
+	if !f.userInTeam(t, f.devTeam.ID, f.lead.ID) {
+		t.Error("lead was wrongly removed — remove is not targeted")
 	}
 }
 

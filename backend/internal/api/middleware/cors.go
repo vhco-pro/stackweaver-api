@@ -10,23 +10,32 @@ import (
 )
 
 func CORSMiddleware() gin.HandlerFunc {
+	// AUD-070: only credential-trust localhost origins outside production. In production
+	// (GIN_MODE=release, the same gate the rest of the app uses) the real frontend origin is
+	// configured via CORS_EXTRA_ORIGINS, so trusting any localhost variant there is pure attack
+	// surface — a page a victim was tricked into loading from their own localhost could otherwise
+	// pivot into the API with credentials.
+	allowLocalhost := os.Getenv("GIN_MODE") != "release"
+
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 
-		// Allowed origins (for development, allow localhost on common ports)
-		// Support both IPv4 (127.0.0.1) and IPv6 ([::1]) localhost
-		allowedOrigins := []string{
-			"http://localhost:5173", // Vite dev server
-			"http://localhost:3000", // Alternative frontend port
-			"http://localhost:5174", // Alternative Vite port
-			"http://127.0.0.1:5173", // IPv4 localhost
-			"http://127.0.0.1:3000", // IPv4 localhost
-			"http://127.0.0.1:5174", // IPv4 localhost
-			"http://[::1]:5173",     // IPv6 localhost
-			"http://[::1]:3000",     // IPv6 localhost
-			"http://[::1]:5174",     // IPv6 localhost
+		var allowedOrigins []string
+		// Allowed localhost dev origins (non-production only).
+		if allowLocalhost {
+			allowedOrigins = append(allowedOrigins,
+				"http://localhost:5173", // Vite dev server
+				"http://localhost:3000", // Alternative frontend port
+				"http://localhost:5174", // Alternative Vite port
+				"http://127.0.0.1:5173", // IPv4 localhost
+				"http://127.0.0.1:3000", // IPv4 localhost
+				"http://127.0.0.1:5174", // IPv4 localhost
+				"http://[::1]:5173",     // IPv6 localhost
+				"http://[::1]:3000",     // IPv6 localhost
+				"http://[::1]:5174",     // IPv6 localhost
+			)
 		}
-		// Extra origins for Cloudflare Tunnel or other public frontend URLs (comma-separated)
+		// Extra origins for Cloudflare Tunnel or other public frontend URLs (comma-separated).
 		if extra := os.Getenv("CORS_EXTRA_ORIGINS"); extra != "" {
 			for _, o := range strings.Split(extra, ",") {
 				if o = strings.TrimSpace(o); o != "" {
@@ -57,7 +66,7 @@ func CORSMiddleware() gin.HandlerFunc {
 		// after the literal host prefix, require the next byte to
 		// be `:` (port), `/` (path), or end-of-string, anchoring the
 		// match to the actual hostname.
-		if !allowed && origin != "" {
+		if !allowed && origin != "" && allowLocalhost {
 			allowed = isLocalhostOrigin(origin)
 		}
 
