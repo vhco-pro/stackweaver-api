@@ -19,6 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -88,6 +90,12 @@ type CreateRunRequestV2 struct {
 			IsDestroy          *bool  `json:"is-destroy,omitempty"`
 			Message            string `json:"message,omitempty"`
 			AutoApplyAfterPlan *bool  `json:"auto-apply-after-plan,omitempty"` // For UI "Plan and Apply" runs
+			// go-tfe RunCreateOptions wire fields (what any go-tfe client actually sends, e.g.
+			// tfe_workspace_run). auto-apply = apply without manual confirmation; plan-only = speculative
+			// run that cannot be applied. Neither auto-apply-after-plan nor a top-level operation exist on
+			// the go-tfe wire, so without these a normal go-tfe run resolved to a non-applyable plan-only.
+			AutoApply *bool `json:"auto-apply,omitempty"`
+			PlanOnly  *bool `json:"plan-only,omitempty"`
 		} `json:"attributes,omitempty"`
 		Relationships struct {
 			Workspace struct {
@@ -109,6 +117,60 @@ type CreateRunRequestV2 struct {
 	ConfigurationVersionID *string `json:"configuration_version_id,omitempty"` // Format: cv-{16-char-id}
 	Operation              string  `json:"operation"`
 	AutoApplyAfterPlan     *bool   `json:"auto_apply_after_plan,omitempty"` // Legacy format
+}
+
+// resolveRunOperation maps a bound run-create request to a run operation and the two apply-intent
+// flags, honoring go-tfe's real RunCreateOptions wire attributes (is-destroy, plan-only, auto-apply)
+// with the frontend/legacy `operation` + `auto-apply-after-plan` as fallbacks.
+//
+//   - operation           — the resolved run operation (plan-only cannot be applied).
+//   - autoApplyAfterPlan   — the "this is a plan-and-apply run" marker (frontend/legacy field).
+//   - perRunAutoApply      — go-tfe `auto-apply: true`: apply without a manual confirm (fire-and-forget).
+//   - legacyOperation      — the caller used the removed "plan"/"apply" operation and must be rejected.
+//
+// Precedence: is-destroy wins, then a speculative plan-only, then any go-tfe run (auto-apply present)
+// is an APPLYABLE plan-and-apply. Without the plan-only/auto-apply arms a normal go-tfe run fell
+// through to the auto-apply-after-plan fallback and became a non-applyable plan-only, breaking
+// tfe_workspace_run and every go-tfe caller.
+func resolveRunOperation(req *CreateRunRequestV2) (operation models.RunOperation, autoApplyAfterPlan bool, perRunAutoApply bool, legacyOperation bool) {
+	if req.Data.Attributes.AutoApply != nil {
+		perRunAutoApply = *req.Data.Attributes.AutoApply
+	}
+	switch {
+	case req.Data.Attributes.AutoApplyAfterPlan != nil:
+		autoApplyAfterPlan = *req.Data.Attributes.AutoApplyAfterPlan
+	case req.AutoApplyAfterPlan != nil:
+		autoApplyAfterPlan = *req.AutoApplyAfterPlan
+	}
+
+	switch {
+	case req.Data.Attributes.IsDestroy != nil && *req.Data.Attributes.IsDestroy:
+		operation = models.RunOperationDestroy
+	case req.Data.Attributes.PlanOnly != nil && *req.Data.Attributes.PlanOnly:
+		// go-tfe `plan-only: true` — a speculative run that cannot be applied.
+		operation = models.RunOperationPlanOnly
+	case req.Data.Attributes.AutoApply != nil:
+		// A go-tfe client sent `auto-apply` (present, true OR false) without is-destroy/plan-only — a
+		// normal, APPLYABLE run (waits at `planned` for confirmation). auto-apply:true additionally
+		// auto-applies server-side (perRunAutoApply).
+		operation = models.RunOperationPlanAndApply
+	case req.Operation == "plan-and-apply":
+		operation = models.RunOperationPlanAndApply
+	case req.Operation == "plan-only":
+		operation = models.RunOperationPlanOnly
+	case req.Operation == "destroy":
+		operation = models.RunOperationDestroy
+	case req.Operation == "plan" || req.Operation == "apply":
+		legacyOperation = true
+	default:
+		// Frontend/legacy fallback: auto-apply-after-plan decides applyable vs plan-only.
+		if autoApplyAfterPlan {
+			operation = models.RunOperationPlanAndApply
+		} else {
+			operation = models.RunOperationPlanOnly
+		}
+	}
+	return operation, autoApplyAfterPlan, perRunAutoApply, legacyOperation
 }
 
 // formatRunResponse formats a run in TFE-compatible JSON:API format
@@ -299,8 +361,11 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		"status-timestamps": statusTimestamps,
 		"has-changes":       hasChanges(run), // Set based on plan output
 		"actions": gin.H{
-			"is-cancelable":       run.Status == models.RunStatusRunning || run.Status == models.RunStatusPending || run.Status == models.RunStatusPlanning || run.Status == models.RunStatusApplying,
-			"is-confirmable":      false,
+			"is-cancelable": run.Status == models.RunStatusRunning || run.Status == models.RunStatusPending || run.Status == models.RunStatusPlanning || run.Status == models.RunStatusApplying,
+			// TFE-compatible: a plan-and-apply/destroy run waiting at `planned` is confirmable (apply-able).
+			// go-tfe clients (e.g. tfe_workspace_run) poll actions.is-confirmable to know when to confirm
+			// the apply; it mirrors permissions.can-apply. Was hardcoded false, which hung those clients.
+			"is-confirmable":      canApply,
 			"is-discardable":      run.Status == models.RunStatusPending,
 			"is-force-cancelable": false,
 		},
@@ -414,8 +479,11 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 // hasChanges determines if the run has changes based on plan output
 // Matches TFE behavior: checks the resource_changes array in Terraform plan JSON
 func hasChanges(run *models.Run) bool {
-	// Check if this is a plan operation that has completed
-	if (run.Operation != models.RunOperationPlanOnly && run.Operation != models.RunOperationPlanAndApply) ||
+	// Check if this is a plan operation that has completed. Destroy runs are included — a destroy plan
+	// has real changes (resources to destroy), and go-tfe clients (tfe_workspace_run) gate on has-changes
+	// to decide whether to confirm the apply; excluding destroy made every destroy run report
+	// has-changes=false and hang the provider waiting for a "planned and finished" no-op status.
+	if (run.Operation != models.RunOperationPlanOnly && run.Operation != models.RunOperationPlanAndApply && run.Operation != models.RunOperationDestroy) ||
 		(run.Status != models.RunStatusPlanned && run.Status != models.RunStatusCompleted) {
 		return false
 	}
@@ -540,51 +608,21 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		configVersionID = req.ConfigurationVersionID
 	}
 
-	// Determine operation type based on request
-	// TFE-compatible: Two run types - "plan-only" and "plan-and-apply"
-	// - "plan-only": CLI runs and UI "Plan only" runs (cannot be applied)
-	// - "plan-and-apply": UI "Plan and Apply" runs (goes through planning → planned → applying → applied)
-	// - "destroy": Destroy runs (tear down infrastructure)
-	var operation models.RunOperation
-	switch {
-	case req.Data.Attributes.IsDestroy != nil && *req.Data.Attributes.IsDestroy:
-		operation = models.RunOperationDestroy
-	case req.Operation == "plan-and-apply":
-		// Explicit operation from frontend or API caller
-		operation = models.RunOperationPlanAndApply
-	case req.Operation == "plan-only":
-		operation = models.RunOperationPlanOnly
-	case req.Operation == "destroy":
-		operation = models.RunOperationDestroy
-	default:
-		// Fallback: use autoApplyAfterPlan to determine if this is a plan-and-apply run
-		// This maintains backward compatibility with go-tfe client
-		autoApplyAfterPlan := false
-		if req.Data.Attributes.AutoApplyAfterPlan != nil {
-			autoApplyAfterPlan = *req.Data.Attributes.AutoApplyAfterPlan
-		} else if req.AutoApplyAfterPlan != nil {
-			autoApplyAfterPlan = *req.AutoApplyAfterPlan
-		}
-
-		// Reject legacy "plan" and "apply" operations
-		if req.Operation == "plan" || req.Operation == "apply" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "Legacy 'plan' and 'apply' operations are no longer supported. Use 'plan-only' or 'plan-and-apply' instead.",
-					},
+	// Determine operation type + apply intents from the request (see resolveRunOperation). Honors
+	// go-tfe's wire attributes (is-destroy, plan-only, auto-apply) with the frontend/legacy
+	// operation + auto-apply-after-plan as fallbacks.
+	operation, autoApplyAfterPlan, perRunAutoApply, legacyOperation := resolveRunOperation(&req)
+	if legacyOperation {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "400",
+					"title":  "Bad Request",
+					"detail": "Legacy 'plan' and 'apply' operations are no longer supported. Use 'plan-only' or 'plan-and-apply' instead.",
 				},
-			})
-			return
-		}
-
-		if autoApplyAfterPlan {
-			operation = models.RunOperationPlanAndApply
-		} else {
-			operation = models.RunOperationPlanOnly
-		}
+			},
+		})
+		return
 	}
 
 	// Verify workspace exists and get it
@@ -703,20 +741,27 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		// Create configuration version from VCS
 		createdConfigVersionID, err := h.createConfigurationVersionFromVCS(c.Request.Context(), workspace, vcsConn)
 		if err != nil {
-			logger.Infof("Run creation: Failed to create configuration version from VCS: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": fmt.Sprintf("Failed to create configuration version from VCS: %v", err),
-					},
-				},
-			})
+			// AUD-063: log the real cause server-side; return a generic detail (the raw err may carry
+			// VCS host/path/credential context).
+			apierror.Internal(c, "Failed to create configuration version from VCS", err)
 			return
 		}
 		configVersionID = &createdConfigVersionID
 		logger.Infof("Run creation: Created configuration version %s from VCS", *configVersionID)
+	}
+
+	// TFE-compatible: a run created without an explicit configuration-version uses the workspace's
+	// LATEST configuration version (go-tfe RunCreateOptions.ConfigurationVersion is optional — e.g.
+	// tfe_workspace_run never sets it). Without this fallback the run has no config and the plan fails
+	// with "No configuration files". Only applies to non-VCS workspaces (the VCS block above already
+	// created a config version from the repo when applicable).
+	if configVersionID == nil {
+		if latestCV, cvErr := h.configVersionRepo.GetLatestByWorkspaceID(workspaceID); cvErr == nil && latestCV != nil {
+			configVersionID = &latestCV.ID
+			logger.Infof("Run creation: no configuration-version supplied, defaulting to workspace's latest %s", *configVersionID)
+		} else {
+			logger.Warnf("Run creation: no configuration-version supplied and workspace %s has no configuration version; plan will fail", workspaceID)
+		}
 	}
 
 	// TFE-compatible: Auto-cancel previous pending/running/planned runs based on operation type
@@ -752,18 +797,8 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	// This flag indicates if a UI "Plan and Apply" run should be applicable after completion
 	// - false: "Plan only" run (plan-only, cannot be applied)
 	// - true: "Plan and Apply" run (not plan-only, can be applied after completion)
-	autoApplyAfterPlan := false
-	switch {
-	case req.Data.Attributes.AutoApplyAfterPlan != nil:
-		autoApplyAfterPlan = *req.Data.Attributes.AutoApplyAfterPlan
-		logger.Infof("Run creation: auto_apply_after_plan from JSON:API format = %v", autoApplyAfterPlan)
-	case req.AutoApplyAfterPlan != nil:
-		// Legacy format support
-		autoApplyAfterPlan = *req.AutoApplyAfterPlan
-		logger.Infof("Run creation: auto_apply_after_plan from legacy format = %v", autoApplyAfterPlan)
-	default:
-		logger.Infof("Run creation: auto_apply_after_plan not provided, defaulting to false")
-	}
+	// operation, autoApplyAfterPlan and perRunAutoApply were resolved above via resolveRunOperation.
+	logger.Infof("Run creation: operation=%s auto_apply_after_plan=%v auto_apply=%v", operation, autoApplyAfterPlan, perRunAutoApply)
 
 	// TFE-compatible: All runs follow 2-phase process (plan, then confirm apply)
 	// UI "Plan and Apply" is just a regular plan run - user will see plan output and click "Apply Plan" button
@@ -776,6 +811,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		Status:                 models.RunStatusPending,
 		Operation:              operation,
 		AutoApplyAfterPlan:     autoApplyAfterPlan,    // TFE-compatible: Used to determine plan-only vs applicable
+		AutoApply:              perRunAutoApply,       // go-tfe `auto-apply`: apply without manual confirmation
 		AgentPoolID:            workspace.AgentPoolID, // Set from current workspace (remote => nil, agent => pool)
 	}
 
@@ -950,6 +986,38 @@ func (h *RunHandlerV2) GetOutputs(c *gin.Context) {
 
 	outputs := materializedOutputs(h.stateOutputRepo, version, true, h.cryptoSvc)
 	c.JSON(http.StatusOK, gin.H{"data": outputs})
+}
+
+// ListTaskStages returns the run-task stages for a run (TFE-compatible).
+// GET /api/v2/runs/:id/task-stages
+//
+// Stackweaver has no run-tasks subsystem, so a run never has pre-plan/post-plan/pre-apply task stages —
+// the truthful response is an empty list. go-tfe clients (e.g. tfe_workspace_run, which reads task
+// stages to decide whether a post-plan stage exists) require this endpoint to exist and return a valid
+// paginated list rather than a 404. We still 404 for a genuinely unknown run id so callers get a real
+// not-found instead of a misleading empty success.
+func (h *RunHandlerV2) ListTaskStages(c *gin.Context) {
+	runID := c.Param("id")
+	if _, err := h.runRepo.GetByID(runID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []gin.H{
+				{"status": "404", "title": "Not Found", "detail": "Run not found"},
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data": []gin.H{},
+		"meta": gin.H{
+			"pagination": gin.H{
+				"current-page": 1,
+				"prev-page":    nil,
+				"next-page":    nil,
+				"total-pages":  1,
+				"total-count":  0,
+			},
+		},
+	})
 }
 
 // GetPlan returns the plan output for a run (TFE-compatible)
@@ -1141,27 +1209,11 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 		host = "localhost:8022"
 	}
 
-	// TFE uses absolute URLs for log-read-url - include it for all runs
-	// The endpoint will return empty body (200 OK) if logs don't exist yet
-	// According to TFE API docs, all endpoints use Authorization header for authentication
-	// Terraform CLI will use the same Authorization header it uses for other API calls
-	// However, TFE may include token in query parameter for log-read-url as a fallback
-	// Extract token from request (if available) to include in log-read-url as fallback
-	token := ""
-	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) == 2 && parts[0] == "Bearer" {
-			token = parts[1]
-		}
-	}
-
-	// Build log-read-url - TFE includes token in query parameter as fallback authentication
-	// Terraform CLI should use Authorization header, but token in URL provides compatibility
-	if token != "" {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs?token=%s", scheme, host, run.ID, token)
-	} else {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs", scheme, host, run.ID)
-	}
+	// AUD-045: emit a short-TTL, run-scoped log token in the log-read-url instead of the caller's
+	// bearer token (which would leak into proxy logs / history). The CLI still prefers its
+	// Authorization header; the query token is the TFE-compatible fallback. If no scoped token can
+	// be minted (no user in context / signing disabled) the URL is emitted without a token.
+	attributes["log-read-url"] = buildLogReadURL(c, scheme, host, run.ID, "")
 
 	// Build relationships and links according to TFE Plans API spec
 	// TFE Plans API requires relationships.state-versions and links (self, json-output)
@@ -1391,21 +1443,9 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		host = "localhost:8022"
 	}
 
-	// Extract token from request for log-read-url
-	token := ""
-	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) == 2 && parts[0] == "Bearer" {
-			token = parts[1]
-		}
-	}
-
-	// Build log-read-url with phase parameter for apply logs
-	if token != "" {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs?phase=apply&token=%s", scheme, host, run.ID, token)
-	} else {
-		attributes["log-read-url"] = fmt.Sprintf("%s://%s/api/v2/runs/%s/logs?phase=apply", scheme, host, run.ID)
-	}
+	// AUD-045: run-scoped short-TTL log token instead of the caller's bearer token (see the run
+	// response builder above).
+	attributes["log-read-url"] = buildLogReadURL(c, scheme, host, run.ID, "phase=apply")
 
 	// Build relationships according to TFE Applies API spec
 	relationships := gin.H{
@@ -1461,22 +1501,27 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 	// If token is in query, authenticate with it; otherwise rely on standard auth middleware
 	tokenFromQuery := c.Query("token")
 	if tokenFromQuery != "" {
-		// Authenticate using token from query parameter (TFE-compatible)
-		user, err := h.authService.GetUserFromToken(tokenFromQuery)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "401",
-						"title":  "Unauthorized",
-						"detail": "Invalid token",
+		// AUD-045: prefer a run-scoped log token (HMAC-bound to this run ID, short TTL). Fall back to
+		// full-token auth for any client still passing a bearer/API token in the query.
+		if uid, ok := verifyLogToken(tokenFromQuery, c.Param("id")); ok {
+			c.Set("user_id", uid)
+		} else {
+			user, err := h.authService.GetUserFromToken(tokenFromQuery)
+			if err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"errors": []gin.H{
+						{
+							"status": "401",
+							"title":  "Unauthorized",
+							"detail": "Invalid token",
+						},
 					},
-				},
-			})
-			return
+				})
+				return
+			}
+			// Store user in context for potential future use
+			c.Set("user_id", user.ID)
 		}
-		// Store user in context for potential future use
-		c.Set("user_id", user.ID)
 	}
 
 	run, ok := h.authorizeRun(c, c.Param("id"), "read")
@@ -1581,7 +1626,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 
 		// Try Redis first if log buffer service is available
 		if h.logBufferService != nil {
-			ctx := context.Background()
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
 			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
 			if err == nil && logsStr != "" {
 				// Found logs in Redis, convert to bytes
@@ -1616,7 +1661,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 			} else {
 				logsKey = fmt.Sprintf("runs/%s/logs/%s.log", run.ID, run.Operation)
 			}
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// REMOVED: Fallback logic that returned plan logs when apply logs don't exist
 				// This was causing plan logs to appear in apply phase terminal output
@@ -1641,35 +1686,49 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		return
 
 	case "agent":
-		// Agent execution: logs sent by agent to backend, stored in MinIO
-		if h.storageClient == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "503",
-						"title":  "Service Unavailable",
-						"detail": "Storage client not initialized",
-					},
-				},
-			})
-			return
+		// Agent execution: logs are streamed by the agent to the backend. AUD-028: they now go
+		// through the same Redis log buffer as remote runs (O(1) APPEND) and are copied to MinIO
+		// once at completion, so read Redis first (live runs) then fall back to MinIO (completed
+		// or Redis-evicted). This mirrors the "remote" branch above.
+		if h.logBufferService != nil {
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
+			if logsStr, rErr := h.logBufferService.Get(ctx, run.ID, phase, offset, limit); rErr == nil && logsStr != "" {
+				logs = []byte(logsStr)
+			} else if rErr != nil {
+				logger.Infof("[LOGS] Error getting agent logs from Redis for run %s phase %s: %v", run.ID, phase, rErr)
+			}
 		}
 
-		// Use the phase determined above (either from query parameter or status-based)
-		logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
-		logs, err = h.storageClient.Get(context.Background(), logsKey)
-		if err != nil {
-			// TFE returns 200 OK with empty body when logs don't exist
-			c.Data(http.StatusOK, "text/plain", []byte(""))
-			return
+		if len(logs) == 0 {
+			if h.storageClient == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"errors": []gin.H{
+						{
+							"status": "503",
+							"title":  "Service Unavailable",
+							"detail": "Storage client not initialized",
+						},
+					},
+				})
+				return
+			}
+
+			// Use the phase determined above (either from query parameter or status-based)
+			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
+			if err != nil {
+				// TFE returns 200 OK with empty body when logs don't exist
+				c.Data(http.StatusOK, "text/plain", []byte(""))
+				return
+			}
+			logs = sliceLogBytes(logs, offset, limit)
 		}
-		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
 			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, run.Operation)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// Return 200 OK with empty body when logs don't exist
 				c.Data(http.StatusOK, "text/plain", []byte(""))
@@ -1760,7 +1819,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 
 		// Try Redis first if log buffer service is available
 		if h.logBufferService != nil {
-			ctx := context.Background()
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
 			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
 			if err == nil && logsStr != "" {
 				// Found logs in Redis, convert to bytes
@@ -1788,7 +1847,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 
 			// TFE-compatible log path: runs/{run_id}/logs/plan.log
 			logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// TFE returns 200 OK with empty body when logs don't exist
 				logger.Infof("[LOGS] Plan logs not found for run %s: %v", run.ID, err)
@@ -1822,7 +1881,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 		}
 
 		logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-		logs, err = h.storageClient.Get(context.Background(), logsKey)
+		logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 		if err != nil {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
@@ -1833,7 +1892,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
 			logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
 				return
@@ -1936,7 +1995,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 
 		// Try Redis first if log buffer service is available
 		if h.logBufferService != nil {
-			ctx := context.Background()
+			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
 			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
 			if err == nil && logsStr != "" {
 				// Found logs in Redis, convert to bytes
@@ -1965,7 +2024,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 			// TFE-compatible log path: runs/{run_id}/logs/apply.log
 			// NOTE: No fallback to plan logs - this endpoint only returns apply logs
 			logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// TFE returns 200 OK with empty body when logs don't exist
 				// This is correct behavior - apply logs simply don't exist yet or were cancelled
@@ -2000,7 +2059,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 		}
 
 		logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-		logs, err = h.storageClient.Get(context.Background(), logsKey)
+		logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 		if err != nil {
 			c.Data(http.StatusOK, "text/plain", []byte(""))
 			return
@@ -2011,7 +2070,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
 			logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-			logs, err = h.storageClient.Get(context.Background(), logsKey)
+			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
 				return
@@ -2166,18 +2225,38 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 			return
 		}
 
-		// Transition run to applying phase
+		// Transition run to applying phase. Clear the dispatch claim (AUD-007/112) so the
+		// orchestrator dispatches the apply exactly once — the plan phase set dispatched_at, and
+		// the apply is a fresh dispatch that a runner must pick up.
+		// AUD-140: guarded transition (conditional UPDATE from 'planned') instead of a
+		// whole-record Save on the stale snapshot — otherwise a concurrent Discard/Cancel
+		// that already moved the run to 'cancelled' would be resurrected into 'applying'.
 		now := time.Now()
-		planRun.Status = models.RunStatusApplying
-		planRun.ApplyStartedAt = &now // Track when apply phase started
-		planRun.UpdatedAt = now
-		if err := h.runRepo.Update(planRun); err != nil {
+		ok, err := h.runRepo.TransitionStatus(
+			planRun.ID,
+			[]models.RunStatus{models.RunStatusPlanned},
+			models.RunStatusApplying,
+			map[string]any{"apply_started_at": now, "dispatched_at": nil},
+		)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"errors": []gin.H{
 					{
 						"status": "500",
 						"title":  "Internal Server Error",
 						"detail": "Failed to transition run to applying phase",
+					},
+				},
+			})
+			return
+		}
+		if !ok {
+			c.JSON(http.StatusConflict, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "409",
+						"title":  "Conflict",
+						"detail": "Run is no longer in 'planned' status and cannot be applied.",
 					},
 				},
 			})
@@ -2238,14 +2317,13 @@ func (h *RunHandlerV2) ListByWorkspace(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := pagination.Parse(c, 20)
 	if perPage > 100 {
 		perPage = 100
 	}
 	offset := (page - 1) * perPage
 
-	runs, total, err := h.runRepo.ListByWorkspace(workspaceID, perPage, offset)
+	runs, total, err := h.runRepo.WithContext(c.Request.Context()).ListByWorkspace(workspaceID, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -2313,18 +2391,32 @@ func (h *RunHandlerV2) Cancel(c *gin.Context) {
 		return
 	}
 
-	// Update run status to cancelled
+	// AUD-140: guarded transition (conditional UPDATE on the current status)
+	// instead of a whole-record Save on the stale snapshot loaded by authorizeRun.
+	// A bare Save would clobber a runner completion that landed between the read
+	// and the write (reverting an applied run to cancelled + wiping its terminal
+	// columns). Mirrors ForceCancel.
 	now := time.Now()
-	run.Status = models.RunStatusCancelled
-	run.CompletedAt = &now
-
-	if err := h.runRepo.Update(run); err != nil {
+	ok, err := h.runRepo.TransitionStatus(run.ID, cancellableStatuses, models.RunStatusCancelled, map[string]any{"completed_at": now})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "500",
 					"title":  "Internal Server Error",
 					"detail": "Failed to cancel run",
+				},
+			},
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusConflict, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "409",
+					"title":  "Conflict",
+					"detail": "Run is no longer in a cancellable state.",
 				},
 			},
 		})
@@ -2359,18 +2451,35 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 		return
 	}
 
-	// Update run status to cancelled (discarded runs are marked as cancelled)
+	// AUD-140: guarded transition instead of a whole-record Save on the stale
+	// snapshot — a Discard landing while the orchestrator advances a pending run
+	// to planning/planned would otherwise clobber the runner's progress.
 	now := time.Now()
-	run.Status = models.RunStatusCancelled
-	run.CompletedAt = &now
-
-	if err := h.runRepo.Update(run); err != nil {
+	ok, err := h.runRepo.TransitionStatus(
+		run.ID,
+		[]models.RunStatus{models.RunStatusPending, models.RunStatusPlanned},
+		models.RunStatusCancelled,
+		map[string]any{"completed_at": now},
+	)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "500",
 					"title":  "Internal Server Error",
 					"detail": "Failed to discard run",
+				},
+			},
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusConflict, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "409",
+					"title":  "Conflict",
+					"detail": "Run can no longer be discarded (state changed).",
 				},
 			},
 		})
@@ -2389,33 +2498,40 @@ func (h *RunHandlerV2) ForceCancel(c *gin.Context) {
 		return
 	}
 
-	// Force cancel can only be used on runs that are planning or applying
-	// and have been canceled non-forcefully first
-	if run.Status != models.RunStatusRunning {
-		c.JSON(http.StatusConflict, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "409",
-					"title":  "Conflict",
-					"detail": "Run cannot be force-cancelled in current state",
-				},
-			},
-		})
-		return
-	}
-
-	// Force cancel immediately terminates the run
+	// Force cancel terminates a run that is still in flight. AUD-031: the previous check required
+	// the legacy status "running", which the lifecycle never sets, so this endpoint always 409'd
+	// and was functionally dead. Accept the states a run can actually be in-flight in (pending
+	// before dispatch, planning, applying, or the legacy running). The transition is guarded
+	// (AUD-017) so it cannot resurrect a run that has already reached a terminal state.
 	now := time.Now()
-	run.Status = models.RunStatusCancelled
-	run.CompletedAt = &now
-
-	if err := h.runRepo.Update(run); err != nil {
+	ok, err := h.runRepo.TransitionStatus(
+		run.ID,
+		[]models.RunStatus{
+			models.RunStatusPending, models.RunStatusPlanning,
+			models.RunStatusApplying, models.RunStatusRunning,
+		},
+		models.RunStatusCancelled,
+		map[string]any{"completed_at": now},
+	)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "500",
 					"title":  "Internal Server Error",
 					"detail": "Failed to force-cancel run",
+				},
+			},
+		})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusConflict, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "409",
+					"title":  "Conflict",
+					"detail": "Run cannot be force-cancelled in current state",
 				},
 			},
 		})
@@ -2494,21 +2610,13 @@ func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
 		return
 	}
 
-	// Start the run
-	now := time.Now()
-	run.Status = models.RunStatusRunning
-	run.StartedAt = &now
-	if err := h.runRepo.Update(run); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to start run",
-				},
-			},
-		})
-		return
+	// AUD-031: the run stays `pending` — unlocking the workspace is the whole action. The previous
+	// code set the legacy status `running`, which the orchestrator's dispatch query (which lists
+	// only `pending`/`applying`) never enqueues, so a force-executed run hung until the stuck-run
+	// reaper killed it. Left `pending`, the orchestrator picks it up on its next tick.
+	// Clear any stale dispatch claim (AUD-007/112) so the orchestrator can dispatch it afresh.
+	if err := h.runRepo.ClearDispatch(run.ID); err != nil {
+		logger.Warnf("Failed to clear dispatch claim on force-executed run %s: %v", run.ID, err)
 	}
 
 	// TFE returns 202 Accepted for action endpoints (no body)
@@ -2534,14 +2642,13 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := pagination.Parse(c, 20)
 	if perPage > 100 {
 		perPage = 100
 	}
 	offset := (page - 1) * perPage
 
-	runs, total, err := h.runRepo.ListByOrganization(org.ID, perPage, offset)
+	runs, total, err := h.runRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -2849,10 +2956,18 @@ func AutoCancelConflictingRuns(runRepo *repository.RunRepository, workspaceID st
 		}
 
 		if shouldCancel {
+			// AUD-140: guarded transition rather than a whole-record Save on the
+			// list snapshot — a run that the runner completes (to applied/planned,
+			// writing state/plan output) between the SELECT and this write must not
+			// be clobbered back to cancelled. The conditional UPDATE no-ops on any
+			// run that already advanced out of the cancellable set.
 			now := time.Now()
-			existingRun.Status = models.RunStatusCancelled
-			existingRun.CompletedAt = &now
-			if err := runRepo.Update(&existingRun); err != nil {
+			if _, err := runRepo.TransitionStatus(
+				existingRun.ID,
+				[]models.RunStatus{models.RunStatusPending, models.RunStatusRunning, models.RunStatusPlanned},
+				models.RunStatusCancelled,
+				map[string]any{"completed_at": now},
+			); err != nil {
 				logger.Warnf("Failed to cancel previous plan run %s: %v", existingRun.ID, err)
 			}
 		}
