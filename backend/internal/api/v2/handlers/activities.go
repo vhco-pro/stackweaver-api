@@ -16,13 +16,37 @@ import (
 type ActivityHandlerV2 struct {
 	activityService *activity.Service
 	authService     *auth.Service
+	orgRepo         *repository.OrganizationRepository
+	workspaceRepo   *repository.WorkspaceRepository
+	projectRepo     *repository.ProjectRepository
 }
 
-func NewActivityHandlerV2(activityService *activity.Service, authService *auth.Service) *ActivityHandlerV2 {
+func NewActivityHandlerV2(
+	activityService *activity.Service,
+	authService *auth.Service,
+	orgRepo *repository.OrganizationRepository,
+	workspaceRepo *repository.WorkspaceRepository,
+	projectRepo *repository.ProjectRepository,
+) *ActivityHandlerV2 {
 	return &ActivityHandlerV2{
 		activityService: activityService,
 		authService:     authService,
+		orgRepo:         orgRepo,
+		workspaceRepo:   workspaceRepo,
+		projectRepo:     projectRepo,
 	}
+}
+
+// requireOrgMembership writes a 403 and returns false when userID is not a member
+// of orgID. JWT/browser identities bypass the org-resolution wall, so this
+// per-handler check is the only defense for them (AUD-139).
+func (h *ActivityHandlerV2) requireOrgMembership(c *gin.Context, userID, orgID uuid.UUID) bool {
+	inOrg, err := h.orgRepo.UserInOrg(userID, orgID)
+	if err != nil || !inOrg {
+		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization"}}})
+		return false
+	}
+	return true
 }
 
 // ListActivities handles GET /api/v2/activities
@@ -67,8 +91,36 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		workspaceID = &workspaceIDStr
 	}
 
-	// Default to current user's activities if no filters
-	if userID == nil && orgID == nil && workspaceID == nil {
+	// AUD-139: authorize the requested scope. Attacker-supplied
+	// organization_id/workspace_id/user_id filters previously widened the query
+	// past the caller's own rows with no membership check, exposing another
+	// tenant's audit trail. A caller may only read activity they are authorized
+	// for: an org/workspace they belong to, or (absent any org/workspace scope)
+	// their own rows.
+	if workspaceID != nil {
+		workspace, err := h.workspaceRepo.GetByID(*workspaceID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Workspace not found"}}})
+			return
+		}
+		project, err := h.projectRepo.GetByID(workspace.ProjectID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to resolve workspace organization"}}})
+			return
+		}
+		if !h.requireOrgMembership(c, user.ID, project.OrganizationID) {
+			return
+		}
+	}
+	if orgID != nil {
+		if !h.requireOrgMembership(c, user.ID, *orgID) {
+			return
+		}
+	}
+	// With no authorized org/workspace scope, a caller may only see their own
+	// rows — this both preserves the "my activities" default and prevents a bare
+	// user_id filter from reading another user's activity.
+	if orgID == nil && workspaceID == nil {
 		userID = &user.ID
 	}
 
