@@ -279,7 +279,7 @@ func TestGetPublicHost_ZitadelPublicHost(t *testing.T) {
 	c.Request.Header.Set("X-Forwarded-Host", "forwarded.example.com")
 	c.Request.Host = "host.example.com"
 
-	host := getPublicHost(c)
+	host := newUnconfiguredProxy().getPublicHost(c)
 	if host != "public.example.com" {
 		t.Errorf("expected public.example.com, got %s", host)
 	}
@@ -292,7 +292,7 @@ func TestGetPublicHost_ForwardHost(t *testing.T) {
 	c.Request.Header.Set("X-Zitadel-Forward-Host", "forward.example.com")
 	c.Request.Host = "host.example.com"
 
-	host := getPublicHost(c)
+	host := newUnconfiguredProxy().getPublicHost(c)
 	if host != "forward.example.com" {
 		t.Errorf("expected forward.example.com, got %s", host)
 	}
@@ -305,7 +305,7 @@ func TestGetPublicHost_XForwardedHost(t *testing.T) {
 	c.Request.Header.Set("X-Forwarded-Host", "xfwd.example.com")
 	c.Request.Host = "host.example.com"
 
-	host := getPublicHost(c)
+	host := newUnconfiguredProxy().getPublicHost(c)
 	if host != "xfwd.example.com" {
 		t.Errorf("expected xfwd.example.com, got %s", host)
 	}
@@ -317,7 +317,7 @@ func TestGetPublicHost_FallbackToHost(t *testing.T) {
 	c.Request = newTestRequest(http.MethodGet, "/")
 	c.Request.Host = "fallback.example.com"
 
-	host := getPublicHost(c)
+	host := newUnconfiguredProxy().getPublicHost(c)
 	if host != "fallback.example.com" {
 		t.Errorf("expected fallback.example.com, got %s", host)
 	}
@@ -339,7 +339,7 @@ func TestGetPublicBaseURL_PrefersForwardedProtoHTTPS(t *testing.T) {
 	c.Request.Header.Set("X-Forwarded-Proto", "https")
 	c.Request.Host = "stackweaver.vhco.pro"
 
-	got := getPublicBaseURL(c)
+	got := newUnconfiguredProxy().getPublicBaseURL(c)
 	if got != "https://stackweaver.vhco.pro" {
 		t.Errorf("expected https://stackweaver.vhco.pro, got %s", got)
 	}
@@ -352,7 +352,7 @@ func TestGetPublicBaseURL_HonorsForwardedProtoHTTP(t *testing.T) {
 	c.Request.Header.Set("X-Forwarded-Proto", "http")
 	c.Request.Host = "internal.example.com"
 
-	got := getPublicBaseURL(c)
+	got := newUnconfiguredProxy().getPublicBaseURL(c)
 	if got != "http://internal.example.com" {
 		t.Errorf("expected http://internal.example.com, got %s", got)
 	}
@@ -365,7 +365,7 @@ func TestGetPublicBaseURL_FallsBackToTLSDetection(t *testing.T) {
 	// No X-Forwarded-Proto, no TLS on the request → must default to http.
 	c.Request.Host = "localhost:8022"
 
-	got := getPublicBaseURL(c)
+	got := newUnconfiguredProxy().getPublicBaseURL(c)
 	if got != "http://localhost:8022" {
 		t.Errorf("expected http://localhost:8022, got %s", got)
 	}

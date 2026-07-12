@@ -235,7 +235,7 @@ func SetupAnsibleRoutes(
 	// Initialize Variable Set Handler for job template variable sets (reuse from terraform routes)
 	variableSetRepoForAnsible := repository.NewVariableSetRepository(db)
 	variableSetVariableRepoForAnsible := repository.NewVariableSetVariableRepository(db)
-	variableSetHandlerForAnsible := handlers.NewVariableSetHandlerV2(variableSetRepoForAnsible, variableSetVariableRepoForAnsible, orgRepo, projectRepo, nil, templateRepo, authService, rbacService)
+	variableSetHandlerForAnsible := handlers.NewVariableSetHandlerV2(variableSetRepoForAnsible, variableSetVariableRepoForAnsible, orgRepo, projectRepo, nil, templateRepo, authService, rbacService, variableService)
 
 	// Initialize Ansible Handlers
 	inventoryHandler := ansibleHandlers.NewInventoryHandler(inventoryService, inventoryRepo, orgRepo, projectRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo)
