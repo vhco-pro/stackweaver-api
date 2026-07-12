@@ -11,6 +11,7 @@ var (
 	rProject                = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByProjectID(v) }
 	rWorkspace              = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByWorkspaceID(v) }
 	rRun                    = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunID(v) }
+	rRunTrigger             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunTriggerID(v) }
 	rConfigVersion          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByConfigVersionID(v) }
 	rStateVersion           = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByStateVersionID(v) }
 	rVariable               = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByVariableID(v) }
@@ -81,6 +82,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/teams/:teamName":              orgByName(),
 	"/api/v2/teams/:id":                                        resource("id", rTeam),
 	"/api/v2/teams/:id/relationships/organization-memberships": resource("id", rTeam),
+	"/api/v2/teams/:id/relationships/users":                    resource("id", rTeam),
 
 	// --- projects ---
 	"/api/v2/organizations/:name/projects":                      orgByName(),
@@ -122,6 +124,8 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/workspaces/:id/actions/force-unlock":                                resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/safe-delete":                                 resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/runs":                                                resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/run-triggers":                                        resource("id", rWorkspace),
+	"/api/v2/run-triggers/:id":                                                   resource("id", rRunTrigger),
 	"/api/v2/workspaces/:id/configuration-versions":                              resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/state-versions":                                      resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/state-versions/remove-resource":                      resource("id", rWorkspace),
