@@ -107,6 +107,15 @@ func (s *Service) InitializeZitadel(issuer, clientID, clientSecret, internalAddr
 	return nil
 }
 
+// RegisterAudience adds a client_id the Zitadel verifier will accept in an access token's
+// `aud` (AUD-012). Register both the API and the frontend PKCE client so real user tokens
+// (issued to the frontend client) are accepted while tokens for other clients are rejected.
+func (s *Service) RegisterAudience(clientID string) {
+	if s.verifier != nil {
+		s.verifier.AcceptAudience(clientID)
+	}
+}
+
 func (s *Service) GetUserFromContext(c *gin.Context) (*models.User, error) {
 	userID, exists := c.Get("user_id")
 	if !exists {
