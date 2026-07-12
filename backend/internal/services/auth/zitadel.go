@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/michielvha/logger"
@@ -23,39 +25,69 @@ import (
 type remoteKeySet struct {
 	httpClient   *http.Client
 	jwksURL      string
-	hostOverride string // Host header override for in-cluster requests to Zitadel
+	hostOverride string       // Host header override for in-cluster requests to Zitadel
+	mu           sync.RWMutex // guards keys — read on every verify, written on refresh (AUD-040)
 	keys         []jose.JSONWebKey
 }
 
 func (r *remoteKeySet) VerifySignature(ctx context.Context, jws *jose.JSONWebSignature) ([]byte, error) {
-	// Fetch keys if not cached
-	if len(r.keys) == 0 {
-		if err := r.fetchKeys(ctx); err != nil {
-			return nil, fmt.Errorf("failed to fetch keys: %w", err)
-		}
+	// Fast path: verify against the currently cached keys.
+	if payload, ok := r.tryVerify(jws); ok {
+		return payload, nil
 	}
 
-	// Try each key until one works
-	// jws.Verify() expects a single crypto key (not []JSONWebKey)
-	// Extract the actual crypto key from each JSONWebKey.Key field
-	var lastErr error
+	// AUD-040: the JWKS was fetched once and never refreshed, so after Zitadel rotates its
+	// signing keys every token fails until restart. If the token's `kid` isn't one we have
+	// cached (or the cache is cold), refresh once and retry. Gating on kid-not-cached stops
+	// an attacker posting garbage tokens from farming JWKS refreshes.
+	if r.shouldRefresh(jws) {
+		if err := r.fetchKeys(ctx); err != nil {
+			return nil, fmt.Errorf("failed to refresh JWKS: %w", err)
+		}
+		if payload, ok := r.tryVerify(jws); ok {
+			return payload, nil
+		}
+	}
+	return nil, fmt.Errorf("signature verification failed against JWKS")
+}
+
+// tryVerify attempts verification against the cached keys under a read lock.
+func (r *remoteKeySet) tryVerify(jws *jose.JSONWebSignature) ([]byte, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, key := range r.keys {
 		if key.Key == nil {
 			continue
 		}
-
-		// jws.Verify() accepts the actual crypto key (e.g., *rsa.PublicKey, *ecdsa.PublicKey)
-		payload, err := jws.Verify(key.Key)
-		if err == nil {
-			return payload, nil
+		if payload, err := jws.Verify(key.Key); err == nil {
+			return payload, true
 		}
-		lastErr = err
 	}
+	return nil, false
+}
 
-	if lastErr != nil {
-		return nil, fmt.Errorf("signature verification failed with all keys: %w", lastErr)
+// shouldRefresh reports whether a verify failure warrants a one-shot JWKS refresh: the cache
+// is cold, or the token carries a `kid` we don't have (a plausible key rotation). A token
+// whose `kid` is already cached, or that carries no `kid`, does not trigger a refresh.
+func (r *remoteKeySet) shouldRefresh(jws *jose.JSONWebSignature) bool {
+	kid := ""
+	if len(jws.Signatures) > 0 {
+		kid = jws.Signatures[0].Header.KeyID
 	}
-	return nil, fmt.Errorf("no valid keys found in JWKS")
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.keys) == 0 {
+		return true
+	}
+	if kid == "" {
+		return false
+	}
+	for _, key := range r.keys {
+		if key.KeyID == kid {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *remoteKeySet) fetchKeys(ctx context.Context) error {
@@ -95,7 +127,9 @@ func (r *remoteKeySet) fetchKeys(ctx context.Context) error {
 		return fmt.Errorf("no keys found in JWKS")
 	}
 
+	r.mu.Lock()
 	r.keys = jwks.Keys
+	r.mu.Unlock()
 	return nil
 }
 
@@ -106,8 +140,35 @@ type ZitadelVerifier struct {
 	clientSecret string
 	httpClient   *http.Client
 	keySet       oidc.KeySet
-	internalAddr string // K8s-internal service address (e.g. "zitadel:8080"), bypasses TLS
-	hostOverride string // External issuer hostname sent as Host header for tenant routing
+	internalAddr string   // K8s-internal service address (e.g. "zitadel:8080"), bypasses TLS
+	hostOverride string   // External issuer hostname sent as Host header for tenant routing
+	acceptedAuds []string // client_ids a token's `aud` may contain (AUD-012); empty disables enforcement
+}
+
+// AcceptAudience registers a client_id that an access token's `aud` may contain. Real user
+// access tokens are issued to the frontend PKCE client, so their `aud` carries the frontend
+// client id — not the API client id the verifier is otherwise configured with. Call this for
+// every Stackweaver client (API + frontend) so audience enforcement (AUD-012) accepts real
+// tokens while rejecting tokens minted for other clients on the same Zitadel instance.
+func (v *ZitadelVerifier) AcceptAudience(clientID string) {
+	if clientID != "" {
+		v.acceptedAuds = append(v.acceptedAuds, clientID)
+	}
+}
+
+// audienceAccepted reports whether the token's `aud` intersects the configured set of
+// Stackweaver client_ids. When no audiences are configured it returns true, preserving
+// availability for unconfigured deployments (enforcement is opt-in via AcceptAudience).
+func (v *ZitadelVerifier) audienceAccepted(aud []string) bool {
+	if len(v.acceptedAuds) == 0 {
+		return true
+	}
+	for _, want := range v.acceptedAuds {
+		if slices.Contains(aud, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewZitadelVerifier creates a new Zitadel JWT verifier using the OIDC library.
@@ -188,8 +249,15 @@ func (v *ZitadelVerifier) VerifyToken(ctx context.Context, tokenString string) (
 		return nil, nil, fmt.Errorf("issuer validation failed: %w", err)
 	}
 
-	// Validate audience (lenient - access tokens might have project ID as audience)
-	_ = oidc.CheckAudience(claims, v.clientID)
+	// AUD-012: enforce that the token is intended for a Stackweaver client. Previously the
+	// audience error was discarded ("lenient"), so any token signed by the same Zitadel
+	// instance — for any client/project — authenticated and auto-provisioned a user. Real
+	// user access tokens are issued to the frontend PKCE client, so we accept the frontend
+	// client id (registered via AcceptAudience) as well as the API client id, and reject
+	// tokens whose `aud` names only other clients.
+	if !v.audienceAccepted(claims.GetAudience()) {
+		return nil, nil, fmt.Errorf("token audience %v does not include a Stackweaver client", claims.GetAudience())
+	}
 
 	// Validate expiration
 	if err := oidc.CheckExpiration(claims, 0); err != nil {
