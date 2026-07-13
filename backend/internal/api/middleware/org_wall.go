@@ -28,6 +28,7 @@ type OrgResolver interface {
 	ByProjectID(id string) (uuid.UUID, error)
 	ByWorkspaceID(id string) (uuid.UUID, error)
 	ByRunID(id string) (uuid.UUID, error)
+	ByRunTriggerID(id string) (uuid.UUID, error)
 	ByConfigVersionID(id string) (uuid.UUID, error)
 	ByStateVersionID(id string) (uuid.UUID, error)
 	ByVariableID(id string) (uuid.UUID, error)

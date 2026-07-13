@@ -5,12 +5,12 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -62,6 +62,11 @@ func (h *VCSConnectionHandlerV2) List(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
 		})
+		return
+	}
+
+	// AUD-138: gate the connection roster on org membership (JWT callers bypass the wall).
+	if !h.requireOrgMembership(c, org.ID) {
 		return
 	}
 
@@ -229,6 +234,11 @@ func (h *VCSConnectionHandlerV2) Get(c *gin.Context) {
 		return
 	}
 
+	// AUD-138: gate metadata read on org membership.
+	if !h.authorizeVCSConnectionRead(c, connection) {
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"id":   connection.ID,
@@ -301,9 +311,45 @@ func (h *VCSConnectionHandlerV2) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// requireOrgMembership gates an action on the caller being a member of orgID.
+// Writes the JSON:API error and returns false when unauthorized — 401 (no auth),
+// 403 (not a member). JWT/browser identities bypass the org-resolution wall, so
+// this per-handler check is the only defense for them.
+func (h *VCSConnectionHandlerV2) requireOrgMembership(c *gin.Context, orgID uuid.UUID) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return false
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, orgID)
+	if err != nil || !inOrg {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization (via team membership)"}},
+		})
+		return false
+	}
+	return true
+}
+
+// authorizeVCSConnectionRead gates a read of a VCS connection on organization
+// membership. AUD-138: the repository/branch/file-content read endpoints operate
+// the connection's org's *decrypted* OAuth token server-side, so an unauthorized
+// caller could exfiltrate another tenant's private source. It writes the JSON:API
+// error and returns false when unauthorized.
+func (h *VCSConnectionHandlerV2) authorizeVCSConnectionRead(c *gin.Context, connection *models.VCSConnection) bool {
+	return h.requireOrgMembership(c, connection.OrganizationID)
+}
+
 // getProvider resolves the ProviderService for a connection and handles error responses.
-// Returns nil if an error was written to c.
+// Returns nil if an error was written to c. It first enforces org membership
+// (AUD-138) — every provider-backed read goes through here, so this is the single
+// choke point that gates repository/branch/file-content listing.
 func (h *VCSConnectionHandlerV2) getProvider(c *gin.Context, connection *models.VCSConnection) vcs.ProviderService {
+	if !h.authorizeVCSConnectionRead(c, connection) {
+		return nil
+	}
 	provider, err := h.vcsRegistry.GetProvider(connection)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -346,8 +392,7 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+	page, perPage := pagination.Parse(c, 30)
 	if perPage > 100 {
 		perPage = 100
 	}
@@ -413,8 +458,7 @@ func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
+	page, perPage := pagination.Parse(c, 100)
 	if perPage > 100 {
 		perPage = 100
 	}
@@ -480,8 +524,7 @@ func (h *VCSConnectionHandlerV2) ListBranches(c *gin.Context) {
 	owner := c.Param("owner")
 	repo := c.Param("repo")
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+	page, perPage := pagination.Parse(c, 30)
 	if perPage > 100 {
 		perPage = 100
 	}

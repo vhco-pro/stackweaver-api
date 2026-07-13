@@ -4,6 +4,7 @@ package routes
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 
@@ -71,6 +72,11 @@ func SetupV2Routes(
 		}
 	}
 
+	// AUD-045: sign run-scoped log-read tokens with the deployment's ENCRYPTION_KEY (stable across
+	// restarts). When unset, the log-read-url is emitted without a token and the CLI authenticates
+	// with its Authorization header.
+	terraformHandlers.SetLogTokenSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
+
 	// VCS Provider Registry (multi-provider support)
 	azureDevOpsManager, err := vcs.NewAzureDevOpsManager()
 	if err != nil {
@@ -104,12 +110,14 @@ func SetupV2Routes(
 	rbacService := rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo)
 
 	// Handlers
+	agentPoolRepo := repository.NewAgentPoolRepository(db)
 	orgHandler := handlers.NewOrganizationHandlerV2(orgRepo, teamRepo, projectRepo, authService, activityService, rbacService, db)
-	projectHandler := handlers.NewProjectHandlerV2(projectRepo, orgRepo, teamRepo, authService, activityService, rbacService)
+	projectHandler := handlers.NewProjectHandlerV2(projectRepo, orgRepo, teamRepo, agentPoolRepo, authService, activityService, rbacService)
+	tagBindingRepo := repository.NewTagBindingRepository(db)
+	tagBindingHandler := handlers.NewTagBindingHandlerV2(tagBindingRepo, projectRepo, workspaceRepo, orgRepo, authService, rbacService)
 	teamHandler := handlers.NewTeamHandlerV2(teamRepo, orgRepo, authService, rbacService)
 	teamWorkspaceAccessHandler := handlers.NewTeamWorkspaceAccessHandlerV2(teamRepo, workspaceRepo, projectRepo, orgRepo, authService, rbacService)
 	teamProjectAccessHandler := handlers.NewTeamProjectAccessHandlerV2(teamRepo, projectRepo, orgRepo, authService, rbacService)
-	agentPoolRepo := repository.NewAgentPoolRepository(db)
 	workspaceHandler := terraformHandlers.NewWorkspaceHandlerV2(workspaceRepo, projectRepo, orgRepo, vcsConnectionRepo, teamRepo, agentPoolRepo, runRepo, authService, activityService, rbacService, vcsRegistry, db)
 
 	// User repository for organization memberships
@@ -177,6 +185,13 @@ func SetupV2Routes(
 		teamsById.GET("/:id/relationships/organization-memberships", teamMemberHandler.ListOrganizationMemberships)
 		teamsById.POST("/:id/relationships/organization-memberships", teamMemberHandler.AddOrganizationMemberships)
 		teamsById.DELETE("/:id/relationships/organization-memberships", teamMemberHandler.RemoveOrganizationMemberships)
+
+		// Team Members by username (TFE-compatible: tfe_team_members).
+		// TFE uses /api/v2/teams/:id/relationships/users. go-tfe TeamMembers.Add/Remove with Usernames.
+		// Stackweaver resolves each username as an email (users have no populated username); read
+		// round-trips via GET /teams/:id?include=users.
+		teamsById.POST("/:id/relationships/users", teamMemberHandler.AddUsers)
+		teamsById.DELETE("/:id/relationships/users", teamMemberHandler.RemoveUsers)
 	}
 
 	// Effective permissions (returns union of all team permissions for the authenticated user)
@@ -195,6 +210,12 @@ func SetupV2Routes(
 	// Projects by ID (TFE-compatible - provider reads projects by ID after creation)
 	// TFE-compatible: GET /api/v2/projects/:id (for go-tfe Read)
 	v2.GET("/projects/:id", projectHandler.GetByID)
+	// TFE-compatible: PATCH /api/v2/projects/:id (go-tfe Projects.Update — tfe_project + tfe_project_settings)
+	v2.PATCH("/projects/:id", projectHandler.UpdateByID)
+	// TFE-compatible: project tag bindings (tfe_project tags, data.tfe_project effective_tags)
+	v2.GET("/projects/:id/tag-bindings", tagBindingHandler.GetProjectTagBindings)
+	v2.PATCH("/projects/:id/tag-bindings", tagBindingHandler.PatchProjectTagBindings)
+	v2.GET("/projects/:id/effective-tag-bindings", tagBindingHandler.GetProjectEffectiveTagBindings)
 	// TFE-compatible: DELETE /api/v2/projects/:id (for go-tfe Delete)
 	v2.DELETE("/projects/:id", projectHandler.DeleteByID)
 
@@ -324,6 +345,10 @@ func SetupV2Routes(
 
 	// TFE-compatible: DELETE /api/v2/workspaces/:id (force delete by ID)
 	v2.DELETE("/workspaces/:id", workspaceHandler.DeleteByID)
+	// TFE-compatible: workspace tag bindings (tfe_workspace tags, data.tfe_workspace effective_tags)
+	v2.GET("/workspaces/:id/tag-bindings", tagBindingHandler.GetWorkspaceTagBindings)
+	v2.PATCH("/workspaces/:id/tag-bindings", tagBindingHandler.PatchWorkspaceTagBindings)
+	v2.GET("/workspaces/:id/effective-tag-bindings", tagBindingHandler.GetWorkspaceEffectiveTagBindings)
 
 	// Workspace actions (using workspace ID - must use :id to match other workspace routes)
 	workspaceActions := v2.Group("/workspaces/:id")
@@ -389,6 +414,10 @@ func SetupV2Routes(
 	if err != nil {
 		logger.Warnf("Failed to initialize storage: %v (storage features will be limited)", err)
 	}
+	// AUD-053: let workspace deletion prune the workspace's stored state files + run logs.
+	if storageClient != nil {
+		workspaceRepo.SetStorage(storageClient)
+	}
 
 	configVersionHandler := terraformHandlers.NewConfigurationVersionHandlerV2(configVersionRepo, workspaceRepo, authService, storageClient)
 
@@ -430,9 +459,10 @@ func SetupV2Routes(
 		tfRuns.GET("/:id", runHandler.Get)
 		tfRuns.GET("/:id/plan", runHandler.GetPlan)
 		tfRuns.GET("/:id/outputs", runHandler.GetOutputs)
-		tfRuns.GET("/:id/logs", runHandler.GetLogs)            // Generic endpoint (backward compatible)
-		tfRuns.GET("/:id/logs/plan", runHandler.GetPlanLogs)   // Explicit plan logs endpoint
-		tfRuns.GET("/:id/logs/apply", runHandler.GetApplyLogs) // Explicit apply logs endpoint
+		tfRuns.GET("/:id/logs", runHandler.GetLogs)               // Generic endpoint (backward compatible)
+		tfRuns.GET("/:id/logs/plan", runHandler.GetPlanLogs)      // Explicit plan logs endpoint
+		tfRuns.GET("/:id/logs/apply", runHandler.GetApplyLogs)    // Explicit apply logs endpoint
+		tfRuns.GET("/:id/task-stages", runHandler.ListTaskStages) // TFE run-tasks: Stackweaver has none → empty list
 		tfRuns.POST("/:id/actions/apply", runHandler.Apply)
 		tfRuns.POST("/:id/actions/cancel", runHandler.Cancel)
 		tfRuns.POST("/:id/actions/discard", runHandler.Discard)
@@ -454,6 +484,20 @@ func SetupV2Routes(
 	workspaceRuns := v2.Group("/workspaces/:id/runs")
 	{
 		workspaceRuns.GET("", runHandler.ListByWorkspace)
+	}
+
+	// Run Triggers (TFE-compatible: tfe_run_trigger). A run trigger links a source workspace to a
+	// target workspace so a successful apply in the source auto-queues a run in the target (fired by
+	// the orchestrator's run-trigger worker). Create/list are under the TARGET workspace; read/delete
+	// are by run-trigger id.
+	runTriggerRepo := repository.NewRunTriggerRepository(db)
+	runTriggerHandler := terraformHandlers.NewRunTriggerHandlerV2(runTriggerRepo, workspaceRepo, authService, rbacService)
+	v2.POST("/workspaces/:id/run-triggers", runTriggerHandler.Create)
+	v2.GET("/workspaces/:id/run-triggers", runTriggerHandler.ListByWorkspace)
+	runTriggersByID := v2.Group("/run-triggers")
+	{
+		runTriggersByID.GET("/:id", runTriggerHandler.GetByID)
+		runTriggersByID.DELETE("/:id", runTriggerHandler.Delete)
 	}
 
 	// Organization Runs (TFE-compatible)
@@ -561,7 +605,7 @@ func SetupV2Routes(
 	variableSetVariableRepo := repository.NewVariableSetVariableRepository(db)
 	jobTemplateRepo := repository.NewAnsibleJobTemplateRepository(db)
 	// projectRepo already declared above, reuse it
-	variableSetHandler := handlers.NewVariableSetHandlerV2(variableSetRepo, variableSetVariableRepo, orgRepo, projectRepo, workspaceRepo, jobTemplateRepo, authService, rbacService)
+	variableSetHandler := handlers.NewVariableSetHandlerV2(variableSetRepo, variableSetVariableRepo, orgRepo, projectRepo, workspaceRepo, jobTemplateRepo, authService, rbacService, variableService)
 
 	// Update variable service to include variable set repo (for variable set support in GetVariablesForRun)
 	// This allows platform variables + variable sets to work together
@@ -884,7 +928,7 @@ func SetupV2Routes(
 	// Registry Routes (Public - No Auth Required for Terraform CLI)
 	// These endpoints are outside the authenticated v2 group
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, storageClient)
-	moduleHandler := handlers.NewRegistryModuleHandler(moduleService)
+	moduleHandler := handlers.NewRegistryModuleHandler(moduleService, authService, orgRepo)
 
 	// Initialize provider repositories and services
 	providerRepo := repository.NewProviderRepository(db)
@@ -899,7 +943,25 @@ func SetupV2Routes(
 	gpgKeyHandler := handlers.NewGPGKeyHandler(gpgKeyRepo, orgRepo, authService, rbacService)
 
 	// v1 provider-install protocol handler (public download/discovery + signed SHA256SUMS streaming).
-	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, storageClient)
+	// authService + orgRepo let it gate PRIVATE providers on org membership (AUD-123).
+	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, authService, orgRepo, storageClient)
+
+	// AUD-147: sign short-TTL provider-artifact capability URLs so `terraform init` can fetch a
+	// private provider's binary/SHA256SUMS/.sig (Terraform sends no credentials to those URLs, which
+	// AUD-123 gated on membership). Prefer the deployment's ENCRYPTION_KEY (stable across restarts and
+	// instances, like the AUD-045 log token); fall back to an ephemeral per-process key when unset so
+	// the capability URLs still work in dev.
+	if artifactKey := encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")); len(artifactKey) > 0 {
+		handlers.SetArtifactTokenSecret(artifactKey)
+	} else {
+		ephemeral := make([]byte, 32)
+		if _, err := rand.Read(ephemeral); err != nil {
+			logger.Warnf("registry: could not generate an ephemeral artifact-URL signing key: %v", err)
+		} else {
+			handlers.SetArtifactTokenSecret(ephemeral)
+			logger.Warnf("registry: ENCRYPTION_KEY unset — signing provider-artifact capability URLs with an ephemeral per-process key (set ENCRYPTION_KEY for stability across restarts/instances)")
+		}
+	}
 
 	// tfe_registry_provider resource CRUD (go-tfe registry-providers surface).
 	providerResourceHandler := handlers.NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, rbacService, storageClient)
@@ -990,7 +1052,7 @@ func SetupV2Routes(
 	}
 
 	// Activity/Audit Log Routes (activityService already created above)
-	activityHandler := handlers.NewActivityHandlerV2(activityService, authService)
+	activityHandler := handlers.NewActivityHandlerV2(activityService, authService, orgRepo, workspaceRepo, projectRepo)
 
 	activities := v2.Group("/activities")
 	{
@@ -1139,6 +1201,9 @@ func SetupV2Routes(
 	runnerAgentHandler.SetStateMaterializer(stateMaterializer)
 	// Route self-hosted-runner state reads/writes through the encryption-at-rest chokepoint (#95).
 	runnerAgentHandler.SetStateService(stateService)
+	// AUD-028: stream agent job output through the shared Redis log buffer (O(1) APPEND) when
+	// available, copied to MinIO once at completion, instead of the O(n²) object-storage append.
+	runnerAgentHandler.SetLogBuffer(logBufferService)
 
 	runnerAgent := v2.Group("/runner")
 	{

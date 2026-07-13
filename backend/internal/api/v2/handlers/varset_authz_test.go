@@ -118,6 +118,7 @@ func setupVarsetAuthz(t *testing.T) *varsetAuthzFixture {
 		nil, // jobTemplateRepo — unused on the tested paths
 		authService,
 		rbacService,
+		nil, // variableService — unused on the tested authz paths
 	)
 
 	gin.SetMode(gin.TestMode)

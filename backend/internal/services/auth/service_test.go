@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -171,6 +172,26 @@ func TestGetUserFromToken_APIKeyMissingServiceFailsCleanly(t *testing.T) {
 	}
 }
 
+func TestGetUserFromToken_UnknownTFETokenIsTerminal(t *testing.T) {
+	// #503: a `tfe-` token that fails api-key lookup must be rejected
+	// outright, NOT handed to JWT verification. With no verifier set,
+	// the legacy fallthrough returned "authentication service not
+	// initialized" — the truthful invalid-token error proves the prefix
+	// is authoritative.
+	apiKey := &mockAPIKeyService{} // every lookup fails
+
+	svc := NewServiceWithLookups(&mockUserRepo{})
+	svc.SetAPIKeyService(apiKey)
+
+	_, err := svc.GetUserFromToken("tfe-revoked-or-unknown")
+	if err == nil || !strings.Contains(err.Error(), "invalid or revoked API token") {
+		t.Fatalf("want terminal invalid-or-revoked error, got: %v", err)
+	}
+	if len(apiKey.verifyCalls) != 1 {
+		t.Errorf("VerifyAPIKey call log: %v", apiKey.verifyCalls)
+	}
+}
+
 func TestGetUserFromToken_APIKeyValidButOrphanedUser(t *testing.T) {
 	// API key matches but the linked user is gone (e.g. orphaned key
 	// after a user delete). Service must NOT return a nil-user with
@@ -271,6 +292,81 @@ func TestAuthenticateMiddleware_OrgBoundTokenSetsBoundOrg(t *testing.T) {
 	}
 	if gotOrg != orgID {
 		t.Errorf("token_org_id: want %s, got %s", orgID, gotOrg)
+	}
+}
+
+// runMiddlewareExpectingRejection drives AuthenticateMiddleware with the
+// given mocks and bearer token, asserting the request never reaches the
+// handler. Returns the response for status/body assertions.
+func runMiddlewareExpectingRejection(t *testing.T, apiKeySvc *mockAPIKeyService, userRepo *mockUserRepo, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	svc := NewServiceWithLookups(userRepo)
+	svc.SetAPIKeyService(apiKeySvc)
+
+	r := gin.New()
+	r.Use(svc.AuthenticateMiddleware())
+	handlerReached := false
+	r.GET("/probe", func(c *gin.Context) {
+		handlerReached = true
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/probe", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if handlerReached {
+		t.Fatal("request must not reach the handler")
+	}
+	return w
+}
+
+func TestAuthenticateMiddleware_UnknownTFETokenIsTerminal(t *testing.T) {
+	// #503: a `tfe-` token that fails api-key lookup must 401 outright,
+	// NOT fall through to JWT verification. With no verifier set, the
+	// legacy fallthrough produced a 500 ("authentication service not
+	// initialized"), so the 401 + truthful detail proves the prefix is
+	// authoritative. Applies equally to a valid JWT wearing a `tfe-`
+	// prefix — the declared kind wins.
+	apiKeySvc := &mockAPIKeyService{} // every lookup fails
+
+	w := runMiddlewareExpectingRejection(t, apiKeySvc, &mockUserRepo{}, "tfe-revoked-or-unknown")
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status: want 401, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid or revoked API token") {
+		t.Errorf("body must carry the truthful detail, got: %s", w.Body.String())
+	}
+	if len(apiKeySvc.verifyCalls) != 1 {
+		t.Errorf("VerifyAPIKey call log: %v", apiKeySvc.verifyCalls)
+	}
+}
+
+func TestAuthenticateMiddleware_OrphanedAPIKeyIsTerminal(t *testing.T) {
+	// A key that verifies but whose user row is gone must also 401 at
+	// the api-key layer rather than fall through to JWT verification.
+	apiKeySvc := &mockAPIKeyService{
+		verifyFn: func(string) (*models.APIKey, error) {
+			return &models.APIKey{ID: uuid.New(), UserID: uuid.New()}, nil
+		},
+	}
+	userRepo := &mockUserRepo{
+		getByIDFn: func(uuid.UUID) (*models.User, error) {
+			return nil, errors.New("user not found")
+		},
+	}
+
+	w := runMiddlewareExpectingRejection(t, apiKeySvc, userRepo, "tfe-orphaned-key")
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status: want 401, got %d (body: %s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid or revoked API token") {
+		t.Errorf("body must carry the truthful detail, got: %s", w.Body.String())
 	}
 }
 
