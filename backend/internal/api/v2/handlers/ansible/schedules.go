@@ -347,7 +347,7 @@ func formatScheduleResponse(schedule *models.AnsibleSchedule) gin.H {
 // @Failure 404 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{id} [get]
 func (h *ScheduleHandler) Get(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
+	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid schedule ID")
 		return
@@ -470,7 +470,7 @@ func (h *ScheduleHandler) List(c *gin.Context) {
 // @Failure 404 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{id} [patch]
 func (h *ScheduleHandler) Update(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
+	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid schedule ID")
 		return
@@ -534,7 +534,7 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 // @Failure 500 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{id} [delete]
 func (h *ScheduleHandler) Delete(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
+	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid schedule ID")
 		return
@@ -591,7 +591,7 @@ func (h *ScheduleHandler) Delete(c *gin.Context) {
 // @Failure 500 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{id}/enable [post]
 func (h *ScheduleHandler) Enable(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
+	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid schedule ID")
 		return
@@ -648,7 +648,7 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 // @Failure 500 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{id}/disable [post]
 func (h *ScheduleHandler) Disable(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
+	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
 		response.BadRequest(c, "Invalid schedule ID")
 		return

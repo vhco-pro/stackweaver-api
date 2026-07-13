@@ -8,20 +8,24 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	// "github.com/gomarkdown/markdown"
-	// "github.com/gomarkdown/markdown/html"
-	// "github.com/gomarkdown/markdown/parser"
+	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 )
 
 type RegistryModuleHandler struct {
 	moduleService *registry.ModuleService
+	authService   *auth.Service
+	orgRepo       *repository.OrganizationRepository
 }
 
-func NewRegistryModuleHandler(moduleService *registry.ModuleService) *RegistryModuleHandler {
+func NewRegistryModuleHandler(moduleService *registry.ModuleService, authService *auth.Service, orgRepo *repository.OrganizationRepository) *RegistryModuleHandler {
 	return &RegistryModuleHandler{
 		moduleService: moduleService,
+		authService:   authService,
+		orgRepo:       orgRepo,
 	}
 }
 
@@ -54,6 +58,7 @@ func (h *RegistryModuleHandler) ListModules(c *gin.Context) {
 		})
 		return
 	}
+	modules = h.filterAccessibleModules(c, modules)
 
 	// Format response according to Terraform Registry API spec
 	response := gin.H{
@@ -108,6 +113,7 @@ func (h *RegistryModuleHandler) SearchModules(c *gin.Context) {
 		})
 		return
 	}
+	modules = h.filterAccessibleModules(c, modules)
 
 	response := gin.H{
 		"meta": gin.H{
@@ -130,6 +136,17 @@ func (h *RegistryModuleHandler) GetModuleVersions(c *gin.Context) {
 	namespace := c.Param("namespace")
 	name := c.Param("name")
 	provider := c.Param("provider")
+
+	module, err := h.moduleService.GetModule(namespace, name, provider)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []string{"Module not found"},
+		})
+		return
+	}
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+		return
+	}
 
 	versions, err := h.moduleService.GetModuleVersions(namespace, name, provider)
 	if err != nil {
@@ -182,6 +199,10 @@ func (h *RegistryModuleHandler) GetModule(c *gin.Context) {
 		})
 		return
 	}
+	// AUD-123: every module belongs to an org's private registry — gate on membership.
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+		return
+	}
 
 	latestVersion, err := h.moduleService.GetLatestVersion(namespace, name, provider)
 	if err != nil {
@@ -209,6 +230,9 @@ func (h *RegistryModuleHandler) GetModuleVersion(c *gin.Context) {
 		})
 		return
 	}
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+		return
+	}
 
 	moduleVersion, err := h.moduleService.GetModuleVersion(namespace, name, provider, version)
 	if err != nil {
@@ -229,6 +253,17 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 	name := c.Param("name")
 	provider := c.Param("provider")
 	version := c.Param("version")
+
+	module, err := h.moduleService.GetModule(namespace, name, provider)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []string{"Module not found"},
+		})
+		return
+	}
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+		return
+	}
 
 	// If version is empty, get latest version
 	if version == "" {
@@ -251,12 +286,14 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 		return
 	}
 
-	// Track download asynchronously
+	// Track download asynchronously. AUD-062: capture request-derived values before the goroutine —
+	// gin pools and reuses *gin.Context after the handler returns, so reading c inside the goroutine
+	// is a data race.
+	ipAddress := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
 	go func() {
 		moduleVersion, err := h.moduleService.GetModuleVersion(namespace, name, provider, version)
 		if err == nil {
-			ipAddress := c.ClientIP()
-			userAgent := c.GetHeader("User-Agent")
 			_ = h.moduleService.TrackDownload(moduleVersion.ID, ipAddress, userAgent)
 		}
 	}()
@@ -270,6 +307,17 @@ func (h *RegistryModuleHandler) GetModuleDownloadsSummary(c *gin.Context) {
 	namespace := c.Param("namespace")
 	name := c.Param("name")
 	provider := c.Param("provider")
+
+	module, err := h.moduleService.GetModule(namespace, name, provider)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"errors": []string{"Module not found"},
+		})
+		return
+	}
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+		return
+	}
 
 	latestVersion, err := h.moduleService.GetLatestVersion(namespace, name, provider)
 	if err != nil {
@@ -300,6 +348,25 @@ func (h *RegistryModuleHandler) GetModuleDownloadsSummary(c *gin.Context) {
 			},
 		},
 	})
+}
+
+// filterAccessibleModules drops modules whose org the caller is not a member of (AUD-123).
+// All modules are org-private, so an anonymous or cross-tenant caller sees an empty list
+// rather than another org's private module names/versions. Pagination counts stay based on
+// the unfiltered query, so the caller simply pages through their accessible subset.
+func (h *RegistryModuleHandler) filterAccessibleModules(c *gin.Context, modules []models.Module) []models.Module {
+	orgIDs := make([]uuid.UUID, 0, len(modules))
+	for i := range modules {
+		orgIDs = append(orgIDs, modules[i].OrganizationID)
+	}
+	accessible := registryAccessibleOrgs(c, h.authService, h.orgRepo, orgIDs)
+	kept := make([]models.Module, 0, len(modules))
+	for _, m := range modules {
+		if accessible[m.OrganizationID] {
+			kept = append(kept, m)
+		}
+	}
+	return kept
 }
 
 // Helper functions

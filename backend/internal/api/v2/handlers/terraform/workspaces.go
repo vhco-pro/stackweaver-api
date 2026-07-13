@@ -193,8 +193,89 @@ type CreateWorkspaceRequestV2 struct {
 					Type string `json:"type"`
 				} `json:"data"`
 			} `json:"project,omitempty"`
+			TagBindings *wsTagBindingsRel `json:"tag-bindings,omitempty"`
 		} `json:"relationships"`
 	} `json:"data"`
+}
+
+// wsTagBindingsRel captures the workspace `tag-bindings` relationship. The tfe provider serialises the
+// workspace `tags` map here with the key/value INLINE in each relationship-data member's attributes
+// (not in the top-level `included` array).
+type wsTagBindingsRel struct {
+	Data []struct {
+		Attributes struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
+func (t *wsTagBindingsRel) bindings() []models.TagBinding {
+	if t == nil {
+		return nil
+	}
+	out := make([]models.TagBinding, 0, len(t.Data))
+	for _, d := range t.Data {
+		if d.Attributes.Key != "" {
+			out = append(out, models.TagBinding{Key: d.Attributes.Key, Value: d.Attributes.Value})
+		}
+	}
+	return out
+}
+
+// wsTagsPresent reports whether a create request manages tag bindings.
+func (r *CreateWorkspaceRequestV2) wsTagsPresent() bool {
+	return r.Data.Relationships.TagBindings != nil
+}
+
+// wsEffectiveTagBindingsRequested reports whether the request asked to include effective tag bindings.
+// go-tfe sends the include value with underscores (`effective_tag_bindings`); accept the hyphenated
+// form too for robustness.
+func wsEffectiveTagBindingsRequested(c *gin.Context) bool {
+	inc := c.Query("include")
+	return strings.Contains(inc, "effective_tag_bindings") || strings.Contains(inc, "effective-tag-bindings")
+}
+
+func wsTagBindingLinkage(bindings []models.TagBinding, resourceType string) gin.H {
+	data := make([]gin.H, 0, len(bindings))
+	for i := range bindings {
+		id := bindings[i].ID
+		if id == "" {
+			id = bindings[i].Key
+		}
+		data = append(data, gin.H{"type": resourceType, "id": id})
+	}
+	return gin.H{"data": data}
+}
+
+func wsTagBindingIncluded(bindings []models.TagBinding, resourceType string) []gin.H {
+	out := make([]gin.H, 0, len(bindings))
+	for i := range bindings {
+		b := bindings[i]
+		id := b.ID
+		if id == "" {
+			id = b.Key
+		}
+		out = append(out, gin.H{"type": resourceType, "id": id, "attributes": gin.H{"key": b.Key, "value": b.Value}})
+	}
+	return out
+}
+
+// workspaceResponseWithTags builds the workspace read response, adding the effective-tag-bindings
+// relationship + included resources when ?include=effective-tag-bindings was requested (how the tfe
+// provider resource + data.tfe_workspace read a workspace's effective tags).
+func (h *WorkspaceHandlerV2) workspaceResponseWithTags(c *gin.Context, workspace *models.Workspace) gin.H {
+	data := formatWorkspaceResponse(workspace, h.vcsConnectionRepo)
+	resp := gin.H{"data": data}
+	if wsEffectiveTagBindingsRequested(c) {
+		eff, _ := repository.NewTagBindingRepository(h.db).EffectiveForWorkspace(workspace.ID)
+		if rels, ok := data["relationships"].(gin.H); ok {
+			rels["effective-tag-bindings"] = wsTagBindingLinkage(eff, "effective-tag-bindings")
+			rels["tag-bindings"] = wsTagBindingLinkage(eff, "tag-bindings")
+		}
+		resp["included"] = wsTagBindingIncluded(eff, "effective-tag-bindings")
+	}
+	return resp
 }
 
 // UpdateWorkspaceRequestV2 uses JSON:API format (TFE-compatible)
@@ -229,7 +310,15 @@ type UpdateWorkspaceRequestV2 struct {
 			RunTimeout                 *int            `json:"run-timeout,omitempty"`
 			ForceDelete                *bool           `json:"force-delete,omitempty"`
 		} `json:"attributes"`
+		Relationships *struct {
+			TagBindings *wsTagBindingsRel `json:"tag-bindings,omitempty"`
+		} `json:"relationships,omitempty"`
 	} `json:"data"`
+}
+
+// wsTagsPresent reports whether an update request manages tag bindings.
+func (r *UpdateWorkspaceRequestV2) wsTagsPresent() bool {
+	return r.Data.Relationships != nil && r.Data.Relationships.TagBindings != nil
 }
 
 // ListByOrganization lists workspaces by organization name (TFE-compatible)
@@ -294,7 +383,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 
 	if hasOrgReadWorkspaces {
 		// User has organization-level read-workspaces permission - show all workspaces
-		workspaces, total, err = h.workspaceRepo.ListByOrganization(orgName, pageSize, offset)
+		workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganization(orgName, pageSize, offset)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"errors": []gin.H{
@@ -352,7 +441,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 			}
 
 			// Query workspaces that are in the accessible list
-			workspaces, total, err = h.workspaceRepo.ListByOrganizationAndIDs(orgName, workspaceIDList, pageSize, offset)
+			workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganizationAndIDs(orgName, workspaceIDList, pageSize, offset)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"errors": []gin.H{
@@ -727,9 +816,7 @@ func (h *WorkspaceHandlerV2) GetByOrganizationAndName(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatWorkspaceResponse(workspace, h.vcsConnectionRepo),
-	})
+	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
 
 // Create creates a workspace in an organization (TFE-compatible)
@@ -1137,6 +1224,14 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// TFE tag bindings: apply the workspace's `tags` (sent as a tag-bindings relation, values in
+	// `included`) if the request manages them.
+	if req.wsTagsPresent() {
+		if err := repository.NewTagBindingRepository(h.db).ReplaceForWorkspace(workspace.ID, req.Data.Relationships.TagBindings.bindings()); err != nil {
+			_ = err // best-effort
+		}
 	}
 
 	// Register repository-scoped webhooks when the workspace is linked to an ADO repo.
@@ -2291,9 +2386,7 @@ func (h *WorkspaceHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatWorkspaceResponse(workspace, h.vcsConnectionRepo),
-	})
+	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
 
 // UpdateByID updates a workspace by its ID (TFE-compatible)
@@ -2513,9 +2606,14 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		return
 	}
 
+	// TFE tag bindings: replace the workspace's tags when the request manages them.
+	if req.wsTagsPresent() {
+		if err := repository.NewTagBindingRepository(h.db).ReplaceForWorkspace(workspace.ID, req.Data.Relationships.TagBindings.bindings()); err != nil {
+			_ = err
+		}
+	}
+
 	h.maybeRegisterADOWebhook(workspace.VCSConnectionID, workspace.VCSRepository)
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatWorkspaceResponse(workspace, h.vcsConnectionRepo),
-	})
+	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }

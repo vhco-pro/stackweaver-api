@@ -535,3 +535,144 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 	// TFE returns 204 No Content on success
 	c.Status(http.StatusNoContent)
 }
+
+// resolveTeamMemberIdentifier resolves a tfe_team_members `usernames` entry to an existing user that
+// belongs to the team's organization. TFE addresses team members by a unique username; Stackweaver
+// provisions users from Zitadel without a populated username, so the identifier is resolved by EMAIL
+// (case-insensitive) — the stable, org-portable identity (documented divergence). The user must
+// already be a member of the team's organization (tenant safety: no cross-org resolution, and you add
+// existing org members to teams, matching TFE). Returns the user, or writes a JSON:API error + false.
+func (h *TeamMemberHandlerV2) resolveTeamMemberIdentifier(c *gin.Context, team *models.Team, identifier string) (*models.User, bool) {
+	user, err := h.userRepo.GetByEmailCaseInsensitive(identifier)
+	if err != nil || user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("No user found for %q — Stackweaver identifies team members by email; ensure the user exists and is a member of the organization", identifier)}}})
+		return nil, false
+	}
+	// Tenant safety: the user must be a member of the team's organization. This both matches TFE
+	// (team members are drawn from org members) and prevents adding/probing users from other orgs.
+	if _, err := h.orgRepo.GetMember(team.OrganizationID, user.ID); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": fmt.Sprintf("User %q is not a member of this organization — add them to the organization before adding them to a team", identifier)}}})
+		return nil, false
+	}
+	return user, true
+}
+
+// AddUsers handles POST /api/v2/teams/:id/relationships/users
+// TFE spec: go-tfe TeamMembers.Add with Usernames. go-tfe serializes each username as the JSON:API
+// resource id of a "users" resource: {"data":[{"type":"users","id":"<username>"}]}. Stackweaver
+// resolves the id as an email (see resolveTeamMemberIdentifier). Reference:
+// https://developer.hashicorp.com/terraform/enterprise/api-docs/team-members#add-a-user-to-team
+func (h *TeamMemberHandlerV2) AddUsers(c *gin.Context) {
+	teamIDStr := c.Param("id")
+	teamID, err := uuid.Parse(teamIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid team ID format"}}})
+		return
+	}
+
+	team, err := h.teamRepo.GetByID(teamID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Team not found"}}})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to retrieve team"}}})
+		return
+	}
+
+	if !h.requireTeamMembershipManagement(c, team) {
+		return
+	}
+
+	// go-tfe sends the username as the resource id: {"data":[{"type":"users","id":"<username>"}]}.
+	var req struct {
+		Data []struct {
+			Type string `json:"type" binding:"required"`
+			ID   string `json:"id" binding:"required"`
+		} `json:"data" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		return
+	}
+
+	for _, userRef := range req.Data {
+		if userRef.Type != "users" {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid type, expected 'users'"}}})
+			return
+		}
+		user, ok := h.resolveTeamMemberIdentifier(c, team, userRef.ID)
+		if !ok {
+			return
+		}
+		// Idempotent: skip if already a member.
+		if isMember, _ := h.teamRepo.IsMember(teamID, user.ID); isMember {
+			continue
+		}
+		if err := h.teamRepo.AddMember(teamID, user.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to add user to team: %v", err)}}})
+			return
+		}
+		logger.Debugf("TeamMember AddUsers - Added user %s to team %s", user.ID.String(), teamIDStr)
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// RemoveUsers handles DELETE /api/v2/teams/:id/relationships/users
+// TFE spec: go-tfe TeamMembers.Remove with Usernames (same id-as-username serialization as AddUsers).
+// Reference:
+// https://developer.hashicorp.com/terraform/enterprise/api-docs/team-members#delete-a-user-from-team
+func (h *TeamMemberHandlerV2) RemoveUsers(c *gin.Context) {
+	teamIDStr := c.Param("id")
+	teamID, err := uuid.Parse(teamIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid team ID format"}}})
+		return
+	}
+
+	team, err := h.teamRepo.GetByID(teamID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Team not found"}}})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to retrieve team"}}})
+		return
+	}
+
+	if !h.requireTeamMembershipManagement(c, team) {
+		return
+	}
+
+	var req struct {
+		Data []struct {
+			Type string `json:"type" binding:"required"`
+			ID   string `json:"id" binding:"required"`
+		} `json:"data" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		return
+	}
+
+	for _, userRef := range req.Data {
+		if userRef.Type != "users" {
+			continue
+		}
+		// Resolve by email but do NOT require current org membership on removal — a user removed from
+		// the org should still be strippable from the team, and destroy paths must be forgiving.
+		user, err := h.userRepo.GetByEmailCaseInsensitive(userRef.ID)
+		if err != nil || user == nil {
+			logger.Warnf("TeamMember RemoveUsers - No user for %q (may already be gone), continuing", userRef.ID)
+			continue
+		}
+		if err := h.teamRepo.RemoveMember(teamID, user.ID); err != nil {
+			logger.Debugf("TeamMember RemoveUsers - Error removing user %s from team %s: %v", user.ID.String(), teamIDStr, err)
+		} else {
+			logger.Debugf("TeamMember RemoveUsers - Removed user %s from team %s", user.ID.String(), teamIDStr)
+		}
+	}
+
+	c.Status(http.StatusNoContent)
+}
