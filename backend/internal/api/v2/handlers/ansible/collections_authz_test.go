@@ -45,7 +45,7 @@ func TestJobCollectionsAuthz(t *testing.T) {
 	}
 	if err := db.AutoMigrate(
 		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
-		&models.Team{}, &models.TeamMember{}, &models.TeamProjectAccess{},
+		&models.Team{}, &models.TeamMember{}, &models.TeamProjectAccess{}, &models.TeamOrganizationAccess{},
 		&models.Project{}, &models.AnsibleInventory{}, &models.AnsibleJob{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)

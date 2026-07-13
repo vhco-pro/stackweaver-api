@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -104,6 +105,22 @@ type AuthProxyConfig struct {
 	// same-origin deployments like network_mode: host on localhost). Read from
 	// STACKWEAVER_APP_URL in main.go.
 	PublicFrontendURL string
+	// PublicAPIBaseURL is the browser/client-visible base URL of THIS api
+	// (e.g. "https://api.example.com"), used unconditionally for the OIDC
+	// discovery document's issuer + endpoint URLs so they can never be
+	// steered by a forged X-Forwarded-Host / X-Zitadel-* header (AUD-113).
+	// Empty → fall back to the header-derived host (dev / same-origin only).
+	// Read from STACKWEAVER_PUBLIC_URL in main.go.
+	PublicAPIBaseURL string
+	// TrustedForwardHosts is the allowlist of hosts the proxy will honor when
+	// they arrive in an X-Zitadel-Public-Host / X-Zitadel-Forward-Host /
+	// X-Forwarded-Host header (AUD-113/AUD-071). A header host not on the list
+	// is ignored and the configured canonical host is used instead, so a direct
+	// attacker request cannot poison the discovery doc or IdP redirect URLs.
+	// The hosts of PublicAPIBaseURL, PublicFrontendURL and ZitadelIssuer are
+	// added automatically. Empty derived set → trust all (legacy dev behavior).
+	// Extra entries read from STACKWEAVER_TRUSTED_HOSTS in main.go.
+	TrustedForwardHosts []string
 	// PostLogoutAllowedHosts is a list of host names that the
 	// EndSession redirect-host allowlist will accept on top of
 	// PublicFrontendURL's host. Round 25 Wave 5 (item 5 / Round 23
@@ -201,6 +218,12 @@ type AuthProxy struct {
 	decoyOrgIDsCap       int
 	decoyOrgIDsStop      chan struct{}
 	decoyOrgIDsSweepOnce sync.Once
+
+	// trustedHosts is the normalized (lowercased, port-stripped) allowlist of
+	// hosts honored from forwarding headers (AUD-113/AUD-071). Built once at
+	// construction from PublicAPIBaseURL/PublicFrontendURL/ZitadelIssuer +
+	// TrustedForwardHosts. Empty → trust all (unconfigured dev behavior).
+	trustedHosts []string
 }
 
 // decoyOrgIDEntry is the value stored in the bounded LRU. Round 25
@@ -274,6 +297,22 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 		decoyOrgIDsEntries: make(map[string]*list.Element),
 		decoyOrgIDsLRU:     list.New(),
 		decoyOrgIDsCap:     defaultDecoyOrgIDsCap,
+	}
+	// AUD-113/AUD-071: build the trusted-host allowlist from the configured
+	// public URLs. A forwarding-header host outside this set is ignored so it
+	// can't poison the discovery doc / IdP redirect URLs.
+	seen := map[string]bool{}
+	addHost := func(raw string) {
+		if h := normalizeHost(hostFromURLOrHost(raw)); h != "" && !seen[h] {
+			seen[h] = true
+			p.trustedHosts = append(p.trustedHosts, h)
+		}
+	}
+	addHost(config.PublicAPIBaseURL)
+	addHost(config.PublicFrontendURL)
+	addHost(config.ZitadelIssuer)
+	for _, h := range config.TrustedForwardHosts {
+		addHost(h)
 	}
 	p.startDecoyOrgIDsSweeper()
 	return p
@@ -569,17 +608,78 @@ func (p *AuthProxy) proxyFormPost(ctx context.Context, path string, formData url
 	return p.proxyRequest(ctx, http.MethodPost, path, strings.NewReader(formData.Encode()), "application/x-www-form-urlencoded")
 }
 
+// hostFromURLOrHost returns the host of a URL string (scheme://host/…) or, if the
+// value is already a bare host, the value itself. Empty in → empty out.
+func hostFromURLOrHost(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.Contains(s, "://") {
+		if u, err := url.Parse(s); err == nil {
+			return u.Host
+		}
+	}
+	return s
+}
+
+// normalizeHost lowercases a host and strips any :port so allowlist membership
+// is compared on the host alone.
+func normalizeHost(h string) string {
+	h = strings.ToLower(strings.TrimSpace(h))
+	if h == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		return host
+	}
+	return h
+}
+
+// isTrustedHost reports whether host may be advertised in a public URL. With no
+// configured allowlist (dev / same-origin) every host is trusted, preserving the
+// legacy behavior; once any public URL is configured (production), only its host
+// and its siblings pass (AUD-113/AUD-071).
+func (p *AuthProxy) isTrustedHost(host string) bool {
+	if len(p.trustedHosts) == 0 {
+		return true
+	}
+	h := normalizeHost(host)
+	if h == "" {
+		return false
+	}
+	for _, t := range p.trustedHosts {
+		if t == h {
+			return true
+		}
+	}
+	return false
+}
+
 // getPublicHost resolves the browser-visible host for building callback URLs (per D4).
 // Priority: x-zitadel-public-host → x-zitadel-forward-host → x-forwarded-host → host header.
-func getPublicHost(c *gin.Context) string {
+// AUD-113/AUD-071: a forwarding-header (or Host) value is only honored when it is on the
+// configured trusted-host allowlist — otherwise it is a forgeable input and we fall back to
+// the configured canonical host (p.trustedHosts[0]) so a direct attacker request cannot steer
+// the discovery doc / IdP redirect URLs to an attacker-controlled host.
+func (p *AuthProxy) getPublicHost(c *gin.Context) string {
 	for _, header := range []string{
 		"X-Zitadel-Public-Host",
 		"X-Zitadel-Forward-Host",
 		"X-Forwarded-Host",
 	} {
-		if v := c.GetHeader(header); v != "" {
+		if v := c.GetHeader(header); v != "" && p.isTrustedHost(v) {
 			return v
 		}
+	}
+	if p.isTrustedHost(c.Request.Host) {
+		return c.Request.Host
+	}
+	// Nothing presented a trusted host — return the configured canonical host
+	// rather than an attacker-controlled one. (Only reachable once an allowlist
+	// is configured; unconfigured dev trusts all and never lands here.)
+	if len(p.trustedHosts) > 0 {
+		return p.trustedHosts[0]
 	}
 	return c.Request.Host
 }
@@ -593,15 +693,15 @@ func getPublicHost(c *gin.Context) string {
 //     header first the discovery doc / IdP successUrl land on the wrong
 //     scheme and the SPA redirect chain breaks.
 //  2. Direct TLS on the request (TLS == nil → http, else https).
-func getPublicBaseURL(c *gin.Context) string {
+func (p *AuthProxy) getPublicBaseURL(c *gin.Context) string {
 	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-		return proto + "://" + getPublicHost(c)
+		return proto + "://" + p.getPublicHost(c)
 	}
 	scheme := "https"
 	if c.Request.TLS == nil {
 		scheme = "http"
 	}
-	return scheme + "://" + getPublicHost(c)
+	return scheme + "://" + p.getPublicHost(c)
 }
 
 // getFrontendBaseURL returns the SPA's public base URL for IdP redirect
@@ -612,7 +712,7 @@ func (p *AuthProxy) getFrontendBaseURL(c *gin.Context) string {
 	if u := strings.TrimRight(p.config.PublicFrontendURL, "/"); u != "" {
 		return u
 	}
-	return getPublicBaseURL(c)
+	return p.getPublicBaseURL(c)
 }
 
 // respondError sends a JSON error response matching Zitadel's error shape.
@@ -1110,7 +1210,14 @@ func (p *AuthProxy) OIDCDiscovery(c *gin.Context) {
 		return
 	}
 
-	publicBase := getPublicBaseURL(c)
+	// AUD-113: the discovery document advertises this api's OIDC endpoints to
+	// every client that fetches it, so its base must never come from a forgeable
+	// header. Use the configured PublicAPIBaseURL unconditionally when set; only
+	// fall back to the (now allowlist-gated) request-derived base in dev.
+	publicBase := strings.TrimRight(p.config.PublicAPIBaseURL, "/")
+	if publicBase == "" {
+		publicBase = p.getPublicBaseURL(c)
+	}
 	discovery["issuer"] = publicBase
 	discovery["authorization_endpoint"] = publicBase + "/auth/oidc/authorize"
 	discovery["token_endpoint"] = publicBase + "/auth/oidc/token"
@@ -2511,7 +2618,42 @@ func (p *AuthProxy) ListIdpProviders(c *gin.Context) {
 // --- User Management Proxy (A6) ---
 
 // CreateUser handles POST /auth/users.
+// registrationAllowed reports whether the Zitadel login policy permits self-registration
+// (`allowRegister: true`). It reads the live policy via the admin PAT and returns true ONLY
+// when registration is affirmatively allowed — a disabled policy, or any error reading it,
+// yields false so the public registration endpoint fails closed (AUD-120). The cache is
+// deliberately bypassed for the same reason as shouldFakeUnknownUser: the policy only changes
+// on rare operator action, and a stale allow would keep the bypass open.
+func (p *AuthProxy) registrationAllowed(c *gin.Context) bool {
+	body, status, err := p.proxyJSON(c.Request.Context(), http.MethodGet, "/v2/settings/login", nil)
+	if err != nil || status != http.StatusOK {
+		return false
+	}
+	// The settings response is wrapped in `{"settings": {...}}` — unwrap before checking.
+	var wrapper struct {
+		Settings json.RawMessage `json:"settings"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil || len(wrapper.Settings) == 0 {
+		return false
+	}
+	var policy struct {
+		AllowRegister bool `json:"allowRegister"`
+	}
+	if err := json.Unmarshal(wrapper.Settings, &policy); err != nil {
+		return false
+	}
+	return policy.AllowRegister
+}
+
 func (p *AuthProxy) CreateUser(c *gin.Context) {
+	// AUD-120: this endpoint is on the unauthenticated /auth surface and forwards to Zitadel
+	// with the admin PAT. Honor the operator's login policy — without this an operator who
+	// disabled self-registration is bypassed (bounded only by the per-IP rate limiter).
+	if !p.registrationAllowed(c) {
+		respondError(c, http.StatusForbidden, "self-registration is disabled")
+		return
+	}
+
 	var reqBody map[string]any
 	if err := c.ShouldBindJSON(&reqBody); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid request body")

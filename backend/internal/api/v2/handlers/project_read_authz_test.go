@@ -75,7 +75,7 @@ func TestProjectReadAuthz(t *testing.T) {
 	orgRepo := repository.NewOrganizationRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
 	rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db))
-	h := NewProjectHandlerV2(repository.NewProjectRepository(db), orgRepo, repository.NewTeamRepository(db), authService, nil, rbacService)
+	h := NewProjectHandlerV2(repository.NewProjectRepository(db), orgRepo, repository.NewTeamRepository(db), nil, nil, authService, nil, rbacService)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
