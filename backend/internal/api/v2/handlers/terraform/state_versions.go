@@ -4,13 +4,14 @@ package terraform
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -158,8 +159,7 @@ func (h *StateVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := pagination.Parse(c, 20)
 	if perPage > 100 {
 		perPage = 100
 	}
@@ -834,23 +834,7 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Get next version number
-	nextVersion, err := h.stateVersionRepo.GetNextVersion(workspaceID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to get next version number",
-				},
-			},
-		})
-		return
-	}
-
-	// Store state file in MinIO (TFE-compatible)
-	// Path: workspaces/{workspace_id}/state/{version}.json
+	// Marshal the state for storage first (validation), then reserve the version + write the object.
 	stateJSON, err := json.Marshal(req.StateData)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -865,9 +849,38 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Route through the state service so state is encrypted at rest before storage.
+	// AUD-018: atomically reserve the next version through the shared path (retry on the
+	// unique-violation, reject a serial regression with 409), row-first then object storage.
+	stateVersion := &models.StateVersion{
+		WorkspaceID: workspaceID,
+		Serial:      req.Serial,
+		Lineage:     req.Lineage,
+	}
+	nextVersion, err := h.stateVersionRepo.CreateNextVersion(stateVersion)
+	if err != nil {
+		if errors.Is(err, repository.ErrStateSerialRegression) {
+			c.JSON(http.StatusConflict, gin.H{
+				"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": "incoming state serial is older than the current state version"}},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "500",
+					"title":  "Internal Server Error",
+					"detail": "Failed to create state version",
+				},
+			},
+		})
+		return
+	}
+
+	// Store the state object (encrypted at rest via the state service), keyed on the reserved
+	// version. On failure roll back the reserved row so no dangling version remains.
 	if h.stateService != nil {
 		if err := h.stateService.PutStateObject(c.Request.Context(), workspaceID, nextVersion, stateJSON); err != nil {
+			_ = h.stateVersionRepo.Delete(stateVersion.ID)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"errors": []gin.H{
 					{
@@ -879,28 +892,6 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 			})
 			return
 		}
-	}
-
-	// Create state version record (metadata only - actual state is in MinIO)
-	// Store minimal state data in DB for quick access (or empty if we want to force MinIO retrieval)
-	stateVersion := &models.StateVersion{
-		WorkspaceID: workspaceID,
-		Version:     nextVersion,
-		Serial:      req.Serial,
-		Lineage:     req.Lineage,
-	}
-
-	if err := h.stateVersionRepo.Create(stateVersion); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create state version",
-				},
-			},
-		})
-		return
 	}
 
 	// Materialize outputs/resources from the pushed state (State Storage Rework).

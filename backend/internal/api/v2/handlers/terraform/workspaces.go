@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -193,8 +194,89 @@ type CreateWorkspaceRequestV2 struct {
 					Type string `json:"type"`
 				} `json:"data"`
 			} `json:"project,omitempty"`
+			TagBindings *wsTagBindingsRel `json:"tag-bindings,omitempty"`
 		} `json:"relationships"`
 	} `json:"data"`
+}
+
+// wsTagBindingsRel captures the workspace `tag-bindings` relationship. The tfe provider serialises the
+// workspace `tags` map here with the key/value INLINE in each relationship-data member's attributes
+// (not in the top-level `included` array).
+type wsTagBindingsRel struct {
+	Data []struct {
+		Attributes struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
+func (t *wsTagBindingsRel) bindings() []models.TagBinding {
+	if t == nil {
+		return nil
+	}
+	out := make([]models.TagBinding, 0, len(t.Data))
+	for _, d := range t.Data {
+		if d.Attributes.Key != "" {
+			out = append(out, models.TagBinding{Key: d.Attributes.Key, Value: d.Attributes.Value})
+		}
+	}
+	return out
+}
+
+// wsTagsPresent reports whether a create request manages tag bindings.
+func (r *CreateWorkspaceRequestV2) wsTagsPresent() bool {
+	return r.Data.Relationships.TagBindings != nil
+}
+
+// wsEffectiveTagBindingsRequested reports whether the request asked to include effective tag bindings.
+// go-tfe sends the include value with underscores (`effective_tag_bindings`); accept the hyphenated
+// form too for robustness.
+func wsEffectiveTagBindingsRequested(c *gin.Context) bool {
+	inc := c.Query("include")
+	return strings.Contains(inc, "effective_tag_bindings") || strings.Contains(inc, "effective-tag-bindings")
+}
+
+func wsTagBindingLinkage(bindings []models.TagBinding, resourceType string) gin.H {
+	data := make([]gin.H, 0, len(bindings))
+	for i := range bindings {
+		id := bindings[i].ID
+		if id == "" {
+			id = bindings[i].Key
+		}
+		data = append(data, gin.H{"type": resourceType, "id": id})
+	}
+	return gin.H{"data": data}
+}
+
+func wsTagBindingIncluded(bindings []models.TagBinding, resourceType string) []gin.H {
+	out := make([]gin.H, 0, len(bindings))
+	for i := range bindings {
+		b := bindings[i]
+		id := b.ID
+		if id == "" {
+			id = b.Key
+		}
+		out = append(out, gin.H{"type": resourceType, "id": id, "attributes": gin.H{"key": b.Key, "value": b.Value}})
+	}
+	return out
+}
+
+// workspaceResponseWithTags builds the workspace read response, adding the effective-tag-bindings
+// relationship + included resources when ?include=effective-tag-bindings was requested (how the tfe
+// provider resource + data.tfe_workspace read a workspace's effective tags).
+func (h *WorkspaceHandlerV2) workspaceResponseWithTags(c *gin.Context, workspace *models.Workspace) gin.H {
+	data := formatWorkspaceResponse(workspace, h.vcsConnectionRepo)
+	resp := gin.H{"data": data}
+	if wsEffectiveTagBindingsRequested(c) {
+		eff, _ := repository.NewTagBindingRepository(h.db).EffectiveForWorkspace(workspace.ID)
+		if rels, ok := data["relationships"].(gin.H); ok {
+			rels["effective-tag-bindings"] = wsTagBindingLinkage(eff, "effective-tag-bindings")
+			rels["tag-bindings"] = wsTagBindingLinkage(eff, "tag-bindings")
+		}
+		resp["included"] = wsTagBindingIncluded(eff, "effective-tag-bindings")
+	}
+	return resp
 }
 
 // UpdateWorkspaceRequestV2 uses JSON:API format (TFE-compatible)
@@ -229,7 +311,163 @@ type UpdateWorkspaceRequestV2 struct {
 			RunTimeout                 *int            `json:"run-timeout,omitempty"`
 			ForceDelete                *bool           `json:"force-delete,omitempty"`
 		} `json:"attributes"`
+		Relationships *struct {
+			TagBindings *wsTagBindingsRel `json:"tag-bindings,omitempty"`
+		} `json:"relationships,omitempty"`
 	} `json:"data"`
+}
+
+// wsTagsPresent reports whether an update request manages tag bindings.
+func (r *UpdateWorkspaceRequestV2) wsTagsPresent() bool {
+	return r.Data.Relationships != nil && r.Data.Relationships.TagBindings != nil
+}
+
+// --- Workspace list tag filtering (data.tfe_workspace_ids compatibility) ---------------------------
+//
+// The tfe provider's data.tfe_workspace_ids sends tag filters as query params on the list endpoint:
+//   search[tags]          — comma-separated tag names to include (legacy `tag_names`)
+//   search[exclude-tags]  — comma-separated tag names to exclude (`exclude_tags`)
+//   filter[tagged][N][key], filter[tagged][N][value] — key/value binding include filters (`tag_filters.include`)
+//   include=effective_tag_bindings — also embed each workspace's effective tags in the response
+//
+// Stackweaver models tags as key/value *bindings* (not legacy flat names), so the legacy name filters
+// map onto binding *keys*: `search[tags]=env` matches workspaces whose effective tags contain key `env`
+// (any value). The key/value `filter[tagged]` path matches on exact key=value. All filters use AND
+// semantics (a workspace must satisfy every include term and no exclude term), matching TFE.
+
+// wsParseCommaList splits a comma-separated query value into trimmed, non-empty items.
+func wsParseCommaList(v string) []string {
+	out := []string{}
+	for _, p := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// wsParseTaggedFilter reads filter[tagged][N][key]/[value] pairs (contiguous from index 0).
+func wsParseTaggedFilter(c *gin.Context) []models.TagBinding {
+	var out []models.TagBinding
+	for i := 0; ; i++ {
+		key := strings.TrimSpace(c.Query(fmt.Sprintf("filter[tagged][%d][key]", i)))
+		if key == "" {
+			break
+		}
+		out = append(out, models.TagBinding{Key: key, Value: c.Query(fmt.Sprintf("filter[tagged][%d][value]", i))})
+	}
+	return out
+}
+
+// wsTagFilter captures a parsed set of workspace tag filters and whether any are active.
+type wsTagFilter struct {
+	includeKeys  []string            // search[tags] → effective tags must contain these keys
+	excludeKeys  []string            // search[exclude-tags] → effective tags must NOT contain these keys
+	includePairs []models.TagBinding // filter[tagged] → effective tags must contain these key=value pairs
+}
+
+func wsParseTagFilter(c *gin.Context) wsTagFilter {
+	return wsTagFilter{
+		includeKeys:  wsParseCommaList(c.Query("search[tags]")),
+		excludeKeys:  wsParseCommaList(c.Query("search[exclude-tags]")),
+		includePairs: wsParseTaggedFilter(c),
+	}
+}
+
+func (f wsTagFilter) active() bool {
+	return len(f.includeKeys) > 0 || len(f.excludeKeys) > 0 || len(f.includePairs) > 0
+}
+
+// matches reports whether a workspace's effective tags satisfy every filter term.
+func (f wsTagFilter) matches(eff []models.TagBinding) bool {
+	byKey := make(map[string]string, len(eff))
+	for _, t := range eff {
+		byKey[t.Key] = t.Value
+	}
+	for _, k := range f.includeKeys {
+		if _, ok := byKey[k]; !ok {
+			return false
+		}
+	}
+	for _, p := range f.includePairs {
+		if v, ok := byKey[p.Key]; !ok || v != p.Value {
+			return false
+		}
+	}
+	for _, k := range f.excludeKeys {
+		if _, ok := byKey[k]; ok {
+			return false
+		}
+	}
+	return true
+}
+
+// wsEffectiveTagsBatch computes each workspace's effective tags (project-inherited + own, own wins on a
+// key conflict) for a set of loaded workspaces using two batch queries. Returns workspaceID → sorted
+// bindings. Mirrors TagBindingRepository.EffectiveForWorkspace without the per-workspace N+1.
+func wsEffectiveTagsBatch(db *gorm.DB, workspaces []models.Workspace) (map[string][]models.TagBinding, error) {
+	tagRepo := repository.NewTagBindingRepository(db)
+
+	projectIDSet := map[uuid.UUID]struct{}{}
+	wsIDs := make([]string, 0, len(workspaces))
+	for i := range workspaces {
+		wsIDs = append(wsIDs, workspaces[i].ID)
+		if workspaces[i].ProjectID != uuid.Nil {
+			projectIDSet[workspaces[i].ProjectID] = struct{}{}
+		}
+	}
+	projectIDs := make([]uuid.UUID, 0, len(projectIDSet))
+	for id := range projectIDSet {
+		projectIDs = append(projectIDs, id)
+	}
+
+	projTags, err := tagRepo.ListByProjects(projectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch-load project tag bindings: %w", err)
+	}
+	ownTags, err := tagRepo.ListByWorkspaces(wsIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch-load workspace tag bindings: %w", err)
+	}
+
+	result := make(map[string][]models.TagBinding, len(workspaces))
+	for i := range workspaces {
+		ws := &workspaces[i]
+		merged := map[string]string{}
+		if ws.ProjectID != uuid.Nil {
+			for _, t := range projTags[ws.ProjectID] {
+				merged[t.Key] = t.Value
+			}
+		}
+		for _, t := range ownTags[ws.ID] {
+			merged[t.Key] = t.Value
+		}
+		keys := make([]string, 0, len(merged))
+		for k := range merged {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make([]models.TagBinding, 0, len(keys))
+		for _, k := range keys {
+			out = append(out, models.TagBinding{Key: k, Value: merged[k]})
+		}
+		result[ws.ID] = out
+	}
+	return result, nil
+}
+
+// wsEffTagRelation builds the effective-tag-bindings relationship linkage + included resources for one
+// workspace in a list response. IDs are workspace-scoped (`<wsID>.<key>`) so JSON:API `included` stays
+// unique across workspaces that share a tag key with different values.
+func wsEffTagRelation(wsID string, eff []models.TagBinding) (gin.H, []gin.H) {
+	data := make([]gin.H, 0, len(eff))
+	included := make([]gin.H, 0, len(eff))
+	for _, b := range eff {
+		id := wsID + "." + b.Key
+		data = append(data, gin.H{"type": "effective-tag-bindings", "id": id})
+		included = append(included, gin.H{"type": "effective-tag-bindings", "id": id, "attributes": gin.H{"key": b.Key, "value": b.Value}})
+	}
+	return gin.H{"data": data}, included
 }
 
 // ListByOrganization lists workspaces by organization name (TFE-compatible)
@@ -289,12 +527,22 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 	}
 	offset := (pageNumber - 1) * pageSize
 
+	// Tag filtering (data.tfe_workspace_ids). When active, we load the full accessible set and filter on
+	// effective tags in memory so pagination + totals reflect the *filtered* result; the DB can't express
+	// effective-tag (project-inherited) matching in one query. Otherwise keep the paginated fast path.
+	tagFilter := wsParseTagFilter(c)
+	includeEff := wsEffectiveTagBindingsRequested(c)
+	repoLimit, repoOffset := pageSize, offset
+	if tagFilter.active() {
+		repoLimit, repoOffset = -1, 0 // -1 disables GORM's LIMIT → load all, then filter+paginate below
+	}
+
 	var workspaces []models.Workspace
 	var total int64
 
 	if hasOrgReadWorkspaces {
 		// User has organization-level read-workspaces permission - show all workspaces
-		workspaces, total, err = h.workspaceRepo.ListByOrganization(orgName, pageSize, offset)
+		workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganization(orgName, repoLimit, repoOffset)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"errors": []gin.H{
@@ -352,7 +600,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 			}
 
 			// Query workspaces that are in the accessible list
-			workspaces, total, err = h.workspaceRepo.ListByOrganizationAndIDs(orgName, workspaceIDList, pageSize, offset)
+			workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganizationAndIDs(orgName, workspaceIDList, repoLimit, repoOffset)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"errors": []gin.H{
@@ -365,6 +613,48 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 				})
 				return
 			}
+		}
+	}
+
+	// effByWs holds each response workspace's effective tags, populated when the caller asked to embed
+	// them (?include=effective_tag_bindings) or when a tag filter needs them for matching.
+	var effByWs map[string][]models.TagBinding
+
+	if tagFilter.active() {
+		// Compute effective tags across the full loaded set, keep only matches, then paginate in memory.
+		effAll, err := wsEffectiveTagsBatch(h.db, workspaces)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to compute effective tags"}},
+			})
+			return
+		}
+		filtered := make([]models.Workspace, 0, len(workspaces))
+		for i := range workspaces {
+			if tagFilter.matches(effAll[workspaces[i].ID]) {
+				filtered = append(filtered, workspaces[i])
+			}
+		}
+		total = int64(len(filtered))
+		// Apply the requested page over the filtered result.
+		start := offset
+		if start > len(filtered) {
+			start = len(filtered)
+		}
+		end := start + pageSize
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		workspaces = filtered[start:end]
+		effByWs = effAll // reused below; superset is fine (only paginated IDs are looked up)
+	} else if includeEff {
+		// No filtering, but the caller wants effective tags embedded for this page.
+		effByWs, err = wsEffectiveTagsBatch(h.db, workspaces)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to compute effective tags"}},
+			})
+			return
 		}
 	}
 
@@ -397,6 +687,15 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 				},
 			}
 			included = append(included, formatRunForInclusion(run))
+		}
+
+		// Embed effective tag bindings when ?include=effective_tag_bindings was requested (the tfe
+		// provider's data.tfe_workspace_ids tag_filters path relies on this to read each workspace's tags).
+		if includeEff {
+			rels := wsData["relationships"].(gin.H)
+			linkage, inc := wsEffTagRelation(workspaces[i].ID, effByWs[workspaces[i].ID])
+			rels["effective-tag-bindings"] = linkage
+			included = append(included, inc...)
 		}
 
 		workspacesData[i] = wsData
@@ -727,9 +1026,7 @@ func (h *WorkspaceHandlerV2) GetByOrganizationAndName(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatWorkspaceResponse(workspace, h.vcsConnectionRepo),
-	})
+	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
 
 // Create creates a workspace in an organization (TFE-compatible)
@@ -1137,6 +1434,14 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// TFE tag bindings: apply the workspace's `tags` (sent as a tag-bindings relation, values in
+	// `included`) if the request manages them.
+	if req.wsTagsPresent() {
+		if err := repository.NewTagBindingRepository(h.db).ReplaceForWorkspace(workspace.ID, req.Data.Relationships.TagBindings.bindings()); err != nil {
+			_ = err // best-effort
+		}
 	}
 
 	// Register repository-scoped webhooks when the workspace is linked to an ADO repo.
@@ -2291,9 +2596,7 @@ func (h *WorkspaceHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatWorkspaceResponse(workspace, h.vcsConnectionRepo),
-	})
+	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
 
 // UpdateByID updates a workspace by its ID (TFE-compatible)
@@ -2513,9 +2816,14 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		return
 	}
 
+	// TFE tag bindings: replace the workspace's tags when the request manages them.
+	if req.wsTagsPresent() {
+		if err := repository.NewTagBindingRepository(h.db).ReplaceForWorkspace(workspace.ID, req.Data.Relationships.TagBindings.bindings()); err != nil {
+			_ = err
+		}
+	}
+
 	h.maybeRegisterADOWebhook(workspace.VCSConnectionID, workspace.VCSRepository)
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatWorkspaceResponse(workspace, h.vcsConnectionRepo),
-	})
+	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
