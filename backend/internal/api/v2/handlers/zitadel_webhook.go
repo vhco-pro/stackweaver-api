@@ -13,11 +13,20 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 )
+
+// webhookTolerance is the maximum allowed skew between the signed timestamp and now
+// for a Zitadel webhook to be accepted. The timestamp is covered by the HMAC so it
+// cannot be forged, but without a freshness window a captured valid request replays
+// forever (AUD-041). Zitadel emits `t=<unix_seconds>`; 5 minutes matches the
+// Stripe-style tolerance the signature scheme is modeled on.
+const webhookTolerance = 5 * time.Minute
 
 // ZitadelWebhookHandler handles Zitadel Actions V2 webhook callbacks.
 // Actions V2 uses external HTTP endpoints (webhooks) instead of embedded JavaScript.
@@ -92,6 +101,20 @@ func verifySignature(sigHeader, rawBody, signingKey string, isProduction bool) b
 
 	if !hmac.Equal([]byte(computed), []byte(signature)) {
 		logger.Warnf("Zitadel webhook: signature mismatch — refusing webhook")
+		return false
+	}
+
+	// AUD-041: the signature proves the request is authentic but not that it is recent.
+	// The timestamp is inside the HMAC (so it cannot be altered without the key), yet a
+	// captured valid request could be replayed indefinitely — re-driving sso_groups/RBAC
+	// sync. Reject when the signed timestamp is outside ±5 minutes of now.
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		logger.Warnf("Zitadel webhook: unparseable timestamp %q — refusing webhook", timestamp)
+		return false
+	}
+	if age := time.Since(time.Unix(ts, 0)); age > webhookTolerance || age < -webhookTolerance {
+		logger.Warnf("Zitadel webhook: timestamp outside tolerance (age %s) — refusing replay", age.Round(time.Second))
 		return false
 	}
 

@@ -14,8 +14,14 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/variable"
 	"gorm.io/gorm"
 )
+
+// maskedValue is the placeholder returned for a sensitive variable value on every read
+// path — the real value is never sent to clients (TFE-compatible). It is defined once so
+// the write paths (AUD-105) can reliably detect a round-tripped masked value and skip it.
+const maskedValue = "••••••••"
 
 type VariableSetHandlerV2 struct {
 	variableSetRepo         *repository.VariableSetRepository
@@ -26,6 +32,7 @@ type VariableSetHandlerV2 struct {
 	jobTemplateRepo         *repository.AnsibleJobTemplateRepository
 	authService             *auth.Service
 	rbacService             *rbac.Service
+	variableService         *variable.Service
 }
 
 func NewVariableSetHandlerV2(
@@ -37,6 +44,7 @@ func NewVariableSetHandlerV2(
 	jobTemplateRepo *repository.AnsibleJobTemplateRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	variableService *variable.Service,
 ) *VariableSetHandlerV2 {
 	return &VariableSetHandlerV2{
 		variableSetRepo:         variableSetRepo,
@@ -47,7 +55,29 @@ func NewVariableSetHandlerV2(
 		jobTemplateRepo:         jobTemplateRepo,
 		authService:             authService,
 		rbacService:             rbacService,
+		variableService:         variableService,
 	}
+}
+
+// encryptVarsetValue encrypts a variable-set variable's value in place when it is
+// sensitive, setting the Encrypted flag — mirroring the workspace-variable path
+// (variable.Service.CreateVariable). Non-sensitive values are stored verbatim with
+// Encrypted=false. When no variable service is configured the value is left as-is so
+// callers degrade to the previous (plaintext) behavior rather than erroring; in
+// production the encryption key fails loud at startup (AUD-013), so this never triggers.
+// AUD-104: sensitive variable-set values were previously stored in cleartext at rest.
+func (h *VariableSetHandlerV2) encryptVarsetValue(v *models.VariableSetVariable) error {
+	if !v.Sensitive || h.variableService == nil {
+		v.Encrypted = false
+		return nil
+	}
+	enc, err := h.variableService.Encrypt(v.Value)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt variable value: %w", err)
+	}
+	v.Value = enc
+	v.Encrypted = true
+	return nil
 }
 
 // authorizeVarset gates the caller (already resolved from the context) against a
@@ -159,7 +189,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		for j, v := range vs.Variables {
 			value := v.Value
 			if v.Sensitive {
-				value = "••••••••"
+				value = maskedValue
 			}
 			variablesData[j] = gin.H{
 				"id":   v.ID,
@@ -219,7 +249,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		}
 
 		// Include projects if organization-scoped and has projects assigned
-		if vs.Scope == "organization" && len(vs.Projects) > 0 {
+		if len(vs.Projects) > 0 { // AUD-150: project attachments exist only on org-owned sets
 			projectsData := make([]gin.H, len(vs.Projects))
 			for j, p := range vs.Projects {
 				projectsData[j] = gin.H{
@@ -233,7 +263,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		}
 
 		// Include workspaces if workspace-scoped and has workspaces assigned
-		if vs.Scope == "workspace" && len(vs.Workspaces) > 0 {
+		if len(vs.Workspaces) > 0 { // AUD-150: workspace attachments exist only on org-owned sets
 			workspacesData := make([]gin.H, len(vs.Workspaces))
 			for j, w := range vs.Workspaces {
 				workspacesData[j] = gin.H{
@@ -247,7 +277,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		}
 
 		// TFE uses "global" and "priority" instead of "scope"
-		global := vs.Scope == "organization"
+		global := vs.Global // AUD-150: global is now its own field, independent of ownership
 
 		attributes := gin.H{
 			"name":            vs.Name,
@@ -324,7 +354,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	for i, v := range variables {
 		value := v.Value
 		if v.Sensitive {
-			value = "••••••••"
+			value = maskedValue
 		}
 		variablesData[i] = gin.H{
 			"id":   v.ID,
@@ -343,7 +373,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	// Get projects for this set (if organization-scoped)
 	// TFE spec: projects relationship is just id/type, not full attributes
 	projectsData := make([]gin.H, 0)
-	if variableSet.Scope == "organization" && len(variableSet.Projects) > 0 {
+	if len(variableSet.Projects) > 0 { // AUD-150: project attachments exist only on org-owned sets
 		for _, p := range variableSet.Projects {
 			projectsData = append(projectsData, gin.H{
 				"id":   p.ID.String(),
@@ -355,7 +385,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	// Get workspaces for this set (if workspace-scoped)
 	// TFE spec: workspaces relationship is just id/type, not full attributes
 	workspacesData := make([]gin.H, 0)
-	if variableSet.Scope == "workspace" && len(variableSet.Workspaces) > 0 {
+	if len(variableSet.Workspaces) > 0 { // AUD-150: workspace attachments exist only on org-owned sets
 		for _, w := range variableSet.Workspaces {
 			workspacesData = append(workspacesData, gin.H{
 				"id":   w.ID,
@@ -364,9 +394,15 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 		}
 	}
 
-	// Get organization for relationships if not already retrieved
+	// Get organization for relationships if not already retrieved (AUD-129: a missing
+	// org row is an internal FK inconsistency, not a client error — fail loudly rather
+	// than nil-deref on org.Name below).
 	if org == nil {
-		org, _ = h.orgRepo.GetByID(variableSet.OrganizationID)
+		org, err = h.orgRepo.GetByID(variableSet.OrganizationID)
+		if err != nil || org == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to load organization for variable set"}}})
+			return
+		}
 	}
 
 	relationships := gin.H{
@@ -414,7 +450,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	}
 
 	// TFE uses "global" and "priority" instead of "scope"
-	global := variableSet.Scope == "organization"
+	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"id":   variableSet.ID,
@@ -469,14 +505,6 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 
 	attrs := req.Data.Attributes
 
-	// TFE uses "global" instead of "scope"
-	// global=true means organization-scoped (applies to all workspaces)
-	// global=false means workspace-scoped (applies to specific workspaces)
-	scope := "workspace" // Default
-	if attrs.Global {
-		scope = "organization"
-	}
-
 	// Handle parent relationship - determine if variable set is project-owned or organization-owned
 	var projectID *uuid.UUID
 	if req.Data.Relationships.Parent.Data != nil {
@@ -511,22 +539,30 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 		return
 	}
 
+	// AUD-150: Scope reflects OWNERSHIP (derived from ProjectID); `global` is stored independently.
+	// A project-owned set cannot be global (rejected above); an org-owned set may be global or scoped
+	// to explicitly-attached workspaces/projects.
+	scope := "organization"
+	if projectID != nil {
+		scope = "project"
+	}
+
 	variableSet := &models.VariableSet{
 		OrganizationID: org.ID,
 		Name:           attrs.Name,
 		Description:    attrs.Description,
 		Scope:          scope,
+		Global:         attrs.Global,
 		Priority:       attrs.Priority,
 		ProjectID:      projectID, // nil for organization-owned, set for project-owned
 		CreatedBy:      user.ID,
 	}
 
-	if err := h.variableSetRepo.Create(variableSet); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create variable set"}}})
-		return
-	}
-
-	// Handle relationships.vars if provided (create variables in the set)
+	// Collect the variables and workspace/project assignments up front, then create the
+	// whole set atomically (AUD-119). Previously each row was created individually with its
+	// error ignored (`// Ignore errors for now`), so a mid-loop failure returned 201 with
+	// variables/assignments silently dropped and no rollback.
+	var variables []*models.VariableSetVariable
 	if len(req.Data.Relationships.Vars.Data) > 0 {
 		for _, varData := range req.Data.Relationships.Vars.Data {
 			varType, _ := varData["type"].(string)
@@ -565,55 +601,66 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 			}
 
 			variable := &models.VariableSetVariable{
-				VariableSetID: variableSet.ID,
-				Key:           key,
-				Value:         value,
-				Description:   description,
-				Category:      category,
-				HCL:           hcl,
-				Sensitive:     sensitive,
+				Key:         key,
+				Value:       value,
+				Description: description,
+				Category:    category,
+				HCL:         hcl,
+				Sensitive:   sensitive,
 			}
-
-			_ = h.variableSetVariableRepo.Create(variable) // Ignore errors for now
+			// AUD-104: encrypt sensitive values before storage. A failure here must abort
+			// the whole create (AUD-119) rather than silently drop the variable or store cleartext.
+			if err := h.encryptVarsetValue(variable); err != nil {
+				logger.Warnf("Failed to encrypt varset variable %q: %v", key, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt sensitive variable"}}})
+				return
+			}
+			variables = append(variables, variable)
 		}
 	}
 
-	// Handle relationships.workspaces if provided
+	var workspaceIDs []string
 	if len(req.Data.Relationships.Workspaces.Data) > 0 {
 		for _, wsData := range req.Data.Relationships.Workspaces.Data {
 			wsID, _ := wsData["id"].(string)
 			if wsID != "" {
-				_ = h.variableSetRepo.AddWorkspace(variableSet.ID, wsID) // Ignore errors for now
+				workspaceIDs = append(workspaceIDs, wsID)
 			}
 		}
 	}
 
-	// Handle relationships.projects if provided
+	var projectIDs []uuid.UUID
 	if len(req.Data.Relationships.Projects.Data) > 0 {
 		for _, projData := range req.Data.Relationships.Projects.Data {
 			projID, _ := projData["id"].(string)
 			projUUID, err := uuid.Parse(projID)
 			if err == nil {
-				_ = h.variableSetRepo.AddProject(variableSet.ID, projUUID) // Ignore errors for now
+				projectIDs = append(projectIDs, projUUID)
 			}
 		}
 	}
 
+	if err := h.variableSetRepo.CreateWithRelations(variableSet, variables, workspaceIDs, projectIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create variable set"}}})
+		return
+	}
+
 	// TFE uses "global" instead of "scope"
-	global := variableSet.Scope == "organization"
+	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
 	c.JSON(http.StatusCreated, gin.H{
 		"data": gin.H{
 			"id":   variableSet.ID,
 			"type": "varsets", // TFE uses "varsets" not "variable-sets"
 			"attributes": gin.H{
-				"name":            variableSet.Name,
-				"description":     variableSet.Description,
-				"global":          global,               // TFE-compatible
-				"priority":        variableSet.Priority, // TFE-compatible
-				"updated-at":      variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				"var-count":       0,
-				"workspace-count": 0,
-				"project-count":   0,
+				"name":        variableSet.Name,
+				"description": variableSet.Description,
+				"global":      global,               // TFE-compatible
+				"priority":    variableSet.Priority, // TFE-compatible
+				"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+				// AUD-129: report real counts from what was just created instead of hardcoded 0.
+				"var-count":       len(variables),
+				"workspace-count": len(workspaceIDs),
+				"project-count":   len(projectIDs),
 			},
 			"relationships": gin.H{
 				"organization": gin.H{
@@ -704,18 +751,14 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 		variableSet.Description = *attrs.Description
 	}
 	if attrs.Global != nil {
-		// TFE uses "global" instead of "scope"
-		if *attrs.Global {
-			variableSet.Scope = "organization"
-		} else {
-			variableSet.Scope = "workspace"
-		}
+		variableSet.Global = *attrs.Global // AUD-150: global is its own field, independent of ownership
 	}
 	if attrs.Priority != nil {
 		variableSet.Priority = *attrs.Priority
 	}
 
-	// Handle parent relationship update if provided
+	// Handle parent relationship update if provided. AUD-150: Scope tracks ownership (derived from
+	// ProjectID); `global` is orthogonal and a project-owned set may not be global.
 	if req.Data.Relationships.Parent.Data != nil {
 		parentType, _ := req.Data.Relationships.Parent.Data["type"].(string)
 		parentID, _ := req.Data.Relationships.Parent.Data["id"].(string)
@@ -726,17 +769,19 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 			if err == nil {
 				project, err := h.projectRepo.GetByID(projectUUID)
 				if err == nil && project.OrganizationID == variableSet.OrganizationID {
-					variableSet.ProjectID = &projectUUID
 					// If parent is project, global must be false (TFE requirement)
-					if variableSet.Scope == "organization" {
+					if variableSet.Global {
 						c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Project-owned variable sets cannot be global"}}})
 						return
 					}
+					variableSet.ProjectID = &projectUUID
+					variableSet.Scope = "project"
 				}
 			}
 		case "organizations":
 			// Organization-owned: clear project ID
 			variableSet.ProjectID = nil
+			variableSet.Scope = "organization"
 		}
 	}
 
@@ -745,9 +790,14 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 		return
 	}
 
-	// Get organization for relationships (org already declared above, use = not :=)
+	// Get organization for relationships (org already declared above, use = not :=).
+	// AUD-129: guard the ignored-error fetch so a missing org row can't nil-deref on org.Name.
 	if org == nil {
-		org, _ = h.orgRepo.GetByID(variableSet.OrganizationID)
+		org, err = h.orgRepo.GetByID(variableSet.OrganizationID)
+		if err != nil || org == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to load organization for variable set"}}})
+			return
+		}
 	}
 
 	// Build parent relationship - project-owned or organization-owned
@@ -766,20 +816,22 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 	}
 
 	// TFE uses "global" instead of "scope"
-	global := variableSet.Scope == "organization"
+	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"id":   variableSet.ID,
 			"type": "varsets", // TFE uses "varsets" not "variable-sets"
 			"attributes": gin.H{
-				"name":            variableSet.Name,
-				"description":     variableSet.Description,
-				"global":          global,               // TFE-compatible
-				"priority":        variableSet.Priority, // TFE-compatible
-				"updated-at":      variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				"var-count":       0, // Will be populated if variables are loaded
-				"workspace-count": 0,
-				"project-count":   0,
+				"name":        variableSet.Name,
+				"description": variableSet.Description,
+				"global":      global,               // TFE-compatible
+				"priority":    variableSet.Priority, // TFE-compatible
+				"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+				// AUD-129: report the real counts from the preloaded set rather than
+				// hardcoding 0 (GetByID preloads Variables/Workspaces/Projects).
+				"var-count":       len(variableSet.Variables),
+				"workspace-count": len(variableSet.Workspaces),
+				"project-count":   len(variableSet.Projects),
 			},
 			"relationships": gin.H{
 				"organization": gin.H{
@@ -891,9 +943,10 @@ func (h *VariableSetHandlerV2) AssignWorkspace(c *gin.Context) {
 		return
 	}
 
-	// Only workspace-scoped variable sets can be assigned to workspaces
-	if variableSet.Scope != "workspace" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only workspace-scoped variable sets can be assigned to workspaces"}}})
+	// AUD-150: only organization-owned variable sets can be attached to workspaces. Project-owned sets
+	// (ProjectID set) apply to their whole project and are not individually workspace-attachable.
+	if variableSet.ProjectID != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only organization-owned variable sets can be assigned to workspaces"}}})
 		return
 	}
 
@@ -1043,9 +1096,10 @@ func (h *VariableSetHandlerV2) AssignProject(c *gin.Context) {
 		return
 	}
 
-	// Only organization-scoped variable sets can be assigned to projects
-	if variableSet.Scope != "organization" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only organization-scoped variable sets can be assigned to projects"}}})
+	// AUD-150: only organization-owned variable sets can be attached to projects. Project-owned sets
+	// (ProjectID set) belong to a single project and are not attachable to others.
+	if variableSet.ProjectID != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only organization-owned variable sets can be assigned to projects"}}})
 		return
 	}
 
@@ -1356,7 +1410,7 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 		}
 
 		// Include projects if organization-scoped and has projects assigned
-		if vs.Scope == "organization" && len(vs.Projects) > 0 {
+		if len(vs.Projects) > 0 { // AUD-150: project attachments exist only on org-owned sets
 			projectsData := make([]gin.H, len(vs.Projects))
 			for j, p := range vs.Projects {
 				projectsData[j] = gin.H{
@@ -1370,7 +1424,7 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 		}
 
 		// TFE uses "global" instead of "scope"
-		global := vs.Scope == "organization"
+		global := vs.Global // AUD-150: global is now its own field, independent of ownership
 
 		data[i] = gin.H{
 			"id":   vs.ID,
@@ -1481,7 +1535,7 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 	for i, v := range variables {
 		value := v.Value
 		if v.Sensitive {
-			value = "••••••••"
+			value = maskedValue
 		}
 		data[i] = gin.H{
 			"id":   v.ID,
@@ -1567,7 +1621,7 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 	data := gin.H{
 		"id":   variable.ID,
@@ -1674,7 +1728,11 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		Category:      category,
 		HCL:           attrs.HCL,
 		Sensitive:     attrs.Sensitive,
-		Encrypted:     false, // Legacy field, not in TFE spec
+	}
+	// AUD-104: encrypt the value at rest when the variable is sensitive.
+	if err := h.encryptVarsetValue(variable); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+		return
 	}
 
 	if err := h.variableSetVariableRepo.Create(variable); err != nil {
@@ -1722,7 +1780,7 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -1838,9 +1896,6 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if attrs.Key != nil {
 		variable.Key = *attrs.Key
 	}
-	if attrs.Value != nil {
-		variable.Value = *attrs.Value
-	}
 	if attrs.Description != nil {
 		variable.Description = *attrs.Description
 	}
@@ -1854,8 +1909,22 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if attrs.HCL != nil {
 		variable.HCL = *attrs.HCL
 	}
+	// Resolve the final sensitivity before touching the value so it is encrypted correctly.
 	if attrs.Sensitive != nil {
 		variable.Sensitive = *attrs.Sensitive
+	}
+	// AUD-105: a nil value means "unchanged"; a value equal to the masked placeholder means
+	// the client round-tripped a masked read (the SPA and the TFE provider resubmit the whole
+	// resource when editing an unrelated field) — writing it would silently overwrite the real
+	// secret with bullets and break every consuming run. Only overwrite when a genuine new
+	// value is supplied, and (AUD-104) encrypt it at rest when sensitive. Leaving the value
+	// untouched preserves the existing stored ciphertext/plaintext and its Encrypted flag.
+	if attrs.Value != nil && *attrs.Value != maskedValue {
+		variable.Value = *attrs.Value
+		if err := h.encryptVarsetValue(variable); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+			return
+		}
 	}
 
 	if err := h.variableSetVariableRepo.Update(variable); err != nil {
@@ -1865,7 +1934,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedValue
 	}
 
 	c.JSON(http.StatusOK, gin.H{

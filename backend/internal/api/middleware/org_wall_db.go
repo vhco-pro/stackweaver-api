@@ -17,6 +17,7 @@ type dbOrgResolver struct {
 	project          *repository.ProjectRepository
 	workspace        *repository.WorkspaceRepository
 	run              *repository.RunRepository
+	runTrigger       *repository.RunTriggerRepository
 	configVersion    *repository.ConfigurationVersionRepository
 	stateVersion     *repository.StateVersionRepository
 	variable         *repository.VariableRepository
@@ -41,6 +42,7 @@ type dbOrgResolver struct {
 	ansibleJob       *repository.AnsibleJobRepository
 	ansibleSchedule  *repository.AnsibleScheduleRepository
 	ansibleWorkflow  *repository.AnsibleWorkflowRepository
+	notificationCfg  *repository.NotificationConfigurationRepository
 }
 
 // NewDBOrgResolver builds the production OrgResolver from a database handle.
@@ -50,6 +52,7 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		project:          repository.NewProjectRepository(db),
 		workspace:        repository.NewWorkspaceRepository(db),
 		run:              repository.NewRunRepository(db),
+		runTrigger:       repository.NewRunTriggerRepository(db),
 		configVersion:    repository.NewConfigurationVersionRepository(db),
 		stateVersion:     repository.NewStateVersionRepository(db),
 		variable:         repository.NewVariableRepository(db),
@@ -74,6 +77,7 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		ansibleJob:       repository.NewAnsibleJobRepository(db),
 		ansibleSchedule:  repository.NewAnsibleScheduleRepository(db),
 		ansibleWorkflow:  repository.NewAnsibleWorkflowRepository(db),
+		notificationCfg:  repository.NewNotificationConfigurationRepository(db),
 	}
 }
 
@@ -167,6 +171,23 @@ func (r *dbOrgResolver) ByRunID(id string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return r.orgByWorkspaceStr(run.WorkspaceID)
+}
+
+func (r *dbOrgResolver) ByRunTriggerID(id string) (uuid.UUID, error) {
+	rt, err := r.runTrigger.GetByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	// Resolve via the TARGET workspace (the trigger belongs to the org that owns the workspace it runs in).
+	return r.orgByWorkspaceStr(rt.WorkspaceID)
+}
+
+func (r *dbOrgResolver) ByNotificationConfigID(id string) (uuid.UUID, error) {
+	nc, err := r.notificationCfg.GetByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return r.orgByWorkspaceStr(nc.WorkspaceID)
 }
 
 func (r *dbOrgResolver) ByConfigVersionID(id string) (uuid.UUID, error) {
