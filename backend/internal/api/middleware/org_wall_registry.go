@@ -11,6 +11,8 @@ var (
 	rProject                = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByProjectID(v) }
 	rWorkspace              = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByWorkspaceID(v) }
 	rRun                    = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunID(v) }
+	rRunTrigger             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunTriggerID(v) }
+	rNotificationConfig     = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByNotificationConfigID(v) }
 	rConfigVersion          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByConfigVersionID(v) }
 	rStateVersion           = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByStateVersionID(v) }
 	rVariable               = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByVariableID(v) }
@@ -74,6 +76,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/entitlement-set":          orgByName(),
 	"/api/v2/organizations/:name/organization-memberships": orgByName(),
 	"/api/v2/organizations/:name/effective-permissions":    orgByName(),
+	"/api/v2/organizations/:name/authentication-token":     orgByName(),
 	"/api/v2/organization-memberships/:id":                 resource("id", rOrgMembership),
 
 	// --- teams ---
@@ -81,11 +84,15 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/teams/:teamName":              orgByName(),
 	"/api/v2/teams/:id":                                        resource("id", rTeam),
 	"/api/v2/teams/:id/relationships/organization-memberships": resource("id", rTeam),
+	"/api/v2/teams/:id/relationships/users":                    resource("id", rTeam),
 
 	// --- projects ---
 	"/api/v2/organizations/:name/projects":                      orgByName(),
 	"/api/v2/organizations/:name/projects/:project_name":        orgByName(),
 	"/api/v2/projects/:id":                                      resource("id", rProject),
+	"/api/v2/projects/:id/tag-bindings":                         resource("id", rProject),
+	"/api/v2/projects/:id/notification-configurations":          resource("id", rProject),
+	"/api/v2/projects/:id/effective-tag-bindings":               resource("id", rProject),
 	"/api/v2/projects/:id/ansible-config":                       resource("id", rProject),
 	"/api/v2/projects/:id/relationships/team-access":            resource("id", rProject),
 	"/api/v2/projects/:id/relationships/team-access/:access_id": resource("access_id", rTeamProjectAccess),
@@ -117,11 +124,18 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/workspaces/:workspace_name/actions/safe-delete": orgByName(),
 	"/api/v2/terraform/workspaces/:id":                                           resource("id", rWorkspace),
 	"/api/v2/workspaces/:id":                                                     resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/tag-bindings":                                        resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/notification-configurations":                         resource("id", rWorkspace),
+	"/api/v2/notification-configurations/:id":                                    resource("id", rNotificationConfig),
+	"/api/v2/notification-configurations/:id/actions/verify":                     resource("id", rNotificationConfig),
+	"/api/v2/workspaces/:id/effective-tag-bindings":                              resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/lock":                                        resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/unlock":                                      resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/force-unlock":                                resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/safe-delete":                                 resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/runs":                                                resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/run-triggers":                                        resource("id", rWorkspace),
+	"/api/v2/run-triggers/:id":                                                   resource("id", rRunTrigger),
 	"/api/v2/workspaces/:id/configuration-versions":                              resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/state-versions":                                      resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/state-versions/remove-resource":                      resource("id", rWorkspace),
@@ -147,6 +161,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/runs":                           agnostic(),
 	"/api/v2/runs/:id":                       resource("id", rRun),
 	"/api/v2/runs/:id/plan":                  resource("id", rRun),
+	"/api/v2/runs/:id/task-stages":           resource("id", rRun),
 	"/api/v2/runs/:id/outputs":               resource("id", rRun),
 	"/api/v2/runs/:id/logs":                  resource("id", rRun),
 	"/api/v2/runs/:id/logs/plan":             resource("id", rRun),

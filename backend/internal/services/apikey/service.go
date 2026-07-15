@@ -307,6 +307,63 @@ func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name stri
 	return apiKey, key, nil
 }
 
+// orgTokenName is the display name given to every organization authentication token
+// (tfe_organization_token). The token is identified as a singleton by APIKey.IsOrgToken, not this name.
+const orgTokenName = "Organization Token"
+
+// CreateOrganizationToken mints (or regenerates) THE single authentication token for an organization:
+// the credential CI/automation uses to act on the org, matching tfe_organization_token. There is at
+// most one per org: any existing org token is revoked first, so regenerating invalidates the old value.
+//
+// The token is a real org-bound automation key (Kind=org, OrganizationID, scope org:<id>:admin) flagged
+// IsOrgToken, so it authenticates through the normal api-key path with org-admin access. userID is the
+// creating org owner (for ownership/audit); the token authorizes via its scope, not the user's teams.
+func (s *Service) CreateOrganizationToken(userID, orgID uuid.UUID, expiresAt *time.Time) (*models.APIKey, string, error) {
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate organization token: %w", err)
+	}
+
+	keyHash, err := HashKey(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to hash organization token: %w", err)
+	}
+
+	// Revoke any existing org token so there is only ever one (regenerate semantics).
+	if err := s.apiKeyRepo.DeleteOrgToken(orgID); err != nil {
+		return nil, "", fmt.Errorf("failed to revoke existing organization token: %w", err)
+	}
+
+	apiKey := &models.APIKey{
+		UserID:         userID,
+		Name:           orgTokenName,
+		Kind:           models.APIKeyKindOrg,
+		KeyHash:        keyHash,
+		KeyPrefix:      GetKeyPrefix(key),
+		Scopes:         models.StringArray{"org:" + orgID.String() + ":admin"},
+		OrganizationID: &orgID,
+		IsOrgToken:     true,
+		ExpiresAt:      expiresAt,
+	}
+
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("failed to create organization token: %w", err)
+	}
+
+	return apiKey, key, nil
+}
+
+// GetOrganizationToken returns an org's authentication token metadata (no plaintext), or
+// gorm.ErrRecordNotFound if the org has none.
+func (s *Service) GetOrganizationToken(orgID uuid.UUID) (*models.APIKey, error) {
+	return s.apiKeyRepo.GetOrgToken(orgID)
+}
+
+// DeleteOrganizationToken revokes an org's authentication token (no-op if none exists).
+func (s *Service) DeleteOrganizationToken(orgID uuid.UUID) error {
+	return s.apiKeyRepo.DeleteOrgToken(orgID)
+}
+
 // DeleteAPIKeysForRunner removes every token minted for a runner (by its
 // runner:<id>:* scopes). Called when a runner is deregistered/deleted so its
 // credentials cannot outlive it.
