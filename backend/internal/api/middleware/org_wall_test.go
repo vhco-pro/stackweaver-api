@@ -32,6 +32,7 @@ func (f *fakeResolver) ByWorkspaceID(string) (uuid.UUID, error)              { r
 func (f *fakeResolver) ByRunID(string) (uuid.UUID, error)                    { return f.resolve() }
 func (f *fakeResolver) ByRunTriggerID(string) (uuid.UUID, error)             { return f.resolve() }
 func (f *fakeResolver) ByNotificationConfigID(string) (uuid.UUID, error)     { return f.resolve() }
+func (f *fakeResolver) ByChangeRequestID(string) (uuid.UUID, error)          { return f.resolve() }
 func (f *fakeResolver) ByConfigVersionID(string) (uuid.UUID, error)          { return f.resolve() }
 func (f *fakeResolver) ByStateVersionID(string) (uuid.UUID, error)           { return f.resolve() }
 func (f *fakeResolver) ByVariableID(string) (uuid.UUID, error)               { return f.resolve() }

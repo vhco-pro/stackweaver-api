@@ -13,6 +13,7 @@ var (
 	rRun                    = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunID(v) }
 	rRunTrigger             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunTriggerID(v) }
 	rNotificationConfig     = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByNotificationConfigID(v) }
+	rChangeRequest          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByChangeRequestID(v) }
 	rConfigVersion          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByConfigVersionID(v) }
 	rStateVersion           = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByStateVersionID(v) }
 	rVariable               = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByVariableID(v) }
@@ -77,6 +78,8 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/organization-memberships": orgByName(),
 	"/api/v2/organizations/:name/effective-permissions":    orgByName(),
 	"/api/v2/organizations/:name/authentication-token":     orgByName(),
+	"/api/v2/organizations/:name/explorer/bulk-actions":    orgByName(),
+	"/api/v2/organizations/:name/change-requests":          orgByName(),
 	"/api/v2/organization-memberships/:id":                 resource("id", rOrgMembership),
 
 	// --- teams ---
@@ -128,6 +131,9 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/workspaces/:id/notification-configurations":                         resource("id", rWorkspace),
 	"/api/v2/notification-configurations/:id":                                    resource("id", rNotificationConfig),
 	"/api/v2/notification-configurations/:id/actions/verify":                     resource("id", rNotificationConfig),
+	"/api/v2/teams/:id/notification-configurations":                              resource("id", rTeam),
+	"/api/v2/workspaces/:id/change-requests":                                     resource("id", rWorkspace),
+	"/api/v2/workspaces/change-requests/:id":                                     resource("id", rChangeRequest),
 	"/api/v2/workspaces/:id/effective-tag-bindings":                              resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/lock":                                        resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/unlock":                                      resource("id", rWorkspace),

@@ -355,15 +355,40 @@ func SetupV2Routes(
 	// real delivery (generic HMAC webhook / Slack / Teams). Delivery fires from the orchestrator poll.
 	notificationCfgRepo := repository.NewNotificationConfigurationRepository(db)
 	notificationSvc := notification.NewService(notificationCfgRepo, atRestCrypto, os.Getenv("STACKWEAVER_APP_URL"))
-	notificationHandler := terraformHandlers.NewNotificationConfigurationHandlerV2(notificationCfgRepo, workspaceRepo, projectRepo, orgRepo, authService, rbacService, atRestCrypto, notificationSvc)
+	notificationHandler := terraformHandlers.NewNotificationConfigurationHandlerV2(notificationCfgRepo, workspaceRepo, projectRepo, orgRepo, teamRepo, authService, rbacService, atRestCrypto, notificationSvc)
 	v2.POST("/workspaces/:id/notification-configurations", notificationHandler.Create)
 	v2.GET("/workspaces/:id/notification-configurations", notificationHandler.List)
 	v2.POST("/projects/:id/notification-configurations", notificationHandler.CreateForProject)
 	v2.GET("/projects/:id/notification-configurations", notificationHandler.ListForProject)
+	// Team notifications (tfe_team_notification_configuration): fire on change_request:created for any
+	// workspace the team can reach.
+	v2.POST("/teams/:id/notification-configurations", notificationHandler.CreateForTeam)
+	v2.GET("/teams/:id/notification-configurations", notificationHandler.ListForTeam)
 	v2.GET("/notification-configurations/:id", notificationHandler.Read)
 	v2.PATCH("/notification-configurations/:id", notificationHandler.Update)
 	v2.DELETE("/notification-configurations/:id", notificationHandler.Delete)
 	v2.POST("/notification-configurations/:id/actions/verify", notificationHandler.Verify)
+
+	// Change requests (HCP Terraform's workspace_change_requests): action items an admin files against
+	// workspaces and the owning team archives. Filing goes through the TFE bulk-action endpoint, which
+	// is TFE's only documented create path (one subject/message, many target_ids).
+	//
+	// The show/archive paths put a static "change-requests" segment exactly where /workspaces/:id
+	// already binds a wildcard. Gin allows this and gives the static segment priority, so these are
+	// TFE's literal paths (see TestChangeRequestRoutesMatchTFE for the routing proof). Workspace routes
+	// key on ID, never name, so a workspace named "change-requests" cannot shadow them.
+	//
+	// Archive accepts POST and PATCH because TFE's own docs disagree: the endpoint spec says POST while
+	// the curl sample uses PATCH. Accepting both means either client works.
+	changeRequestRepo := repository.NewChangeRequestRepository(db)
+	changeRequestHandler := terraformHandlers.NewChangeRequestHandlerV2(changeRequestRepo, workspaceRepo, orgRepo, authService, rbacService)
+	v2.POST("/organizations/:name/explorer/bulk-actions", changeRequestHandler.BulkActions)
+	v2.GET("/organizations/:name/change-requests", changeRequestHandler.ListByOrganization)
+	v2.GET("/workspaces/:id/change-requests", changeRequestHandler.ListByWorkspace)
+	v2.GET("/workspaces/change-requests/:id", changeRequestHandler.Read)
+	v2.PATCH("/workspaces/change-requests/:id", changeRequestHandler.Archive)
+	v2.POST("/workspaces/change-requests/:id", changeRequestHandler.Archive)
+	v2.DELETE("/workspaces/change-requests/:id", changeRequestHandler.Delete)
 
 	// Workspace actions (using workspace ID - must use :id to match other workspace routes)
 	workspaceActions := v2.Group("/workspaces/:id")
