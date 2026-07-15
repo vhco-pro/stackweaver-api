@@ -30,6 +30,7 @@ type OrgResolver interface {
 	ByRunID(id string) (uuid.UUID, error)
 	ByRunTriggerID(id string) (uuid.UUID, error)
 	ByNotificationConfigID(id string) (uuid.UUID, error)
+	ByChangeRequestID(id string) (uuid.UUID, error)
 	ByConfigVersionID(id string) (uuid.UUID, error)
 	ByStateVersionID(id string) (uuid.UUID, error)
 	ByVariableID(id string) (uuid.UUID, error)

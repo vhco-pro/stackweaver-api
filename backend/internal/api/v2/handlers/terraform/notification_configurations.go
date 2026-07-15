@@ -26,6 +26,7 @@ type NotificationConfigurationHandlerV2 struct {
 	workspaceRepo *repository.WorkspaceRepository
 	projectRepo   *repository.ProjectRepository
 	orgRepo       *repository.OrganizationRepository
+	teamRepo      *repository.TeamRepository
 	authService   *auth.Service
 	rbacService   *rbac.Service
 	cryptoService *crypto.CryptoService
@@ -37,6 +38,7 @@ func NewNotificationConfigurationHandlerV2(
 	workspaceRepo *repository.WorkspaceRepository,
 	projectRepo *repository.ProjectRepository,
 	orgRepo *repository.OrganizationRepository,
+	teamRepo *repository.TeamRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
 	cryptoService *crypto.CryptoService,
@@ -47,6 +49,7 @@ func NewNotificationConfigurationHandlerV2(
 		workspaceRepo: workspaceRepo,
 		projectRepo:   projectRepo,
 		orgRepo:       orgRepo,
+		teamRepo:      teamRepo,
 		authService:   authService,
 		rbacService:   rbacService,
 		cryptoService: cryptoService,
@@ -84,12 +87,17 @@ func formatNotificationConfig(nc *models.NotificationConfiguration) gin.H {
 	if emails == nil {
 		emails = []string{}
 	}
-	// subscribable is polymorphic: a workspace or a project (whichever the config is bound to).
+	// subscribable is polymorphic: the workspace, project or team the config is bound to. Every scope
+	// MUST have a branch here: an unhandled one emits "subscribable": null, a valid-looking 200 that
+	// silently breaks the provider round-trip rather than failing loudly.
 	var subscribable gin.H
-	if nc.WorkspaceID != nil {
+	switch {
+	case nc.WorkspaceID != nil:
 		subscribable = gin.H{"data": gin.H{"id": *nc.WorkspaceID, "type": "workspaces"}}
-	} else if nc.ProjectID != nil {
+	case nc.ProjectID != nil:
 		subscribable = gin.H{"data": gin.H{"id": nc.ProjectID.String(), "type": "projects"}}
+	case nc.TeamID != nil:
+		subscribable = gin.H{"data": gin.H{"id": nc.TeamID.String(), "type": "teams"}}
 	}
 	return gin.H{
 		"id":   nc.ID,
@@ -197,6 +205,21 @@ func (h *NotificationConfigurationHandlerV2) CreateForProject(c *gin.Context) {
 	h.createAndRespond(c, nc)
 }
 
+// CreateForTeam handles POST /teams/:id/notification-configurations
+// (tfe_team_notification_configuration). Its only meaningful trigger is change_request:created.
+func (h *NotificationConfigurationHandlerV2) CreateForTeam(c *gin.Context) {
+	team, ok := h.authTeam(c, true)
+	if !ok {
+		return
+	}
+	nc, ok := h.buildFromRequest(c)
+	if !ok {
+		return
+	}
+	nc.TeamID = &team.ID
+	h.createAndRespond(c, nc)
+}
+
 // buildFromRequest parses + validates the create body into a new (scope-less) config.
 func (h *NotificationConfigurationHandlerV2) buildFromRequest(c *gin.Context) (*models.NotificationConfiguration, bool) {
 	var req ncRequest
@@ -245,6 +268,16 @@ func (h *NotificationConfigurationHandlerV2) ListForProject(c *gin.Context) {
 		return
 	}
 	configs, err := h.repo.ListByProject(project.ID)
+	h.respondList(c, configs, err)
+}
+
+// ListForTeam handles GET /teams/:id/notification-configurations
+func (h *NotificationConfigurationHandlerV2) ListForTeam(c *gin.Context) {
+	team, ok := h.authTeam(c, false)
+	if !ok {
+		return
+	}
+	configs, err := h.repo.ListByTeam(team.ID)
 	h.respondList(c, configs, err)
 }
 
@@ -298,7 +331,47 @@ func (h *NotificationConfigurationHandlerV2) authProjectByID(c *gin.Context, pro
 	return project, true
 }
 
-// loadForCaller loads a config by id and authorizes the caller against its scope (workspace or project).
+// authTeam loads the team named by :id and checks the caller's permission.
+func (h *NotificationConfigurationHandlerV2) authTeam(c *gin.Context, write bool) (*models.Team, bool) {
+	teamID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		ncError(c, http.StatusBadRequest, "Bad Request", "Invalid team ID")
+		return nil, false
+	}
+	return h.authTeamByID(c, teamID, write)
+}
+
+// authTeamByID mirrors authProjectByID's asymmetry: managing a team's notifications is an org-admin
+// action (org:manage-teams), while reading them only requires membership of the organization.
+func (h *NotificationConfigurationHandlerV2) authTeamByID(c *gin.Context, teamID uuid.UUID, write bool) (*models.Team, bool) {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		ncError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return nil, false
+	}
+	team, err := h.teamRepo.GetByID(teamID)
+	if err != nil {
+		ncError(c, http.StatusNotFound, "Not Found", "Team not found")
+		return nil, false
+	}
+	if write {
+		ok, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, team.OrganizationID)
+		if err != nil || !ok {
+			ncError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage this team's notifications")
+			return nil, false
+		}
+	} else {
+		inOrg, err := h.orgRepo.UserInOrg(user.ID, team.OrganizationID)
+		if err != nil || !inOrg {
+			ncError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
+			return nil, false
+		}
+	}
+	return team, true
+}
+
+// loadForCaller loads a config by id and authorizes the caller against its scope (workspace, project or
+// team).
 func (h *NotificationConfigurationHandlerV2) loadForCaller(c *gin.Context, write bool) (*models.NotificationConfiguration, bool) {
 	nc, err := h.repo.GetByID(c.Param("id"))
 	if err != nil {
@@ -312,6 +385,10 @@ func (h *NotificationConfigurationHandlerV2) loadForCaller(c *gin.Context, write
 		}
 	case nc.ProjectID != nil:
 		if _, ok := h.authProjectByID(c, *nc.ProjectID, write); !ok {
+			return nil, false
+		}
+	case nc.TeamID != nil:
+		if _, ok := h.authTeamByID(c, *nc.TeamID, write); !ok {
 			return nil, false
 		}
 	default:
@@ -380,17 +457,27 @@ func (h *NotificationConfigurationHandlerV2) Verify(c *gin.Context) {
 		UpdatedAt:     time.Now(),
 	}
 	// Fill scope/org names best-effort for the payload.
-	if nc.WorkspaceID != nil {
+	switch {
+	case nc.WorkspaceID != nil:
 		if ws, err := h.workspaceRepo.GetByID(*nc.WorkspaceID); err == nil {
 			rc.WorkspaceID = ws.ID
 			rc.WorkspaceName = ws.Name
 			rc.Organization = ws.Project.Organization.Name
 		}
-	} else if nc.ProjectID != nil {
+	case nc.ProjectID != nil:
 		if p, err := h.projectRepo.GetByID(*nc.ProjectID); err == nil {
 			rc.ProjectID = p.ID
 			rc.WorkspaceName = p.Name
 			rc.Organization = p.Organization.Name // "" if not preloaded
+		}
+	case nc.TeamID != nil:
+		// A team config has no workspace of its own; the notifier turns this into a synthetic
+		// change-request event, so only the org name is meaningful here.
+		if team, err := h.teamRepo.GetByID(*nc.TeamID); err == nil {
+			rc.WorkspaceName = team.Name
+			if org, oerr := h.orgRepo.GetByID(team.OrganizationID); oerr == nil {
+				rc.Organization = org.Name
+			}
 		}
 	}
 	if err := h.notifier.Verify(c.Request.Context(), nc, rc); err != nil {

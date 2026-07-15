@@ -43,6 +43,7 @@ type dbOrgResolver struct {
 	ansibleSchedule  *repository.AnsibleScheduleRepository
 	ansibleWorkflow  *repository.AnsibleWorkflowRepository
 	notificationCfg  *repository.NotificationConfigurationRepository
+	changeRequest    *repository.ChangeRequestRepository
 }
 
 // NewDBOrgResolver builds the production OrgResolver from a database handle.
@@ -78,6 +79,7 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		ansibleSchedule:  repository.NewAnsibleScheduleRepository(db),
 		ansibleWorkflow:  repository.NewAnsibleWorkflowRepository(db),
 		notificationCfg:  repository.NewNotificationConfigurationRepository(db),
+		changeRequest:    repository.NewChangeRequestRepository(db),
 	}
 }
 
@@ -187,14 +189,26 @@ func (r *dbOrgResolver) ByNotificationConfigID(id string) (uuid.UUID, error) {
 	if err != nil {
 		return uuid.Nil, err
 	}
-	// A config is scoped to a workspace or a project; resolve the org via whichever it is.
+	// A config is scoped to a workspace, a project or a team; resolve the org via whichever it is.
 	if nc.WorkspaceID != nil {
 		return r.orgByWorkspaceStr(*nc.WorkspaceID)
 	}
 	if nc.ProjectID != nil {
 		return r.orgByProjectUUID(*nc.ProjectID)
 	}
+	if nc.TeamID != nil {
+		return r.orgByTeamUUID(*nc.TeamID)
+	}
 	return uuid.Nil, gorm.ErrRecordNotFound
+}
+
+func (r *dbOrgResolver) ByChangeRequestID(id string) (uuid.UUID, error) {
+	cr, err := r.changeRequest.GetByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	// A change request is always scoped to exactly one workspace.
+	return r.orgByWorkspaceStr(cr.WorkspaceID)
 }
 
 func (r *dbOrgResolver) ByConfigVersionID(id string) (uuid.UUID, error) {

@@ -206,6 +206,83 @@ type TeamAnsibleTemplateAccess struct {
 // effective permission on a job template in the given project. Read-only
 // visibility for the template Access tab; enforcement stays in the Check*
 // methods (see RBAC_MASTER_PLAN for per-resource grants).
+// TeamWithWorkspaceAccess identifies a team that can reach a given workspace.
+type TeamWithWorkspaceAccess struct {
+	TeamID   uuid.UUID
+	TeamName string
+}
+
+// ListTeamsWithWorkspaceAccess returns every team in the organization that can reach the given
+// workspace, which is the audience for a change_request:created notification
+// (tfe_team_notification_configuration applies "to all workspaces that the configured team has access
+// to").
+//
+// Access is a UNION of four independent sources, and there is no table to join for it:
+//
+//  1. the owners team, which bypasses permission checks by name
+//  2. org-wide access (TeamOrganizationAccess manage/read workspaces), which reaches EVERY workspace
+//  3. project access on the workspace's parent project, which reaches every workspace in it
+//  4. a direct TeamWorkspaceAccess grant on the workspace itself
+//
+// Missing any leg silently under-notifies. In particular TeamRepository.GetWorkspaceAccess covers only
+// leg 4, so using it alone would miss the project-level grants that are the common case in TFE-style
+// setups. The per-leg permission mapping is delegated to the same helpers the permission checks use, so
+// this cannot drift from what access actually means.
+//
+// Note leg 2 is deliberately broad: a team with org-wide read is notified about every change request in
+// the organization. That is TFE's semantics, not an accident.
+func (s *Service) ListTeamsWithWorkspaceAccess(orgID, projectID uuid.UUID, workspaceID string) ([]TeamWithWorkspaceAccess, error) {
+	if s.teamRepo == nil {
+		return nil, fmt.Errorf("team repository not available")
+	}
+	teams, _, err := s.teamRepo.List(orgID, 1000, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list teams: %w", err)
+	}
+	out := make([]TeamWithWorkspaceAccess, 0, len(teams))
+	for i := range teams {
+		team := &teams[i]
+		if s.teamReachesWorkspace(team, projectID, workspaceID) {
+			out = append(out, TeamWithWorkspaceAccess{TeamID: team.ID, TeamName: team.Name})
+		}
+	}
+	return out, nil
+}
+
+// teamReachesWorkspace reports whether any of the four access legs gives this team read or write on the
+// workspace. Ordered cheapest-first: the owners check and the preloaded org access need no query.
+func (s *Service) teamReachesWorkspace(team *models.Team, projectID uuid.UUID, workspaceID string) bool {
+	reaches := func(perms map[Permission]bool) bool {
+		return perms[PermissionWorkspaceRead] || perms[PermissionWorkspaceWrite]
+	}
+
+	// 1. owners bypass (same by-name rule checkOrgPermission and IsOrgOwner use).
+	if team.Name == "owners" {
+		return true
+	}
+
+	// 2. org-wide access. OrganizationAccess is preloaded by TeamRepository.List.
+	if team.OrganizationAccess != nil && reaches(s.getPermissionsFromOrganizationAccess(team.OrganizationAccess)) {
+		return true
+	}
+
+	// 3. project access on the workspace's parent project.
+	if pa, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && pa != nil {
+		if reaches(s.getPermissionsFromProjectAccess(pa, ResourceTypeTerraformWorkspace)) {
+			return true
+		}
+	}
+
+	// 4. a direct grant on the workspace.
+	if wa, err := s.teamRepo.GetWorkspaceAccessByTeamAndWorkspace(team.ID, workspaceID); err == nil && wa != nil {
+		if reaches(s.getPermissionsFromWorkspaceAccess(wa)) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (s *Service) GetTeamAccessForAnsibleTemplate(orgID, projectID uuid.UUID) ([]TeamAnsibleTemplateAccess, error) {
 	if s.teamRepo == nil {
 		return nil, fmt.Errorf("team repository not available")
