@@ -2,7 +2,14 @@
 
 package middleware
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
 
 // TestIsLocalhostOrigin pins Round 24 Finding 2's host-boundary
 // anchor — the previous prefix check (`origin[:16] == "http://
@@ -50,5 +57,33 @@ func TestIsLocalhostOrigin(t *testing.T) {
 				t.Errorf("isLocalhostOrigin(%q) = %v, want %v", tc.origin, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCORSMiddleware_LocalhostGatedByProdMode covers AUD-070: a localhost Origin is credential-
+// trusted only outside production. In GIN_MODE=release the middleware must NOT echo the localhost
+// origin or set Allow-Credentials; outside release it must (dev convenience).
+func TestCORSMiddleware_LocalhostGatedByProdMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const localhostOrigin = "http://localhost:5173"
+
+	run := func(ginMode string) (allowOrigin, allowCreds string) {
+		t.Setenv("GIN_MODE", ginMode)
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v2/ping", nil)
+		req.Header.Set("Origin", localhostOrigin)
+		c.Request = req
+		CORSMiddleware()(c)
+		return w.Header().Get("Access-Control-Allow-Origin"), w.Header().Get("Access-Control-Allow-Credentials")
+	}
+
+	// Production: localhost must NOT be trusted.
+	if o, cr := run("release"); o != "" || cr != "" {
+		t.Errorf("release mode credential-trusted localhost: origin=%q creds=%q, want both empty", o, cr)
+	}
+	// Development: localhost trusted for convenience.
+	if o, cr := run("debug"); o != localhostOrigin || cr != "true" {
+		t.Errorf("debug mode did not trust localhost: origin=%q creds=%q, want %q/true", o, cr, localhostOrigin)
 	}
 }

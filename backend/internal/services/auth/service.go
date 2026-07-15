@@ -107,6 +107,15 @@ func (s *Service) InitializeZitadel(issuer, clientID, clientSecret, internalAddr
 	return nil
 }
 
+// RegisterAudience adds a client_id the Zitadel verifier will accept in an access token's
+// `aud` (AUD-012). Register both the API and the frontend PKCE client so real user tokens
+// (issued to the frontend client) are accepted while tokens for other clients are rejected.
+func (s *Service) RegisterAudience(clientID string) {
+	if s.verifier != nil {
+		s.verifier.AcceptAudience(clientID)
+	}
+}
+
 func (s *Service) GetUserFromContext(c *gin.Context) (*models.User, error) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -147,6 +156,12 @@ func (s *Service) GetUserFromToken(tokenString string) (*models.User, error) {
 				}
 			}
 		}
+		// The "tfe-" prefix is authoritative (#503): an API token is never
+		// a JWT, so a lookup miss is terminal. Falling through to JWT
+		// verification surfaced revoked/unknown keys as "token is not a
+		// JWT (got opaque token)" — misdirecting operators toward Zitadel
+		// configuration instead of the token's lifecycle.
+		return nil, errors.New("invalid or revoked API token")
 	}
 
 	// Try JWT token (Zitadel)
@@ -304,10 +319,26 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 					logger.Debugf("auth: api-key lookup failed: %v", err)
 				}
 			}
-			// If api-key auth fails, continue to JWT verification
-		} else {
-			logger.Debug("auth: token does not start with 'tfe-', attempting JWT verification")
+			// The "tfe-" prefix is authoritative (#503): an API token is
+			// never a JWT, so a lookup miss is terminal. Falling through
+			// to JWT verification surfaced revoked/unknown keys as "token
+			// is not a JWT (got opaque token)" — misdirecting operators
+			// toward Zitadel configuration instead of the token's
+			// lifecycle.
+			logger.Warnf("auth: api token rejected: unknown or revoked (id: %s)", shortTokenID(tokenString))
+			c.JSON(401, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "401",
+						"title":  "Unauthorized",
+						"detail": "invalid or revoked API token",
+					},
+				},
+			})
+			c.Abort()
+			return
 		}
+		logger.Debug("auth: token does not start with 'tfe-', attempting JWT verification")
 
 		// Try JWT token (Zitadel)
 		if s.verifier == nil {

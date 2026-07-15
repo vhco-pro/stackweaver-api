@@ -1269,11 +1269,19 @@ func (h *TeamHandlerV2) GetByID(c *gin.Context) {
 	if includeUsers {
 		for _, teamMember := range team.Members {
 			if teamMember.User.ID != uuid.Nil {
+				// tfe_team_members addresses members by username, but Stackweaver provisions users from
+				// Zitadel without a populated username and resolves the resource by EMAIL. Echo the email
+				// as the username when no explicit username is set, so the provider's read round-trips
+				// with the emails it sent (otherwise every apply drifts on an empty username).
+				username := teamMember.User.Username
+				if username == "" {
+					username = teamMember.User.Email
+				}
 				userData := gin.H{
 					"id":   teamMember.User.ID.String(),
 					"type": "users",
 					"attributes": gin.H{
-						"username": teamMember.User.Username,
+						"username": username,
 						"email":    teamMember.User.Email,
 						"name":     teamMember.User.Name,
 					},
