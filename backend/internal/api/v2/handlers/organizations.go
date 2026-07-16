@@ -26,17 +26,19 @@ type OrganizationHandlerV2 struct {
 	orgRepo         *repository.OrganizationRepository
 	teamRepo        *repository.TeamRepository
 	projectRepo     *repository.ProjectRepository
+	agentPoolRepo   *repository.AgentPoolRepository
 	authService     *auth.Service
 	activityService *activity.Service
 	rbacService     *rbac.Service
 	db              *gorm.DB
 }
 
-func NewOrganizationHandlerV2(orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, projectRepo *repository.ProjectRepository, authService *auth.Service, activityService *activity.Service, rbacService *rbac.Service, db *gorm.DB) *OrganizationHandlerV2 {
+func NewOrganizationHandlerV2(orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, projectRepo *repository.ProjectRepository, agentPoolRepo *repository.AgentPoolRepository, authService *auth.Service, activityService *activity.Service, rbacService *rbac.Service, db *gorm.DB) *OrganizationHandlerV2 {
 	return &OrganizationHandlerV2{
 		orgRepo:         orgRepo,
 		teamRepo:        teamRepo,
 		projectRepo:     projectRepo,
+		agentPoolRepo:   agentPoolRepo,
 		authService:     authService,
 		activityService: activityService,
 		rbacService:     rbacService,
@@ -55,6 +57,9 @@ type OrganizationAttributes struct {
 	// Org-wide retention for finished Ansible jobs (0 = keep forever).
 	AnsibleJobRetentionDays *int    `json:"ansible-job-retention-days"`
 	AnsibleAdHocModules     *string `json:"ansible-adhoc-modules"`
+	// DefaultExecutionMode is the org-wide default workspace execution mode
+	// (tfe_organization_default_settings): remote|agent|local.
+	DefaultExecutionMode *string `json:"default-execution-mode"`
 }
 
 // CreateOrganizationRequestV2 supports both simple JSON and JSON:API format
@@ -72,6 +77,21 @@ type CreateOrganizationRequestV2 struct {
 	} `json:"data"`
 }
 
+// orgRelationships captures the relationships an organization update may carry.
+//
+// default-agent-pool is a RELATIONSHIP here, not an attribute: go-tfe declares it
+// `jsonapi:"relation,default-agent-pool"` on OrganizationUpdateOptions. Note this differs from the
+// project resource, which carries `default-agent-pool-id` as a plain attribute. The two are not
+// symmetric on the wire, so do not "tidy" this into an attribute.
+type orgRelationships struct {
+	DefaultAgentPool *struct {
+		Data *struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"data"`
+	} `json:"default-agent-pool,omitempty"`
+}
+
 // UpdateOrganizationRequestV2 supports both simple JSON and JSON:API format
 type UpdateOrganizationRequestV2 struct {
 	// Simple format fields
@@ -80,8 +100,9 @@ type UpdateOrganizationRequestV2 struct {
 
 	// JSON:API format
 	Data *struct {
-		Type       string                 `json:"type"`
-		Attributes OrganizationAttributes `json:"attributes"`
+		Type          string                 `json:"type"`
+		Attributes    OrganizationAttributes `json:"attributes"`
+		Relationships *orgRelationships      `json:"relationships,omitempty"`
 	} `json:"data"`
 }
 
@@ -91,6 +112,13 @@ func buildTFEOrganizationResponse(org *models.Organization) gin.H {
 	collaboratorAuthPolicy := org.CollaboratorAuthPolicy
 	if collaboratorAuthPolicy == "" {
 		collaboratorAuthPolicy = "password"
+	}
+
+	// tfe_organization_default_settings reads this back after every write, so an unset mode must still
+	// report the effective default rather than "" or the provider sees drift on the next plan.
+	defaultExecutionMode := org.DefaultExecutionMode
+	if defaultExecutionMode == "" {
+		defaultExecutionMode = "remote"
 	}
 
 	return gin.H{
@@ -107,6 +135,7 @@ func buildTFEOrganizationResponse(org *models.Organization) gin.H {
 			"collaborator-auth-policy":            collaboratorAuthPolicy,
 			"cost-estimation-enabled":             org.CostEstimationEnabled,
 			"default-terraform-version":           org.DefaultTerraformVersion,
+			"default-execution-mode":              defaultExecutionMode,
 			"ansible-job-retention-days":          org.AnsibleJobRetentionDays,
 			"ansible-adhoc-modules":               org.AnsibleAdHocModules,
 			"speculative-plan-management-enabled": true,
@@ -149,10 +178,73 @@ func buildTFEOrganizationResponse(org *models.Organization) gin.H {
 				"can-manage-projects":         true,
 			},
 		},
+		"relationships": orgRelationshipsResponse(org),
 		"links": gin.H{
 			"self": "/api/v2/organizations/" + org.Name,
 		},
 	}
+}
+
+// applyOrgDefaultSettings validates and applies tfe_organization_default_settings onto an org,
+// returning an error detail and false when the request is invalid.
+//
+// The rules mirror the project-level equivalent in projects.go, deliberately: these are the same two
+// settings one level up the chain, and TFE enforces the same constraints at both levels.
+func (h *OrganizationHandlerV2) applyOrgDefaultSettings(org *models.Organization, mode *string, rels *orgRelationships) (string, bool) {
+	if mode != nil {
+		switch *mode {
+		case "remote", "agent", "local":
+		default:
+			return "default-execution-mode must be one of: remote, agent, local", false
+		}
+		org.DefaultExecutionMode = *mode
+		// Leaving agent mode clears any stale default pool, so the org cannot report agent execution
+		// against a pool it no longer uses.
+		if *mode != "agent" {
+			org.DefaultAgentPoolID = nil
+		}
+	}
+
+	if rels != nil && rels.DefaultAgentPool != nil {
+		// An explicit {"data": null} clears the default; a data object sets it.
+		if rels.DefaultAgentPool.Data == nil || rels.DefaultAgentPool.Data.ID == "" {
+			org.DefaultAgentPoolID = nil
+		} else {
+			poolID, err := uuid.Parse(rels.DefaultAgentPool.Data.ID)
+			if err != nil {
+				return "default-agent-pool id is not a valid ID", false
+			}
+			// Tenant safety: the pool must exist and belong to THIS organization, or an org could
+			// point its default at another tenant's pool.
+			pool, err := h.agentPoolRepo.GetByID(poolID, false)
+			if err != nil || pool == nil || pool.OrganizationID != org.ID {
+				return "default agent pool not found in this organization", false
+			}
+			org.DefaultAgentPoolID = &poolID
+		}
+	}
+
+	// TFE requires an agent pool when the default execution mode is agent (the provider raises
+	// "Default execution mode must be set to 'agent' when default_agent_pool_id is set" for the
+	// inverse); reject the incoherent state rather than store a default that cannot dispatch.
+	if org.DefaultExecutionMode == "agent" && org.DefaultAgentPoolID == nil {
+		return "default-agent-pool is required when default-execution-mode is agent", false
+	}
+
+	return "", true
+}
+
+// orgRelationshipsResponse renders the organization's relationships. default-agent-pool is omitted
+// entirely when unset: the provider maps a missing relation to a null default_agent_pool_id, whereas an
+// explicit {"data": null} is equally valid JSON:API but noisier to no benefit.
+func orgRelationshipsResponse(org *models.Organization) gin.H {
+	rels := gin.H{}
+	if org.DefaultAgentPoolID != nil {
+		rels["default-agent-pool"] = gin.H{
+			"data": gin.H{"id": org.DefaultAgentPoolID.String(), "type": "agent-pools"},
+		}
+	}
+	return rels
 }
 
 // List returns all organizations that the user is a member of
@@ -605,6 +697,16 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	}
 	if newAnsibleAdHocModules != nil {
 		org.AnsibleAdHocModules = *newAnsibleAdHocModules
+	}
+
+	// tfe_organization_default_settings: the org-wide execution defaults.
+	if req.Data != nil {
+		if detail, ok := h.applyOrgDefaultSettings(org, req.Data.Attributes.DefaultExecutionMode, req.Data.Relationships); !ok {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"errors": []gin.H{{"status": "422", "title": "Invalid Attribute", "detail": detail}},
+			})
+			return
+		}
 	}
 
 	if err := h.orgRepo.Update(org); err != nil {

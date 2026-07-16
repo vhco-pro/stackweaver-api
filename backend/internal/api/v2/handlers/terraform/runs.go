@@ -119,6 +119,49 @@ type CreateRunRequestV2 struct {
 	AutoApplyAfterPlan     *bool   `json:"auto_apply_after_plan,omitempty"` // Legacy format
 }
 
+// resolveEffectiveAgentPool resolves which agent pool a run dispatches to, walking TFE's execution
+// settings chain from most specific to least:
+//
+//	workspace  (its own execution_mode + agent pool)
+//	  -> project       (tfe_project_settings, when Project.SettingsOverwritten)
+//	    -> organization (tfe_organization_default_settings)
+//
+// A workspace "does not overwrite" when its execution mode is unset or "remote", the same signal TFE
+// uses for its setting-overwrites. A project defers to the org unless it has explicitly overwritten its
+// settings, which is exactly what Project.SettingsOverwritten records.
+//
+// Only agent mode produces a pool: remote and local execution have none, so those levels resolve to nil
+// and the run dispatches normally.
+//
+// The workspace must be loaded with its Project and the Project's Organization for the outer levels to
+// be consulted; a missing preload degrades to the workspace's own pool rather than guessing.
+func resolveEffectiveAgentPool(workspace *models.Workspace) *uuid.UUID {
+	// A workspace that overwrote its own execution mode keeps its own pool: the levels above never
+	// apply to it.
+	if workspace.ExecutionMode != "" && workspace.ExecutionMode != "remote" {
+		return workspace.AgentPoolID
+	}
+
+	// The workspace defers. The project wins next if it defaults to agent execution with a pool.
+	project := &workspace.Project
+	if project.DefaultExecutionMode == "agent" && project.DefaultAgentPoolID != nil {
+		return project.DefaultAgentPoolID
+	}
+
+	// The project specified its own (non-agent) settings, so it has deliberately opted out of agent
+	// execution and must not fall through to an org-wide agent default.
+	if project.SettingsOverwritten {
+		return workspace.AgentPoolID
+	}
+
+	// Nothing below the org expressed a preference: apply the org default.
+	if project.Organization.DefaultExecutionMode == "agent" && project.Organization.DefaultAgentPoolID != nil {
+		return project.Organization.DefaultAgentPoolID
+	}
+
+	return workspace.AgentPoolID
+}
+
 // resolveRunOperation maps a bound run-create request to a run operation and the two apply-intent
 // flags, honoring go-tfe's real RunCreateOptions wire attributes (is-destroy, plan-only, auto-apply)
 // with the frontend/legacy `operation` + `auto-apply-after-plan` as fallbacks.
@@ -800,17 +843,10 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	// operation, autoApplyAfterPlan and perRunAutoApply were resolved above via resolveRunOperation.
 	logger.Infof("Run creation: operation=%s auto_apply_after_plan=%v auto_apply=%v", operation, autoApplyAfterPlan, perRunAutoApply)
 
-	// TFE tfe_project_settings inheritance: a workspace that does not overwrite its own execution mode
-	// (execution_mode "remote"/unset — the same signal the workspace uses for its setting-overwrites)
-	// inherits its project's default execution settings at run time. When the project defaults to agent
-	// execution with a default pool, this run is dispatched to that pool. Explicit workspace settings win.
-	effectiveAgentPoolID := workspace.AgentPoolID
-	if workspace.ExecutionMode == "" || workspace.ExecutionMode == "remote" {
-		if workspace.Project.DefaultExecutionMode == "agent" && workspace.Project.DefaultAgentPoolID != nil {
-			effectiveAgentPoolID = workspace.Project.DefaultAgentPoolID
-			logger.Infof("Run creation: workspace %s inherits project default agent pool %s", workspaceID, effectiveAgentPoolID.String())
-		}
-	}
+	// TFE execution-settings inheritance, resolved at run time down the chain
+	// workspace -> project (tfe_project_settings) -> organization (tfe_organization_default_settings).
+	// The most specific level that actually specifies settings wins.
+	effectiveAgentPoolID := resolveEffectiveAgentPool(workspace)
 
 	// TFE-compatible: All runs follow 2-phase process (plan, then confirm apply)
 	// UI "Plan and Apply" is just a regular plan run - user will see plan output and click "Apply Plan" button
