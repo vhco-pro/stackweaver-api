@@ -112,7 +112,7 @@ func SetupV2Routes(
 
 	// Handlers
 	agentPoolRepo := repository.NewAgentPoolRepository(db)
-	orgHandler := handlers.NewOrganizationHandlerV2(orgRepo, teamRepo, projectRepo, authService, activityService, rbacService, db)
+	orgHandler := handlers.NewOrganizationHandlerV2(orgRepo, teamRepo, projectRepo, agentPoolRepo, authService, activityService, rbacService, db)
 	tagBindingRepo := repository.NewTagBindingRepository(db)
 	projectHandler := handlers.NewProjectHandlerV2(projectRepo, orgRepo, teamRepo, agentPoolRepo, tagBindingRepo, authService, activityService, rbacService)
 	tagBindingHandler := handlers.NewTagBindingHandlerV2(tagBindingRepo, projectRepo, workspaceRepo, orgRepo, authService, rbacService)
