@@ -44,6 +44,7 @@ type OrgResolver interface {
 	ByTeamWorkspaceAccessID(id string) (uuid.UUID, error)
 	ByTeamProjectAccessID(id string) (uuid.UUID, error)
 	ByAgentPoolID(id string) (uuid.UUID, error)
+	ByAuthTokenID(id string) (uuid.UUID, error)
 	ByRunnerID(id string) (uuid.UUID, error)
 	ByVCSConnectionID(id string) (uuid.UUID, error)
 	ByOIDCConfigID(id string) (uuid.UUID, error)

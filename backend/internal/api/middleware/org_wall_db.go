@@ -48,6 +48,7 @@ type dbOrgResolver struct {
 	workspaceTask    *repository.WorkspaceTaskRepository
 	taskStage        *repository.TaskStageRepository
 	taskResult       *repository.TaskResultRepository
+	apiKey           *repository.APIKeyRepository
 }
 
 // NewDBOrgResolver builds the production OrgResolver from a database handle.
@@ -88,6 +89,7 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		workspaceTask:    repository.NewWorkspaceTaskRepository(db),
 		taskStage:        repository.NewTaskStageRepository(db),
 		taskResult:       repository.NewTaskResultRepository(db),
+		apiKey:           repository.NewAPIKeyRepository(db),
 	}
 }
 
@@ -343,6 +345,23 @@ func (r *dbOrgResolver) ByAgentPoolID(id string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return pool.OrganizationID, nil
+}
+
+// ByAuthTokenID resolves an agent token (/authentication-tokens/:id, tfe_agent_token) to its
+// organization via the backing api_key's OrganizationID.
+func (r *dbOrgResolver) ByAuthTokenID(id string) (uuid.UUID, error) {
+	tokenID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	key, err := r.apiKey.GetAgentToken(tokenID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if key.OrganizationID == nil {
+		return uuid.Nil, gorm.ErrRecordNotFound
+	}
+	return *key.OrganizationID, nil
 }
 
 func (r *dbOrgResolver) ByRunnerID(id string) (uuid.UUID, error) {

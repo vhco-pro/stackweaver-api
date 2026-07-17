@@ -425,6 +425,78 @@ func (s *Service) DeleteTeamToken(teamID uuid.UUID) error {
 	return s.apiKeyRepo.DeleteTeamToken(teamID)
 }
 
+// CreateAgentToken mints an agent registration token (tfe_agent_token) bound to a single agent pool:
+// the credential an agent presents to register into that pool. Unlike the org/team tokens a pool may
+// have many, so this always creates a new one (no regenerate/singleton semantics).
+//
+// The token is a real org-bound automation key (Kind=org, OrganizationID = the pool's org, scope
+// org:<org>:runner:register) additionally bound to AgentPoolID and flagged IsAgentToken. It flows
+// through the normal api-key path; the runner registration handler enforces that a runner presenting
+// it may only join AgentPoolID. description (required by the provider) is stored as the key name.
+func (s *Service) CreateAgentToken(userID, poolID, orgID uuid.UUID, description string) (*models.APIKey, string, error) {
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate agent token: %w", err)
+	}
+
+	keyHash, err := HashKey(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to hash agent token: %w", err)
+	}
+
+	apiKey := &models.APIKey{
+		UserID:         userID,
+		Name:           description,
+		Kind:           models.APIKeyKindOrg,
+		KeyHash:        keyHash,
+		KeyPrefix:      GetKeyPrefix(key),
+		Scopes:         models.StringArray{"org:" + orgID.String() + ":runner:register"},
+		OrganizationID: &orgID,
+		AgentPoolID:    &poolID,
+		IsAgentToken:   true,
+	}
+
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("failed to create agent token: %w", err)
+	}
+
+	return apiKey, key, nil
+}
+
+// ListAgentTokens returns a pool's agent registration tokens (metadata only, no plaintext).
+func (s *Service) ListAgentTokens(poolID uuid.UUID) ([]*models.APIKey, error) {
+	return s.apiKeyRepo.ListAgentTokens(poolID)
+}
+
+// GetAgentToken returns a single agent token by id (metadata only), or gorm.ErrRecordNotFound if the
+// id is not an agent token.
+func (s *Service) GetAgentToken(id uuid.UUID) (*models.APIKey, error) {
+	return s.apiKeyRepo.GetAgentToken(id)
+}
+
+// DeleteAgentToken revokes a single agent token by id. Returns whether a row was deleted so the
+// handler can 404 an unknown id.
+func (s *Service) DeleteAgentToken(id uuid.UUID) (bool, error) {
+	n, err := s.apiKeyRepo.DeleteAgentToken(id)
+	return n > 0, err
+}
+
+// AgentPoolBindingForKey returns the pool an api key is bound to when it is an agent token, or nil
+// when the key is not an agent token (an ordinary org-level runner:register key with no pool
+// restriction). The runner registration handler uses this to confine a pool token to its own pool.
+func (s *Service) AgentPoolBindingForKey(apiKeyID uuid.UUID) (*uuid.UUID, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(apiKeyID)
+	if err != nil {
+		return nil, err
+	}
+	if !apiKey.IsAgentToken {
+		// Not an agent token: no pool binding and no error - the caller treats a nil pool as
+		// "unrestricted" (an ordinary org-level runner:register key).
+		return nil, nil //nolint:nilnil // (nil, nil) is the documented "no binding" signal
+	}
+	return apiKey.AgentPoolID, nil
+}
+
 // DeleteAPIKeysForRunner removes every token minted for a runner (by its
 // runner:<id>:* scopes). Called when a runner is deregistered/deleted so its
 // credentials cannot outlive it.
