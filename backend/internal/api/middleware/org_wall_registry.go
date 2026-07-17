@@ -14,6 +14,10 @@ var (
 	rRunTrigger             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunTriggerID(v) }
 	rNotificationConfig     = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByNotificationConfigID(v) }
 	rChangeRequest          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByChangeRequestID(v) }
+	rRunTask                = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunTaskID(v) }
+	rTaskStage              = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByTaskStageID(v) }
+	rTaskResult             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByTaskResultID(v) }
+	rTaskResultOutcome      = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByTaskResultOutcomeID(v) }
 	rConfigVersion          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByConfigVersionID(v) }
 	rStateVersion           = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByStateVersionID(v) }
 	rVariable               = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByVariableID(v) }
@@ -134,23 +138,38 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/teams/:id/notification-configurations":                              resource("id", rTeam),
 	"/api/v2/workspaces/:id/change-requests":                                     resource("id", rWorkspace),
 	"/api/v2/workspaces/change-requests/:id":                                     resource("id", rChangeRequest),
-	"/api/v2/workspaces/:id/effective-tag-bindings":                              resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/actions/lock":                                        resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/actions/unlock":                                      resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/actions/force-unlock":                                resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/actions/safe-delete":                                 resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/runs":                                                resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/run-triggers":                                        resource("id", rWorkspace),
-	"/api/v2/run-triggers/:id":                                                   resource("id", rRunTrigger),
-	"/api/v2/workspaces/:id/configuration-versions":                              resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/state-versions":                                      resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/state-versions/remove-resource":                      resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/current-state-version":                               resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/current-state-version-outputs":                       resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/current-state-version-resources":                     resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/vars":                                                resource("id", rWorkspace),
-	"/api/v2/workspaces/:id/vars/:variable_id":                                   resource("variable_id", rVariable),
-	"/api/v2/workspaces/:id/platform-variables":                                  resource("id", rWorkspace),
+	// Run tasks (tfe_organization_run_task / tfe_workspace_run_task). The task-result callback and
+	// plans/:id/json-output live on the ROOT router (token-authenticated) and never reach this wall.
+	"/api/v2/organizations/:name/tasks":        orgByName(),
+	"/api/v2/tasks/:id":                        resource("id", rRunTask),
+	"/api/v2/workspaces/:id/tasks":             resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/tasks/:tid":        resource("id", rWorkspace),
+	"/api/v2/task-stages/:id":                  resource("id", rTaskStage),
+	"/api/v2/task-stages/:id/actions/override": resource("id", rTaskStage),
+	"/api/v2/task-results/:id":                 resource("id", rTaskResult),
+	"/api/v2/task-results/:id/outcomes":        resource("id", rTaskResult),
+	"/api/v2/task-result-outcomes/:id":         resource("id", rTaskResultOutcome),
+	// Root-router dual-auth downloads: the wall runs in their composed chain only for
+	// NON-task-token callers (the TaskTokenGate serves token requests before the wall).
+	"/api/v2/plans/:id/json-output":                          resource("id", rRun),
+	"/api/v2/configuration-versions/:id/download":            resource("id", rConfigVersion),
+	"/api/v2/workspaces/:id/effective-tag-bindings":          resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/actions/lock":                    resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/actions/unlock":                  resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/actions/force-unlock":            resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/actions/safe-delete":             resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/runs":                            resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/run-triggers":                    resource("id", rWorkspace),
+	"/api/v2/run-triggers/:id":                               resource("id", rRunTrigger),
+	"/api/v2/workspaces/:id/configuration-versions":          resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/state-versions":                  resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/state-versions/remove-resource":  resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/current-state-version":           resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/current-state-version-outputs":   resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/current-state-version-resources": resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/vars":                            resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/vars/:variable_id":               resource("variable_id", rVariable),
+	"/api/v2/workspaces/:id/platform-variables":              resource("id", rWorkspace),
 
 	// --- team access (workspace) ---
 	// Collection routes carry team+workspace in the body and are validated

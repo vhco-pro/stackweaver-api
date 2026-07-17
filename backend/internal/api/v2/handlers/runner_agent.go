@@ -604,8 +604,10 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	now := time.Now()
 
 	// Update run status based on current phase
-	switch run.Status { //nolint:exhaustive // only pending and applying need action on job start
-	case models.RunStatusPending:
+	switch run.Status { //nolint:exhaustive // only pending/pre_plan_completed and applying need action on job start
+	case models.RunStatusPending, models.RunStatusPrePlanCompleted:
+		// pre_plan_completed = the run's pre_plan task stage passed; it dispatches like pending
+		// (a run with an UNPASSED pre_plan stage never gets here — ClaimForDispatch refuses it).
 		run.Status = models.RunStatusPlanning
 		run.StartedAt = &now
 	case models.RunStatusApplying:
@@ -1103,15 +1105,15 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		run.PlanOutput["DestroyCount"] = float64(req.ResourceDestructions)
 		run.PlanOutput["OutputChangeCount"] = float64(req.OutputChanges)
 
-		// Parse the full plan JSON and store resource_changes and output_changes for hasChanges() detection
+		// Store the FULL parsed plan JSON (all top-level keys), matching the platform runner. The
+		// old subset (resource_changes/output_changes only) was enough for hasChanges() detection
+		// but starved the plans/:id/json-output endpoint that run-task services (plan_json_api_url)
+		// and go-tfe read — agent runs must serve the same plan JSON platform runs do.
 		if req.PlanJSON != "" {
 			var planData map[string]interface{}
 			if err := json.Unmarshal([]byte(req.PlanJSON), &planData); err == nil {
-				if rc, ok := planData["resource_changes"]; ok {
-					run.PlanOutput["resource_changes"] = rc
-				}
-				if oc, ok := planData["output_changes"]; ok {
-					run.PlanOutput["output_changes"] = oc
+				for k, v := range planData {
+					run.PlanOutput[k] = v
 				}
 			}
 		}
@@ -1131,8 +1133,10 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			// UI-triggered "Plan and Apply" runs must wait for user confirmation via the Apply endpoint.
 			// The AutoApplyAfterPlan flag only indicates this is a "plan-and-apply" run (not "plan-only"),
 			// it does NOT mean the run should auto-apply without user confirmation.
+			// Computed BEFORE the run-task gate below so a run pausing at a post_plan stage persists
+			// the same decision (AutoApplyResolved) for the continuation to apply.
+			shouldAutoApply := false
 			if (run.AutoApplyAfterPlan || run.AutoApply) && (run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy) {
-				shouldAutoApply := false
 				// go-tfe `auto-apply: true` (e.g. tfe_workspace_run fire-and-forget) auto-applies
 				// regardless of VCS/workspace settings — it is an explicit per-run intent.
 				if run.AutoApply {
@@ -1151,11 +1155,36 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 						}
 					}
 				}
-				if shouldAutoApply {
-					run.Status = models.RunStatusApplying
-				} else {
-					logger.Infof("Run %s plan completed, waiting for user confirmation (not VCS-triggered or workspace auto-apply disabled)", runID)
+			}
+
+			// Run-task gate: a run with a post_plan task stage pauses at post_plan_running; the
+			// continuation applies the planned/completed/applying decision after the stage passes.
+			// Mirrors the platform runner's gate in backend/cmd/runner/main.go — the two finalize
+			// paths must gate identically.
+			hasPostPlanStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostPlan)
+			if tsErr != nil {
+				// Fail closed: skipping the gate on a DB error would let a run bypass a mandatory task.
+				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to check task stages"}}})
+				return
+			}
+			switch {
+			case hasPostPlanStage:
+				run.Status = models.RunStatusPostPlanRunning
+				run.AutoApplyResolved = shouldAutoApply
+				logger.Infof("Run %s paused at post_plan task stage (auto-apply resolved: %v)", runID, shouldAutoApply)
+			case shouldAutoApply:
+				run.Status = models.RunStatusApplying
+				// Clear the dispatch claim consumed by the PLAN job start, or no agent can ever claim
+				// the apply phase (ClaimForDispatch requires a NULL claim) and the run wedges at
+				// `applying`. The manual-confirm path already clears it; this auto-apply path never
+				// did (pre-existing bug, found while wiring run tasks — see #554). Cleared via a
+				// separate UPDATE before the Save below persists the applying status.
+				if clearErr := repository.NewRunRepository(h.db).ClearDispatch(runID); clearErr != nil {
+					logger.Warnf("Failed to clear dispatch claim for auto-applied run %s: %v", runID, clearErr)
 				}
+				run.DispatchedAt = nil // keep the in-memory struct consistent with the cleared claim for the Save below
+			default:
+				logger.Infof("Run %s plan completed, waiting for user confirmation (not VCS-triggered or workspace auto-apply disabled)", runID)
 			}
 		case models.RunStatusCancelled:
 			// Run was cancelled (e.g. user cancelled mid-apply); do not overwrite with applied
@@ -1163,11 +1192,27 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		default:
 			// Apply phase, plan-only, or destroy completed. Only set applied if run is not cancelled
 			// (atomic update so we never overwrite cancelled, regardless of race with Cancel API).
-			res := h.db.Model(&models.Run{}).Where("id = ? AND status != ?", runID, models.RunStatusCancelled).Updates(map[string]interface{}{
+			// Run-task gate: with a post_apply task stage the run pauses at post_apply_running (no
+			// completed_at yet); the continuation writes applied after the stage passes. Mirrors the
+			// platform runner's post-apply gate.
+			hasPostApplyStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostApply)
+			if tsErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to check task stages"}}})
+				return
+			}
+			terminalUpdates := map[string]interface{}{
 				"status":       models.RunStatusApplied,
 				"completed_at": now,
 				"updated_at":   now,
-			})
+			}
+			if hasPostApplyStage {
+				terminalUpdates = map[string]interface{}{
+					"status":     models.RunStatusPostApplyRunning,
+					"updated_at": now,
+				}
+				logger.Infof("Run %s paused at post_apply task stage", runID)
+			}
+			res := h.db.Model(&models.Run{}).Where("id = ? AND status != ?", runID, models.RunStatusCancelled).Updates(terminalUpdates)
 			if res.RowsAffected == 0 {
 				c.JSON(http.StatusOK, gin.H{"status": "completed"})
 				return

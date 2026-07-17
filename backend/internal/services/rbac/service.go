@@ -999,6 +999,13 @@ func (s *Service) CheckOrgManageWorkspaces(ctx context.Context, userID, organiza
 	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageWorkspaces)
 }
 
+// CheckOrgManageRunTasks checks if the user can manage the org's run tasks (tfe_organization_run_task
+// CRUD). Granted by the ManageRunTasks org-access bit; the owners-team bypass is honored by
+// checkOrgPermission.
+func (s *Service) CheckOrgManageRunTasks(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageRunTasks)
+}
+
 // CheckOrgManageVCSSettings checks if user can manage VCS settings
 func (s *Service) CheckOrgManageVCSSettings(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
 	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageVCSSettings)

@@ -28,6 +28,7 @@ import (
 	"github.com/michielvha/stackweaver/core/services/logbuffer"
 	"github.com/michielvha/stackweaver/core/services/notification"
 	"github.com/michielvha/stackweaver/core/services/oidc"
+	"github.com/michielvha/stackweaver/core/services/runtask"
 	"github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
@@ -77,6 +78,9 @@ func SetupV2Routes(
 	// restarts). When unset, the log-read-url is emitted without a token and the CLI authenticates
 	// with its Authorization header.
 	terraformHandlers.SetLogTokenSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
+	// Run-task access tokens (webhook access_token → callback / plan-json / config download) use the
+	// same key; the orchestrator (which mints them at delivery) resolves the identical key.
+	terraformHandlers.SetTaskTokenSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
 
 	// VCS Provider Registry (multi-provider support)
 	azureDevOpsManager, err := vcs.NewAzureDevOpsManager()
@@ -369,6 +373,28 @@ func SetupV2Routes(
 	v2.DELETE("/notification-configurations/:id", notificationHandler.Delete)
 	v2.POST("/notification-configurations/:id/actions/verify", notificationHandler.Verify)
 
+	// Run tasks (tfe_organization_run_task / tfe_workspace_run_task /
+	// tfe_organization_run_task_global_settings): external services hooked into run stage
+	// boundaries via signed webhooks. Global settings live on the task document itself
+	// (global-configuration attribute), so no extra endpoint exists. TFE-exact paths.
+	runTaskRepo := repository.NewRunTaskRepository(db)
+	workspaceTaskRepo := repository.NewWorkspaceTaskRepository(db)
+	runTaskService := runtask.NewService(atRestCrypto)
+	runTaskHandler := terraformHandlers.NewRunTaskHandlerV2(runTaskRepo, workspaceTaskRepo, orgRepo, authService, rbacService, atRestCrypto, runTaskService)
+	workspaceRunTaskHandler := terraformHandlers.NewWorkspaceRunTaskHandlerV2(workspaceTaskRepo, runTaskRepo, workspaceRepo, authService, rbacService)
+	v2.POST("/organizations/:name/tasks", runTaskHandler.Create)
+	v2.GET("/organizations/:name/tasks", runTaskHandler.List)
+	v2.GET("/tasks/:id", runTaskHandler.Read)
+	v2.PATCH("/tasks/:id", runTaskHandler.Update)
+	v2.DELETE("/tasks/:id", runTaskHandler.Delete)
+	v2.POST("/workspaces/:id/tasks", workspaceRunTaskHandler.Create)
+	v2.GET("/workspaces/:id/tasks", workspaceRunTaskHandler.List)
+	v2.GET("/workspaces/:id/tasks/:tid", workspaceRunTaskHandler.Read)
+	v2.PATCH("/workspaces/:id/tasks/:tid", workspaceRunTaskHandler.Update)
+	v2.DELETE("/workspaces/:id/tasks/:tid", workspaceRunTaskHandler.Delete)
+	// Task stage/result READ routes are registered further down, after runHandler is constructed
+	// (they are RunHandlerV2 methods; binding them here would capture a nil receiver).
+
 	// Change requests (HCP Terraform's workspace_change_requests): action items an admin files against
 	// workspaces and the owning team archives. Filing goes through the TFE bulk-action endpoint, which
 	// is TFE's only documented create path (one subject/message, many target_ids).
@@ -459,7 +485,7 @@ func SetupV2Routes(
 		workspaceRepo.SetStorage(storageClient)
 	}
 
-	configVersionHandler := terraformHandlers.NewConfigurationVersionHandlerV2(configVersionRepo, workspaceRepo, authService, storageClient)
+	configVersionHandler := terraformHandlers.NewConfigurationVersionHandlerV2(configVersionRepo, workspaceRepo, authService, storageClient, rbacService)
 
 	// Initialize Redis log buffer service for log streaming
 	// Initialize Redis connection for log streaming (reuse same config as Ansible queue)
@@ -489,7 +515,9 @@ func SetupV2Routes(
 	stateVersionRepo := repository.NewStateVersionRepository(db)
 	stateOutputRepo := repository.NewStateVersionOutputRepository(db)
 	stateResourceRepo := repository.NewStateVersionResourceRepository(db)
-	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo, stateOutputRepo, atRestCrypto)
+	taskStageRepo := repository.NewTaskStageRepository(db)
+	taskResultRepo := repository.NewTaskResultRepository(db)
+	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo, stateOutputRepo, atRestCrypto, taskStageRepo, taskResultRepo)
 
 	// Terraform Runs (TFE-compatible)
 	// TFE expects: /api/v2/runs/:id
@@ -510,10 +538,51 @@ func SetupV2Routes(
 		tfRuns.POST("/:id/actions/force-execute", runHandler.ForceExecute)
 	}
 
+	// Task stages/results: a run's gate state at each boundary (read + the override action). The
+	// callback the external service PATCHes lives on the ROOT router (token-authenticated), not here.
+	v2.GET("/task-stages/:id", runHandler.GetTaskStage)
+	v2.POST("/task-stages/:id/actions/override", runHandler.OverrideTaskStage)
+	v2.GET("/task-results/:id", runHandler.GetTaskResult)
+	v2.GET("/task-results/:id/outcomes", runHandler.ListTaskResultOutcomes)
+	v2.GET("/task-result-outcomes/:id", runHandler.GetTaskResultOutcome)
+
 	// Plans endpoint (TFE-compatible)
 	// TFE supports both /api/v2/runs/:id/plan AND /api/v2/plans/:id
 	// For plan operations, plan ID = run ID
 	v2.GET("/plans/:id", runHandler.GetPlan)
+
+	// Plan JSON output + configuration archive download: dual-auth routes on the ROOT router.
+	// External run-task services fetch them with the webhook's `access_token` (a stateless
+	// run-scoped bearer the TaskTokenGate verifies and serves directly); every other caller falls
+	// through the gate into the normal AuthMiddleware + OrgResolutionWall chain, then the same
+	// handler with its own RBAC checks. json-output also fixes the links.json-output URL the plan
+	// document has always advertised but never served; download closes the standing
+	// ConfigurationVersions.Download gap.
+	rootChainWall := middleware.OrgResolutionWall(middleware.NewDBOrgResolver(db))
+	r.GET("/api/v2/plans/:id/json-output",
+		terraformHandlers.TaskTokenGate(func(c *gin.Context, _, runID string) bool {
+			return runID == c.Param("id") // plan ID = run ID
+		}, runHandler.GetPlanJSONOutput),
+		middleware.AuthMiddleware(authService),
+		rootChainWall,
+		runHandler.GetPlanJSONOutput)
+	r.GET("/api/v2/configuration-versions/:id/download",
+		terraformHandlers.TaskTokenGate(func(c *gin.Context, _, runID string) bool {
+			// The token authorizes only ITS run's configuration version.
+			run, err := runRepo.GetByID(runID)
+			return err == nil && run.ConfigurationVersionID != nil && *run.ConfigurationVersionID == c.Param("id")
+		}, configVersionHandler.DownloadConfigurationVersion),
+		middleware.AuthMiddleware(authService),
+		rootChainWall,
+		configVersionHandler.DownloadConfigurationVersion)
+
+	// Run-task result callback: the external service PATCHes its verdict here with the webhook's
+	// access_token. ROOT router (outside the auth middleware, like the ansible provisioning
+	// callback); the handler verifies the stateless token itself. Body capped BEFORE any read
+	// (CRIT-1 lesson) — 8MiB leaves room for outcome payloads (each outcome body ≤ 1MB).
+	r.PATCH("/api/v2/task-results/:id/callback",
+		middleware.MaxBodyBytes(8<<20),
+		runHandler.TaskResultCallback)
 
 	// Applies endpoint (TFE-compatible)
 	// TFE expects: /api/v2/applies/:id
