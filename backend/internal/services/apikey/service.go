@@ -364,6 +364,64 @@ func (s *Service) DeleteOrganizationToken(orgID uuid.UUID) error {
 	return s.apiKeyRepo.DeleteOrgToken(orgID)
 }
 
+// auditTokenName is the display name given to every audit-trail token (tfe_audit_trail_token). The
+// token is identified as a singleton by APIKey.IsAuditToken, not this name.
+const auditTokenName = "Audit Trail Token" //nolint:gosec // display name, not a credential
+
+// CreateAuditTrailToken mints (or regenerates) THE single audit-trail token for an organization: a
+// read-only credential for the org's audit surface, matching tfe_audit_trail_token. It is a distinct
+// per-org singleton from the regular org token (an org may hold both); any existing audit token is
+// revoked first, so regenerating invalidates the old value.
+//
+// Unlike the org token it carries a read-only scope (org:<id>:read), so the org-wall permits reads but
+// rejects mutations - the closest faithful mapping of TFE's audit-read-only semantics. userID is the
+// creating org owner (for ownership/audit).
+func (s *Service) CreateAuditTrailToken(userID, orgID uuid.UUID, expiresAt *time.Time) (*models.APIKey, string, error) {
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate audit trail token: %w", err)
+	}
+
+	keyHash, err := HashKey(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to hash audit trail token: %w", err)
+	}
+
+	// Revoke any existing audit token so there is only ever one (regenerate semantics).
+	if err := s.apiKeyRepo.DeleteAuditToken(orgID); err != nil {
+		return nil, "", fmt.Errorf("failed to revoke existing audit trail token: %w", err)
+	}
+
+	apiKey := &models.APIKey{
+		UserID:         userID,
+		Name:           auditTokenName,
+		Kind:           models.APIKeyKindOrg,
+		KeyHash:        keyHash,
+		KeyPrefix:      GetKeyPrefix(key),
+		Scopes:         models.StringArray{"org:" + orgID.String() + ":read"},
+		OrganizationID: &orgID,
+		IsAuditToken:   true,
+		ExpiresAt:      expiresAt,
+	}
+
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("failed to create audit trail token: %w", err)
+	}
+
+	return apiKey, key, nil
+}
+
+// GetAuditTrailToken returns an org's audit-trail token metadata (no plaintext), or
+// gorm.ErrRecordNotFound if the org has none.
+func (s *Service) GetAuditTrailToken(orgID uuid.UUID) (*models.APIKey, error) {
+	return s.apiKeyRepo.GetAuditToken(orgID)
+}
+
+// DeleteAuditTrailToken revokes an org's audit-trail token (no-op if none exists).
+func (s *Service) DeleteAuditTrailToken(orgID uuid.UUID) error {
+	return s.apiKeyRepo.DeleteAuditToken(orgID)
+}
+
 // teamTokenName is the display name given to every team authentication token (tfe_team_token). The
 // token is identified as a singleton by APIKey.IsTeamToken, not this name.
 const teamTokenName = "Team Token"

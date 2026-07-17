@@ -51,6 +51,17 @@ func jsonAPIError(c *gin.Context, status int, title, detail string) {
 	})
 }
 
+// auditTrailTokenType is the value of the `?token=` query param that selects the audit-trail token
+// variant (tfe_audit_trail_token) instead of the default organization token. go-tfe sends it via
+// OrganizationToken{Create,Read,Delete}Options.TokenType. Both share this endpoint but are distinct
+// per-org singletons.
+const auditTrailTokenType = "audit-trails"
+
+// isAuditRequest reports whether the request targets the audit-trail token variant.
+func isAuditRequest(c *gin.Context) bool {
+	return c.Query("token") == auditTrailTokenType
+}
+
 // orgTokenCreateRequest is the JSON:API body go-tfe sends: an optional iso8601 `expired-at`.
 type orgTokenCreateRequest struct {
 	Data struct {
@@ -130,7 +141,13 @@ func (h *OrganizationTokenHandlerV2) Create(c *gin.Context) {
 		}
 	}
 
-	key, token, err := h.apiKeyService.CreateOrganizationToken(user.ID, org.ID, req.Data.Attributes.ExpiredAt)
+	var key *models.APIKey
+	var token string
+	if isAuditRequest(c) {
+		key, token, err = h.apiKeyService.CreateAuditTrailToken(user.ID, org.ID, req.Data.Attributes.ExpiredAt)
+	} else {
+		key, token, err = h.apiKeyService.CreateOrganizationToken(user.ID, org.ID, req.Data.Attributes.ExpiredAt)
+	}
 	if err != nil {
 		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create organization token")
 		return
@@ -147,13 +164,19 @@ func (h *OrganizationTokenHandlerV2) Read(c *gin.Context) {
 		return
 	}
 
-	key, err := h.apiKeyService.GetOrganizationToken(org.ID)
+	var key *models.APIKey
+	var err error
+	if isAuditRequest(c) {
+		key, err = h.apiKeyService.GetAuditTrailToken(org.ID)
+	} else {
+		key, err = h.apiKeyService.GetOrganizationToken(org.ID)
+	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			jsonAPIError(c, http.StatusNotFound, "Not Found", "Organization token not found")
+			jsonAPIError(c, http.StatusNotFound, "Not Found", "Token not found")
 			return
 		}
-		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to read organization token")
+		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to read token")
 		return
 	}
 
@@ -168,8 +191,14 @@ func (h *OrganizationTokenHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.apiKeyService.DeleteOrganizationToken(org.ID); err != nil {
-		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete organization token")
+	var err error
+	if isAuditRequest(c) {
+		err = h.apiKeyService.DeleteAuditTrailToken(org.ID)
+	} else {
+		err = h.apiKeyService.DeleteOrganizationToken(org.ID)
+	}
+	if err != nil {
+		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete token")
 		return
 	}
 
