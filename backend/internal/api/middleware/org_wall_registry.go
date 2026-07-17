@@ -75,6 +75,9 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/tokens":     agnostic(),
 	"/api/v2/tokens/:id": agnostic(),
 
+	// --- current account (tfe_current_user) ---
+	"/api/v2/account/details": agnostic(),
+
 	// --- organizations ---
 	// List + create carry no single target org (create has no parent).
 	"/api/v2/organizations":                                orgListCreate(),
