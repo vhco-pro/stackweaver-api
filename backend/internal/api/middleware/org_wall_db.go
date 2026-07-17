@@ -44,6 +44,10 @@ type dbOrgResolver struct {
 	ansibleWorkflow  *repository.AnsibleWorkflowRepository
 	notificationCfg  *repository.NotificationConfigurationRepository
 	changeRequest    *repository.ChangeRequestRepository
+	runTask          *repository.RunTaskRepository
+	workspaceTask    *repository.WorkspaceTaskRepository
+	taskStage        *repository.TaskStageRepository
+	taskResult       *repository.TaskResultRepository
 }
 
 // NewDBOrgResolver builds the production OrgResolver from a database handle.
@@ -80,6 +84,10 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		ansibleWorkflow:  repository.NewAnsibleWorkflowRepository(db),
 		notificationCfg:  repository.NewNotificationConfigurationRepository(db),
 		changeRequest:    repository.NewChangeRequestRepository(db),
+		runTask:          repository.NewRunTaskRepository(db),
+		workspaceTask:    repository.NewWorkspaceTaskRepository(db),
+		taskStage:        repository.NewTaskStageRepository(db),
+		taskResult:       repository.NewTaskResultRepository(db),
 	}
 }
 
@@ -209,6 +217,44 @@ func (r *dbOrgResolver) ByChangeRequestID(id string) (uuid.UUID, error) {
 	}
 	// A change request is always scoped to exactly one workspace.
 	return r.orgByWorkspaceStr(cr.WorkspaceID)
+}
+
+func (r *dbOrgResolver) ByRunTaskID(id string) (uuid.UUID, error) {
+	t, err := r.runTask.GetByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	// Run tasks carry their org directly.
+	return t.OrganizationID, nil
+}
+
+func (r *dbOrgResolver) ByTaskStageID(id string) (uuid.UUID, error) {
+	ts, err := r.taskStage.GetByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	// A stage belongs to a run, which belongs to a workspace.
+	run, err := r.run.GetByID(ts.RunID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return r.orgByWorkspaceStr(run.WorkspaceID)
+}
+
+func (r *dbOrgResolver) ByTaskResultID(id string) (uuid.UUID, error) {
+	tr, err := r.taskResult.GetByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return r.ByTaskStageID(tr.TaskStageID)
+}
+
+func (r *dbOrgResolver) ByTaskResultOutcomeID(id string) (uuid.UUID, error) {
+	o, err := r.taskResult.GetOutcomeByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return r.ByTaskResultID(o.TaskResultID)
 }
 
 func (r *dbOrgResolver) ByConfigVersionID(id string) (uuid.UUID, error) {

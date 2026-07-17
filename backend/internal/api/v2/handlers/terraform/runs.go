@@ -47,6 +47,8 @@ type RunHandlerV2 struct {
 	stateVersionRepo  *repository.StateVersionRepository
 	stateOutputRepo   *repository.StateVersionOutputRepository
 	cryptoSvc         *crypto.CryptoService // decrypts sensitive output values at rest (#95); nil = disabled
+	taskStageRepo     *repository.TaskStageRepository
+	taskResultRepo    *repository.TaskResultRepository
 }
 
 func NewRunHandlerV2(
@@ -64,6 +66,8 @@ func NewRunHandlerV2(
 	stateVersionRepo *repository.StateVersionRepository,
 	stateOutputRepo *repository.StateVersionOutputRepository,
 	cryptoSvc *crypto.CryptoService,
+	taskStageRepo *repository.TaskStageRepository,
+	taskResultRepo *repository.TaskResultRepository,
 ) *RunHandlerV2 {
 	return &RunHandlerV2{
 		runRepo:           runRepo,
@@ -80,6 +84,8 @@ func NewRunHandlerV2(
 		stateVersionRepo:  stateVersionRepo,
 		stateOutputRepo:   stateOutputRepo,
 		cryptoSvc:         cryptoSvc,
+		taskStageRepo:     taskStageRepo,
+		taskResultRepo:    taskResultRepo,
 	}
 }
 
@@ -378,8 +384,10 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 	var canApply bool
 	switch run.Operation {
 	case models.RunOperationPlanAndApply, models.RunOperationDestroy:
-		// Plan-and-apply or destroy run: can apply when plan phase is completed (status="planned")
-		canApply = run.Status == models.RunStatusPlanned
+		// Plan-and-apply or destroy run: can apply when plan phase is completed. `planned` is the
+		// task-less rest state; `post_plan_completed` is the rest state when a post_plan task stage
+		// exists (tfe_workspace_run treats `planned` as pending in that case) — see run.go statuses.
+		canApply = run.Status == models.RunStatusPlanned || run.Status == models.RunStatusPostPlanCompleted
 	case models.RunOperationPlanOnly:
 		// Plan-only run: cannot be applied
 		canApply = false
@@ -404,7 +412,8 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		"status-timestamps": statusTimestamps,
 		"has-changes":       hasChanges(run), // Set based on plan output
 		"actions": gin.H{
-			"is-cancelable": run.Status == models.RunStatusRunning || run.Status == models.RunStatusPending || run.Status == models.RunStatusPlanning || run.Status == models.RunStatusApplying,
+			"is-cancelable": run.Status == models.RunStatusRunning || run.Status == models.RunStatusPending || run.Status == models.RunStatusPlanning || run.Status == models.RunStatusApplying ||
+				run.Status == models.RunStatusPrePlanRunning || run.Status == models.RunStatusPostPlanRunning || run.Status == models.RunStatusPreApplyRunning || run.Status == models.RunStatusPostApplyRunning,
 			// TFE-compatible: a plan-and-apply/destroy run waiting at `planned` is confirmable (apply-able).
 			// go-tfe clients (e.g. tfe_workspace_run) poll actions.is-confirmable to know when to confirm
 			// the apply; it mirrors permissions.can-apply. Was hardcoded false, which hung those clients.
@@ -1036,37 +1045,8 @@ func (h *RunHandlerV2) GetOutputs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": outputs})
 }
 
-// ListTaskStages returns the run-task stages for a run (TFE-compatible).
-// GET /api/v2/runs/:id/task-stages
-//
-// Stackweaver has no run-tasks subsystem, so a run never has pre-plan/post-plan/pre-apply task stages —
-// the truthful response is an empty list. go-tfe clients (e.g. tfe_workspace_run, which reads task
-// stages to decide whether a post-plan stage exists) require this endpoint to exist and return a valid
-// paginated list rather than a 404. We still 404 for a genuinely unknown run id so callers get a real
-// not-found instead of a misleading empty success.
-func (h *RunHandlerV2) ListTaskStages(c *gin.Context) {
-	runID := c.Param("id")
-	if _, err := h.runRepo.GetByID(runID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Run not found"},
-			},
-		})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"data": []gin.H{},
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": 1,
-				"prev-page":    nil,
-				"next-page":    nil,
-				"total-pages":  1,
-				"total-count":  0,
-			},
-		},
-	})
-}
+// ListTaskStages (GET /api/v2/runs/:id/task-stages) lives in task_stages.go with the rest of the
+// run-task read surface — it replaced the pre-run-tasks empty stub.
 
 // GetPlan returns the plan output for a run (TFE-compatible)
 // GET /api/v2/runs/:id/plan
@@ -1168,7 +1148,14 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 		if run.StartedAt != nil {
 			planStatusTimestamps["started-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
-	case models.RunStatusPlanned:
+	case models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted:
+		planStatus = "pending" // pre_plan run tasks execute before the plan starts
+	case models.RunStatusPreApplyCompleted: // wire-completeness const, never persisted
+		planStatus = "finished"
+	case models.RunStatusPlanned, models.RunStatusPostPlanRunning, models.RunStatusPostPlanCompleted,
+		models.RunStatusPreApplyRunning, models.RunStatusPostApplyRunning, models.RunStatusPostApplyCompleted:
+		// The PLAN itself is finished in all of these: post-plan/pre-apply/post-apply run tasks
+		// execute after it. go-tfe/terraform wait on the plan document reaching "finished".
 		planStatus = "finished" // TFE uses "finished" for completed plans
 		if run.PlanCompletedAt != nil {
 			planStatusTimestamps["finished-at"] = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
@@ -1386,6 +1373,16 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		applyStatus = "pending" // Plan phase hasn't started apply yet
 	case models.RunStatusPlanned:
 		applyStatus = "pending" // Plan completed, waiting for apply
+	case models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted,
+		models.RunStatusPostPlanRunning, models.RunStatusPostPlanCompleted,
+		models.RunStatusPreApplyRunning, models.RunStatusPreApplyCompleted:
+		applyStatus = "pending" // run-task stages before the apply phase
+	case models.RunStatusPostApplyRunning, models.RunStatusPostApplyCompleted:
+		// The apply itself finished; only informational post-apply tasks are still running.
+		applyStatus = "finished"
+		if run.ApplyStartedAt != nil {
+			applyStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+		}
 	case models.RunStatusRunning:
 		applyStatus = "running"
 		if run.ApplyStartedAt != nil {
@@ -1637,9 +1634,13 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		// TFE-compatible: destroy runs follow the same two-phase flow as plan-and-apply
 		if run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy {
 			switch run.Status {
-			case models.RunStatusPending, models.RunStatusPlanning, models.RunStatusPlanned:
+			case models.RunStatusPending, models.RunStatusPlanning, models.RunStatusPlanned,
+				models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted,
+				models.RunStatusPostPlanRunning, models.RunStatusPostPlanCompleted,
+				models.RunStatusPreApplyRunning, models.RunStatusPreApplyCompleted: // confirmed but apply not dispatched: latest logs are the plan's
 				phase = "plan"
-			case models.RunStatusApplying, models.RunStatusApplied:
+			case models.RunStatusApplying, models.RunStatusApplied,
+				models.RunStatusPostApplyRunning, models.RunStatusPostApplyCompleted:
 				phase = "apply"
 			case models.RunStatusFailed, models.RunStatusCancelled, models.RunStatusRunning, models.RunStatusCompleted:
 				// For other statuses, default to plan (logs may still be streaming)
@@ -2259,8 +2260,11 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 	// TFE-compatible: For plan-and-apply and destroy runs, transition from "planned" to "applying" status
 	// Destroy runs follow the same two-phase flow: plan -destroy → confirm → apply
 	if planRun.Operation == models.RunOperationPlanAndApply || planRun.Operation == models.RunOperationDestroy {
-		// Plan-and-apply or destroy run: transition to applying phase
-		if planRun.Status != models.RunStatusPlanned {
+		// Plan-and-apply or destroy run: transition to applying phase. Confirmable rest states:
+		// `planned` (no post-plan tasks) and `post_plan_completed` (post-plan task stage passed —
+		// tfe_workspace_run treats `planned` as pending when a post-plan stage exists).
+		confirmable := []models.RunStatus{models.RunStatusPlanned, models.RunStatusPostPlanCompleted}
+		if planRun.Status != models.RunStatusPlanned && planRun.Status != models.RunStatusPostPlanCompleted {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"errors": []gin.H{
 					{
@@ -2273,18 +2277,38 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 			return
 		}
 
+		// Run-task gate: with a pre_apply task stage, confirmation moves the run to
+		// pre_apply_running — the orchestrator fires the stage's webhooks and the continuation
+		// transitions to applying (setting apply_started_at and clearing the dispatch claim) only
+		// after the stage passes. Without one, confirm goes straight to applying as before.
+		hasPreApplyStage, tsErr := h.taskStageRepo.HasStage(planRun.ID, models.TaskStagePreApply)
+		if tsErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check task stages"}},
+			})
+			return
+		}
+
 		// Transition run to applying phase. Clear the dispatch claim (AUD-007/112) so the
 		// orchestrator dispatches the apply exactly once — the plan phase set dispatched_at, and
 		// the apply is a fresh dispatch that a runner must pick up.
-		// AUD-140: guarded transition (conditional UPDATE from 'planned') instead of a
+		// AUD-140: guarded transition (conditional UPDATE from a confirmable status) instead of a
 		// whole-record Save on the stale snapshot — otherwise a concurrent Discard/Cancel
 		// that already moved the run to 'cancelled' would be resurrected into 'applying'.
 		now := time.Now()
+		target := models.RunStatusApplying
+		fields := map[string]any{"apply_started_at": now, "dispatched_at": nil}
+		if hasPreApplyStage {
+			target = models.RunStatusPreApplyRunning
+			// apply_started_at and the dispatch claim are written by the continuation when the
+			// stage passes; the run is not dispatchable while its pre_apply tasks execute.
+			fields = map[string]any{}
+		}
 		ok, err := h.runRepo.TransitionStatus(
 			planRun.ID,
-			[]models.RunStatus{models.RunStatusPlanned},
-			models.RunStatusApplying,
-			map[string]any{"apply_started_at": now, "dispatched_at": nil},
+			confirmable,
+			target,
+			fields,
 		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -2413,11 +2437,17 @@ func (h *RunHandlerV2) Cancel(c *gin.Context) {
 
 	// Allow cancellation of pending, running, planning, and applying runs
 	// Planning and applying runs can be cancelled to stop long-running operations
+	// The run-task *_running statuses are cancellable too: the run is waiting on external task
+	// services, and cancelling also cancels its non-terminal task stages/results below.
 	cancellableStatuses := []models.RunStatus{
 		models.RunStatusPending,
 		models.RunStatusRunning,
 		models.RunStatusPlanning,
 		models.RunStatusApplying,
+		models.RunStatusPrePlanRunning,
+		models.RunStatusPostPlanRunning,
+		models.RunStatusPreApplyRunning,
+		models.RunStatusPostApplyRunning,
 	}
 	isCancellable := false
 	for _, status := range cancellableStatuses {
@@ -2471,6 +2501,12 @@ func (h *RunHandlerV2) Cancel(c *gin.Context) {
 		return
 	}
 
+	// Cancel the run's non-terminal task stages/results too (no-op for runs without task stages),
+	// so external services' late callbacks find terminal results and the timeline reads canceled.
+	if err := h.taskStageRepo.CancelPendingForRun(run.ID); err != nil {
+		logger.Warnf("Failed to cancel task stages for canceled run %s: %v", run.ID, err)
+	}
+
 	// TFE returns 202 Accepted for action endpoints (no body)
 	// According to TFE API docs: https://developer.hashicorp.com/terraform/enterprise/api-docs/run
 	c.Status(http.StatusAccepted)
@@ -2485,8 +2521,22 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 	}
 
 	// Can discard runs in pending state or planned state (plan completed, waiting for apply confirmation)
-	// This allows users to discard unwanted plans before they are applied
-	if run.Status != models.RunStatusPending && run.Status != models.RunStatusPlanned {
+	// This allows users to discard unwanted plans before they are applied.
+	// Run-task rest/wait states are discardable the same way: post_plan_completed is `planned` with
+	// a passed post-plan stage, and post_plan_running covers a stage awaiting override that the user
+	// chooses to abandon instead (TFE allows discarding runs whose tasks await override).
+	discardable := []models.RunStatus{
+		models.RunStatusPending, models.RunStatusPlanned,
+		models.RunStatusPostPlanCompleted, models.RunStatusPostPlanRunning,
+	}
+	isDiscardable := false
+	for _, s := range discardable {
+		if run.Status == s {
+			isDiscardable = true
+			break
+		}
+	}
+	if !isDiscardable {
 		c.JSON(http.StatusConflict, gin.H{
 			"errors": []gin.H{
 				{
@@ -2505,7 +2555,7 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 	now := time.Now()
 	ok, err := h.runRepo.TransitionStatus(
 		run.ID,
-		[]models.RunStatus{models.RunStatusPending, models.RunStatusPlanned},
+		discardable,
 		models.RunStatusCancelled,
 		map[string]any{"completed_at": now},
 	)
@@ -2532,6 +2582,11 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// Cancel the run's non-terminal task stages/results (no-op for runs without task stages).
+	if err := h.taskStageRepo.CancelPendingForRun(run.ID); err != nil {
+		logger.Warnf("Failed to cancel task stages for discarded run %s: %v", run.ID, err)
 	}
 
 	// TFE returns 202 Accepted for action endpoints (no body)

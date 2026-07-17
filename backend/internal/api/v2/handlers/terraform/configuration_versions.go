@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/storage"
@@ -21,6 +22,7 @@ type ConfigurationVersionHandlerV2 struct {
 	workspaceRepo     *repository.WorkspaceRepository
 	authService       *auth.Service
 	storageClient     storage.Client
+	rbacService       *rbac.Service // used by the download endpoint's normal-bearer leg
 }
 
 func NewConfigurationVersionHandlerV2(
@@ -28,12 +30,14 @@ func NewConfigurationVersionHandlerV2(
 	workspaceRepo *repository.WorkspaceRepository,
 	authService *auth.Service,
 	storageClient storage.Client,
+	rbacService *rbac.Service,
 ) *ConfigurationVersionHandlerV2 {
 	return &ConfigurationVersionHandlerV2{
 		configVersionRepo: configVersionRepo,
 		workspaceRepo:     workspaceRepo,
 		authService:       authService,
 		storageClient:     storageClient,
+		rbacService:       rbacService,
 	}
 }
 
