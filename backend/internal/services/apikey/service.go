@@ -364,6 +364,67 @@ func (s *Service) DeleteOrganizationToken(orgID uuid.UUID) error {
 	return s.apiKeyRepo.DeleteOrgToken(orgID)
 }
 
+// teamTokenName is the display name given to every team authentication token (tfe_team_token). The
+// token is identified as a singleton by APIKey.IsTeamToken, not this name.
+const teamTokenName = "Team Token"
+
+// CreateTeamToken mints (or regenerates) THE single (legacy, descriptionless) authentication token
+// for a team: the credential CI/automation uses to act as the team, matching tfe_team_token. There is
+// at most one per team: any existing team token is revoked first, so regenerating invalidates the old
+// value.
+//
+// The token is a real team-scoped automation key (Kind=org so it flows through the normal api-key
+// path, OrganizationID = the team's org, TeamID, scope team:<id>:admin) flagged IsTeamToken. The
+// org-wall binds it to the team's org and defers its team scope to per-handler authorization. userID
+// is the creating org owner (for ownership/audit); the token authorizes via its scope, not the user's
+// teams.
+func (s *Service) CreateTeamToken(userID, teamID, orgID uuid.UUID, expiresAt *time.Time) (*models.APIKey, string, error) {
+	key, err := GenerateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate team token: %w", err)
+	}
+
+	keyHash, err := HashKey(key)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to hash team token: %w", err)
+	}
+
+	// Revoke any existing team token so there is only ever one (regenerate semantics).
+	if err := s.apiKeyRepo.DeleteTeamToken(teamID); err != nil {
+		return nil, "", fmt.Errorf("failed to revoke existing team token: %w", err)
+	}
+
+	apiKey := &models.APIKey{
+		UserID:         userID,
+		Name:           teamTokenName,
+		Kind:           models.APIKeyKindOrg,
+		KeyHash:        keyHash,
+		KeyPrefix:      GetKeyPrefix(key),
+		Scopes:         models.StringArray{"team:" + teamID.String() + ":admin"},
+		OrganizationID: &orgID,
+		TeamID:         &teamID,
+		IsTeamToken:    true,
+		ExpiresAt:      expiresAt,
+	}
+
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("failed to create team token: %w", err)
+	}
+
+	return apiKey, key, nil
+}
+
+// GetTeamToken returns a team's authentication token metadata (no plaintext), or
+// gorm.ErrRecordNotFound if the team has none.
+func (s *Service) GetTeamToken(teamID uuid.UUID) (*models.APIKey, error) {
+	return s.apiKeyRepo.GetTeamToken(teamID)
+}
+
+// DeleteTeamToken revokes a team's authentication token (no-op if none exists).
+func (s *Service) DeleteTeamToken(teamID uuid.UUID) error {
+	return s.apiKeyRepo.DeleteTeamToken(teamID)
+}
+
 // DeleteAPIKeysForRunner removes every token minted for a runner (by its
 // runner:<id>:* scopes). Called when a runner is deregistered/deleted so its
 // credentials cannot outlive it.

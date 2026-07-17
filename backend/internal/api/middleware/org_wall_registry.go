@@ -90,6 +90,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/teams":                        orgByName(),
 	"/api/v2/organizations/:name/teams/:teamName":              orgByName(),
 	"/api/v2/teams/:id":                                        resource("id", rTeam),
+	"/api/v2/teams/:id/authentication-token":                   resource("id", rTeam),
 	"/api/v2/teams/:id/relationships/organization-memberships": resource("id", rTeam),
 	"/api/v2/teams/:id/relationships/users":                    resource("id", rTeam),
 

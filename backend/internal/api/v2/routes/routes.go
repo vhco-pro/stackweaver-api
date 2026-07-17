@@ -789,6 +789,13 @@ func SetupV2Routes(
 	v2.GET("/organizations/:name/authentication-token", orgTokenHandler.Read)
 	v2.DELETE("/organizations/:name/authentication-token", orgTokenHandler.Delete)
 
+	// Team authentication token: one per team (tfe_team_token), legacy descriptionless path. Owner of
+	// the team's org only. Backed by a team-scoped api_key flagged IsTeamToken.
+	teamTokenHandler := handlers.NewTeamTokenHandlerV2(tokenAPIKeyService, authService, rbacService, teamRepo)
+	v2.POST("/teams/:id/authentication-token", teamTokenHandler.Create)
+	v2.GET("/teams/:id/authentication-token", teamTokenHandler.Read)
+	v2.DELETE("/teams/:id/authentication-token", teamTokenHandler.Delete)
+
 	// VCS Connections
 	vcsConnectionHandler := handlers.NewVCSConnectionHandlerV2(vcsConnectionRepo, orgRepo, authService, vcsRegistry, rbacService)
 
