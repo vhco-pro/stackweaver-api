@@ -783,6 +783,10 @@ func SetupV2Routes(
 		tokens.DELETE("/:id", tokenHandler.Delete)
 	}
 
+	// Current account (tfe_current_user / go-tfe Users.ReadCurrent): the authenticated caller.
+	accountHandler := handlers.NewAccountHandlerV2(authService)
+	v2.GET("/account/details", accountHandler.Details)
+
 	// Organization authentication token: one per org (tfe_organization_token). Org-owner only.
 	orgTokenHandler := handlers.NewOrganizationTokenHandlerV2(tokenAPIKeyService, authService, rbacService, orgRepo)
 	v2.POST("/organizations/:name/authentication-token", orgTokenHandler.Create)
