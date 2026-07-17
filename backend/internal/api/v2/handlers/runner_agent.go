@@ -232,6 +232,17 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Pool-binding enforcement: an agent token (tfe_agent_token) is bound to a single pool, so a runner
+	// presenting one may only join THAT pool. An ordinary org-level runner:register key has no binding
+	// (nil) and keeps the historical behavior of joining any pool named in the body.
+	if apiKeyUUID, perr := uuid.Parse(fmt.Sprintf("%v", apiKeyID)); perr == nil {
+		boundPool, berr := h.apiKeyService.AgentPoolBindingForKey(apiKeyUUID)
+		if berr == nil && boundPool != nil && *boundPool != poolID {
+			c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "this agent token is bound to a different agent pool"}}})
+			return
+		}
+	}
+
 	// The runner-scoped token is owned by the same user as the registering key.
 	registeringUserID, _ := c.Get("user_id")
 	registeringUserUUID, _ := registeringUserID.(uuid.UUID)

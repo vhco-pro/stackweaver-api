@@ -27,6 +27,7 @@ var (
 	rTeamWorkspaceAccess    = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByTeamWorkspaceAccessID(v) }
 	rTeamProjectAccess      = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByTeamProjectAccessID(v) }
 	rAgentPool              = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAgentPoolID(v) }
+	rAuthToken              = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAuthTokenID(v) }
 	rRunner                 = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunnerID(v) }
 	rVCSConnection          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByVCSConnectionID(v) }
 	rOIDCConfig             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByOIDCConfigID(v) }
@@ -106,9 +107,11 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/projects/:id/relationships/team-access/:access_id": resource("access_id", rTeamProjectAccess),
 
 	// --- agent pools ---
-	"/api/v2/organizations/:name/agent-pools": orgByName(),
-	"/api/v2/agent-pools/:id":                 resource("id", rAgentPool),
-	"/api/v2/agent-pools/:id/agents":          resource("id", rAgentPool),
+	"/api/v2/organizations/:name/agent-pools":       orgByName(),
+	"/api/v2/agent-pools/:id":                       resource("id", rAgentPool),
+	"/api/v2/agent-pools/:id/agents":                resource("id", rAgentPool),
+	"/api/v2/agent-pools/:id/authentication-tokens": resource("id", rAgentPool),
+	"/api/v2/authentication-tokens/:id":             resource("id", rAuthToken),
 
 	// --- OIDC configurations ---
 	"/api/v2/organizations/:name/oidc-configurations": orgByName(),

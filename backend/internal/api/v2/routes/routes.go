@@ -796,6 +796,16 @@ func SetupV2Routes(
 	v2.GET("/teams/:id/authentication-token", teamTokenHandler.Read)
 	v2.DELETE("/teams/:id/authentication-token", teamTokenHandler.Delete)
 
+	// Agent (pool) tokens: many per pool (tfe_agent_token), the credential an agent presents to register
+	// into the pool. Manage-agent-pools RBAC. Backed by a pool-bound api_key flagged IsAgentToken; the
+	// runner registration handler enforces the pool binding. Create/List are pool-scoped; Read/Delete
+	// are by token id at the top-level /authentication-tokens/:id (go-tfe AgentTokens.Read/Delete).
+	agentTokenHandler := handlers.NewAgentTokenHandlerV2(tokenAPIKeyService, authService, rbacService, agentPoolRepo)
+	v2.POST("/agent-pools/:id/authentication-tokens", agentTokenHandler.Create)
+	v2.GET("/agent-pools/:id/authentication-tokens", agentTokenHandler.List)
+	v2.GET("/authentication-tokens/:id", agentTokenHandler.ReadByID)
+	v2.DELETE("/authentication-tokens/:id", agentTokenHandler.DeleteByID)
+
 	// VCS Connections
 	vcsConnectionHandler := handlers.NewVCSConnectionHandlerV2(vcsConnectionRepo, orgRepo, authService, vcsRegistry, rbacService)
 
