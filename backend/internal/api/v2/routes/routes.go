@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
@@ -638,7 +639,19 @@ func SetupV2Routes(
 
 	// Upload endpoint (no auth middleware - uses token in query parameter)
 	// This must be registered separately because it uses token-based auth, not Authorization header
+	//
+	// AUD-156: cap the upload body. The handler reads the whole body into memory (GetRawData), so
+	// without a cap a multi-GB stream is a memory-exhaustion DoS. Terraform config tarballs are
+	// small; the 500MB default is generous (a ContentLength above it is rejected 413 before any
+	// read) and overridable via STACKWEAVER_MAX_CONFIG_UPLOAD_MB for outsized monorepos.
+	maxUploadBytes := int64(500) << 20
+	if v := os.Getenv("STACKWEAVER_MAX_CONFIG_UPLOAD_MB"); v != "" {
+		if mb, err := strconv.ParseInt(v, 10, 64); err == nil && mb > 0 {
+			maxUploadBytes = mb << 20
+		}
+	}
 	uploadEndpoint := r.Group("/api/v2/configuration-versions")
+	uploadEndpoint.Use(middleware.MaxBodyBytes(maxUploadBytes))
 	uploadEndpoint.PUT("/:id/upload", configVersionHandler.Upload)
 
 	// Repositories for state versions, variables, and tokens

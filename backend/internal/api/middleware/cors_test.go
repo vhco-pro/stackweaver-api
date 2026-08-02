@@ -87,3 +87,30 @@ func TestCORSMiddleware_LocalhostGatedByProdMode(t *testing.T) {
 		t.Errorf("debug mode did not trust localhost: origin=%q creds=%q, want %q/true", o, cr, localhostOrigin)
 	}
 }
+
+// AUD-157: the OPTIONS preflight must reflect Access-Control-Allow-Origin (+ credentials) only for
+// allowed origins — previously it reflected ANY origin before the allowed check.
+func TestCORSPreflight_GatedOnAllowedOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("GIN_MODE", "release") // localhost not trusted; only CORS_EXTRA_ORIGINS allowed
+	t.Setenv("CORS_EXTRA_ORIGINS", "https://app.example.com")
+
+	preflight := func(origin string) (allowOrigin, allowCreds string, code int) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodOptions, "/api/v2/organizations", nil)
+		req.Header.Set("Origin", origin)
+		c.Request = req
+		CORSMiddleware()(c)
+		return w.Header().Get("Access-Control-Allow-Origin"), w.Header().Get("Access-Control-Allow-Credentials"), w.Code
+	}
+
+	// Disallowed origin: no credentialed CORS headers on the preflight (the bug).
+	if o, cr, _ := preflight("https://evil.com"); o != "" || cr != "" {
+		t.Errorf("preflight reflected disallowed origin: origin=%q creds=%q, want both empty", o, cr)
+	}
+	// Allowed origin: preflight still works.
+	if o, cr, _ := preflight("https://app.example.com"); o != "https://app.example.com" || cr != "true" {
+		t.Errorf("preflight did not honor allowed origin: origin=%q creds=%q, want app.example.com/true", o, cr)
+	}
+}
