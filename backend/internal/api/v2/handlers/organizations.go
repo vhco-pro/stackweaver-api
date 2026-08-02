@@ -612,6 +612,31 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
+	// AUD-151: gate org-settings mutation on manage-membership (owner-tier), mirroring
+	// Delete. JWT/browser identities bypass the org-resolution wall, so without this
+	// per-handler check any authenticated user could rewrite any org by name — rename,
+	// downgrade collaborator_auth_policy, or change the org run-execution defaults.
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return
+	}
+	canManage, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), user.ID, org.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}},
+		})
+		return
+	}
+	if !canManage {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to update this organization"}},
+		})
+		return
+	}
+
 	var req UpdateOrganizationRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -724,7 +749,6 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 
 	// Log activity
 	if h.activityService != nil {
-		user, _ := h.authService.GetUserFromContext(c)
 		activityCtx := helpers.GetActivityContext(c)
 		if user != nil {
 			activityCtx.UserID = &user.ID

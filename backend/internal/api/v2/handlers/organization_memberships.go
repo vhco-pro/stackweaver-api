@@ -573,6 +573,33 @@ func (h *OrganizationMembershipHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
+	// AUD-152: the response leaks the member's email + team memberships. JWT/browser
+	// identities bypass the org-resolution wall, so gate here: a caller may read their
+	// own membership, otherwise they must have manage-membership on the target org
+	// (mirroring the List/Create/Update/Delete siblings).
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+		})
+		return
+	}
+	if member.UserID != user.ID {
+		canManage, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), user.ID, member.OrganizationID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}},
+			})
+			return
+		}
+		if !canManage {
+			c.JSON(http.StatusForbidden, gin.H{
+				"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to view this organization membership"}},
+			})
+			return
+		}
+	}
+
 	// Format response - always include user data in included array (JSON:API pattern)
 	membershipData := formatOrganizationMembershipResponse(member, org.Name)
 	included := make([]gin.H, 0)
