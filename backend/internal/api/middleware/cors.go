@@ -70,13 +70,14 @@ func CORSMiddleware() gin.HandlerFunc {
 			allowed = isLocalhostOrigin(origin)
 		}
 
-		// For OPTIONS requests (preflight), always set CORS headers if origin is present
-		// This ensures the browser can complete the preflight check
+		// For OPTIONS requests (preflight), reflect the origin only when it is allowed.
+		// AUD-157: the preflight previously set Access-Control-Allow-Origin + Allow-Credentials
+		// for ANY origin before consulting `allowed`, so an arbitrary origin got a credentialed
+		// 204. It was not independently exploitable (the real-request path below IS gated, so the
+		// browser blocked reads), but the preflight must match that gate — only allowed origins
+		// (and the localhost variants folded into `allowed` above) get the credentialed headers.
 		if c.Request.Method == "OPTIONS" {
-			// Set CORS headers BEFORE checking if origin is allowed
-			// This ensures preflight requests succeed even if origin check fails
-			if origin != "" {
-				// Use the origin (both allowed and development cases use the same origin)
+			if allowed && origin != "" {
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
