@@ -294,9 +294,17 @@ func (h *VCSAppInstallationHandlerV2) InitiateAzureDevOpsInstallation(c *gin.Con
 		return
 	}
 
-	// State format: "stackweaverOrg|adoOrg|returnPath|uuid"
+	// State payload: "stackweaverOrg|adoOrg|returnPath|uuid", wrapped in an HMAC-signed,
+	// expiring envelope so the callback can prove it minted this state (AUD-155).
 	escapedReturn := url.QueryEscape(returnPath)
-	state := fmt.Sprintf("%s|%s|%s|%s", orgName, adoOrg, escapedReturn, uuid.New().String())
+	payload := fmt.Sprintf("%s|%s|%s|%s", orgName, adoOrg, escapedReturn, uuid.New().String())
+	state := mintOAuthState(payload)
+	if state == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{{"status": "500", "title": "Configuration Error", "detail": "OAuth state signing is not configured (ENCRYPTION_KEY unset)"}},
+		})
+		return
+	}
 
 	authURL := h.azureDevOpsManager.GetAuthorizationURL(state)
 	c.JSON(http.StatusOK, gin.H{
@@ -324,8 +332,18 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		return
 	}
 
-	// Decode state: "stackweaverOrg|adoOrg|returnPath|uuid"
-	stateParts := strings.SplitN(state, "|", 4)
+	// AUD-155: verify the HMAC-signed state before trusting any field. A missing/forged/expired
+	// state (e.g. an attacker-crafted state pointing at a victim org) fails signature verification.
+	payload, ok := verifyOAuthState(state)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid or expired state parameter"}},
+		})
+		return
+	}
+
+	// Decode state payload: "stackweaverOrg|adoOrg|returnPath|uuid"
+	stateParts := strings.SplitN(payload, "|", 4)
 	if len(stateParts) < 2 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid state parameter"}},
