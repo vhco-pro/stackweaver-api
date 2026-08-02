@@ -439,6 +439,25 @@ func (h *TeamHandlerV2) calculateTeamPermissions(ctx context.Context, userID, or
 
 // List lists teams for an organization
 // GET /api/v2/organizations/:name/teams
+// requireOrgMembership resolves the caller and writes 401/403 (returning false) unless
+// they are a member of orgID. JWT/browser identities bypass the org-resolution wall, so
+// this per-handler check is the only tenant-isolation defense for them — the team read
+// endpoints otherwise leak member usernames/emails and team topology cross-tenant
+// (AUD-153/154).
+func (h *TeamHandlerV2) requireOrgMembership(c *gin.Context, orgID uuid.UUID) (uuid.UUID, bool) {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		return uuid.Nil, false
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, orgID)
+	if err != nil || !inOrg {
+		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization"}}})
+		return uuid.Nil, false
+	}
+	return user.ID, true
+}
+
 func (h *TeamHandlerV2) List(c *gin.Context) {
 	orgName := c.Param("name")
 
@@ -453,6 +472,11 @@ func (h *TeamHandlerV2) List(c *gin.Context) {
 				},
 			},
 		})
+		return
+	}
+
+	userID, ok := h.requireOrgMembership(c, org.ID)
+	if !ok {
 		return
 	}
 
@@ -476,13 +500,6 @@ func (h *TeamHandlerV2) List(c *gin.Context) {
 			},
 		})
 		return
-	}
-
-	// Get current user for permission calculation
-	user, err := h.authService.GetUserFromContext(c)
-	var userID uuid.UUID
-	if err == nil {
-		userID = user.ID
 	}
 
 	// Format response
@@ -531,6 +548,11 @@ func (h *TeamHandlerV2) Get(c *gin.Context) {
 		return
 	}
 
+	userID, ok := h.requireOrgMembership(c, org.ID)
+	if !ok {
+		return
+	}
+
 	team, err := h.teamRepo.GetByName(org.ID, teamName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -543,13 +565,6 @@ func (h *TeamHandlerV2) Get(c *gin.Context) {
 			},
 		})
 		return
-	}
-
-	// Get current user for permission calculation
-	user, err := h.authService.GetUserFromContext(c)
-	var userID uuid.UUID
-	if err == nil {
-		userID = user.ID
 	}
 
 	// Calculate permissions
@@ -1169,11 +1184,9 @@ func (h *TeamHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
-	// Get current user for permission calculation
-	user, err := h.authService.GetUserFromContext(c)
-	var userID uuid.UUID
-	if err == nil {
-		userID = user.ID
+	userID, ok := h.requireOrgMembership(c, team.OrganizationID)
+	if !ok {
+		return
 	}
 
 	// Parse include options
