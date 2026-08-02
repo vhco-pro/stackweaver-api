@@ -81,6 +81,10 @@ func SetupV2Routes(
 	// Run-task access tokens (webhook access_token → callback / plan-json / config download) use the
 	// same key; the orchestrator (which mints them at delivery) resolves the identical key.
 	terraformHandlers.SetTaskTokenSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
+	// AUD-155: sign the Azure DevOps OAuth `state` with the same key so the callback can prove it
+	// minted the state (the flow is stateless — no session store). An unset key fails state
+	// verification closed rather than trusting a forgeable state.
+	handlers.SetOAuthStateSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
 
 	// VCS Provider Registry (multi-provider support)
 	azureDevOpsManager, err := vcs.NewAzureDevOpsManager()
