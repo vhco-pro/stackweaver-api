@@ -300,11 +300,14 @@ func SetupAnsibleRoutes(
 
 	// Host by ID endpoints
 	// GET/PATCH/DELETE /api/v2/ansible/hosts/:id
+	// POST/DELETE     /api/v2/ansible/hosts/:id/groups/:group_id
 	hosts := v2.Group("/ansible/hosts")
 	{
 		hosts.GET("/:id", hostHandler.Get)
 		hosts.PATCH("/:id", hostHandler.Update)
 		hosts.DELETE("/:id", hostHandler.Delete)
+		hosts.POST("/:id/groups/:group_id", hostHandler.AddToGroup)
+		hosts.DELETE("/:id/groups/:group_id", hostHandler.RemoveFromGroup)
 	}
 
 	// Group by ID endpoints
