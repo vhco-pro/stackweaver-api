@@ -60,7 +60,7 @@ func SetupRoutes(
 
 	// Middleware
 	r.Use(middleware.CORSMiddleware())
-	r.Use(middleware.NewIPRateLimiter(100, 200).Middleware())
+	r.Use(middleware.NewIPRateLimiter(rateLimitFromEnv("RATE_LIMIT", 100, 200)).Middleware())
 	// Security headers on every response (JSON API + auth proxy). CSP is inert on
 	// JSON but nosniff/HSTS/etc. are real defense-in-depth. Applied globally after
 	// CORS so preflight (OPTIONS) short-circuits before it, and so the /auth group
@@ -199,7 +199,7 @@ func setupOAuthLoginRoutes(r *gin.Engine, authService *auth.Service, apiKeyServi
 // CSRF protection is applied to mutating methods via Origin/Referer validation.
 func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 	// Auth-specific rate limiter: stricter than the global one (10 req/s, burst 20)
-	authRateLimiter := middleware.NewIPRateLimiter(10, 20)
+	authRateLimiter := middleware.NewIPRateLimiter(rateLimitFromEnv("AUTH_RATE_LIMIT", 10, 20))
 
 	// CSRF protection on mutating methods
 	// Allowed origins match the CORS middleware (localhost variants + CORS_EXTRA_ORIGINS)
@@ -306,4 +306,30 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 		// Production binaries get a no-op implementation (see testing_noop.go).
 		registerTestingRoutes(auth, authRateLimiter, proxy)
 	}
+}
+
+// rateLimitFromEnv resolves a limiter's rps/burst from <PREFIX>_RPS /
+// <PREFIX>_BURST, falling back to the given defaults. Per-IP limits assume
+// distinct clients have distinct IPs; deployments where many users share one
+// attributed IP (an office NATing through a single egress, or an ingress
+// without TRUSTED_PROXIES) need a bigger bucket, and test harnesses drive
+// everything from one IP by construction (#597). Invalid or non-positive
+// values are rejected loudly rather than silently weakening a security limit.
+func rateLimitFromEnv(prefix string, defRPS, defBurst int) (int, int) {
+	rps, burst := defRPS, defBurst
+	if v := os.Getenv(prefix + "_RPS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			rps = n
+		} else {
+			logger.Warnf("%s_RPS=%q is not a positive integer — keeping default %d", prefix, v, defRPS)
+		}
+	}
+	if v := os.Getenv(prefix + "_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			burst = n
+		} else {
+			logger.Warnf("%s_BURST=%q is not a positive integer — keeping default %d", prefix, v, defBurst)
+		}
+	}
+	return rps, burst
 }
