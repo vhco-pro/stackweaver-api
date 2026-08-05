@@ -39,43 +39,44 @@ func NewAnsibleConfigHandler(
 	}
 }
 
-// AnsibleConfigRequest is the request body for creating/updating ansible config
+// AnsibleConfigRequest is the JSON:API request body for upserting an ansible
+// config (#608): { data: { type, attributes: { "config-content": "..." } } },
+// matching the envelope every other /api/v2 write endpoint accepts.
 type AnsibleConfigRequest struct {
-	ConfigContent string `json:"config_content" binding:"required"`
+	Data struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			ConfigContent string `json:"config-content" binding:"required"`
+		} `json:"attributes" binding:"required"`
+	} `json:"data" binding:"required"`
 }
 
-// AnsibleConfigResponse is the response format for ansible config
-type AnsibleConfigResponse struct {
-	ID             string  `json:"id"`
-	Type           string  `json:"type"`
-	Scope          string  `json:"scope"`
-	OrganizationID *string `json:"organization_id,omitempty"`
-	ProjectID      *string `json:"project_id,omitempty"`
-	WorkspaceID    *string `json:"workspace_id,omitempty"`
-	ConfigContent  string  `json:"config_content"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
-}
-
-func buildAnsibleConfigResponse(config *models.AnsibleConfig) AnsibleConfigResponse {
-	resp := AnsibleConfigResponse{
-		ID:            config.ID.String(),
-		Type:          "ansible-configs",
-		Scope:         config.Scope(),
-		ConfigContent: config.ConfigContent,
-		CreatedAt:     config.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:     config.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+// buildAnsibleConfigResponse renders the standard JSON:API resource object
+// (#608): attributes nested and dasherized, scope parents expressed as
+// relationships rather than flat *_id attributes.
+func buildAnsibleConfigResponse(config *models.AnsibleConfig) gin.H {
+	resp := gin.H{
+		"type": "ansible-configs",
+		"id":   config.ID.String(),
+		"attributes": gin.H{
+			"scope":          config.Scope(),
+			"config-content": config.ConfigContent,
+			"created-at":     config.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			"updated-at":     config.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		},
 	}
+	relationships := gin.H{}
 	if config.OrganizationID != nil {
-		s := config.OrganizationID.String()
-		resp.OrganizationID = &s
+		relationships["organization"] = gin.H{"data": gin.H{"type": "organizations", "id": config.OrganizationID.String()}}
 	}
 	if config.ProjectID != nil {
-		s := config.ProjectID.String()
-		resp.ProjectID = &s
+		relationships["project"] = gin.H{"data": gin.H{"type": "projects", "id": config.ProjectID.String()}}
 	}
 	if config.WorkspaceID != nil {
-		resp.WorkspaceID = config.WorkspaceID
+		relationships["workspace"] = gin.H{"data": gin.H{"type": "workspaces", "id": *config.WorkspaceID}}
+	}
+	if len(relationships) > 0 {
+		resp["relationships"] = relationships
 	}
 	return resp
 }
@@ -129,8 +130,15 @@ func (h *AnsibleConfigHandler) UpsertByOrganization(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
 		return
 	}
-	userIDStr := userID.(string)
-	userUUID, _ := uuid.Parse(userIDStr)
+	// The auth middleware stores user_id as uuid.UUID (auth/service.go
+	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
+	// on every write — unreachable until the request binding was fixed, since
+	// the old body shape 400'd first.
+	userUUID, ok := userID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		return
+	}
 
 	// Require org manage-workspaces permission (ansible configs affect workspace execution)
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, org.ID)
@@ -147,7 +155,7 @@ func (h *AnsibleConfigHandler) UpsertByOrganization(c *gin.Context) {
 
 	config := &models.AnsibleConfig{
 		OrganizationID: &org.ID,
-		ConfigContent:  req.ConfigContent,
+		ConfigContent:  req.Data.Attributes.ConfigContent,
 		CreatedByID:    userUUID,
 		UpdatedByID:    userUUID,
 	}
@@ -184,8 +192,15 @@ func (h *AnsibleConfigHandler) DeleteByOrganization(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
 		return
 	}
-	userIDStr := userID.(string)
-	userUUID, _ := uuid.Parse(userIDStr)
+	// The auth middleware stores user_id as uuid.UUID (auth/service.go
+	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
+	// on every write — unreachable until the request binding was fixed, since
+	// the old body shape 400'd first.
+	userUUID, ok := userID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		return
+	}
 
 	// Require org manage-workspaces permission
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, org.ID)
@@ -262,8 +277,15 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
 		return
 	}
-	userIDStr := userID.(string)
-	userUUID, _ := uuid.Parse(userIDStr)
+	// The auth middleware stores user_id as uuid.UUID (auth/service.go
+	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
+	// on every write — unreachable until the request binding was fixed, since
+	// the old body shape 400'd first.
+	userUUID, ok := userID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		return
+	}
 
 	// Require org manage-workspaces permission (project ansible configs affect workspace execution)
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, project.OrganizationID)
@@ -280,7 +302,7 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 
 	config := &models.AnsibleConfig{
 		ProjectID:     &projectID,
-		ConfigContent: req.ConfigContent,
+		ConfigContent: req.Data.Attributes.ConfigContent,
 		CreatedByID:   userUUID,
 		UpdatedByID:   userUUID,
 	}
@@ -323,8 +345,15 @@ func (h *AnsibleConfigHandler) DeleteByProject(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
 		return
 	}
-	userIDStr := userID.(string)
-	userUUID, _ := uuid.Parse(userIDStr)
+	// The auth middleware stores user_id as uuid.UUID (auth/service.go
+	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
+	// on every write — unreachable until the request binding was fixed, since
+	// the old body shape 400'd first.
+	userUUID, ok := userID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		return
+	}
 
 	// Require org manage-workspaces permission
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, project.OrganizationID)
