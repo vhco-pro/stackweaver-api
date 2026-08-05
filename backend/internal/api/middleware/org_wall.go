@@ -63,6 +63,10 @@ type OrgResolver interface {
 	ByAnsibleWorkflowID(id string) (uuid.UUID, error)
 	ByAnsibleWorkflowNodeID(id string) (uuid.UUID, error)
 	ByAnsibleWorkflowEdgeID(id string) (uuid.UUID, error)
+	ByAnsibleInventorySyncID(id string) (uuid.UUID, error)
+	ByAnsibleNotificationTemplateID(id string) (uuid.UUID, error)
+	ByAnsibleWorkflowJobID(id string) (uuid.UUID, error)
+	ByAnsibleWorkflowNodeJobID(id string) (uuid.UUID, error)
 
 	// UserInOrg reports whether the user is a member of the org (directly
 	// or via a team). It is the membership boundary user-bound tokens and

@@ -45,6 +45,10 @@ var (
 	rAnsibleWorkflow        = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleWorkflowID(v) }
 	rAnsibleWorkflowNode    = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleWorkflowNodeID(v) }
 	rAnsibleWorkflowEdge    = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleWorkflowEdgeID(v) }
+	rAnsibleInventorySync   = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleInventorySyncID(v) }
+	rAnsibleNotifTemplate   = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleNotificationTemplateID(v) }
+	rAnsibleWorkflowJob     = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleWorkflowJobID(v) }
+	rAnsibleWorkflowNodeJob = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByAnsibleWorkflowNodeJobID(v) }
 )
 
 func orgByName() routeEntry { return routeEntry{orgNameParam: "name"} }
@@ -289,6 +293,31 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/ansible/credentials": orgByName(),
 	"/api/v2/ansible/credentials/:id":                 resource("id", rAnsibleCredential),
 
+	// --- ansible: org-wall gap closure (#615) — routes added without
+	// classification; the fail-closed wall 403'd every api-key token here. ---
+	"/api/v2/organizations/:name/ansible/adhoc-modules":                           orgByName(),
+	"/api/v2/organizations/:name/ansible/vcs-playbook-files":                      orgByName(),
+	"/api/v2/organizations/:name/ansible/playbooks/actions/bulk-import":           orgByName(),
+	"/api/v2/organizations/:name/ansible/playbooks/actions/find-or-create":        orgByName(),
+	"/api/v2/organizations/:name/ansible/notification-templates":                  orgByName(),
+	"/api/v2/organizations/:name/ansible/notification-attachments":                orgByName(),
+	"/api/v2/organizations/:name/ansible/notification-attachments/:attachment_id": orgByName(),
+	"/api/v2/ansible/notification-templates/:id":                                  resource("id", rAnsibleNotifTemplate),
+	"/api/v2/ansible/notification-templates/:id/test":                             resource("id", rAnsibleNotifTemplate),
+	"/api/v2/ansible/hosts/:id/groups/:group_id":                                  resource("id", rAnsibleHost),
+	"/api/v2/ansible/inventories/:id/syncs":                                       resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventories/:id/actions/run-command":                         resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventory-syncs/:sync_id":                                    resource("sync_id", rAnsibleInventorySync),
+	"/api/v2/ansible/job-templates/:id/access":                                    resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/notifications":                             resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/credentials":                               resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/credentials/:credential_id":                resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/workflows/:id/jobs":                                          resource("id", rAnsibleWorkflow),
+	"/api/v2/ansible/workflows/:id/launch":                                        resource("id", rAnsibleWorkflow),
+	"/api/v2/ansible/workflow-jobs/:id":                                           resource("id", rAnsibleWorkflowJob),
+	"/api/v2/ansible/workflow-node-jobs/:id/approve":                              resource("id", rAnsibleWorkflowNodeJob),
+	"/api/v2/ansible/workflow-node-jobs/:id/deny":                                 resource("id", rAnsibleWorkflowNodeJob),
+
 	// --- ansible: playbooks ---
 	"/api/v2/organizations/:name/ansible/playbooks": orgByName(),
 	"/api/v2/projects/:id/ansible/playbooks":        resource("id", rProject),
@@ -340,3 +369,14 @@ var wallRegistry = map[string]routeEntry{
 // (the creator becomes owner of a brand-new org), so neither has a target
 // org for the wall to compare against.
 func orgListCreate() routeEntry { return routeEntry{agnostic: true} }
+
+// WallClassified reports whether a gin route pattern is classified in the
+// org-resolution wall registry. Exported for the registry-completeness test
+// (routes package), which walks the real engine's routes and fails on any
+// walled /api/v2 route missing from the registry — the fail-closed wall turns
+// an unclassified route into a 403 for every api-key token (#615), so gaps
+// must surface at test time, not in production automation.
+func WallClassified(fullPath string) bool {
+	_, ok := wallRegistry[fullPath]
+	return ok
+}
