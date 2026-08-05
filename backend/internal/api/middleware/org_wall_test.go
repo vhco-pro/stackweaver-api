@@ -62,11 +62,15 @@ func (f *fakeResolver) ByAnsibleJobTemplateID(string) (uuid.UUID, error)     { r
 func (f *fakeResolver) ByAnsibleJobTemplateVariableID(string) (uuid.UUID, error) {
 	return f.resolve()
 }
-func (f *fakeResolver) ByAnsibleJobID(string) (uuid.UUID, error)          { return f.resolve() }
-func (f *fakeResolver) ByAnsibleScheduleID(string) (uuid.UUID, error)     { return f.resolve() }
-func (f *fakeResolver) ByAnsibleWorkflowID(string) (uuid.UUID, error)     { return f.resolve() }
-func (f *fakeResolver) ByAnsibleWorkflowNodeID(string) (uuid.UUID, error) { return f.resolve() }
-func (f *fakeResolver) ByAnsibleWorkflowEdgeID(string) (uuid.UUID, error) { return f.resolve() }
+func (f *fakeResolver) ByAnsibleJobID(string) (uuid.UUID, error)                  { return f.resolve() }
+func (f *fakeResolver) ByAnsibleScheduleID(string) (uuid.UUID, error)             { return f.resolve() }
+func (f *fakeResolver) ByAnsibleWorkflowID(string) (uuid.UUID, error)             { return f.resolve() }
+func (f *fakeResolver) ByAnsibleWorkflowNodeID(string) (uuid.UUID, error)         { return f.resolve() }
+func (f *fakeResolver) ByAnsibleWorkflowEdgeID(string) (uuid.UUID, error)         { return f.resolve() }
+func (f *fakeResolver) ByAnsibleInventorySyncID(string) (uuid.UUID, error)        { return f.resolve() }
+func (f *fakeResolver) ByAnsibleNotificationTemplateID(string) (uuid.UUID, error) { return f.resolve() }
+func (f *fakeResolver) ByAnsibleWorkflowJobID(string) (uuid.UUID, error)          { return f.resolve() }
+func (f *fakeResolver) ByAnsibleWorkflowNodeJobID(string) (uuid.UUID, error)      { return f.resolve() }
 func (f *fakeResolver) UserInOrg(uuid.UUID, uuid.UUID) (bool, error) {
 	return f.member, f.memberErr
 }

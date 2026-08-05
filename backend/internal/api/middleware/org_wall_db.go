@@ -35,6 +35,8 @@ type dbOrgResolver struct {
 	provider         *repository.ProviderRepository
 	ansibleInventory *repository.AnsibleInventoryRepository
 	ansibleInvSource *repository.AnsibleInventorySourceRepository
+	ansibleInvSync   *repository.AnsibleInventorySyncRepository
+	ansibleNotifTpl  *repository.AnsibleNotificationRepository
 	ansibleCred      *repository.AnsibleCredentialRepository
 	ansiblePlaybook  *repository.AnsiblePlaybookRepository
 	ansibleJobTpl    *repository.AnsibleJobTemplateRepository
@@ -76,6 +78,8 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		provider:         repository.NewProviderRepository(db),
 		ansibleInventory: repository.NewAnsibleInventoryRepository(db),
 		ansibleInvSource: repository.NewAnsibleInventorySourceRepository(db),
+		ansibleInvSync:   repository.NewAnsibleInventorySyncRepository(db),
+		ansibleNotifTpl:  repository.NewAnsibleNotificationRepository(db),
 		ansibleCred:      repository.NewAnsibleCredentialRepository(db),
 		ansiblePlaybook:  repository.NewAnsiblePlaybookRepository(db),
 		ansibleJobTpl:    repository.NewAnsibleJobTemplateRepository(db),
@@ -581,6 +585,58 @@ func (r *dbOrgResolver) ByAnsibleWorkflowEdgeID(id string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return r.orgByWorkflowUUID(edge.WorkflowID)
+}
+
+func (r *dbOrgResolver) ByAnsibleInventorySyncID(id string) (uuid.UUID, error) {
+	syncID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	sync, err := r.ansibleInvSync.GetByID(syncID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return r.orgByInventoryUUID(sync.InventoryID)
+}
+
+func (r *dbOrgResolver) ByAnsibleNotificationTemplateID(id string) (uuid.UUID, error) {
+	tplID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	tpl, err := r.ansibleNotifTpl.GetByID(tplID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return tpl.OrganizationID, nil
+}
+
+func (r *dbOrgResolver) ByAnsibleWorkflowJobID(id string) (uuid.UUID, error) {
+	jobID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	job, err := r.ansibleWorkflow.GetWorkflowJobByID(jobID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return r.orgByWorkflowUUID(job.WorkflowID)
+}
+
+func (r *dbOrgResolver) ByAnsibleWorkflowNodeJobID(id string) (uuid.UUID, error) {
+	nodeJobID, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	nodeJob, err := r.ansibleWorkflow.GetNodeJobByID(nodeJobID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	job, err := r.ansibleWorkflow.GetWorkflowJobByID(nodeJob.WorkflowJobID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return r.orgByWorkflowUUID(job.WorkflowID)
 }
 
 func (r *dbOrgResolver) UserInOrg(userID, orgID uuid.UUID) (bool, error) {
