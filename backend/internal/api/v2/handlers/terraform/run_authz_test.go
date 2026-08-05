@@ -103,7 +103,7 @@ func setupRunAuthzFixture(t *testing.T) *runAuthzFixture {
 	// because the denial paths return at the gate and the owner-allow path only formats.
 	h := NewRunHandlerV2(
 		repository.NewRunRepository(db), repository.NewWorkspaceRepository(db), orgRepo, authService,
-		nil, repository.NewConfigurationVersionRepository(db), nil, nil, nil, nil, rbacService, nil, nil, nil,
+		nil, repository.NewConfigurationVersionRepository(db), nil, nil, nil, nil, rbacService, nil, nil, nil, nil, nil,
 	)
 
 	gin.SetMode(gin.TestMode)
