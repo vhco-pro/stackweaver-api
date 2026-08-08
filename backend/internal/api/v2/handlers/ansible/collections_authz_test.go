@@ -1,7 +1,7 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
 // AUD-128 job-collections authorization. ListJobCollections (GET
-// /ansible/jobs/:id/collections) is keyed by job ID but performed no auth/RBAC —
+// /ansible/jobs/:id/collections) is keyed by job ID but performed no auth/RBAC -
 // any authenticated JWT identity could hit it for any job. The listing is static
 // today, but the endpoint is designed to track per-job installations, so it must be
 // gated on the job's read permission now (mirroring jobs.go Get). This test drives

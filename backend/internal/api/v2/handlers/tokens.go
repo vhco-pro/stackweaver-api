@@ -13,7 +13,7 @@ import (
 )
 
 // TokenHandlerV2 serves the TFE-compatible token endpoints (`/api/v2/tokens`).
-// These mint **user-bound** tokens — the `terraform login` / personal access
+// These mint **user-bound** tokens - the `terraform login` / personal access
 // token. They are now backed by the unified api_keys table (kind="user") via
 // the shared apikey.Service, not the legacy tfe_tokens table.
 type TokenHandlerV2 struct {

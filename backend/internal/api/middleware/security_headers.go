@@ -23,7 +23,7 @@ import (
 //     modern replacement). Mirrors the frontend nginx set.
 //   - Permissions-Policy: deny browser features the API never uses. Mirrors
 //     the frontend nginx set.
-//   - Content-Security-Policy: connect-src 'self' — tight default so the
+//   - Content-Security-Policy: connect-src 'self' - tight default so the
 //     login SPA can only talk to the same origin. Harmless on JSON
 //     responses (browsers apply CSP to the document that initiated the
 //     request, not to this response directly), but kept for parity and so
@@ -54,7 +54,7 @@ func SecurityHeaders() gin.HandlerFunc {
 		h.Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; frame-ancestors 'none'")
 
 		if isTLS(c.Request) {
-			// 1 year, include subdomains. Don't set preload — that's an opt-in
+			// 1 year, include subdomains. Don't set preload - that's an opt-in
 			// registry commitment the operator should make deliberately.
 			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}

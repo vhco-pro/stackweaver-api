@@ -51,7 +51,7 @@ func signWithFreshKey(t *testing.T, payload []byte, armored bool) (publicKeyASCI
 // exact key registered to the org. It proves a good signature verifies, a tampered
 // payload is rejected, a signature made by a DIFFERENT key is rejected (the keyring is
 // built from only the registered key), and the armored signature form is accepted too.
-// Pure Go — runs in CI's plain `go test`, no gpg binary.
+// Pure Go - runs in CI's plain `go test`, no gpg binary.
 func TestVerifyDetachedSignature(t *testing.T) {
 	svc := NewGPGService()
 	payload := []byte("f1b2...deadbeef  terraform-provider-test_1.0.0_linux_amd64.zip\n")
@@ -68,7 +68,7 @@ func TestVerifyDetachedSignature(t *testing.T) {
 		t.Error("VerifyDetachedSignature accepted a signature over a tampered payload")
 	}
 
-	// A signature made by a key that is NOT the registered one is rejected — the whole
+	// A signature made by a key that is NOT the registered one is rejected - the whole
 	// point is that verification is pinned to the org's key, not "any valid signature".
 	otherPub, otherSig := signWithFreshKey(t, payload, false)
 	_ = otherPub
@@ -118,7 +118,7 @@ NDAt9uGXIWYAxiRrcz7C1Vjz1MXYhRfF/8g2k/XWn7wJQ3NeUBNwUecit7JZ0AlS
 // structured OpenPGP parse with no regex fallbacks, so it returns the correct 16-char
 // long key id for a real armored key and REJECTS any input that is not a well-formed
 // public key. Before the fix the final fallback returned "the first 8-hex-char run found
-// anywhere in the text", so garbage was silently accepted as a trust anchor. Pure-Go —
+// anywhere in the text", so garbage was silently accepted as a trust anchor. Pure-Go -
 // no gpg binary, runs in CI's plain `go test`.
 func TestParseGPGKey_StructuredParse(t *testing.T) {
 	svc := NewGPGService()

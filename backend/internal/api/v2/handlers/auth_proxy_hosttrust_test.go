@@ -14,7 +14,7 @@ import (
 // not be steerable by a forged X-Forwarded-Host / X-Zitadel-* header once a trusted-host allowlist is
 // configured. Before the fix, getPublicHost returned any header value verbatim.
 
-// newUnconfiguredProxy builds an AuthProxy with no public-URL allowlist — the dev/same-origin case
+// newUnconfiguredProxy builds an AuthProxy with no public-URL allowlist - the dev/same-origin case
 // where forwarding headers are trusted verbatim (legacy behavior).
 func newUnconfiguredProxy() *AuthProxy {
 	return NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: "http://localhost:8080"})

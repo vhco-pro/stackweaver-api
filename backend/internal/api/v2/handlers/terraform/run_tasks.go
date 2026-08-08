@@ -68,7 +68,7 @@ func taskError(c *gin.Context, status int, title, detail string) {
 }
 
 // fullPaginationMeta is the complete TFE pagination meta block. go-tfe's Pagination struct reads all
-// five fields, and the tfe_organization_run_task data source pages through List with them — the
+// five fields, and the tfe_organization_run_task data source pages through List with them - the
 // 3-field paginationMeta used elsewhere is not enough here (a nil next-page terminates its loop).
 func fullPaginationMeta(page, pageSize int, total int64) gin.H {
 	totalPages := int((total + int64(pageSize) - 1) / int64(pageSize))
@@ -117,7 +117,7 @@ type runTaskRequest struct {
 }
 
 // formatRunTask renders a run task as JSON:API. hmac-key is write-only and never echoed;
-// global-configuration is ALWAYS present with a boolean `enabled` — go-tfe only parses the
+// global-configuration is ALWAYS present with a boolean `enabled` - go-tfe only parses the
 // sub-object when that key is a JSON bool, and tfe_organization_run_task_global_settings errors on
 // a task without it.
 func formatRunTask(t *models.RunTask, orgName string, workspaceTasks []models.WorkspaceTask) gin.H {

@@ -16,9 +16,9 @@ import (
 // Every /runner/* job handler (except register) runs behind middleware.RunnerAuth,
 // which authenticates the caller as exactly one runner and stores it under
 // middleware.CallingRunnerKey. These helpers bind a job/run to that runner:
-//   - org-equality  — the runner's org must own the job (kills cross-tenant access);
-//   - pool-equality — the job's agent pool must be the runner's pool;
-//   - assignment    — if the job is already claimed, only the assignee may touch it.
+//   - org-equality  - the runner's org must own the job (kills cross-tenant access);
+//   - pool-equality - the job's agent pool must be the runner's pool;
+//   - assignment    - if the job is already claimed, only the assignee may touch it.
 // The body-supplied runner_id is never trusted; the authenticated runner is.
 
 // callingRunner returns the runner resolved by middleware.RunnerAuth.
@@ -71,7 +71,7 @@ func (h *RunnerAgentHandler) ansibleJobOrgAndPool(job *models.AnsibleJob) (orgID
 // authorizeRunnerForRun enforces AUD-001 for terraform-run control-plane ops.
 // requireAssigned demands the run already be claimed by the calling runner (for
 // post-start ops: output/complete/state). At the offer/claim boundary (artifacts,
-// start) pass false — the run may still be unassigned, and org+pool equality plus
+// start) pass false - the run may still be unassigned, and org+pool equality plus
 // the atomic claim carry the guarantee. Returns true iff the caller is authorized;
 // otherwise it has already written the error response.
 func (h *RunnerAgentHandler) authorizeRunnerForRun(c *gin.Context, run *models.Run, requireAssigned bool) bool {

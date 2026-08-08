@@ -1,9 +1,9 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
-// AUD-005 residual — VCS token encryption at rest for the Azure DevOps OAuth callback.
+// AUD-005 residual - VCS token encryption at rest for the Azure DevOps OAuth callback.
 // Every other VCS-connection write path runs tokens through ProviderRegistry.EncryptTokens
 // before persisting, but the ADO OAuth callback (vcs_app_installation.go create/update
-// branches) wrote tokenResult.AccessToken/RefreshToken to the DB verbatim — cleartext at
+// branches) wrote tokenResult.AccessToken/RefreshToken to the DB verbatim - cleartext at
 // rest. This test locks the invariant at the persistence seam the handler now uses: an ADO
 // connection persisted through EncryptTokens + the real repository lands as ciphertext in
 // Postgres and decrypts back to the originals, while a persist that skips EncryptTokens
@@ -51,7 +51,7 @@ func TestVCSTokenEncryptionAtRest(t *testing.T) {
 	sfx := uuid.NewString()[:8]
 	org := &models.Organization{ID: uuid.New(), Name: "vcsenc-" + sfx}
 	// Pre-generate connection IDs so the row-scoped cleanup can be registered BEFORE any
-	// seeding — it stays valid even if a Create below fails partway.
+	// seeding - it stays valid even if a Create below fails partway.
 	encConnID := uuid.New()
 	plainConnID := uuid.New()
 	t.Cleanup(func() {
@@ -90,16 +90,16 @@ func TestVCSTokenEncryptionAtRest(t *testing.T) {
 	}
 
 	// Re-read from the DB. The model has no decrypt hook, so GetByID returns exactly what
-	// is stored — which must be ciphertext, never the plaintext token.
+	// is stored - which must be ciphertext, never the plaintext token.
 	stored, err := repo.GetByID(encConnID)
 	if err != nil {
 		t.Fatalf("reload encrypted conn: %v", err)
 	}
 	if stored.AccessToken == plainAccess {
-		t.Fatal("access token stored in cleartext at rest — AUD-005 regression")
+		t.Fatal("access token stored in cleartext at rest - AUD-005 regression")
 	}
 	if stored.RefreshToken == plainRefresh {
-		t.Fatal("refresh token stored in cleartext at rest — AUD-005 regression")
+		t.Fatal("refresh token stored in cleartext at rest - AUD-005 regression")
 	}
 	// And the stored ciphertext must decrypt back to the originals, proving the connection
 	// remains usable (providers call DecryptTokens transparently on read).

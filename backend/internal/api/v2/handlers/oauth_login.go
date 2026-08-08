@@ -21,11 +21,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// OAuth login (login.v1) — implements the `terraform login <host>` flow.
+// OAuth login (login.v1) - implements the `terraform login <host>` flow.
 //
 // Terraform discovers `login.v1` via /.well-known/terraform.json, opens the
 // system browser at the SPA `authz` page (/oauth/authorize), and binds a
-// loopback listener. The SPA — using the authenticated in-browser session —
+// loopback listener. The SPA - using the authenticated in-browser session -
 // calls MintCode (POST /api/v2/oauth/authorize, Bearer) to obtain a one-time
 // authorization code, then redirects the browser to Terraform's loopback
 // `redirect_uri`. Terraform then exchanges that code at the public Token
@@ -45,7 +45,7 @@ const (
 	oauthLoopbackMaxPort = 10010
 
 	// oauthCodeTTL is how long a minted authorization code stays valid before
-	// it must be exchanged. Short by design — the CLI exchanges immediately.
+	// it must be exchanged. Short by design - the CLI exchanges immediately.
 	oauthCodeTTL = 60 * time.Second
 
 	// oauthCodeKeyPrefix namespaces authorization codes in Redis.
@@ -91,7 +91,7 @@ type mintCodeRequest struct {
 
 // MintCode handles POST /api/v2/oauth/authorize.
 //
-// Authenticated (Bearer) — registered on the root router with an explicit
+// Authenticated (Bearer) - registered on the root router with an explicit
 // AuthMiddleware so it bypasses the org-resolution wall (the flow is
 // org-agnostic; the resulting token is user-bound). Validates the PKCE
 // challenge and loopback redirect, mints a single-use code bound to the
@@ -167,7 +167,7 @@ func (h *OAuthLoginHandler) MintCode(c *gin.Context) {
 
 // Token handles POST /api/v2/oauth/token.
 //
-// Public (no Bearer) — the CLI has no session yet. Authentication is provided
+// Public (no Bearer) - the CLI has no session yet. Authentication is provided
 // by the one-time code plus the PKCE verifier. Errors use the RFC 6749 OAuth
 // shape (`{"error": "..."}`). On success returns a TFE-style API token.
 func (h *OAuthLoginHandler) Token(c *gin.Context) {

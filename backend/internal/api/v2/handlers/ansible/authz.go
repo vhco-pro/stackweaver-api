@@ -16,15 +16,15 @@ import (
 // groups, inventory sources), which own no organization of their own and inherit
 // their parent inventory's project/org scope. When the inventory is project-scoped
 // it defers to CheckAnsibleResourcePermission; otherwise it falls back to the
-// org-level manage/read check — mirroring inventories.go exactly. write=true
+// org-level manage/read check - mirroring inventories.go exactly. write=true
 // requires inventory-write / manage-ansible, else inventory-read / read-ansible.
 //
 // It writes the JSON:API error response and returns false when the caller is
 // unauthorized: 401 (no auth), 403 (no permission), 500 (permission lookup error).
 // AUD-100: these sub-resource handlers previously performed no authorization, so
 // any authenticated JWT identity (which bypasses the org wall) could read, mutate
-// or delete any tenant's hosts/groups/sources — and read plaintext connection
-// secrets in host/group variables — by UUID.
+// or delete any tenant's hosts/groups/sources - and read plaintext connection
+// secrets in host/group variables - by UUID.
 func authorizeInventoryResource(
 	c *gin.Context,
 	authService *auth.Service,

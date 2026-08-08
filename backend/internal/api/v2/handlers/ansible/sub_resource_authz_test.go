@@ -2,13 +2,13 @@
 
 // AUD-100 ansible inventory sub-resource authorization matrix. The hosts, groups,
 // inventory-sources and job-template-variable handlers performed NO real
-// authorization — HostHandler/GroupHandler held an authService they never called,
+// authorization - HostHandler/GroupHandler held an authService they never called,
 // InventorySourceHandler held neither authService nor rbacService, and the
 // job-template-variable handler was constructed with a nil rbacService and only
 // checked `c.Get("user_id")`. Any authenticated JWT identity (which bypasses the
 // org wall) could read/create/modify/delete any tenant's hosts, groups and dynamic
-// inventory sources by UUID — including plaintext connection secrets in host/group
-// variables — and mutate any tenant's job-template extra-vars. These tests drive
+// inventory sources by UUID - including plaintext connection secrets in host/group
+// variables - and mutate any tenant's job-template extra-vars. These tests drive
 // the real handlers + real rbac.Service + real Postgres and assert cross-tenant and
 // unauthenticated callers are denied while a legitimate org member is allowed.
 //
@@ -236,7 +236,7 @@ func TestAnsibleSubResourceAuthz_CrossTenantDenied(t *testing.T) {
 }
 
 // TestAnsibleSubResourceAuthz_OwnerAllowed confirms a legitimate org member (owners
-// team, admin project access) can still read their own sub-resources — the gates
+// team, admin project access) can still read their own sub-resources - the gates
 // must not break the happy path.
 func TestAnsibleSubResourceAuthz_OwnerAllowed(t *testing.T) {
 	f := setupAnsibleSubResourceAuthz(t)

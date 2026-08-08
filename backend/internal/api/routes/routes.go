@@ -80,11 +80,11 @@ func SetupRoutes(
 	r.GET("/.well-known/terraform.json", v2handlers.HandleServiceDiscovery)
 
 	// ==========================================
-	// Terraform CLI login (login.v1) — OAuth2 authorization-code + PKCE.
+	// Terraform CLI login (login.v1) - OAuth2 authorization-code + PKCE.
 	// Registered on the ROOT router (not the /api/v2 group) so it bypasses the
 	// org-resolution wall: the flow is org-agnostic and mints a user-bound
 	// token. MintCode is Bearer-authed (the SPA session); Token is public (the
-	// CLI has no session yet — PKCE + the one-time code are the authentication).
+	// CLI has no session yet - PKCE + the one-time code are the authentication).
 	// ==========================================
 	setupOAuthLoginRoutes(r, authService, apiKeyService)
 
@@ -102,9 +102,9 @@ func SetupRoutes(
 	}
 
 	// ==========================================
-	// Auth Proxy Routes (unauthenticated — login flow, /auth/* at root per DR-5)
+	// Auth Proxy Routes (unauthenticated - login flow, /auth/* at root per DR-5)
 	// These routes proxy requests to Zitadel for the custom login UI.
-	// NOT under /api/v2/* — responses use Zitadel's v2 API shape, not JSON:API.
+	// NOT under /api/v2/* - responses use Zitadel's v2 API shape, not JSON:API.
 	// ==========================================
 	if authProxy != nil {
 		setupAuthProxyRoutes(r, authProxy)
@@ -166,7 +166,7 @@ func SetupRoutes(
 // dedicated Redis connection for the short-lived one-time authorization-code
 // store. If Redis is unavailable the feature is disabled (discovery still
 // advertises login.v1, but no exchange endpoint is registered) rather than
-// blocking startup — mirroring how log streaming degrades.
+// blocking startup - mirroring how log streaming degrades.
 func setupOAuthLoginRoutes(r *gin.Engine, authService *auth.Service, apiKeyService *apikey.Service) {
 	host := os.Getenv("REDIS_HOST")
 	if host == "" {
@@ -293,16 +293,16 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 			settings.GET("/security", proxy.GetSecuritySettings)
 		}
 
-		// Org discovery (A7.1, AC-36) — maps an email domain to its org so the
+		// Org discovery (A7.1, AC-36) - maps an email domain to its org so the
 		// SPA can scope subsequent auth when allowDomainDiscovery is enabled.
 		auth.GET("/orgs/by-domain", proxy.LookupOrgByDomain)
 
-		// Round 27 Wave 15 — runtime probe of auth-proxy config state
+		// Round 27 Wave 15 - runtime probe of auth-proxy config state
 		// (backchannel binding, production_mode). Lets the E2E suite
 		// assert R24-8 without scraping container logs.
 		auth.GET("/health/auth-proxy", proxy.HealthAuthProxy)
 
-		// Testing hook (A14) — only registered in builds with the `e2e` tag.
+		// Testing hook (A14) - only registered in builds with the `e2e` tag.
 		// Production binaries get a no-op implementation (see testing_noop.go).
 		registerTestingRoutes(auth, authRateLimiter, proxy)
 	}
@@ -321,14 +321,14 @@ func rateLimitFromEnv(prefix string, defRPS, defBurst int) (int, int) {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			rps = n
 		} else {
-			logger.Warnf("%s_RPS=%q is not a positive integer — keeping default %d", prefix, v, defRPS)
+			logger.Warnf("%s_RPS=%q is not a positive integer - keeping default %d", prefix, v, defRPS)
 		}
 	}
 	if v := os.Getenv(prefix + "_BURST"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			burst = n
 		} else {
-			logger.Warnf("%s_BURST=%q is not a positive integer — keeping default %d", prefix, v, defBurst)
+			logger.Warnf("%s_BURST=%q is not a positive integer - keeping default %d", prefix, v, defBurst)
 		}
 	}
 	return rps, burst

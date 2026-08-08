@@ -13,8 +13,8 @@ import (
 )
 
 // The two run-task download surfaces: the machine-readable plan JSON (webhook payload's
-// plan_json_api_url — fixes the links.json-output URL the plan document has always advertised but
-// never served) and the configuration archive (configuration_version_download_url — pre_plan
+// plan_json_api_url - fixes the links.json-output URL the plan document has always advertised but
+// never served) and the configuration archive (configuration_version_download_url - pre_plan
 // services have no plan yet and scan source instead; also closes the standing TFE gap, go-tfe's
 // ConfigurationVersions.Download).
 //
@@ -64,7 +64,7 @@ var planJSONComputedKeys = map[string]bool{
 }
 
 // GetPlanJSONOutput handles GET /plans/:id/json-output (plan ID = run ID). TFE redirects to an
-// archivist URL; we serve the JSON directly (a valid, documented variation — go-tfe follows either).
+// archivist URL; we serve the JSON directly (a valid, documented variation - go-tfe follows either).
 func (h *RunHandlerV2) GetPlanJSONOutput(c *gin.Context) {
 	runID := c.Param("id")
 	var run *models.Run

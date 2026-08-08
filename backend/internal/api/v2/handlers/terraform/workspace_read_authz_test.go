@@ -2,8 +2,8 @@
 
 // AUD-046 workspace read authorization. GetByOrganizationAndName (GET
 // /organizations/:name/workspaces/:workspace_name) and GetByID (GET
-// /workspaces/:id) returned the full workspace configuration — VCS repo, agent
-// pool, execution mode — with no membership check, so any authenticated user
+// /workspaces/:id) returned the full workspace configuration - VCS repo, agent
+// pool, execution mode - with no membership check, so any authenticated user
 // (including JWT identities, which bypass the org wall) could read another tenant's
 // workspace config by name or UUID. These tests drive the real handler + real
 // Postgres and assert cross-tenant and unauthenticated callers are denied while a

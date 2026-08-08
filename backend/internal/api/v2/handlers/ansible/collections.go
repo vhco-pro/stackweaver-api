@@ -125,7 +125,7 @@ func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
 
 	// AUD-128: gate on the job's read permission (mirrors jobs.go Get). The listing is
 	// static today, but the endpoint is keyed by job ID and will track per-job
-	// installations — so authorize the caller against the job now, before real data
+	// installations - so authorize the caller against the job now, before real data
 	// is wired in.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {

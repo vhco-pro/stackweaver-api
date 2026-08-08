@@ -129,7 +129,7 @@ func TestSettingsProxy_StaleOnUpstream5xx(t *testing.T) {
 }
 
 // TestSettingsProxy_CacheShortCircuitsUpstream asserts that a warm cache
-// prevents outbound requests entirely — the stampede protection this buys us
+// prevents outbound requests entirely - the stampede protection this buys us
 // only works if we actually skip the upstream call.
 func TestSettingsProxy_CacheShortCircuitsUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -166,7 +166,7 @@ func TestSettingsProxy_CacheShortCircuitsUpstream(t *testing.T) {
 
 // Round 25 Wave 3 (item 22 / R25c H-1): the settings cache is LRU-
 // bounded. An attacker minting unique `ctx.orgId` values to fill the
-// cache must NOT exhaust memory — overflow evicts the LRU entry.
+// cache must NOT exhaust memory - overflow evicts the LRU entry.
 func TestSettingsCache_LRUEvictionOnOverflow(t *testing.T) {
 	c := newSettingsCache()
 	c.cap = 3 // shrink for the test
@@ -198,7 +198,7 @@ func TestSettingsCache_HitPromotesToMRU(t *testing.T) {
 	c.set("b", []byte("B"), time.Minute) // [b, a]
 	c.set("c", []byte("C"), time.Minute) // [c, b, a]
 
-	// Touch "a" — moves to front.
+	// Touch "a" - moves to front.
 	if _, ok := c.get("a"); !ok {
 		t.Fatal("a should be a cache hit")
 	}
@@ -279,7 +279,7 @@ func TestSettingsProxy_SingleFlightDeduplication(t *testing.T) {
 	}
 	if m.DedupedFetches < 40 {
 		// Expect ~49 deduped (49 piggybackers + 1 leader). Allow
-		// some scheduling slack — racing schedulers could let some
+		// some scheduling slack - racing schedulers could let some
 		// callers see the populated cache directly. >=40 is plenty
 		// to pin the singleflight behaviour.
 		t.Errorf("metrics: DedupedFetches: want ≥40, got %d", m.DedupedFetches)
@@ -289,7 +289,7 @@ func TestSettingsProxy_SingleFlightDeduplication(t *testing.T) {
 // Round 26 Wave 9 (HIGH-2): the singleflight upstream fetch MUST use a
 // detached context, not the leader's request context. Without this, a
 // leader whose client disconnects mid-fetch poisons every piggy-backing
-// waiter via context.Canceled — turning a single client misbehaviour
+// waiter via context.Canceled - turning a single client misbehaviour
 // into a fan-out outage.
 func TestSettingsProxy_SingleFlightSurvivesLeaderContextCancel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -308,7 +308,7 @@ func TestSettingsProxy_SingleFlightSurvivesLeaderContextCancel(t *testing.T) {
 	proxy := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: mockZitadel.URL, PAT: "pat"})
 	defer proxy.StopDecoyOrgIDsSweeper()
 
-	// Leader's request — context will be cancelled BEFORE the upstream
+	// Leader's request - context will be cancelled BEFORE the upstream
 	// returns. With the fix in place, the singleflight callback uses
 	// a detached context so the fetch completes and the waiter sees
 	// the result.
@@ -326,7 +326,7 @@ func TestSettingsProxy_SingleFlightSurvivesLeaderContextCancel(t *testing.T) {
 	// Give the leader a moment to enter singleflight.
 	time.Sleep(20 * time.Millisecond)
 
-	// Waiter — separate context, alive.
+	// Waiter - separate context, alive.
 	waiterDone := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		w := httptest.NewRecorder()
@@ -341,7 +341,7 @@ func TestSettingsProxy_SingleFlightSurvivesLeaderContextCancel(t *testing.T) {
 	leaderCancel()
 	close(releaseUpstream)
 
-	// The waiter MUST see a successful response — the upstream fetch
+	// The waiter MUST see a successful response - the upstream fetch
 	// completed despite the leader's context cancellation.
 	select {
 	case w := <-waiterDone:
@@ -352,7 +352,7 @@ func TestSettingsProxy_SingleFlightSurvivesLeaderContextCancel(t *testing.T) {
 			t.Errorf("waiter got wrong body: %s", w.Body.String())
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("waiter timed out — singleflight blocked on cancelled leader context (regression)")
+		t.Fatal("waiter timed out - singleflight blocked on cancelled leader context (regression)")
 	}
 
 	<-leaderDone // drain

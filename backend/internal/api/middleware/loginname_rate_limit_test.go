@@ -50,7 +50,7 @@ func TestLoginNameRateLimiter_PerUserIsolation(t *testing.T) {
 		t.Error("alice should be locked")
 	}
 	if rl.IsLocked("bob") {
-		t.Error("bob should NOT be locked — failures must be per-user")
+		t.Error("bob should NOT be locked - failures must be per-user")
 	}
 }
 
@@ -85,7 +85,7 @@ func TestLoginNameRateLimiter_WindowExpiry(t *testing.T) {
 		t.Fatal("alice should be locked initially")
 	}
 
-	// Advance past the window — IsLocked should auto-purge and report
+	// Advance past the window - IsLocked should auto-purge and report
 	// unlocked. This is the sliding-window contract: an attacker who
 	// stops trying for the window's duration gets a fresh budget.
 	clock.now = clock.now.Add(6 * time.Minute)
@@ -156,7 +156,7 @@ func TestBeginAttempt_AllowsUpToThresholdSequentially(t *testing.T) {
 		}
 	}
 	if rl.BeginAttempt("alice") {
-		t.Error("attempt 6 must be refused — 5 failures already reserved")
+		t.Error("attempt 6 must be refused - 5 failures already reserved")
 	}
 }
 
@@ -213,7 +213,7 @@ func TestRollbackAttempt_ReturnsSlot(t *testing.T) {
 	if !rl.BeginAttempt("alice") {
 		t.Error("post-rollback the next attempt must be allowed (count was 2)")
 	}
-	// Now at threshold (3) — the 4th attempt must be refused.
+	// Now at threshold (3) - the 4th attempt must be refused.
 	if rl.BeginAttempt("alice") {
 		t.Error("attempt past threshold must be refused after the rollback dance")
 	}
@@ -223,7 +223,7 @@ func TestRollbackAttempt_ReturnsSlot(t *testing.T) {
 // rollback: rollback on a counter at 0 must not underflow.
 func TestRollbackAttempt_BoundedAtZero(t *testing.T) {
 	rl := NewLoginNameRateLimiter(3, 5*time.Minute)
-	rl.RollbackAttempt("alice") // no prior attempt — must be a no-op
+	rl.RollbackAttempt("alice") // no prior attempt - must be a no-op
 	if !rl.BeginAttempt("alice") {
 		t.Error("rollback-with-no-prior-attempt corrupted the map")
 	}
@@ -231,7 +231,7 @@ func TestRollbackAttempt_BoundedAtZero(t *testing.T) {
 
 // Round 25 Wave 3 (item 23 / R25c H-2): the failures map is LRU-bounded
 // at `defaultLoginNameLimiterCap`. An attacker probing many distinct
-// loginNames must NOT grow memory unbounded — overflow evicts the LRU
+// loginNames must NOT grow memory unbounded - overflow evicts the LRU
 // entry. We size the test cap down to 3 so we can exercise the eviction
 // path without minting 100k entries.
 func TestLoginNameRateLimiter_LRUEvictionOnOverflow(t *testing.T) {
@@ -267,8 +267,8 @@ func TestLoginNameRateLimiter_LRUTouchPromotesEntry(t *testing.T) {
 	rl.RecordFailure("alice") // [alice]
 	rl.RecordFailure("bob")   // [bob, alice]
 	rl.RecordFailure("carol") // [carol, bob, alice]
-	rl.RecordFailure("alice") // [alice, carol, bob] — alice promoted, count++
-	rl.RecordFailure("dave")  // [dave, alice, carol] — bob evicted (LRU)
+	rl.RecordFailure("alice") // [alice, carol, bob] - alice promoted, count++
+	rl.RecordFailure("dave")  // [dave, alice, carol] - bob evicted (LRU)
 
 	if _, ok := rl.failures["bob"]; ok {
 		t.Errorf("bob should have been evicted (was LRU after alice's promotion)")
@@ -298,7 +298,7 @@ func TestLoginNameRateLimiter_SweeperPrunesExpired(t *testing.T) {
 	// Fast-forward past the window.
 	rl.now = func() time.Time { return base.Add(200 * time.Millisecond) }
 
-	// Manually invoke the sweeper (deterministic — don't rely on the
+	// Manually invoke the sweeper (deterministic - don't rely on the
 	// background ticker's timing).
 	rl.sweepExpired()
 

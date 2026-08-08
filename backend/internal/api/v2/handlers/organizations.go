@@ -441,7 +441,7 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 
 	if err := h.orgRepo.Create(org); err != nil {
 		// AUD-109: a permanently-reserved name (previously used, now deleted) is a client error,
-		// not a server error — surface it as 422 so the caller knows to pick a different name.
+		// not a server error - surface it as 422 so the caller knows to pick a different name.
 		if errors.Is(err, repository.ErrOrganizationNameReserved) {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{
 				"errors": []gin.H{
@@ -614,7 +614,7 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 
 	// AUD-151: gate org-settings mutation on manage-membership (owner-tier), mirroring
 	// Delete. JWT/browser identities bypass the org-resolution wall, so without this
-	// per-handler check any authenticated user could rewrite any org by name — rename,
+	// per-handler check any authenticated user could rewrite any org by name - rename,
 	// downgrade collaborator_auth_policy, or change the org run-execution defaults.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
@@ -952,7 +952,7 @@ func (h *OrganizationHandlerV2) createDefaultProject(orgID, ownersTeamID uuid.UU
 
 // cleanupFailedOrgBootstrap removes a partially-bootstrapped organization when a step after the org
 // row was created fails (AUD-023). Without this the org create left a half-built organization behind
-// (org row + maybe teams/membership, no default project) and returned a 500 — the operation was not
+// (org row + maybe teams/membership, no default project) and returned a 500 - the operation was not
 // atomic. It also frees the reserved name (AUD-109) so the caller can retry with the same name.
 // Best-effort: it runs in its own transaction and only logs on failure, since the caller is already
 // returning an error to the client.

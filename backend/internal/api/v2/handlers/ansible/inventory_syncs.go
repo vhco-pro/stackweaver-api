@@ -41,7 +41,7 @@ func NewInventorySyncHandler(
 
 // authorizeInventoryRead verifies the caller can read Ansible resources in
 // the inventory's organization. Writes the error response and returns false
-// on denial — sync output can contain host variables and connection details.
+// on denial - sync output can contain host variables and connection details.
 func (h *InventorySyncHandler) authorizeInventoryRead(c *gin.Context, inventoryID uuid.UUID) bool {
 	inventory, err := h.inventoryRepo.GetByID(inventoryID)
 	if err != nil {

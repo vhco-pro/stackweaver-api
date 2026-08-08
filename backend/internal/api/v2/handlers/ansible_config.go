@@ -132,7 +132,7 @@ func (h *AnsibleConfigHandler) UpsertByOrganization(c *gin.Context) {
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
 	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
-	// on every write — unreachable until the request binding was fixed, since
+	// on every write - unreachable until the request binding was fixed, since
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
@@ -194,7 +194,7 @@ func (h *AnsibleConfigHandler) DeleteByOrganization(c *gin.Context) {
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
 	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
-	// on every write — unreachable until the request binding was fixed, since
+	// on every write - unreachable until the request binding was fixed, since
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
@@ -279,7 +279,7 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
 	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
-	// on every write — unreachable until the request binding was fixed, since
+	// on every write - unreachable until the request binding was fixed, since
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
@@ -347,7 +347,7 @@ func (h *AnsibleConfigHandler) DeleteByProject(c *gin.Context) {
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
 	// c.Set("user_id", user.ID)). The pre-#608 string assertion here panicked
-	// on every write — unreachable until the request binding was fixed, since
+	// on every write - unreachable until the request binding was fixed, since
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {

@@ -3,7 +3,7 @@
 //go:build integration
 // +build integration
 
-// Integration-only tests — require a live PostgreSQL reachable at
+// Integration-only tests - require a live PostgreSQL reachable at
 // `$TEST_DATABASE_URL` (or the local default
 // `postgres://iac:iac_password@localhost:5432/iac_platform`). Compiled
 // into the test binary ONLY when the `integration` build tag is set:
@@ -58,7 +58,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 	// Run migrations. The RBAC tables are included because AUD-123 gates the /v1 module
 	// read endpoints on org membership (orgRepo.UserInOrg reads organization_members AND
-	// teams/team_members) — omitting any of them makes the tests pass only against a DB
+	// teams/team_members) - omitting any of them makes the tests pass only against a DB
 	// that already has the tables (dev) and fail on a fresh CI Postgres.
 	if err := db.AutoMigrate(
 		&models.Organization{},
@@ -99,7 +99,7 @@ func createRegistryTestUser(t *testing.T, db *gorm.DB) *models.User {
 }
 
 // setupTestOrg creates a test organization with a unique name and registers a
-// row-scoped cleanup. It must NOT drop shared tables — these tests run against
+// row-scoped cleanup. It must NOT drop shared tables - these tests run against
 // $TEST_DATABASE_URL, which may be a live database.
 func setupTestOrg(t *testing.T, db *gorm.DB) *models.Organization {
 	org := &models.Organization{
@@ -199,7 +199,7 @@ func TestListModules(t *testing.T) {
 	owner := createRegistryTestUser(t, db)
 	makeUserOrgOwner(t, db, org, owner)
 
-	// Setup router — the real /v1 group carries no auth middleware, so a stub translates the test
+	// Setup router - the real /v1 group carries no auth middleware, so a stub translates the test
 	// header into the same user_id an upstream would set; the handler's own gate does the work.
 	// testUserAuth (authz_matrix_test.go) reads the X-Test-User header into the user_id context.
 	gin.SetMode(gin.TestMode)

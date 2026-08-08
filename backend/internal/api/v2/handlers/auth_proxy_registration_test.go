@@ -2,7 +2,7 @@
 
 // AUD-120 self-registration policy. CreateUser is on the unauthenticated /auth surface and
 // forwards to Zitadel POST /v2/users/human with the admin PAT, so it must honor the login
-// policy's allowRegister — otherwise an operator who disabled self-registration is bypassed.
+// policy's allowRegister - otherwise an operator who disabled self-registration is bypassed.
 
 package handlers
 

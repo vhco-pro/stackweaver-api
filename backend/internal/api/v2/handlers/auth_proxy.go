@@ -49,7 +49,7 @@ type sessionEntry struct {
 	// enforce DR-4: a cookie minted for user A must NOT be usable to
 	// register / read user B's authenticators. Populated post-createSession
 	// via `populateUserIDFromZitadel` (one extra GET /v2/sessions/{id}
-	// round-trip — F-sec-9 caught the gap on 2026-04-28). Preserved across
+	// round-trip - F-sec-9 caught the gap on 2026-04-28). Preserved across
 	// `UpdateSession` so password/MFA checks don't lose the binding.
 	UserID       string `json:"userId,omitempty"`
 	LoginName    string `json:"loginName,omitempty"`
@@ -62,7 +62,7 @@ type sessionEntry struct {
 	// returned a fake success for an unknown loginName when the org's
 	// login policy has `ignoreUnknownUsernames: true`. UpdateSession
 	// short-circuits with a canonical password-invalid response for
-	// these so the decoy never leaves the proxy. Internal-only — the
+	// these so the decoy never leaves the proxy. Internal-only - the
 	// cookie ships in an httpOnly cookie scoped to /auth and the
 	// browser can't read it.
 	Decoy bool `json:"decoy,omitempty"`
@@ -83,7 +83,7 @@ type AuthProxyConfig struct {
 	// Used by the backchannel-logout verifier to enforce that incoming
 	// logout_tokens carry our client_id in their `aud` claim per OIDC
 	// Back-Channel Logout 1.0 §2.6 step 4 (Round 23 Finding 1). Empty value
-	// disables audience binding — production callers MUST set this.
+	// disables audience binding - production callers MUST set this.
 	ClientID string
 	// NotificationMode controls code delivery (return_code or email).
 	NotificationMode NotificationMode
@@ -98,7 +98,7 @@ type AuthProxyConfig struct {
 	IsProduction bool
 	// PublicFrontendURL is the browser-visible base URL of the SPA (e.g.
 	// "https://app.example.com"). Used by IdP success/failure URL construction
-	// in StartIdP — the SPA frequently lives on a different host than the api
+	// in StartIdP - the SPA frequently lives on a different host than the api
 	// (split-domain deployments: api.example.com vs app.example.com), and
 	// without this the IdP-intent callback lands on the wrong host and 404s.
 	// Empty → fall back to the api's own publicBaseURL (correct for
@@ -135,7 +135,7 @@ type AuthProxyConfig struct {
 	// DecoySecret is the HMAC key used by the F-sec-7 decoy-id
 	// derivation (Round 21 Finding 1). Round 25 Wave 6 (item 6 /
 	// Round 22 OOS): in HA deployments, every replica MUST share the
-	// same secret so decoy ids are stable across replicas — otherwise
+	// same secret so decoy ids are stable across replicas - otherwise
 	// an attacker round-robin'd across replicas sees divergent fake
 	// ids while a real user's ids stay stable, distinguishing real
 	// vs decoy. Single-replica deployments can leave this nil and
@@ -147,7 +147,7 @@ type AuthProxyConfig struct {
 	// attempts per loginName within `LoginNameLockoutWindow` that
 	// triggers a per-user lockout (defense against password-spraying
 	// across rotating IPs that the per-IP `IPRateLimiter` doesn't
-	// catch on its own — F-sec-5/6). 0 disables the limiter (useful
+	// catch on its own - F-sec-5/6). 0 disables the limiter (useful
 	// for dev). Read from STACKWEAVER_LOGINNAME_LOCKOUT_THRESHOLD in
 	// main.go; default 5.
 	LoginNameLockoutThreshold int
@@ -179,17 +179,17 @@ type AuthProxy struct {
 	// decoySecret is the per-process HMAC key used to derive deterministic
 	// fake user/org ids for F-sec-7 anti-enumeration responses (Round 21
 	// Finding 1). The same loginName probed twice MUST produce the same
-	// fake `factors.user.id` and `organizationId` — random ids per call
+	// fake `factors.user.id` and `organizationId` - random ids per call
 	// would diverge across two probes for the same unknown user, while
 	// a real user always returns the same ids. Keyed on a randomly-
 	// generated 32-byte secret at AuthProxy construction so the fake-
 	// id space can't be precomputed by an attacker without server
-	// access. Process restart rotates the keyspace — acceptable since
+	// access. Process restart rotates the keyspace - acceptable since
 	// the decoy contract is per-session, not durable.
 	//
 	// HA caveat: each replica generates its own decoySecret, so the
 	// same loginName probed via two replicas yields different fake
-	// ids — distinguishable from a real user (whose ids are stable
+	// ids - distinguishable from a real user (whose ids are stable
 	// across replicas). Round 22 OOS note. Deferred: needs a shared
 	// cluster secret (env var or KMS-derived) for HA correctness.
 	decoySecret []byte
@@ -199,7 +199,7 @@ type AuthProxy struct {
 	// a CreateSession decoy response. Round 22 Finding 3:
 	// `GetLoginSettings ?ctx.orgId=<decoyOrgId>` would otherwise
 	// forward to Zitadel and either 404 or fall back to the
-	// instance-default — both of which are wire-distinguishable from
+	// instance-default - both of which are wire-distinguishable from
 	// a real org's custom policy response, recreating the F-sec-7
 	// enumeration leak from a different angle. When this map
 	// contains the requested orgId, the settings proxy strips
@@ -208,8 +208,8 @@ type AuthProxy struct {
 	//
 	// Round 25 hardening (item 24 / R25c H-3): formerly a `sync.Map`
 	// pruned opportunistically on lookup. Entries that were never
-	// touched again — the common case for an attacker probing once
-	// then moving on — accumulated forever. Now stored as a bounded
+	// touched again - the common case for an attacker probing once
+	// then moving on - accumulated forever. Now stored as a bounded
 	// LRU map (cap `defaultDecoyOrgIDsCap`) with a background sweeper
 	// goroutine that prunes expired entries every `decoyOrgTTL/2`.
 	decoyOrgIDsMu        sync.Mutex
@@ -250,7 +250,7 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 	// Resolve loginName-lockout defaults. Threshold 0 disables the
 	// limiter entirely (helpful for dev / unit-test setups that want
 	// deterministic behavior). Sane production defaults: 5 attempts
-	// per 15 minutes — same shape as common bank / SaaS lockout
+	// per 15 minutes - same shape as common bank / SaaS lockout
 	// policies, well above the typing-mistake threshold but
 	// uncomfortably tight for a brute-force attempt.
 	lockoutThreshold := config.LoginNameLockoutThreshold
@@ -270,7 +270,7 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 	// per-process random secret (correct for single-replica). 32
 	// bytes is overkill for HMAC-SHA256 but matches the OWASP
 	// recommendation; crypto/rand failure here is catastrophic
-	// — we'd rather panic at startup than ship without a decoy
+	// - we'd rather panic at startup than ship without a decoy
 	// secret (decoy ids would otherwise collide trivially).
 	var secret []byte
 	if len(config.DecoySecret) > 0 {
@@ -286,7 +286,7 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 		config: config,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
-			// Don't follow redirects — we intercept 302s from Zitadel (DR-2).
+			// Don't follow redirects - we intercept 302s from Zitadel (DR-2).
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -434,7 +434,7 @@ func (p *AuthProxy) SettingsCacheMetrics() SettingsCacheMetrics {
 // empty. Round 23 Finding 1 added the audience-binding check to
 // `verifyLogoutToken` but kept an empty-string fallback (legacy
 // compat for existing test fixtures that don't know an `aud`). That
-// fallback silently disables the cross-RP forced-logout DoS guard —
+// fallback silently disables the cross-RP forced-logout DoS guard -
 // any Zitadel-signed `logout_token` from another RP on the same
 // instance terminates sessions in this app. The warning makes the
 // degraded mode operationally visible so a misconfigured deployment
@@ -451,7 +451,7 @@ func (p *AuthProxy) getBackchannelVerifier() *backchannelVerifier {
 		}
 		if p.config.ClientID == "" {
 			// Round 25 hardening (item 15): in production, an empty
-			// ClientID is a fatal misconfiguration — the backchannel-
+			// ClientID is a fatal misconfiguration - the backchannel-
 			// logout audience binding silently disables and any
 			// Zitadel-signed logout_token from any other RP on the
 			// same instance can terminate sessions in this app. Fail
@@ -459,10 +459,10 @@ func (p *AuthProxy) getBackchannelVerifier() *backchannelVerifier {
 			// Dev keeps the WARN so test fixtures that don't know an
 			// `aud` need not be rewritten.
 			if p.config.IsProduction {
-				logger.Errorf("auth proxy: ZITADEL_API_CLIENT_ID is empty in production — refusing to construct backchannel verifier. Set ZITADEL_API_CLIENT_ID to the OIDC client_id this RP is registered under at Zitadel.")
+				logger.Errorf("auth proxy: ZITADEL_API_CLIENT_ID is empty in production - refusing to construct backchannel verifier. Set ZITADEL_API_CLIENT_ID to the OIDC client_id this RP is registered under at Zitadel.")
 				panic("auth proxy: ZITADEL_API_CLIENT_ID required in production (Round 25 item 15 / Round 23 Finding 1)")
 			}
-			logger.Warn("auth proxy: ZITADEL_API_CLIENT_ID is empty — backchannel-logout audience binding is DISABLED. Any Zitadel-signed logout_token (including from other RPs on the same instance) will terminate sessions. Set ZITADEL_API_CLIENT_ID to enable cross-RP forced-logout DoS protection (Round 23 Finding 1).")
+			logger.Warn("auth proxy: ZITADEL_API_CLIENT_ID is empty - backchannel-logout audience binding is DISABLED. Any Zitadel-signed logout_token (including from other RPs on the same instance) will terminate sessions. Set ZITADEL_API_CLIENT_ID to enable cross-RP forced-logout DoS protection (Round 23 Finding 1).")
 		}
 		p.backchannelVerifier = newBackchannelVerifier(jwksURL, hostOverride, p.config.ClientID, p.client, p.config.ZitadelIssuer)
 	})
@@ -482,14 +482,14 @@ func (p *AuthProxy) IsBackchannelRevoked(sid string) bool {
 // Wave 15: replaces the `docker logs | grep ZITADEL_API_CLIENT_ID` flow
 // the Round 24 Finding 8 verification used to require.
 //
-// Response shape (stable contract — bump a field rather than change shape):
+// Response shape (stable contract - bump a field rather than change shape):
 //
 //	{
 //	  "backchannel_binding_active": bool,  // true iff p.config.ClientID is non-empty (R24-8)
 //	  "production_mode": bool              // mirrors p.config.IsProduction
 //	}
 //
-// Intentionally NOT a health check in the liveness/readiness sense — it
+// Intentionally NOT a health check in the liveness/readiness sense - it
 // reports CONFIG state, not service availability. Returns 200 always so
 // uptime probes don't get confused; the consumer reads the JSON to make
 // a verdict.
@@ -533,7 +533,7 @@ func parseCustomHeaders(raw string) map[string]string {
 		name := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 		if name == "" || strings.ContainsAny(name, "\r\n\x00") || strings.ContainsAny(value, "\r\n\x00") {
-			logger.Warnf("parseCustomHeaders: rejecting header %q — contains control characters", name)
+			logger.Warnf("parseCustomHeaders: rejecting header %q - contains control characters", name)
 			continue
 		}
 		result[name] = value
@@ -659,7 +659,7 @@ func (p *AuthProxy) isTrustedHost(host string) bool {
 // getPublicHost resolves the browser-visible host for building callback URLs (per D4).
 // Priority: x-zitadel-public-host → x-zitadel-forward-host → x-forwarded-host → host header.
 // AUD-113/AUD-071: a forwarding-header (or Host) value is only honored when it is on the
-// configured trusted-host allowlist — otherwise it is a forgeable input and we fall back to
+// configured trusted-host allowlist - otherwise it is a forgeable input and we fall back to
 // the configured canonical host (p.trustedHosts[0]) so a direct attacker request cannot steer
 // the discovery doc / IdP redirect URLs to an attacker-controlled host.
 func (p *AuthProxy) getPublicHost(c *gin.Context) string {
@@ -675,7 +675,7 @@ func (p *AuthProxy) getPublicHost(c *gin.Context) string {
 	if p.isTrustedHost(c.Request.Host) {
 		return c.Request.Host
 	}
-	// Nothing presented a trusted host — return the configured canonical host
+	// Nothing presented a trusted host - return the configured canonical host
 	// rather than an attacker-controlled one. (Only reachable once an allowlist
 	// is configured; unconfigured dev trusts all and never lands here.)
 	if len(p.trustedHosts) > 0 {
@@ -689,7 +689,7 @@ func (p *AuthProxy) getPublicHost(c *gin.Context) string {
 // Scheme priority:
 //  1. X-Forwarded-Proto header (set by reverse proxies / Cloudflare Tunnel).
 //     The api typically runs behind TLS termination so Request.TLS is nil
-//     even when the browser-visible URL is https — without honouring this
+//     even when the browser-visible URL is https - without honouring this
 //     header first the discovery doc / IdP successUrl land on the wrong
 //     scheme and the SPA redirect chain breaks.
 //  2. Direct TLS on the request (TLS == nil → http, else https).
@@ -747,8 +747,8 @@ func (p *AuthProxy) signSessionCookie(payload []byte) string {
 // verifySessionCookie returns the JSON payload of `cookieVal` if the
 // HMAC tag is valid. Returns (nil, false) if the format is malformed,
 // the tag is missing, or the HMAC doesn't match. The caller must treat
-// a `false` return identically to "no cookie present" — never as a 4xx
-// — so a tampered cookie just makes the user re-authenticate. Round 25
+// a `false` return identically to "no cookie present" - never as a 4xx
+// - so a tampered cookie just makes the user re-authenticate. Round 25
 // Wave 6 (item 19 / R25a #3).
 func (p *AuthProxy) verifySessionCookie(cookieVal string) ([]byte, bool) {
 	idx := strings.IndexByte(cookieVal, '.')
@@ -786,9 +786,9 @@ func (p *AuthProxy) readSessionCookie(c *gin.Context) []sessionEntry {
 	payload, ok := p.verifySessionCookie(cookieVal)
 	if !ok {
 		// Either malformed, unsigned (legacy), or HMAC mismatch.
-		// Treat as absent — caller will issue a fresh empty cookie
+		// Treat as absent - caller will issue a fresh empty cookie
 		// on next write.
-		logger.Debugf("session cookie failed HMAC verification — treating as absent")
+		logger.Debugf("session cookie failed HMAC verification - treating as absent")
 		return nil
 	}
 
@@ -806,7 +806,7 @@ func (p *AuthProxy) readSessionCookie(c *gin.Context) []sessionEntry {
 // length: Gin's `c.SetCookie` runs `url.QueryEscape` on the value before
 // emitting the Set-Cookie header (because cookie values can't contain
 // `"`, `,`, `;`, or control chars verbatim). Raw JSON of ~2 KB expands
-// to ~2.4 KB encoded — checking the raw size lets the encoded cookie
+// to ~2.4 KB encoded - checking the raw size lets the encoded cookie
 // blow past the 2 KB browser-budget guardrail. Round 16 (2026-04-28)
 // caught this against F-sec-19; before the fix, a 30-session cookie was
 // 2468 bytes on the wire despite the in-Go check claiming 2000.
@@ -814,7 +814,7 @@ func (p *AuthProxy) readSessionCookie(c *gin.Context) []sessionEntry {
 // Round 25 Wave 6 (item 19 / R25a #3): the JSON payload is signed with
 // HMAC-SHA256 and the on-the-wire format is `<43-char-base64url-tag>.<json>`.
 // Signing adds a fixed 44 bytes (43-char tag + `.` separator) to the
-// budget — accounted for in the budget loop below.
+// budget - accounted for in the budget loop below.
 func (p *AuthProxy) writeSessionCookie(c *gin.Context, entries []sessionEntry) {
 	for {
 		data, err := json.Marshal(entries)
@@ -904,7 +904,7 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 	params := c.Request.URL.Query()
 
 	// Dispatch on auth-request ID prefix (A2.1)
-	// At this point we don't have the auth-request ID yet — prefix dispatch happens
+	// At this point we don't have the auth-request ID yet - prefix dispatch happens
 	// after Zitadel returns the redirect. We validate in the response parsing below.
 
 	// Forward the authorize request to Zitadel
@@ -937,7 +937,7 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 			return
 		}
 
-		// A2.1: Prefix dispatch — reject SAML and Device flows
+		// A2.1: Prefix dispatch - reject SAML and Device flows
 		if strings.HasPrefix(authRequestID, "saml_") {
 			respondError(c, http.StatusBadRequest, "SAML authentication is not supported by this login UI")
 			return
@@ -982,7 +982,7 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 	}
 
 	// If Zitadel returned something other than a redirect, return a sanitized error.
-	// Don't pass through raw Zitadel responses — they may contain internal hostnames or HTML.
+	// Don't pass through raw Zitadel responses - they may contain internal hostnames or HTML.
 	respondError(c, statusCode, "authorization request failed")
 }
 
@@ -1023,7 +1023,7 @@ func (p *AuthProxy) JWKSProxy(c *gin.Context) {
 }
 
 // UserinfoProxy handles GET /auth/oidc/userinfo.
-// Proxies the userinfo endpoint — note this one passes the Bearer token from the client,
+// Proxies the userinfo endpoint - note this one passes the Bearer token from the client,
 // not the PAT, since it returns info about the authenticated user.
 func (p *AuthProxy) UserinfoProxy(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
@@ -1057,7 +1057,7 @@ func (p *AuthProxy) UserinfoProxy(c *gin.Context) {
 }
 
 // EndSession handles both GET and POST /auth/oidc/end-session.
-// GET: OIDC RP-Initiated Logout (browser redirect with query params — per OIDC spec).
+// GET: OIDC RP-Initiated Logout (browser redirect with query params - per OIDC spec).
 // POST: either form-encoded RP-initiated logout, OR OIDC Back-Channel Logout 1.0
 // when the body contains a `logout_token` (A6.1, AC-38). Back-channel logouts
 // are verified locally against Zitadel's JWKS and do NOT get forwarded upstream;
@@ -1084,7 +1084,7 @@ func (p *AuthProxy) EndSession(c *gin.Context) {
 		}
 	}
 
-	// End session uses id_token_hint for session identification — do NOT add the PAT
+	// End session uses id_token_hint for session identification - do NOT add the PAT
 	// (PAT identifies the service account, not the end user's session).
 	reqURL := p.zitadelURL("/oidc/v1/end_session")
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, reqURL, strings.NewReader(formData.Encode()))
@@ -1124,7 +1124,7 @@ func (p *AuthProxy) EndSession(c *gin.Context) {
 				c.Redirect(statusCode, location)
 				return
 			}
-			// Refuse the redirect — return a benign success body so
+			// Refuse the redirect - return a benign success body so
 			// the SPA can render its own logout-done page.
 			logger.Warnf("EndSession: refusing post-logout redirect to disallowed host (%q)", location)
 			c.JSON(http.StatusOK, gin.H{"loggedOut": true})
@@ -1275,7 +1275,7 @@ func (p *AuthProxy) FinalizeAuthRequest(c *gin.Context) {
 	// F-sec-7 (Audit Round 20): a decoy session must not progress
 	// through finalize. Forwarding to Zitadel would 404 (the decoy id
 	// has no real session), and that 404 is distinguishable from a
-	// real session-without-password's 412 PreconditionFailed — an
+	// real session-without-password's 412 PreconditionFailed - an
 	// attacker who skipped UpdateSession and called finalize directly
 	// could enumerate users by status divergence. Mirror Zitadel's
 	// "session not authenticated" precondition shape.
@@ -1320,7 +1320,7 @@ func (p *AuthProxy) CreateSession(c *gin.Context) {
 	//     delivers via the configured SMTP backend instead of echoing.
 	//     Wave 14 caught this: the SPA's Otp.tsx unconditionally sends
 	//     `returnCode: {}` because it doesn't know which mode the proxy
-	//     is in — without the proxy stripping it, every email-mode
+	//     is in - without the proxy stripping it, every email-mode
 	//     challenge stays as "return-the-code" and no email is ever sent.
 	switch p.config.NotificationMode {
 	case NotificationModeReturnCode:
@@ -1341,7 +1341,7 @@ func (p *AuthProxy) CreateSession(c *gin.Context) {
 	// upstream call to `/v2/settings/login` to read
 	// `ignoreUnknownUsernames`. The known-user (200) branch makes
 	// only ONE call. Without balancing, paired-request medians
-	// diverge at the network-RTT scale — observable as a username-
+	// diverge at the network-RTT scale - observable as a username-
 	// enumeration timing oracle. Issue the same `/v2/settings/login`
 	// call sequentially on the known-user path so both branches
 	// take ≈ 2 RTT. The result is discarded; the only purpose is
@@ -1368,7 +1368,7 @@ func (p *AuthProxy) CreateSession(c *gin.Context) {
 	if statusCode == http.StatusNotFound && p.shouldFakeUnknownUser(c, reqBody) {
 		// Capture the probed loginName so subsequent decoy responses
 		// (GetSession, lockout key) can mirror real-user behaviour
-		// deterministically — Round 21 Finding 1 / Finding 2.
+		// deterministically - Round 21 Finding 1 / Finding 2.
 		probedLoginName, _ := extractLoginNameFromCheck(reqBody)
 
 		// Round 25 Wave 5 (item 25 / R25b F3): collision check between
@@ -1393,22 +1393,22 @@ func (p *AuthProxy) CreateSession(c *gin.Context) {
 			fakeBody, decoyID = nil, ""
 		}
 		if decoyID == "" {
-			logger.Warnf("auth proxy: 5 decoy-id collision retries exhausted (probabilistically impossible — investigate the cookie state) — falling through to upstream 404")
+			logger.Warnf("auth proxy: 5 decoy-id collision retries exhausted (probabilistically impossible - investigate the cookie state) - falling through to upstream 404")
 			c.Data(statusCode, "application/json", respBody)
 			return
 		}
 
 		// Round 25 hardening (item 29 / R25b F8): build-then-publish.
 		// `buildDecoySessionResponse` returns an empty body on marshal
-		// failure — if we publish that we leak the decoy state via
+		// failure - if we publish that we leak the decoy state via
 		// the empty-body wire shape AND register a decoyOrg + cookie
 		// for a session the client never received. Bail out to the
-		// natural 404 path instead — the client sees Zitadel's real
+		// natural 404 path instead - the client sees Zitadel's real
 		// 404 (a known F-sec-7 leak this anti-enumeration code path
 		// is meant to mask, but a fail-closed degradation is better
 		// than half-state).
 		if len(fakeBody) == 0 {
-			logger.Warnf("auth proxy: buildDecoySessionResponse returned empty body — falling through to upstream 404 (loginName=%q)", probedLoginName)
+			logger.Warnf("auth proxy: buildDecoySessionResponse returned empty body - falling through to upstream 404 (loginName=%q)", probedLoginName)
 			c.Data(statusCode, "application/json", respBody)
 			return
 		}
@@ -1435,10 +1435,10 @@ func (p *AuthProxy) CreateSession(c *gin.Context) {
 		// UpdateSession passes `requireOwningSession` (otherwise it
 		// would 403, which is a different shape from a real session
 		// hitting password-invalid). The Decoy flag stays inside the
-		// httpOnly cookie — UpdateSession uses it to short-circuit
+		// httpOnly cookie - UpdateSession uses it to short-circuit
 		// without forwarding upstream. UserID is intentionally empty,
 		// so userScopedProxy refuses to forward calls bound to a
-		// decoy (Round 21 ruled the userScoped surface out — the
+		// decoy (Round 21 ruled the userScoped surface out - the
 		// 403-vs-Zitadel divergence is scoped to a follow-up).
 		p.upsertSessionEntry(c, entry)
 		// Round 22 Finding 3: register the decoy orgId so a follow-
@@ -1483,7 +1483,7 @@ func (p *AuthProxy) shouldFakeUnknownUser(c *gin.Context, reqBody map[string]any
 		return false
 	}
 
-	// (b) read the login policy. Unscoped — we don't know the org
+	// (b) read the login policy. Unscoped - we don't know the org
 	// because the user doesn't exist; the instance-default policy is
 	// what applies in that case.
 	//
@@ -1491,14 +1491,14 @@ func (p *AuthProxy) shouldFakeUnknownUser(c *gin.Context, reqBody map[string]any
 	// decision and the only way the policy goes stale is operator
 	// action, which is rare. A stale `false` cache hit while the
 	// operator has switched the policy to `true` would leak existence
-	// for up to 15 minutes — exactly the leak we're closing. The cost
+	// for up to 15 minutes - exactly the leak we're closing. The cost
 	// is one extra Zitadel call per unknown-user 404, gated by the
 	// per-IP rate limiter (so attacker-volume is bounded).
 	body, status, err := p.proxyJSON(c.Request.Context(), http.MethodGet, "/v2/settings/login", nil)
 	if err != nil || status != http.StatusOK {
 		return false
 	}
-	// settings response is wrapped in `{"settings": {...}}` —
+	// settings response is wrapped in `{"settings": {...}}` -
 	// unwrap before checking. Same shape as settingsProxy.
 	var wrapper struct {
 		Settings json.RawMessage `json:"settings"`
@@ -1524,7 +1524,7 @@ func (p *AuthProxy) shouldFakeUnknownUser(c *gin.Context, reqBody map[string]any
 // real response (same JSON keys, same status code path) AND the id
 // must look like a real Zitadel session id (numeric snowflake) so a
 // client can't tell from the response that it got a fake. The decoy
-// is tracked via the `Decoy` flag on the cookie's sessionEntry — that
+// is tracked via the `Decoy` flag on the cookie's sessionEntry - that
 // flag is internal to the proxy (httpOnly cookie scoped to /auth) and
 // never leaves the wire. UpdateSession reads the flag to short-circuit
 // the decoy with a canonical password-invalid response.
@@ -1554,7 +1554,7 @@ func buildDecoySessionResponse() ([]byte, string) {
 		SessionToken: token,
 	}
 	// gosec G117: SessionToken is a fake (random bytes), not a real
-	// credential — the whole point of the decoy is that there is no
+	// credential - the whole point of the decoy is that there is no
 	// secret to leak.
 	out, err := json.Marshal(body) //nolint:gosec
 	if err != nil {
@@ -1579,7 +1579,7 @@ func randomDecoySessionID() string {
 	for i, b := range buf {
 		out[i] = '0' + (b % 10)
 	}
-	// Avoid a leading zero — Zitadel session ids never start with 0.
+	// Avoid a leading zero - Zitadel session ids never start with 0.
 	if out[0] == '0' {
 		out[0] = '1'
 	}
@@ -1594,11 +1594,11 @@ func randomDecoySessionID() string {
 //	  "factors":{"user":{"verifiedAt","id","loginName","organizationId"}}}}
 //
 // Round 21 Finding 1 caught the previous version emitting an empty
-// `factors: {}` — wire-distinguishable from the real shape, which
+// `factors: {}` - wire-distinguishable from the real shape, which
 // fully populates `factors.user.{verifiedAt, id, loginName,
 // organizationId}`. The fake user/org ids are derived deterministically
 // from the cookie's captured loginName via HMAC(decoySecret) so two
-// probes of the same unknown loginName produce the same ids — mirroring
+// probes of the same unknown loginName produce the same ids - mirroring
 // what real users do (their Zitadel ids are stable). The HMAC secret
 // is per-process (rotated on restart) so an attacker can't precompute
 // the fake-id space.
@@ -1654,7 +1654,7 @@ func buildDecoyGetSessionResponse(entry *sessionEntry, decoySecret []byte) []byt
 // 18-digit numeric id that mirrors the shape of a Zitadel snowflake.
 // Used by the F-sec-7 decoy machinery (Round 21 Finding 1) to ensure
 // two probes of the same unknown loginName produce the same fake
-// user/org id — without this stability, a real-vs-decoy comparison on
+// user/org id - without this stability, a real-vs-decoy comparison on
 // repeated probes would diverge instantly. HMAC-SHA256 is overkill for
 // the security needs (we just want unforgeable + deterministic) but
 // matches the OWASP recipe.
@@ -1666,7 +1666,7 @@ func buildDecoyGetSessionResponse(entry *sessionEntry, decoySecret []byte) []byt
 // from this Zitadel instance can fingerprint the "real" range and
 // flag ids outside it as decoys. Mitigation would be to derive a
 // Zitadel-shaped snowflake (timestamp = quantized now, machine-id =
-// stable hash, sequence = remaining HMAC bytes). Deferred — the
+// stable hash, sequence = remaining HMAC bytes). Deferred - the
 // statistical detection requires many probes against the same
 // instance, and the IPRateLimiter caps probe volume. Tradeoff vs
 // the engineering cost of mirroring Zitadel's snowflake encoding.
@@ -1692,7 +1692,7 @@ func deriveDecoySnowflake(secret []byte, key string) string {
 // statistically samples real-vs-decoy session sequences can flag
 // "always 1" as a decoy fingerprint. A real Zitadel session's
 // `sequence` is a positive integer that increments per session-state
-// write — fresh sessions carry low numbers (1-5 typical), older /
+// write - fresh sessions carry low numbers (1-5 typical), older /
 // MFA-touched sessions trend higher. [1, 50] is a realistic range for
 // the loginName-only sessions the GetSession decoy mirrors.
 //
@@ -1703,7 +1703,7 @@ func deriveDecoySequence(secret []byte, key string) string {
 	mac.Write([]byte("sequence:" + key))
 	digest := mac.Sum(nil)
 	// Use the next 8 bytes (offset 8) so this doesn't share entropy
-	// with `deriveDecoySnowflake` — even though they take different
+	// with `deriveDecoySnowflake` - even though they take different
 	// `key` prefixes already, separating the byte ranges keeps the
 	// per-field derivations independent.
 	n := binary.BigEndian.Uint64(digest[8:16])
@@ -1727,7 +1727,7 @@ func (p *AuthProxy) isIssuedDecoyOrgID(orgID string) bool {
 		return false
 	}
 	if time.Now().After(expiry) {
-		// Expired — prune inline.
+		// Expired - prune inline.
 		p.deleteDecoyOrgID(orgID)
 		return false
 	}
@@ -1743,7 +1743,7 @@ func (p *AuthProxy) isIssuedDecoyOrgID(orgID string) bool {
 // Round 27 (CRITICAL, Round 27b): the returned value is lowercased
 // to canonicalise. Wave 9 fixed the lockout-key derivation site
 // only; the decoy SNOWFLAKE derivations (`deriveDecoySnowflake(secret,
-// "user:"+loginName)` etc.) ALSO use this loginName — case-sensitive
+// "user:"+loginName)` etc.) ALSO use this loginName - case-sensitive
 // HMAC input meant `Alice@x.com` and `alice@x.com` produced
 // DIFFERENT fake user/org ids while a real user with case-insensitive
 // resolution returned the SAME real ids on both probes. Comparing
@@ -1837,7 +1837,7 @@ func buildDecoyFinalizePreconditionResponse() []byte {
 //     Zitadel's shape for register-MFA, register-passkey, password-
 //     reset, change-password, verify-email, etc.)
 //
-// The synthesized response is a "no-op success" — appropriate for
+// The synthesized response is a "no-op success" - appropriate for
 // the read endpoint and for register-side endpoints, less so for
 // destructive actions, but those aren't reachable on a decoy in the
 // SPA flow anyway.
@@ -1849,8 +1849,8 @@ func buildDecoyFinalizePreconditionResponse() []byte {
 // password check before any register-MFA call), but a directly-
 // crafted attacker probe with a forged decoy cookie + decoy-hash
 // URL could. Closes the leak by deriving the same fake org
-// snowflake we use elsewhere — `deriveDecoySnowflake(secret,
-// "org:"+loginName)` — so it matches the GetSession decoy's
+// snowflake we use elsewhere - `deriveDecoySnowflake(secret,
+// "org:"+loginName)` - so it matches the GetSession decoy's
 // `factors.user.organizationId` for the same loginName.
 func buildDecoyUserScopedResponse(zitadelPath string, entry *sessionEntry, decoySecret []byte) []byte {
 	if strings.Contains(zitadelPath, "/authentication_methods") {
@@ -1879,7 +1879,7 @@ func buildDecoyUserScopedResponse(zitadelPath string, entry *sessionEntry, decoy
 		resourceOwner = deriveDecoySnowflake(decoySecret, "org:"+entry.LoginName)
 		// Round 25 hardening (item 27 / R25b F6): HMAC-derived sequence
 		// in the keyed branch. Unkeyed branch (entry == nil) keeps "1"
-		// — those reach this code only via a forged-cookie probe with
+		// - those reach this code only via a forged-cookie probe with
 		// no loginName context, so there's nothing to anchor to.
 		sequence = deriveDecoySequence(decoySecret, entry.LoginName)
 	}
@@ -1909,7 +1909,7 @@ func buildDecoyUserScopedResponse(zitadelPath string, entry *sessionEntry, decoy
 //
 // We match on both the status code AND the body to avoid swallowing
 // legitimate 404s that happen to share the status (e.g. an unknown
-// route — wouldn't carry the User.NotFound marker).
+// route - wouldn't carry the User.NotFound marker).
 func isLikelyUnknownUserResponse(statusCode int, body []byte) bool {
 	if statusCode != http.StatusNotFound {
 		return false
@@ -1948,7 +1948,7 @@ func canonicalDetailsEnvelope() []byte {
 // canonicalCodeInvalidResponse returns a Zitadel-shaped 4xx body that
 // matches what Zitadel emits for a wrong verification code on a real
 // user. Used by Round 23 unknown-user canonicalization on VerifyEmail
-// and ChangePassword's reset-flow branch — a real user with a wrong
+// and ChangePassword's reset-flow branch - a real user with a wrong
 // code 4xxs with this shape, so an unknown user must produce the
 // same shape to avoid enumeration.
 func canonicalCodeInvalidResponse() []byte {
@@ -1998,7 +1998,7 @@ func buildDecoyPasswordInvalidResponse() []byte {
 // `n` characters. Uses crypto/rand under the hood (via the rand
 // package's reader); the exact length is approximate because base64
 // encoding rounds up. Good enough for "looks like a real Zitadel
-// id/token" — an attacker examining the structure can't distinguish.
+// id/token" - an attacker examining the structure can't distinguish.
 func randomDecoyToken(n int) string {
 	// n bytes → ceil(n*4/3) base64 chars. We want ~n output chars,
 	// so request 3n/4 bytes.
@@ -2034,10 +2034,10 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 		return
 	}
 
-	// Verify session exists in cookie — fail-fast if not found
+	// Verify session exists in cookie - fail-fast if not found
 	entry := p.findSessionEntry(c, sessionID)
 	if entry == nil {
-		respondError(c, http.StatusForbidden, "session not found — please sign in again")
+		respondError(c, http.StatusForbidden, "session not found - please sign in again")
 		return
 	}
 	// NOTE: sessionToken on PATCH is DEPRECATED in Zitadel v4.13+ and will be ignored.
@@ -2052,7 +2052,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 	//     delivers via the configured SMTP backend instead of echoing.
 	//     Wave 14 caught this: the SPA's Otp.tsx unconditionally sends
 	//     `returnCode: {}` because it doesn't know which mode the proxy
-	//     is in — without the proxy stripping it, every email-mode
+	//     is in - without the proxy stripping it, every email-mode
 	//     challenge stays as "return-the-code" and no email is ever sent.
 	switch p.config.NotificationMode {
 	case NotificationModeReturnCode:
@@ -2062,13 +2062,13 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 	}
 
 	// F-sec-5/6: detect password-attempt PATCHes. The limiter applies
-	// to BOTH real and decoy sessions — Round 21 Finding 2 caught the
+	// to BOTH real and decoy sessions - Round 21 Finding 2 caught the
 	// decoy lockout gap: real users hit 429 at threshold but decoys
 	// returned 400 forever, giving an attacker a single-bit oracle
 	// for "user exists" by counting consecutive 400s.
 	//
 	// Limiter key: real users key on `entry.UserID` (server-derived,
-	// authoritative — Round 17 populates it via `fetchSessionUserID`).
+	// authoritative - Round 17 populates it via `fetchSessionUserID`).
 	// Decoys have UserID="" and key on `decoy:` + `entry.LoginName`
 	// (the loginName captured at decoy createSession time). Different
 	// keyspaces, but both produce identical 429-at-threshold behaviour
@@ -2077,7 +2077,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 	//
 	// Round 21 Finding 4: the request must be a PURE password attempt
 	// (`checks.password.password` set AND no other factor checks in
-	// the same body). A mixed body — e.g. `password + totp` — that
+	// the same body). A mixed body - e.g. `password + totp` - that
 	// 4xxs upstream might 4xx because of the totp validation, not
 	// password mismatch; counting it as a password failure would let
 	// an attacker (or a transient SPA bug) accidentally lock a
@@ -2095,12 +2095,12 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 			// a separate counter per casing and bypasses the per-user
 			// lockout entirely on the decoy path. The Wave 2 doc-block
 			// on `LoginNameRateLimiter` declares the canonicalisation
-			// invariant — caller must canonicalise — and this is the
+			// invariant - caller must canonicalise - and this is the
 			// caller's responsibility.
 			limiterKey = "decoy:" + strings.ToLower(entry.LoginName)
 		case !entry.Decoy && entry.UserID != "":
 			// UserID is a Zitadel snowflake (numeric, no case
-			// ambiguity) — already canonical.
+			// ambiguity) - already canonical.
 			limiterKey = entry.UserID
 		}
 	}
@@ -2108,7 +2108,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 		// BeginAttempt atomically gates AND reserves a tentative
 		// failure slot. Race-safe under parallel PATCHes (Round 20).
 		if !p.LoginNameLimiter.BeginAttempt(limiterKey) {
-			// Round 27 Wave 15 — observability: emit a WARN log so an
+			// Round 27 Wave 15 - observability: emit a WARN log so an
 			// on-call grepping API logs can see lockouts as they
 			// happen ("yes, X is being attacked"). Structured
 			// `event=` field for easy filtering; the loginName/UserID
@@ -2117,7 +2117,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 			logger.Warnf("event=loginname_lockout_denied key=%q reason=too_many_failed_password_attempts", limiterKey)
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"code":    http.StatusTooManyRequests,
-				"message": "too many failed password attempts — try again later",
+				"message": "too many failed password attempts - try again later",
 			})
 			return
 		}
@@ -2126,7 +2126,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 	// F-sec-7: short-circuit decoy sessions. The decoy never forwards
 	// to Zitadel (which would 404 the fake id and leak by status
 	// divergence). Always return the canonical "Password is invalid"
-	// 4xx — the limiter above already turned the threshold-th attempt
+	// 4xx - the limiter above already turned the threshold-th attempt
 	// into a 429, mirroring the real path.
 	if entry.Decoy {
 		c.Data(http.StatusBadRequest, "application/json", buildDecoyPasswordInvalidResponse())
@@ -2135,10 +2135,10 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 
 	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPatch, "/v2/sessions/"+sessionID, reqBody)
 	if err != nil {
-		// Transport-level error — no auth verdict. Roll back the
+		// Transport-level error - no auth verdict. Roll back the
 		// tentative slot so an outage doesn't silently lock honest
 		// users on retry. (Round 20 Finding 5 documents the budget-
-		// farming risk during sustained Zitadel outages — accepted
+		// farming risk during sustained Zitadel outages - accepted
 		// tradeoff vs locking honest users out.)
 		if limiterKey != "" {
 			p.LoginNameLimiter.RollbackAttempt(limiterKey)
@@ -2172,7 +2172,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 		case statusCode >= 500:
 			p.LoginNameLimiter.RollbackAttempt(limiterKey)
 		}
-		// 4xx falls through — bump stays.
+		// 4xx falls through - bump stays.
 	}
 
 	c.Data(statusCode, "application/json", respBody)
@@ -2180,7 +2180,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 
 // isPureSinglePasswordCheck reports whether the request body is
 // EXACTLY a `{checks: {password: {password: "<non-whitespace>"}}}`
-// shape — no other top-level keys, no other check siblings, no empty
+// shape - no other top-level keys, no other check siblings, no empty
 // or whitespace-only password. The post-flight lockout-bookkeeping
 // rule then treats any 4xx upstream as a real password failure
 // (with no other thing in the body, the only thing that could fail
@@ -2194,7 +2194,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 // bug) trigger lockout on non-password code paths. Now the request
 // body must contain ONLY the `checks` key.
 //
-// Whitespace-only passwords are also rejected — they'd be forwarded
+// Whitespace-only passwords are also rejected - they'd be forwarded
 // to Zitadel and 4xx as "password is invalid", but the attempt was
 // trivially malformed and shouldn't burn a slot.
 func isPureSinglePasswordCheck(reqBody map[string]any) bool {
@@ -2232,7 +2232,7 @@ func (p *AuthProxy) GetSession(c *gin.Context) {
 	}
 
 	// F-sec-7 (Audit Round 20 + Round 21 Finding 1): a decoy GetSession
-	// must mirror a real loginName-only session's full shape — the
+	// must mirror a real loginName-only session's full shape - the
 	// divergence between a 404 and a populated 200 is what lets an
 	// attacker enumerate users. The synthesized response carries a
 	// fully-populated `factors.user.{id, loginName, organizationId}`
@@ -2292,7 +2292,7 @@ func (p *AuthProxy) DeleteSession(c *gin.Context) {
 		return
 	}
 
-	// Remove from cookie on Zitadel success — the canonical happy path.
+	// Remove from cookie on Zitadel success - the canonical happy path.
 	if statusCode == http.StatusOK {
 		p.clearSessionEntry(c, sessionID)
 		c.Data(statusCode, "application/json", respBody)
@@ -2303,7 +2303,7 @@ func (p *AuthProxy) DeleteSession(c *gin.Context) {
 	// rejects the cookie-stored sessionToken as invalid. The token gets
 	// consumed by `finalizeAuthRequest` during normal login completion,
 	// so by the time the user reaches `/login/logout` the stored token
-	// can no longer prove ownership to Zitadel — but the user's intent
+	// can no longer prove ownership to Zitadel - but the user's intent
 	// ("remove this session from my browser's session list") is still
 	// valid from the cookie's perspective. We honour the local cleanup,
 	// surface a 200, and leave the upstream session to expire on its
@@ -2314,7 +2314,7 @@ func (p *AuthProxy) DeleteSession(c *gin.Context) {
 	// Narrowly scoped to "Session Token is invalid" (Zitadel COMMAND-sGr42
 	// → 403) so genuine errors (network failures, real authorization
 	// rejections) still bubble up. Any other 4xx/5xx returns Zitadel's
-	// shape verbatim — the SPA's `data-testid="logout-session-remove"`
+	// shape verbatim - the SPA's `data-testid="logout-session-remove"`
 	// click handler swallows non-2xx and refetches the list, so honest
 	// errors degrade into "the session stays and you can try again."
 	if statusCode == http.StatusForbidden && bytes.Contains(respBody, []byte("Session Token is invalid")) {
@@ -2335,7 +2335,7 @@ func (p *AuthProxy) DeleteSession(c *gin.Context) {
 // client-supplied sessionIds / userIds / creator queries are discarded.
 //
 // F-sec-7 (Round 21 Finding 3): if the cookie holds decoy entries, the
-// upstream query MUST exclude them — Zitadel returns 0 rows for the fake
+// upstream query MUST exclude them - Zitadel returns 0 rows for the fake
 // ids, and the resulting row-count divergence (0 for decoy vs 1+ for a
 // real session in the same loginName-only state) is itself an
 // enumeration oracle. We forward only the real ids upstream, then
@@ -2373,7 +2373,7 @@ func (p *AuthProxy) SearchSessions(c *gin.Context) {
 	}
 
 	// Overwrite any caller-supplied filters with a single IdsQuery
-	// scoped to the REAL cookie sessions (decoys excluded — Round 21).
+	// scoped to the REAL cookie sessions (decoys excluded - Round 21).
 	reqBody["queries"] = []map[string]any{
 		{"idsQuery": map[string]any{"ids": realIDs}},
 	}
@@ -2394,7 +2394,7 @@ func (p *AuthProxy) SearchSessions(c *gin.Context) {
 			c.Data(http.StatusOK, "application/json", spliced)
 			return
 		}
-		// Fall through if splicing failed — better to return Zitadel's
+		// Fall through if splicing failed - better to return Zitadel's
 		// real response than a half-formed mix.
 	}
 
@@ -2442,7 +2442,7 @@ func extractDecoyRows(decoys []sessionEntry, secret []byte) []json.RawMessage {
 //
 // Round 22 Finding 2: the prior version emitted just `{"sessions":
 // [...]}`, dropping Zitadel's `details: {totalResult, timestamp}`
-// envelope — wire-distinguishable from a real-only response.
+// envelope - wire-distinguishable from a real-only response.
 func buildDecoySearchSessionsResponse(decoys []sessionEntry, secret []byte) []byte {
 	rows := extractDecoyRows(decoys, secret)
 	body := struct {
@@ -2467,7 +2467,7 @@ func buildDecoySearchSessionsResponse(decoys []sessionEntry, secret []byte) []by
 // upstream `details` envelope but updates `totalResult` to reflect
 // the merged row count (Round 22 Finding 2). Returns nil on
 // unmarshal failure so the caller can fall back to the upstream
-// response unchanged — but with the all-real `details` count
+// response unchanged - but with the all-real `details` count
 // preserved (the row-count divergence vs the cookie size IS still a
 // secondary leak; reaching this branch requires an upstream JSON
 // parse failure which would itself indicate a bigger problem).
@@ -2530,7 +2530,7 @@ func (p *AuthProxy) StartIdP(c *gin.Context) {
 
 	// IdP success/failure pages live on the SPA, not the api. Build URLs from
 	// the frontend base (config.PublicFrontendURL or, in same-origin
-	// deployments, the api's own host) — using the api host directly here
+	// deployments, the api's own host) - using the api host directly here
 	// would 404 the user when the SPA is on a different domain.
 	frontendBase := p.getFrontendBaseURL(c)
 	idpID, _ := reqBody["idpId"].(string)
@@ -2580,7 +2580,7 @@ func (p *AuthProxy) CompleteIdP(c *gin.Context) {
 //
 // Returns the set of identity providers that should be rendered as login buttons.
 // Zitadel's canonical endpoint for this is GET /v2/settings/login/idps (part of
-// the settings service) — it returns `{details, identityProviders:[...]}`. The
+// the settings service) - it returns `{details, identityProviders:[...]}`. The
 // earlier plan entry that targeted POST /v2/idps/search was wrong for v4 (that
 // path returns 405). The response is adapted to `{result: [...]}` so the
 // frontend reader (which expects a `result` array) doesn't need to track the
@@ -2603,7 +2603,7 @@ func (p *AuthProxy) ListIdpProviders(c *gin.Context) {
 		IdentityProviders json.RawMessage `json:"identityProviders"`
 	}
 	if err := json.Unmarshal(respBody, &wrapper); err != nil {
-		// Unexpected shape — forward unchanged and let the frontend handle it.
+		// Unexpected shape - forward unchanged and let the frontend handle it.
 		c.Data(statusCode, "application/json", respBody)
 		return
 	}
@@ -2620,7 +2620,7 @@ func (p *AuthProxy) ListIdpProviders(c *gin.Context) {
 // CreateUser handles POST /auth/users.
 // registrationAllowed reports whether the Zitadel login policy permits self-registration
 // (`allowRegister: true`). It reads the live policy via the admin PAT and returns true ONLY
-// when registration is affirmatively allowed — a disabled policy, or any error reading it,
+// when registration is affirmatively allowed - a disabled policy, or any error reading it,
 // yields false so the public registration endpoint fails closed (AUD-120). The cache is
 // deliberately bypassed for the same reason as shouldFakeUnknownUser: the policy only changes
 // on rare operator action, and a stale allow would keep the bypass open.
@@ -2629,7 +2629,7 @@ func (p *AuthProxy) registrationAllowed(c *gin.Context) bool {
 	if err != nil || status != http.StatusOK {
 		return false
 	}
-	// The settings response is wrapped in `{"settings": {...}}` — unwrap before checking.
+	// The settings response is wrapped in `{"settings": {...}}` - unwrap before checking.
 	var wrapper struct {
 		Settings json.RawMessage `json:"settings"`
 	}
@@ -2647,7 +2647,7 @@ func (p *AuthProxy) registrationAllowed(c *gin.Context) bool {
 
 func (p *AuthProxy) CreateUser(c *gin.Context) {
 	// AUD-120: this endpoint is on the unauthenticated /auth surface and forwards to Zitadel
-	// with the admin PAT. Honor the operator's login policy — without this an operator who
+	// with the admin PAT. Honor the operator's login policy - without this an operator who
 	// disabled self-registration is bypassed (bounded only by the per-IP rate limiter).
 	if !p.registrationAllowed(c) {
 		respondError(c, http.StatusForbidden, "self-registration is disabled")
@@ -2661,7 +2661,7 @@ func (p *AuthProxy) CreateUser(c *gin.Context) {
 	}
 
 	// In return_code mode, inject email.returnCode (DR-6).
-	// SetHumanEmail.verification is a Zitadel proto `oneof` — only ONE branch
+	// SetHumanEmail.verification is a Zitadel proto `oneof` - only ONE branch
 	// (returnCode | sendCode | isVerified) may be set per message. Register.tsx
 	// pre-fills `isVerified: false` for email-mode parity, so we strip the
 	// other branches before injecting returnCode; otherwise Zitadel's
@@ -2718,7 +2718,7 @@ func (p *AuthProxy) PasswordReset(c *gin.Context) {
 	// → password_reset. With F-sec-7 the createSession step returns a
 	// fake userId for unknown loginNames; without canonicalization
 	// here, the password_reset call distinguishes real vs decoy via
-	// 200 vs 404 — recreating the enumeration leak from a different
+	// 200 vs 404 - recreating the enumeration leak from a different
 	// angle. The actual reset code is only emitted by Zitadel for
 	// real users (in returnCode mode) or via SMTP (in email mode);
 	// the canonical empty-success body for unknown users is harmless.
@@ -2730,7 +2730,7 @@ func (p *AuthProxy) PasswordReset(c *gin.Context) {
 }
 
 // ChangePassword handles POST /auth/users/:id/password.
-// Requires verification code — Zitadel enforces server-side (DR-4).
+// Requires verification code - Zitadel enforces server-side (DR-4).
 func (p *AuthProxy) ChangePassword(c *gin.Context) {
 	userID := c.Param("id")
 	if userID == "" {
@@ -2751,7 +2751,7 @@ func (p *AuthProxy) ChangePassword(c *gin.Context) {
 		return
 	}
 	// Round 23 Finding 2 (MODERATE): canonicalize unknown-user 404
-	// to a "code is invalid" 4xx — same shape Zitadel emits for a
+	// to a "code is invalid" 4xx - same shape Zitadel emits for a
 	// wrong verificationCode (reset flow) or wrong currentPassword
 	// (in-app change flow) on a REAL user. Without this, an attacker
 	// can probe `/auth/users/<guessedId>/password` with a bogus body
@@ -2781,7 +2781,7 @@ func (p *AuthProxy) userScopedProxy(c *gin.Context, zitadelPath string) {
 //
 // DR-4 enforcement: the URL `:id` (target user) MUST match at least one
 // session's bound UserID in the caller's cookie. Round 17 (F-sec-9)
-// added this — pre-fix, any logged-in user could mutate any other user's
+// added this - pre-fix, any logged-in user could mutate any other user's
 // authenticators (TOTP, passkey, etc.) just by swapping the id in the
 // URL. The `userId` URL parameter name comes from the route definition
 // in `routes.go` (e.g. `users.GET("/:id/authentication_methods", ...)`).
@@ -2795,13 +2795,13 @@ func (p *AuthProxy) userScopedProxyWithMethod(c *gin.Context, method, zitadelPat
 	// Bind the request to one of the caller's cookie sessions. If the
 	// route doesn't carry an `:id` param (none of today's user-scoped
 	// routes lack one, but the helper is generalized) we skip the
-	// match check — the session-presence check above is sufficient
+	// match check - the session-presence check above is sufficient
 	// for those.
 	//
 	// Round 22 Finding 1 (F-sec-7 leak): a decoy session has UserID="",
 	// so the legacy match below always 403s decoys. A real loginName-
 	// only session forwards to Zitadel and returns whatever Zitadel
-	// says about the user — DIFFERENT shape from the decoy 403.
+	// says about the user - DIFFERENT shape from the decoy 403.
 	// Match decoys via their hash-derived fake user id: the decoy's
 	// `factors.user.id` (returned by GetSession) equals
 	// `deriveDecoySnowflake(secret, "user:"+entry.LoginName)`. If the
@@ -2850,13 +2850,13 @@ func (p *AuthProxy) userScopedProxyWithMethod(c *gin.Context, method, zitadelPat
 	c.Data(statusCode, "application/json", respBody)
 }
 
-// GetUserByID handles GET /auth/users/:id — proxies Zitadel's
+// GetUserByID handles GET /auth/users/:id - proxies Zitadel's
 // `GET /v2/users/{id}` so the SPA can read flags it needs after
 // authentication (notably `human.passwordChangeRequired` for F19).
 //
 // Routed through `userScopedProxyWithMethod` so the URL `:id` MUST
 // match the cookie session's `UserID` (Round 17 cross-user gate).
-// This keeps the endpoint a pure self-read — a logged-in user can
+// This keeps the endpoint a pure self-read - a logged-in user can
 // only fetch their OWN record. Decoy sessions get a synthesized
 // Zitadel-shaped response from the same Round-22 helper, so direct
 // probes can't enumerate via this endpoint either.
@@ -2870,7 +2870,7 @@ func (p *AuthProxy) GetUserByID(c *gin.Context) {
 // Returns the list of authentication factors the user has enrolled (TOTP,
 // passkey, U2F, OTP-email, OTP-sms, password). The SPA's password page
 // reads this to decide whether to route the user to a second-factor prompt
-// instead of finalizing the auth request on the password alone — without
+// instead of finalizing the auth request on the password alone - without
 // this hop, a TOTP-enrolled user would land on `/dashboard` with only a
 // password verified, which silently breaks user-level MFA enforcement.
 func (p *AuthProxy) ListAuthMethods(c *gin.Context) {
@@ -2935,7 +2935,7 @@ func (p *AuthProxy) EnableOTPSMS(c *gin.Context) {
 //   - POST /v2/users/{id}/email          → SetEmail (set/update; needs `email`)
 //   - POST /v2/users/{id}/email/verify   → VerifyEmail (consumes a code)
 //
-// The SPA uses the latter — the request body carries `verificationCode` only.
+// The SPA uses the latter - the request body carries `verificationCode` only.
 // Calling SetEmail by mistake makes Zitadel reject the request with
 // "invalid SetEmailRequest.Email: value length must be between 1 and 200
 // runes" because `email` is required there.
@@ -2962,7 +2962,7 @@ func (p *AuthProxy) VerifyEmail(c *gin.Context) {
 	}
 
 	// Round 25 Wave 6 (item 20): cross-user gate. The previous unconditional
-	// `requireUserScopedSession` call broke F7 self-registration — a freshly
+	// `requireUserScopedSession` call broke F7 self-registration - a freshly
 	// registered user has NO session cookie yet (CreateUser doesn't mint one),
 	// so verify-email-after-register always 403'd (Wave 14 fix, 2026-05-10).
 	//
@@ -3029,7 +3029,7 @@ func (p *AuthProxy) VerifyEmail(c *gin.Context) {
 
 	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/users/"+userID+"/email/verify", reqBody)
 	if err != nil {
-		// Transport error / 5xx — roll back the rate-limit slot so
+		// Transport error / 5xx - roll back the rate-limit slot so
 		// honest users aren't penalised for a Zitadel outage.
 		p.LoginNameLimiter.RollbackAttempt(rateLimitKey)
 		logger.Errorf("Failed to verify email: %v", err)
@@ -3059,7 +3059,7 @@ func (p *AuthProxy) VerifyEmail(c *gin.Context) {
 // These proxy Zitadel's settings endpoints with a small TTL cache (A7-cache).
 // Zitadel wraps settings responses in a container object (e.g., {"settings": {...}});
 // we unwrap before caching so the cached payload is already in the shape the
-// frontend expects — no repeated unwrap work on cache hits.
+// frontend expects - no repeated unwrap work on cache hits.
 //
 // Cache semantics:
 //   - Per-path TTL from settingsTTL (login 15m, branding 1h, etc.)
@@ -3068,14 +3068,14 @@ func (p *AuthProxy) VerifyEmail(c *gin.Context) {
 //     settings vary per-org when an org has its own policy override
 //     (force-MFA / allow-register / domain-discovery overrides). Without
 //     forwarding the org context, the SPA would see the instance default
-//     even for users in orgs with stricter policies — silently bypassing
+//     even for users in orgs with stricter policies - silently bypassing
 //     forceMfa / allow-register etc.
 //   - If Zitadel 5xxs and a stale entry exists within staleWindow, serve stale
 //     rather than propagate the outage to the SPA. The SPA is dead without
 //     login settings, so stale here is strictly better than a 502.
 
 // allowedSettingsQueryParams limits which incoming query params the settings
-// proxy forwards to Zitadel. Anything outside this set is ignored — the
+// proxy forwards to Zitadel. Anything outside this set is ignored - the
 // alternative (forwarding everything) lets a hostile SPA tweak inject
 // queries that change the cache key in ways we never tested.
 var allowedSettingsQueryParams = map[string]struct{}{
@@ -3097,7 +3097,7 @@ func (p *AuthProxy) settingsProxy(c *gin.Context, zitadelPath string, unwrapKey 
 	}
 	// Round 22 Finding 3: if the caller passes `ctx.orgId` matching
 	// an issued decoy orgId, strip the param so the upstream call is
-	// unscoped (instance-default) — same response shape an unknown
+	// unscoped (instance-default) - same response shape an unknown
 	// real org would produce post-fallback. Without this, the
 	// per-org Zitadel response (404 or instance-default with a
 	// different cached payload) is wire-distinguishable from a real
@@ -3125,7 +3125,7 @@ func (p *AuthProxy) settingsProxy(c *gin.Context, zitadelPath string, unwrapKey 
 	// Round 26 Wave 9 (HIGH-2): the leader's upstream fetch uses a
 	// DETACHED context (not the leader's request context). Without
 	// detachment, the leader's client disconnecting mid-fetch would
-	// poison every piggy-backing waiter via context.Canceled — turning
+	// poison every piggy-backing waiter via context.Canceled - turning
 	// a single client misbehaviour into a fan-out outage. 30s timeout
 	// is generous (settings calls typically <1s) but bounds the
 	// in-flight goroutine if Zitadel hangs.
@@ -3181,7 +3181,7 @@ func (p *AuthProxy) settingsProxy(c *gin.Context, zitadelPath string, unwrapKey 
 
 	res, ok := result.(*sfResult)
 	if !ok {
-		// Defensive — singleflight returned something unexpected.
+		// Defensive - singleflight returned something unexpected.
 		respondError(c, http.StatusBadGateway, "failed to fetch settings from identity provider")
 		return
 	}
@@ -3264,7 +3264,7 @@ const lookupOrgByDomainTTL = 60 * time.Second
 // Fail-closed semantics: any upstream error / unparseable response /
 // missing flag returns false. The caller treats "false" as "no match"
 // (mirror the empty-result branch) so the response is shape-identical
-// for "domain doesn't exist" and "domain exists but org opted out" —
+// for "domain doesn't exist" and "domain exists but org opted out" -
 // no existence oracle.
 func (p *AuthProxy) orgAllowsDomainDiscovery(ctx context.Context, orgID string) bool {
 	if orgID == "" {
@@ -3396,7 +3396,7 @@ func (p *AuthProxy) LookupOrgByDomain(c *gin.Context) {
 	}
 
 	// Cache the filtered response so subsequent probes for the same
-	// domain hit the cache. Empty results are also cached — the whole
+	// domain hit the cache. Empty results are also cached - the whole
 	// point of the negative-result amortisation.
 	respBytes, err := json.Marshal(gin.H{"result": out})
 	if err != nil {
@@ -3415,7 +3415,7 @@ func (p *AuthProxy) LookupOrgByDomain(c *gin.Context) {
 // for OTP challenges so codes are returned in the API response instead of emailed/SMSed.
 //
 // Wave 14 (2026-05-11): Zitadel v4 changed the OTPEmailChallenge /
-// OTPSMSChallenge oneof shape — `returnCode` is now a message type
+// OTPSMSChallenge oneof shape - `returnCode` is now a message type
 // (`{}`), not a boolean. The old boolean shape blows up with
 // `proto: syntax error (line 1:N): unexpected token true` at the
 // grpc-gateway. Verified empirically against v4.12.3 while wiring
@@ -3435,7 +3435,7 @@ func (p *AuthProxy) injectReturnCodeFlags(body map[string]any) {
 }
 
 // stripReturnCodeFlags removes any `returnCode` field from OTP challenges
-// so Zitadel falls back to the default delivery channel — SMTP for email,
+// so Zitadel falls back to the default delivery channel - SMTP for email,
 // the configured SMS provider for SMS. Used in email-notification mode
 // (Wave 14): the SPA always sends `returnCode: {}` because it can't see
 // the proxy's mode env, so the proxy strips it on the wire when running
@@ -3459,7 +3459,7 @@ func (p *AuthProxy) stripReturnCodeFlags(body map[string]any) {
 //
 // On create, the userId binding is fetched via a follow-up `getSession`
 // call (Zitadel's createSession response carries only id+token, no user
-// factor — and the binding is what userScopedProxy uses for DR-4). On
+// factor - and the binding is what userScopedProxy uses for DR-4). On
 // update, we preserve any existing UserID rather than overwriting; an
 // updateSession call doesn't change the bound user, only adds factors.
 func (p *AuthProxy) storeSessionFromResponse(c *gin.Context, respBody json.RawMessage) {
@@ -3482,7 +3482,7 @@ func (p *AuthProxy) storeSessionFromResponse(c *gin.Context, respBody json.RawMe
 	// F-sec-7: decoy sessions are stored directly by CreateSession's
 	// fake-path (it sets Decoy=true on the entry). On a real
 	// updateSession the existing cookie entry might be a decoy that
-	// somehow round-tripped — preserve the flag and skip the
+	// somehow round-tripped - preserve the flag and skip the
 	// fetchSessionUserID call (the id is fake; the lookup would 404).
 	if existing := p.findSessionEntry(c, resp.SessionID); existing != nil && existing.Decoy {
 		entry.Decoy = true
@@ -3493,7 +3493,7 @@ func (p *AuthProxy) storeSessionFromResponse(c *gin.Context, respBody json.RawMe
 	if existing := p.findSessionEntry(c, resp.SessionID); existing != nil && existing.UserID != "" {
 		entry.UserID = existing.UserID
 	} else {
-		// New session — fetch binding. Failures here MUST NOT silently
+		// New session - fetch binding. Failures here MUST NOT silently
 		// drop the entry: without a UserID, the cookie still works for
 		// non-user-scoped endpoints (sessions/search, finalize, etc.),
 		// and the next `userScopedProxy` call will refuse the request

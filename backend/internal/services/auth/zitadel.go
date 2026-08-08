@@ -26,7 +26,7 @@ type remoteKeySet struct {
 	httpClient   *http.Client
 	jwksURL      string
 	hostOverride string       // Host header override for in-cluster requests to Zitadel
-	mu           sync.RWMutex // guards keys — read on every verify, written on refresh (AUD-040)
+	mu           sync.RWMutex // guards keys - read on every verify, written on refresh (AUD-040)
 	keys         []jose.JSONWebKey
 }
 
@@ -147,7 +147,7 @@ type ZitadelVerifier struct {
 
 // AcceptAudience registers a client_id that an access token's `aud` may contain. Real user
 // access tokens are issued to the frontend PKCE client, so their `aud` carries the frontend
-// client id — not the API client id the verifier is otherwise configured with. Call this for
+// client id - not the API client id the verifier is otherwise configured with. Call this for
 // every Stackweaver client (API + frontend) so audience enforcement (AUD-012) accepts real
 // tokens while rejecting tokens minted for other clients on the same Zitadel instance.
 func (v *ZitadelVerifier) AcceptAudience(clientID string) {
@@ -251,7 +251,7 @@ func (v *ZitadelVerifier) VerifyToken(ctx context.Context, tokenString string) (
 
 	// AUD-012: enforce that the token is intended for a Stackweaver client. Previously the
 	// audience error was discarded ("lenient"), so any token signed by the same Zitadel
-	// instance — for any client/project — authenticated and auto-provisioned a user. Real
+	// instance - for any client/project - authenticated and auto-provisioned a user. Real
 	// user access tokens are issued to the frontend PKCE client, so we accept the frontend
 	// client id (registered via AcceptAudience) as well as the API client id, and reject
 	// tokens whose `aud` names only other clients.

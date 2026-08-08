@@ -196,7 +196,7 @@ func SetupAnsibleRoutes(
 		jobService,
 		inventorySourceService,
 	)
-	// The HTTP scheduler instance is CRUD-only (it never ticks — the executing
+	// The HTTP scheduler instance is CRUD-only (it never ticks - the executing
 	// scheduler lives in cmd/api), but CreateSchedule validates workflow
 	// schedules against the engine, so it must be wired here too or workflow
 	// schedules can never be created.

@@ -325,10 +325,10 @@ func (r *UpdateWorkspaceRequestV2) wsTagsPresent() bool {
 // --- Workspace list tag filtering (data.tfe_workspace_ids compatibility) ---------------------------
 //
 // The tfe provider's data.tfe_workspace_ids sends tag filters as query params on the list endpoint:
-//   search[tags]          — comma-separated tag names to include (legacy `tag_names`)
-//   search[exclude-tags]  — comma-separated tag names to exclude (`exclude_tags`)
-//   filter[tagged][N][key], filter[tagged][N][value] — key/value binding include filters (`tag_filters.include`)
-//   include=effective_tag_bindings — also embed each workspace's effective tags in the response
+//   search[tags]          - comma-separated tag names to include (legacy `tag_names`)
+//   search[exclude-tags]  - comma-separated tag names to exclude (`exclude_tags`)
+//   filter[tagged][N][key], filter[tagged][N][value] - key/value binding include filters (`tag_filters.include`)
+//   include=effective_tag_bindings - also embed each workspace's effective tags in the response
 //
 // Stackweaver models tags as key/value *bindings* (not legacy flat names), so the legacy name filters
 // map onto binding *keys*: `search[tags]=env` matches workspaces whose effective tags contain key `env`
@@ -737,7 +737,7 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		"updated-at":          workspace.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 
-	// go-tfe Description is a plain string, not pointer — always include
+	// go-tfe Description is a plain string, not pointer - always include
 	attributes["description"] = workspace.Description
 
 	// TFE API: vcs-repo must be an object matching go-tfe VCSRepo struct exactly
@@ -889,7 +889,7 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 	}
 	attributes["setting-overwrites"] = settingOverwrites
 
-	// StackWeaver extensions — extra attributes the frontend needs that aren't in the TFE API.
+	// StackWeaver extensions - extra attributes the frontend needs that aren't in the TFE API.
 	// TFE clients will ignore unknown attributes.
 	if workspace.VCSConnectionID != nil {
 		attributes["vcs-connection-id"] = workspace.VCSConnectionID.String()
@@ -1163,7 +1163,7 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 					vcsConnectionID = &parsedID
 				}
 			default:
-				// No explicit ID — use the org's VCS connection
+				// No explicit ID - use the org's VCS connection
 				conns, connErr := h.vcsConnectionRepo.ListByOrganization(org.ID)
 				if connErr == nil && len(conns) > 0 {
 					vcsConnectionID = &conns[0].ID
@@ -2081,7 +2081,7 @@ func (h *WorkspaceHandlerV2) Delete(c *gin.Context) {
 // workspace resolved by ID (the TFE-compatible by-ID routes). It mirrors the
 // org+name Update/Delete gate: organization admins (CheckOrgManageWorkspaces) OR
 // members with workspace write access (CheckWorkspacePermission). It writes the
-// JSON:API error response and returns false when the caller is unauthorized —
+// JSON:API error response and returns false when the caller is unauthorized -
 // 401 (no auth), 403 (no permission), 500 (lookup failure). AUD-011: the by-ID
 // twins (DeleteByID/SafeDeleteByID/UpdateByID) previously performed no check, so
 // any authenticated user could destroy or reconfigure any workspace by UUID.
@@ -2131,7 +2131,7 @@ func (h *WorkspaceHandlerV2) authorizeWorkspaceWriteByID(c *gin.Context, workspa
 // authorizeWorkspaceRead gates a read of a workspace on organization membership,
 // resolving the owning org from the workspace's project. It mirrors
 // ProjectHandlerV2.GetByID's UserInOrg check. It writes the JSON:API error and
-// returns false when unauthorized — 401 (no auth), 403 (not a member), 500 (lookup
+// returns false when unauthorized - 401 (no auth), 403 (not a member), 500 (lookup
 // failure). AUD-046: the read-by-name/ID endpoints returned workspace configuration
 // (VCS repo, agent pool, execution mode) to any authenticated user cross-tenant.
 func (h *WorkspaceHandlerV2) authorizeWorkspaceRead(c *gin.Context, workspace *models.Workspace) bool {
@@ -2189,7 +2189,7 @@ func (h *WorkspaceHandlerV2) DeleteByID(c *gin.Context) {
 // SafeDelete safely deletes a workspace by org+name (checks for active infrastructure)
 // POST /api/v2/organizations/:name/workspaces/:workspace_name/actions/safe-delete
 func (h *WorkspaceHandlerV2) SafeDelete(c *gin.Context) {
-	// Reuse the Delete handler — it checks for active infrastructure by default
+	// Reuse the Delete handler - it checks for active infrastructure by default
 	h.Delete(c)
 }
 

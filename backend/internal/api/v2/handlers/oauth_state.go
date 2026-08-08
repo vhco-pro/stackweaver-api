@@ -12,12 +12,12 @@ import (
 )
 
 // AUD-155: the Azure DevOps OAuth `state` parameter carried a uuid nonce that was generated at
-// initiate time but never persisted or validated on callback — the callback trusted whatever
+// initiate time but never persisted or validated on callback - the callback trusted whatever
 // `state` the redirect delivered, so an attacker could craft a state pointing to any organization
 // (CSRF / connection fixation). The flow is stateless (no session store is wired for it), so
 // instead of persisting the nonce we sign the state with the deployment's ENCRYPTION_KEY: the
 // callback recomputes the HMAC and rejects any state it did not mint. This makes the state
-// unforgeable and, via the embedded expiry, replay-bounded — mirroring the AUD-045 log-token model.
+// unforgeable and, via the embedded expiry, replay-bounded - mirroring the AUD-045 log-token model.
 
 const oauthStateTTL = 15 * time.Minute
 

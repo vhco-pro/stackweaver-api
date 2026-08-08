@@ -441,7 +441,7 @@ func (h *TeamHandlerV2) calculateTeamPermissions(ctx context.Context, userID, or
 // GET /api/v2/organizations/:name/teams
 // requireOrgMembership resolves the caller and writes 401/403 (returning false) unless
 // they are a member of orgID. JWT/browser identities bypass the org-resolution wall, so
-// this per-handler check is the only tenant-isolation defense for them — the team read
+// this per-handler check is the only tenant-isolation defense for them - the team read
 // endpoints otherwise leak member usernames/emails and team topology cross-tenant
 // (AUD-153/154).
 func (h *TeamHandlerV2) requireOrgMembership(c *gin.Context, orgID uuid.UUID) (uuid.UUID, bool) {

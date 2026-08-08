@@ -3,7 +3,7 @@
 //go:build integration
 // +build integration
 
-// Integration-only tests — require a live PostgreSQL reachable at
+// Integration-only tests - require a live PostgreSQL reachable at
 // `$TEST_DATABASE_URL` (or the local default
 // `postgres://iac:iac_password@localhost:5432/iac_platform`). Compiled
 // into the test binary ONLY when the `integration` build tag is set:
@@ -111,7 +111,7 @@ func setupTestUserForProvider(t *testing.T, db *gorm.DB) *models.User {
 }
 
 // cleanupProviderTables removes only this test's rows. Every delete is scoped to
-// the test org — these tests run against $TEST_DATABASE_URL, which in dev points
+// the test org - these tests run against $TEST_DATABASE_URL, which in dev points
 // at the live app database, so an unscoped `DELETE FROM providers` would wipe real
 // registry data. Deletes bottom-up through the provider → version → platform →
 // download FK chain, then the org-scoped providers/gpg_keys, then the org + user.
@@ -341,7 +341,7 @@ func TestPublishProviderPlatform_RejectsPathInjection(t *testing.T) {
 
 	// os/arch come from PostForm and are NOT sanitized by the stdlib, so traversal there
 	// is the real injectable vector. The multipart filename is already reduced to its base
-	// by Go's mime/multipart before the handler sees it, so it can't carry separators — but
+	// by Go's mime/multipart before the handler sees it, so it can't carry separators - but
 	// the handler's charset allowlist still rejects a filename with disallowed characters
 	// (and embedded `..`) as defense in depth.
 	cases := []struct{ name, os, arch, filename string }{
@@ -409,7 +409,7 @@ func TestPublishProviderPlatform_RejectsPathInjection(t *testing.T) {
 
 // freshPublisherKey generates a throwaway OpenPGP key in-process (no gpg binary) and returns
 // its ASCII-armored public half (to register as the org's GPG key), the 16-char long key id,
-// and a sign closure that produces a detached signature over a payload with that same key —
+// and a sign closure that produces a detached signature over a payload with that same key -
 // so a test can register one key and sign multiple payloads with it. armored selects the
 // ASCII-armored detached signature form (SHA256SUMS.sig is conventionally binary).
 func freshPublisherKey(t *testing.T) (asciiArmor, keyID string, sign func(payload []byte, armored bool) []byte) {
@@ -448,7 +448,7 @@ func freshPublisherKey(t *testing.T) (asciiArmor, keyID string, sign func(payloa
 // TestPublishProviderPlatform_RejectsUnverifiedSignature is the AUD-106 assertion: publish
 // must reject an artifact whose SHA256SUMS signature does not verify against the org's
 // registered key, or whose (validly signed) SHA256SUMS does not list the uploaded binary.
-// Before the fix the publisher-supplied signature was stored blind — a provider signed by
+// Before the fix the publisher-supplied signature was stored blind - a provider signed by
 // nobody the org trusts (or covering different bytes) was accepted 201 and then served as if
 // the registry vouched for it.
 func TestPublishProviderPlatform_RejectsUnverifiedSignature(t *testing.T) {

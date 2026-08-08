@@ -9,7 +9,7 @@ import "testing"
 // semantics: offset/limit are byte positions, and an offset at/beyond the end yields an
 // empty slice ("no new bytes yet") rather than an out-of-range panic. The previous
 // implementation re-checked `offset >= len(logs)` against the already-windowed length,
-// which wrongly returned empty for incremental polls — this guards against that.
+// which wrongly returned empty for incremental polls - this guards against that.
 func TestSliceLogBytes(t *testing.T) {
 	const full = "alpha\nbeta\ngamma\n" // 17 bytes
 

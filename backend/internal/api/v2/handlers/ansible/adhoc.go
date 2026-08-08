@@ -168,7 +168,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 			response.BadRequest(c, "Invalid credential-id")
 			return
 		}
-		// Org boundary: the credential must belong to the inventory's org —
+		// Org boundary: the credential must belong to the inventory's org -
 		// otherwise a foreign credential could be exfiltrated against
 		// attacker-controlled hosts.
 		cred, err := h.credentialRepo.GetByID(id)

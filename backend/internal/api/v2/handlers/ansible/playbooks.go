@@ -92,7 +92,7 @@ func (h *PlaybookHandler) SetAgentPoolRepo(repo *repository.AgentPoolRepository)
 	h.agentPoolRepo = repo
 }
 
-// validateAgentPoolInOrg verifies the referenced agent pool belongs to orgID —
+// validateAgentPoolInOrg verifies the referenced agent pool belongs to orgID -
 // a template carrying another org's pool would route every launch (manual,
 // scheduled, webhook, workflow) onto that org's self-hosted runners. Writes a
 // 400 response and returns false when the pool is missing or foreign.
@@ -126,7 +126,7 @@ func normalizeSourceMode(mode string) string {
 	return models.PlaybookSourceModeCached
 }
 
-// normalizeJobSliceCount clamps the slice count to [1, 50] — AWX warns that
+// normalizeJobSliceCount clamps the slice count to [1, 50] - AWX warns that
 // very high node counts degrade the scheduler.
 func normalizeJobSliceCount(n int) int {
 	if n < 1 {

@@ -3,7 +3,7 @@
 // Package pagination provides a single TFE-compatible pagination parser shared across the v2
 // handlers (AUD-061). Most handlers already read the JSON:API/TFE `page[number]` / `page[size]`
 // query parameters, but a handful (organizations, projects, VCS connections, state versions, and
-// — most visibly — GET /workspaces/:id/runs) only read the legacy `page` / `per_page`, so go-tfe,
+// - most visibly - GET /workspaces/:id/runs) only read the legacy `page` / `per_page`, so go-tfe,
 // which sends the bracketed form, was stuck on page 1 forever. Parse reads the TFE form first and
 // falls back to the legacy names so existing callers keep working.
 package pagination

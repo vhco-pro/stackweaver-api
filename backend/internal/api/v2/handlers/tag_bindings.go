@@ -61,7 +61,7 @@ func formatTagBindings(bindings []models.TagBinding, resourceType string) gin.H 
 	return gin.H{"data": data}
 }
 
-// tagBindingsRequest is the PATCH body — a JSON:API list of tag-bindings (go-tfe AddTagBindings).
+// tagBindingsRequest is the PATCH body - a JSON:API list of tag-bindings (go-tfe AddTagBindings).
 type tagBindingsRequest struct {
 	Data []struct {
 		Type       string `json:"type"`
@@ -179,7 +179,7 @@ func (h *TagBindingHandlerV2) authWorkspace(c *gin.Context, write bool) (*models
 
 // ---- project endpoints ------------------------------------------------------
 
-// GetProjectTagBindings — GET /projects/:id/tag-bindings
+// GetProjectTagBindings - GET /projects/:id/tag-bindings
 func (h *TagBindingHandlerV2) GetProjectTagBindings(c *gin.Context) {
 	project, ok := h.authProject(c, false)
 	if !ok {
@@ -193,7 +193,7 @@ func (h *TagBindingHandlerV2) GetProjectTagBindings(c *gin.Context) {
 	c.JSON(http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
 }
 
-// GetProjectEffectiveTagBindings — GET /projects/:id/effective-tag-bindings
+// GetProjectEffectiveTagBindings - GET /projects/:id/effective-tag-bindings
 // A project is top-level, so its effective bindings equal its own.
 func (h *TagBindingHandlerV2) GetProjectEffectiveTagBindings(c *gin.Context) {
 	project, ok := h.authProject(c, false)
@@ -208,7 +208,7 @@ func (h *TagBindingHandlerV2) GetProjectEffectiveTagBindings(c *gin.Context) {
 	c.JSON(http.StatusOK, formatTagBindings(bindings, "effective-tag-bindings"))
 }
 
-// PatchProjectTagBindings — PATCH /projects/:id/tag-bindings (replace the project's bindings)
+// PatchProjectTagBindings - PATCH /projects/:id/tag-bindings (replace the project's bindings)
 func (h *TagBindingHandlerV2) PatchProjectTagBindings(c *gin.Context) {
 	project, ok := h.authProject(c, true)
 	if !ok {
@@ -229,7 +229,7 @@ func (h *TagBindingHandlerV2) PatchProjectTagBindings(c *gin.Context) {
 
 // ---- workspace endpoints ----------------------------------------------------
 
-// GetWorkspaceTagBindings — GET /workspaces/:id/tag-bindings
+// GetWorkspaceTagBindings - GET /workspaces/:id/tag-bindings
 func (h *TagBindingHandlerV2) GetWorkspaceTagBindings(c *gin.Context) {
 	ws, ok := h.authWorkspace(c, false)
 	if !ok {
@@ -243,7 +243,7 @@ func (h *TagBindingHandlerV2) GetWorkspaceTagBindings(c *gin.Context) {
 	c.JSON(http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
 }
 
-// GetWorkspaceEffectiveTagBindings — GET /workspaces/:id/effective-tag-bindings
+// GetWorkspaceEffectiveTagBindings - GET /workspaces/:id/effective-tag-bindings
 // A workspace's effective bindings are its own merged with those inherited from its project.
 func (h *TagBindingHandlerV2) GetWorkspaceEffectiveTagBindings(c *gin.Context) {
 	ws, ok := h.authWorkspace(c, false)
@@ -258,7 +258,7 @@ func (h *TagBindingHandlerV2) GetWorkspaceEffectiveTagBindings(c *gin.Context) {
 	c.JSON(http.StatusOK, formatTagBindings(bindings, "effective-tag-bindings"))
 }
 
-// PatchWorkspaceTagBindings — PATCH /workspaces/:id/tag-bindings (replace the workspace's bindings)
+// PatchWorkspaceTagBindings - PATCH /workspaces/:id/tag-bindings (replace the workspace's bindings)
 func (h *TagBindingHandlerV2) PatchWorkspaceTagBindings(c *gin.Context) {
 	ws, ok := h.authWorkspace(c, true)
 	if !ok {

@@ -172,10 +172,10 @@ func resolveEffectiveAgentPool(workspace *models.Workspace) *uuid.UUID {
 // flags, honoring go-tfe's real RunCreateOptions wire attributes (is-destroy, plan-only, auto-apply)
 // with the frontend/legacy `operation` + `auto-apply-after-plan` as fallbacks.
 //
-//   - operation           — the resolved run operation (plan-only cannot be applied).
-//   - autoApplyAfterPlan   — the "this is a plan-and-apply run" marker (frontend/legacy field).
-//   - perRunAutoApply      — go-tfe `auto-apply: true`: apply without a manual confirm (fire-and-forget).
-//   - legacyOperation      — the caller used the removed "plan"/"apply" operation and must be rejected.
+//   - operation           - the resolved run operation (plan-only cannot be applied).
+//   - autoApplyAfterPlan   - the "this is a plan-and-apply run" marker (frontend/legacy field).
+//   - perRunAutoApply      - go-tfe `auto-apply: true`: apply without a manual confirm (fire-and-forget).
+//   - legacyOperation      - the caller used the removed "plan"/"apply" operation and must be rejected.
 //
 // Precedence: is-destroy wins, then a speculative plan-only, then any go-tfe run (auto-apply present)
 // is an APPLYABLE plan-and-apply. Without the plan-only/auto-apply arms a normal go-tfe run fell
@@ -196,10 +196,10 @@ func resolveRunOperation(req *CreateRunRequestV2) (operation models.RunOperation
 	case req.Data.Attributes.IsDestroy != nil && *req.Data.Attributes.IsDestroy:
 		operation = models.RunOperationDestroy
 	case req.Data.Attributes.PlanOnly != nil && *req.Data.Attributes.PlanOnly:
-		// go-tfe `plan-only: true` — a speculative run that cannot be applied.
+		// go-tfe `plan-only: true` - a speculative run that cannot be applied.
 		operation = models.RunOperationPlanOnly
 	case req.Data.Attributes.AutoApply != nil:
-		// A go-tfe client sent `auto-apply` (present, true OR false) without is-destroy/plan-only — a
+		// A go-tfe client sent `auto-apply` (present, true OR false) without is-destroy/plan-only - a
 		// normal, APPLYABLE run (waits at `planned` for confirmation). auto-apply:true additionally
 		// auto-applies server-side (perRunAutoApply).
 		operation = models.RunOperationPlanAndApply
@@ -386,7 +386,7 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 	case models.RunOperationPlanAndApply, models.RunOperationDestroy:
 		// Plan-and-apply or destroy run: can apply when plan phase is completed. `planned` is the
 		// task-less rest state; `post_plan_completed` is the rest state when a post_plan task stage
-		// exists (tfe_workspace_run treats `planned` as pending in that case) — see run.go statuses.
+		// exists (tfe_workspace_run treats `planned` as pending in that case) - see run.go statuses.
 		canApply = run.Status == models.RunStatusPlanned || run.Status == models.RunStatusPostPlanCompleted
 	case models.RunOperationPlanOnly:
 		// Plan-only run: cannot be applied
@@ -531,7 +531,7 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 // hasChanges determines if the run has changes based on plan output
 // Matches TFE behavior: checks the resource_changes array in Terraform plan JSON
 func hasChanges(run *models.Run) bool {
-	// Check if this is a plan operation that has completed. Destroy runs are included — a destroy plan
+	// Check if this is a plan operation that has completed. Destroy runs are included - a destroy plan
 	// has real changes (resources to destroy), and go-tfe clients (tfe_workspace_run) gate on has-changes
 	// to decide whether to confirm the apply; excluding destroy made every destroy run report
 	// has-changes=false and hang the provider waiting for a "planned and finished" no-op status.
@@ -769,7 +769,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	// TFE-compatible: If no configuration version provided and workspace has VCS configured,
 	// automatically create a configuration version by cloning from VCS
 	// This allows UI runs to work without requiring manual configuration version creation
-	// For agent-mode workspaces, skip platform-side VCS clone — the self-hosted runner
+	// For agent-mode workspaces, skip platform-side VCS clone - the self-hosted runner
 	// will clone the repository itself using the VCS info from the job artifacts
 	if configVersionID == nil && workspace.VCSConnectionID != nil && workspace.VCSRepository != "" && workspace.VCSBranch != "" && workspace.ExecutionMode != "agent" {
 		logger.Infof("Run creation: No configuration version provided, but workspace has VCS configured. Creating configuration version from VCS.")
@@ -803,7 +803,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	}
 
 	// TFE-compatible: a run created without an explicit configuration-version uses the workspace's
-	// LATEST configuration version (go-tfe RunCreateOptions.ConfigurationVersion is optional — e.g.
+	// LATEST configuration version (go-tfe RunCreateOptions.ConfigurationVersion is optional - e.g.
 	// tfe_workspace_run never sets it). Without this fallback the run has no config and the plan fails
 	// with "No configuration files". Only applies to non-VCS workspaces (the VCS block above already
 	// created a config version from the repo when applicable).
@@ -919,7 +919,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 }
 
 // authorizeRun loads a run by ID and enforces the caller's run permission at the
-// given level ("read" for views, "apply" for lifecycle actions) — AUD-010. The
+// given level ("read" for views, "apply" for lifecycle actions) - AUD-010. The
 // run action/read endpoints previously performed no RBAC check, so any
 // authenticated user (incl. JWT identities, which bypass the org wall) could read
 // another tenant's plan/apply logs or cancel/discard/force-execute their runs by
@@ -1046,7 +1046,7 @@ func (h *RunHandlerV2) GetOutputs(c *gin.Context) {
 }
 
 // ListTaskStages (GET /api/v2/runs/:id/task-stages) lives in task_stages.go with the rest of the
-// run-task read surface — it replaced the pre-run-tasks empty stub.
+// run-task read surface - it replaced the pre-run-tasks empty stub.
 
 // GetPlan returns the plan output for a run (TFE-compatible)
 // GET /api/v2/runs/:id/plan
@@ -2261,7 +2261,7 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 	// Destroy runs follow the same two-phase flow: plan -destroy → confirm → apply
 	if planRun.Operation == models.RunOperationPlanAndApply || planRun.Operation == models.RunOperationDestroy {
 		// Plan-and-apply or destroy run: transition to applying phase. Confirmable rest states:
-		// `planned` (no post-plan tasks) and `post_plan_completed` (post-plan task stage passed —
+		// `planned` (no post-plan tasks) and `post_plan_completed` (post-plan task stage passed -
 		// tfe_workspace_run treats `planned` as pending when a post-plan stage exists).
 		confirmable := []models.RunStatus{models.RunStatusPlanned, models.RunStatusPostPlanCompleted}
 		if planRun.Status != models.RunStatusPlanned && planRun.Status != models.RunStatusPostPlanCompleted {
@@ -2278,7 +2278,7 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 		}
 
 		// Run-task gate: with a pre_apply task stage, confirmation moves the run to
-		// pre_apply_running — the orchestrator fires the stage's webhooks and the continuation
+		// pre_apply_running - the orchestrator fires the stage's webhooks and the continuation
 		// transitions to applying (setting apply_started_at and clearing the dispatch claim) only
 		// after the stage passes. Without one, confirm goes straight to applying as before.
 		hasPreApplyStage, tsErr := h.taskStageRepo.HasStage(planRun.ID, models.TaskStagePreApply)
@@ -2290,10 +2290,10 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 		}
 
 		// Transition run to applying phase. Clear the dispatch claim (AUD-007/112) so the
-		// orchestrator dispatches the apply exactly once — the plan phase set dispatched_at, and
+		// orchestrator dispatches the apply exactly once - the plan phase set dispatched_at, and
 		// the apply is a fresh dispatch that a runner must pick up.
 		// AUD-140: guarded transition (conditional UPDATE from a confirmable status) instead of a
-		// whole-record Save on the stale snapshot — otherwise a concurrent Discard/Cancel
+		// whole-record Save on the stale snapshot - otherwise a concurrent Discard/Cancel
 		// that already moved the run to 'cancelled' would be resurrected into 'applying'.
 		now := time.Now()
 		target := models.RunStatusApplying
@@ -2550,7 +2550,7 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 	}
 
 	// AUD-140: guarded transition instead of a whole-record Save on the stale
-	// snapshot — a Discard landing while the orchestrator advances a pending run
+	// snapshot - a Discard landing while the orchestrator advances a pending run
 	// to planning/planned would otherwise clobber the runner's progress.
 	now := time.Now()
 	ok, err := h.runRepo.TransitionStatus(
@@ -2713,7 +2713,7 @@ func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
 		return
 	}
 
-	// AUD-031: the run stays `pending` — unlocking the workspace is the whole action. The previous
+	// AUD-031: the run stays `pending` - unlocking the workspace is the whole action. The previous
 	// code set the legacy status `running`, which the orchestrator's dispatch query (which lists
 	// only `pending`/`applying`) never enqueues, so a force-executed run hung until the stuck-run
 	// reaper killed it. Left `pending`, the orchestrator picks it up on its next tick.
@@ -3060,7 +3060,7 @@ func AutoCancelConflictingRuns(runRepo *repository.RunRepository, workspaceID st
 
 		if shouldCancel {
 			// AUD-140: guarded transition rather than a whole-record Save on the
-			// list snapshot — a run that the runner completes (to applied/planned,
+			// list snapshot - a run that the runner completes (to applied/planned,
 			// writing state/plan output) between the SELECT and this write must not
 			// be clobbered back to cancelled. The conditional UPDATE no-ops on any
 			// run that already advanced out of the cancellable set.

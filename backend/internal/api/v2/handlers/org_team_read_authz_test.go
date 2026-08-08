@@ -1,6 +1,6 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
-// Workstream-A authz regression matrix for AUD-151..154 — the org/team read+update
+// Workstream-A authz regression matrix for AUD-151..154 - the org/team read+update
 // handlers that leaned on the org-resolution wall alone (which JWT/browser identities
 // bypass) and so exposed cross-tenant writes/reads:
 //
@@ -136,28 +136,28 @@ func TestOrgTeamReadAuthz(t *testing.T) {
 		want   int
 	}
 	cases := []row{
-		// AUD-151 — Organizations.Update
+		// AUD-151 - Organizations.Update
 		{"151 outsider update", http.MethodPatch, "/organizations/" + orgA.Name, outsider.ID, "{}", http.StatusForbidden},
 		{"151 plain-member update", http.MethodPatch, "/organizations/" + orgA.Name, member.ID, "{}", http.StatusForbidden},
 		{"151 anon update", http.MethodPatch, "/organizations/" + orgA.Name, uuid.Nil, "{}", http.StatusUnauthorized},
 		{"151 owner update", http.MethodPatch, "/organizations/" + orgA.Name, owner.ID, "{}", http.StatusOK},
 
-		// AUD-152 — OrganizationMembership.GetByID (member's own org-A membership row)
+		// AUD-152 - OrganizationMembership.GetByID (member's own org-A membership row)
 		{"152 outsider read", http.MethodGet, "/organization-memberships/" + memberMembership.ID.String(), outsider.ID, "", http.StatusForbidden},
 		{"152 anon read", http.MethodGet, "/organization-memberships/" + memberMembership.ID.String(), uuid.Nil, "", http.StatusUnauthorized},
 		{"152 self read", http.MethodGet, "/organization-memberships/" + memberMembership.ID.String(), member.ID, "", http.StatusOK},
 		{"152 owner read", http.MethodGet, "/organization-memberships/" + memberMembership.ID.String(), owner.ID, "", http.StatusOK},
 
-		// AUD-154 — Team.List
+		// AUD-154 - Team.List
 		{"154 outsider list", http.MethodGet, "/organizations/" + orgA.Name + "/teams", outsider.ID, "", http.StatusForbidden},
 		{"154 anon list", http.MethodGet, "/organizations/" + orgA.Name + "/teams", uuid.Nil, "", http.StatusUnauthorized},
 		{"154 member list", http.MethodGet, "/organizations/" + orgA.Name + "/teams", member.ID, "", http.StatusOK},
 
-		// AUD-154 — Team.Get (by name)
+		// AUD-154 - Team.Get (by name)
 		{"154 outsider get", http.MethodGet, "/organizations/" + orgA.Name + "/teams/owners", outsider.ID, "", http.StatusForbidden},
 		{"154 member get", http.MethodGet, "/organizations/" + orgA.Name + "/teams/owners", member.ID, "", http.StatusOK},
 
-		// AUD-153 — Team.GetByID (?include=users leaks member email)
+		// AUD-153 - Team.GetByID (?include=users leaks member email)
 		{"153 outsider getbyid", http.MethodGet, "/teams/" + ownersTeam.ID.String() + "?include=users", outsider.ID, "", http.StatusForbidden},
 		{"153 anon getbyid", http.MethodGet, "/teams/" + ownersTeam.ID.String() + "?include=users", uuid.Nil, "", http.StatusUnauthorized},
 		{"153 member getbyid", http.MethodGet, "/teams/" + ownersTeam.ID.String() + "?include=users", member.ID, "", http.StatusOK},

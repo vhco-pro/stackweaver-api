@@ -58,7 +58,7 @@ func TestFilterWorkspacesByInstallation(t *testing.T) {
 	// A push delivered for installation 111 (org A) must keep only wsA.
 	kept := h.filterWorkspacesByInstallation([]models.Workspace{wsA, wsB, wsNoConn}, "111")
 	if len(kept) != 1 || kept[0].ID != wsA.ID {
-		t.Fatalf("installation 111 kept %d workspace(s) %v; want only wsA (%s) — cross-org workspace leaked", len(kept), workspaceIDs(kept), wsA.ID)
+		t.Fatalf("installation 111 kept %d workspace(s) %v; want only wsA (%s) - cross-org workspace leaked", len(kept), workspaceIDs(kept), wsA.ID)
 	}
 
 	// A delivery for an installation that matches no connection triggers nothing.

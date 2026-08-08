@@ -12,7 +12,7 @@ import (
 
 // AUD-155: the ADO OAuth state must be unforgeable and expiring. These tests pin that a
 // correctly-minted state round-trips, and that a forged, tampered, expired, or unsigned state is
-// rejected — the CSRF property the callback relies on.
+// rejected - the CSRF property the callback relies on.
 func TestOAuthState(t *testing.T) {
 	SetOAuthStateSecret([]byte("test-oauth-state-secret-32bytes!"))
 	t.Cleanup(func() { SetOAuthStateSecret(nil) })

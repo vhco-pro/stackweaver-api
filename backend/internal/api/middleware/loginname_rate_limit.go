@@ -11,7 +11,7 @@ import (
 // defaultLoginNameLimiterCap bounds the LoginNameRateLimiter map. Round 25
 // hardening (item 23 / R25c H-2): the previous implementation grew the
 // map unbounded, with comments noting "entries older than `window` are
-// purged opportunistically on each call (no background goroutine)" —
+// purged opportunistically on each call (no background goroutine)" -
 // so an attacker probing many distinct loginNames fills the map with
 // entries that won't be purged until each one is touched again.
 // Memory grows unbounded under sustained credential-spraying.
@@ -22,7 +22,7 @@ const defaultLoginNameLimiterCap = 100_000
 
 // LoginNameRateLimiter tracks failed-password attempts per loginName and
 // locks accounts that exceed `threshold` failures within `window`.
-// Defends against password-spraying — an attacker hitting many usernames
+// Defends against password-spraying - an attacker hitting many usernames
 // from rotating IPs would slip past the per-IP `IPRateLimiter` because
 // each attempt costs the bucket only one token; the per-loginName
 // counter accumulates across IPs.
@@ -35,14 +35,14 @@ const defaultLoginNameLimiterCap = 100_000
 // they finally type the right password.
 //
 // Thread-safe under sync.Mutex. Memory grows with the number of distinct
-// loginNames seen within the window — entries older than `window` are
+// loginNames seen within the window - entries older than `window` are
 // purged opportunistically on each call (no background goroutine).
 //
 // **Loginname-key canonicalisation invariant (Round 25 item 28 / R25b F7):**
 // All public methods (`IsLocked`, `BeginAttempt`, `RollbackAttempt`,
 // `RecordFailure`, `Reset`) key on the raw `loginName` string the
 // caller passes in. Two callers that disagree on case-folding (e.g.
-// `Alice@x.com` vs `alice@x.com`) produce two distinct entries — one
+// `Alice@x.com` vs `alice@x.com`) produce two distinct entries - one
 // would lock the user, the other wouldn't. The limiter does NOT
 // canonicalise on its own behalf because it has no domain knowledge
 // about which case-folding rule is correct (loginName domain part is
@@ -50,7 +50,7 @@ const defaultLoginNameLimiterCap = 100_000
 // CALLERS MUST canonicalise (typically `strings.ToLower(loginName)`)
 // before passing in. Today every Stackweaver call site reads the
 // loginName from the same canonicalised source (`extractLoginName…`
-// helpers in `auth_proxy.go`), so the invariant holds — but a future
+// helpers in `auth_proxy.go`), so the invariant holds - but a future
 // caller adding a new code path must follow the same convention.
 type LoginNameRateLimiter struct {
 	mu        sync.Mutex
@@ -76,7 +76,7 @@ type loginNameFailure struct {
 
 // NewLoginNameRateLimiter creates a per-loginName failure tracker. A
 // non-positive `threshold` disables the limiter (every IsLocked call
-// returns false; RecordFailure is a no-op) — useful for STACKWEAVER_ENV=
+// returns false; RecordFailure is a no-op) - useful for STACKWEAVER_ENV=
 // dev setups where password-spraying lockout would be a footgun.
 //
 // Round 25 hardening (item 23 / R25c H-2): the failures map is now LRU-
@@ -101,7 +101,7 @@ func NewLoginNameRateLimiter(threshold int, window time.Duration) *LoginNameRate
 }
 
 // startSweeper launches the background goroutine that periodically
-// prunes expired entries from the failures map. Idempotent — guarded
+// prunes expired entries from the failures map. Idempotent - guarded
 // by sync.Once so callers don't have to track whether they've started
 // it. The sweeper exits when stopSweeper is closed (Stop()).
 func (rl *LoginNameRateLimiter) startSweeper() {
@@ -151,7 +151,7 @@ func (rl *LoginNameRateLimiter) sweepExpired() {
 	}
 }
 
-// Stop halts the background sweeper goroutine. Idempotent — safe to
+// Stop halts the background sweeper goroutine. Idempotent - safe to
 // call multiple times. Intended for graceful shutdown / test cleanup;
 // production deployments don't need to call it because the goroutine
 // exits when the process exits anyway.
@@ -214,7 +214,7 @@ func (rl *LoginNameRateLimiter) removeEntry(loginName string) {
 // failures to be locked. Window-expired entries are purged inline and
 // reported as unlocked.
 //
-// NOTE: `IsLocked` alone is NOT race-safe under parallel attempts —
+// NOTE: `IsLocked` alone is NOT race-safe under parallel attempts -
 // concurrent callers can each see `count < threshold`, all forward
 // upstream, then all RecordFailure, blowing past the threshold by N
 // in-flight attempts. Use `BeginAttempt` for the password-attempt
@@ -230,7 +230,7 @@ func (rl *LoginNameRateLimiter) IsLocked(loginName string) bool {
 		return false
 	}
 	if rl.now().Sub(entry.firstFailureAt) > rl.window {
-		// Window expired — clear and treat as unlocked.
+		// Window expired - clear and treat as unlocked.
 		rl.removeEntry(loginName)
 		return false
 	}
@@ -244,13 +244,13 @@ func (rl *LoginNameRateLimiter) IsLocked(loginName string) bool {
 // This closes the parallel-attempt race that `IsLocked` + post-flight
 // `RecordFailure` allows: with N concurrent PATCHes, all N pass the
 // IsLocked gate (count < threshold), all N forward to Zitadel, then
-// all N record their failures — blowing past `threshold` by N. Audit
+// all N record their failures - blowing past `threshold` by N. Audit
 // Round 20 surfaced this; the fix is to claim the slot pre-flight.
 //
 // Caller contract:
 //   - On a successful upstream auth (HTTP 200): call `Reset(loginName)`
 //     to clear the tentative bump (and any prior failures).
-//   - On a confirmed upstream failure (HTTP 4xx): do NOTHING — the slot
+//   - On a confirmed upstream failure (HTTP 4xx): do NOTHING - the slot
 //     is already counted.
 //   - On a transport-layer error or upstream 5xx: call `RollbackAttempt(loginName)`
 //     so an outage doesn't silently lock honest users.
@@ -269,7 +269,7 @@ func (rl *LoginNameRateLimiter) BeginAttempt(loginName string) bool {
 		return true
 	}
 	if entry.count >= rl.threshold {
-		// Already locked — refuse before forwarding upstream.
+		// Already locked - refuse before forwarding upstream.
 		return false
 	}
 	// Tentatively reserve another slot. If the caller's upstream auth
@@ -285,11 +285,11 @@ func (rl *LoginNameRateLimiter) BeginAttempt(loginName string) bool {
 //
 // Decrements the entry count by one; deletes the entry if count drops
 // to zero (so the next attempt starts a fresh window). Bounded below
-// at zero — a stray rollback can never go negative.
+// at zero - a stray rollback can never go negative.
 //
 // Round 21 Finding 5 (DEFERRED, documented at design-time): under a
 // SUSTAINED Zitadel outage that 5xxs every attempt, an attacker can
-// farm rollbacks indefinitely — each cycle returns their full budget.
+// farm rollbacks indefinitely - each cycle returns their full budget.
 // The honest-user protection is the priority and the IPRateLimiter
 // caps absolute volume per source. A future hardening could track
 // 5xx events separately and treat them as confirmed failures after a
@@ -322,7 +322,7 @@ func (rl *LoginNameRateLimiter) RollbackAttempt(loginName string) {
 //
 // Prefer `BeginAttempt` for the password-attempt gate (see Audit Round
 // 20). RecordFailure is kept for callers that need the legacy
-// post-flight semantics — currently only the unit-test harness.
+// post-flight semantics - currently only the unit-test harness.
 func (rl *LoginNameRateLimiter) RecordFailure(loginName string) {
 	if rl.threshold <= 0 || loginName == "" {
 		return
@@ -354,7 +354,7 @@ func (rl *LoginNameRateLimiter) Reset(loginName string) {
 
 // ResetAll clears every loginName failure entry. Intended for E2E test
 // harnesses (`/auth/testing/reset`) to restore a clean slate between
-// specs — never call from production code paths.
+// specs - never call from production code paths.
 func (rl *LoginNameRateLimiter) ResetAll() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()

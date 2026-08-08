@@ -1,7 +1,7 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
-// AUD-002 regression tests for GitHub webhook signature verification. Pure — no DB, no build
-// tag — so they run in CI's plain `go test`.
+// AUD-002 regression tests for GitHub webhook signature verification. Pure - no DB, no build
+// tag - so they run in CI's plain `go test`.
 
 package handlers
 
@@ -50,7 +50,7 @@ func TestValidGitHubSignature(t *testing.T) {
 // TestVerifyGitHubWebhook is the AUD-002 endpoint gate: the webhook handler must reject an
 // unsigned, wrongly-signed, or (fail-closed) unconfigured delivery with 401, and only accept a
 // correctly-signed one. Before the fix the verification was commented out and every delivery was
-// accepted — an unauthenticated attacker could forge push events and trigger plan-and-apply runs.
+// accepted - an unauthenticated attacker could forge push events and trigger plan-and-apply runs.
 func TestVerifyGitHubWebhook(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	payload := []byte(`{"ref":"refs/heads/main"}`)

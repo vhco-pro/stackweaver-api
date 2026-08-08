@@ -421,7 +421,7 @@ func (s *Service) getPermissionsFromOrganizationAccess(orgAccess *models.TeamOrg
 	}
 
 	// Fine-grained per-resource Ansible permissions
-	// These are independent of the parent toggles above — a team can have
+	// These are independent of the parent toggles above - a team can have
 	// ManageAnsible=false but ManageAnsiblePlaybooks=true to only manage playbooks.
 	if orgAccess.ManageAnsiblePlaybooks {
 		perms[PermissionAnsiblePlaybookRead] = true
@@ -794,8 +794,8 @@ func (s *Service) CheckVariablePermission(
 //   - Organization-owned sets (ProjectID == nil): any org member may read; writes
 //     require "Manage all workspaces" or "Manage all projects".
 //   - Project-owned sets (ProjectID != nil): resolved through the project's team
-//     access — read requires PermissionVariableSetsRead, write requires
-//     PermissionVariableSets — which also picks up org "Manage all projects" via the
+//     access - read requires PermissionVariableSetsRead, write requires
+//     PermissionVariableSets - which also picks up org "Manage all projects" via the
 //     org-access mapping.
 //
 // level is "read" or "write".
@@ -960,7 +960,7 @@ func (s *Service) CheckOrgManageTeams(ctx context.Context, userID, organizationI
 
 // IsOrgOwner checks if the user is a member of the organization's "owners" team.
 // Some operations must be restricted to owners even when the caller holds ManageTeams
-// or ManageMembership grants — e.g. managing the owners team's own membership, where
+// or ManageMembership grants - e.g. managing the owners team's own membership, where
 // anything weaker allows privilege escalation to owner (AUD-003).
 func (s *Service) IsOrgOwner(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
 	// Tenant isolation: user must have at least one team in the org (team-based access)
@@ -1032,7 +1032,7 @@ func (s *Service) CheckOrgManageModules(ctx context.Context, userID, organizatio
 }
 
 // CheckOrgManageProviders checks if user can manage the registry provider trust
-// plane — provider shells, published binaries, and the org's GPG trust anchors.
+// plane - provider shells, published binaries, and the org's GPG trust anchors.
 func (s *Service) CheckOrgManageProviders(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
 	return s.checkOrgPermission(ctx, userID, organizationID, PermissionOrgManageProviders)
 }

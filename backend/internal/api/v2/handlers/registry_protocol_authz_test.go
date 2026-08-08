@@ -36,7 +36,7 @@ func TestRegistryProtocolReadAuthz(t *testing.T) {
 
 	// Declare up front and register cleanup BEFORE any seeding, so a failure mid-setup still
 	// removes whatever rows were created (register-before-seed; the closure reads the vars by
-	// reference). Every delete is row-scoped to this test's orgs/users — $TEST_DATABASE_URL is
+	// reference). Every delete is row-scoped to this test's orgs/users - $TEST_DATABASE_URL is
 	// the live dev DB, so an unscoped delete would wipe real registry data.
 	var orgA, orgB *models.Organization
 	var member, outsider *models.User
@@ -66,7 +66,7 @@ func TestRegistryProtocolReadAuthz(t *testing.T) {
 
 	orgA = setupTestOrgForProvider(t, db) // owns the private provider + module
 	orgB = setupTestOrgForProvider(t, db) // the outsider's org
-	// Distinct ZitadelSubject per user — the shared helper leaves it empty, which collides on
+	// Distinct ZitadelSubject per user - the shared helper leaves it empty, which collides on
 	// the users' unique subject index when more than one test user exists.
 	mkUser := func() *models.User {
 		u := &models.User{ID: uuid.New(), Email: fmt.Sprintf("u-%s@example.com", uuid.New().String()[:8]), ZitadelSubject: uuid.New().String()}
@@ -88,7 +88,7 @@ func TestRegistryProtocolReadAuthz(t *testing.T) {
 	if err := db.Create(&models.ProviderVersion{ProviderID: privateProv.ID, Version: "1.0.0", Protocols: "5.0"}).Error; err != nil {
 		t.Fatalf("create private provider version: %v", err)
 	}
-	// Public provider in A — must stay anonymously reachable.
+	// Public provider in A - must stay anonymously reachable.
 	publicProv := &models.Provider{ID: uuid.New(), OrganizationID: orgA.ID, Name: "open-prov", RegistryName: "public", Namespace: orgA.Name}
 	if err := db.Create(publicProv).Error; err != nil {
 		t.Fatalf("create public provider: %v", err)

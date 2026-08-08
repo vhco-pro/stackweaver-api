@@ -309,7 +309,7 @@ func (h *RegistryPublishingHandler) DeleteAllModules(c *gin.Context) {
 func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 	orgName := c.Param("name")
 
-	// AUD-004: module listings expose VCS wiring — require org membership.
+	// AUD-004: module listings expose VCS wiring - require org membership.
 	_, org, ok := h.requireModuleRead(c, orgName)
 	if !ok {
 		return
@@ -370,7 +370,7 @@ func (h *RegistryPublishingHandler) GetModule(c *gin.Context) {
 	moduleName := c.Param("module_name")
 	provider := c.Param("provider")
 
-	// AUD-004: module detail exposes VCS wiring — require org membership.
+	// AUD-004: module detail exposes VCS wiring - require org membership.
 	_, org, ok := h.requireModuleRead(c, orgName)
 	if !ok {
 		return
@@ -411,7 +411,7 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 	moduleName := c.Param("module_name")
 	provider := c.Param("provider")
 
-	// AUD-004: module version listings are tenant data — require org membership.
+	// AUD-004: module version listings are tenant data - require org membership.
 	_, org, ok := h.requireModuleRead(c, orgName)
 	if !ok {
 		return

@@ -1,8 +1,8 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
 // AUD-101 variable-set authorization matrix. Every variable_sets.go handler fetched
-// the user and then discarded it (`_ = user`) under a TODO — the struct had no
-// rbacService — so any authenticated JWT identity could read, create, modify, delete
+// the user and then discarded it (`_ = user`) under a TODO - the struct had no
+// rbacService - so any authenticated JWT identity could read, create, modify, delete
 // and re-assign variable sets (including sensitive values) in any organization, by
 // org name or varset- ID. These tests drive the real handler + real rbac.Service +
 // real Postgres and assert the TFE model (see docs: managing-variables / go-tfe
@@ -114,11 +114,11 @@ func setupVarsetAuthz(t *testing.T) *varsetAuthzFixture {
 		repository.NewVariableSetVariableRepository(db),
 		orgRepo,
 		repository.NewProjectRepository(db),
-		nil, // workspaceRepo — unused on the tested paths
-		nil, // jobTemplateRepo — unused on the tested paths
+		nil, // workspaceRepo - unused on the tested paths
+		nil, // jobTemplateRepo - unused on the tested paths
 		authService,
 		rbacService,
-		nil, // variableService — unused on the tested authz paths
+		nil, // variableService - unused on the tested authz paths
 	)
 
 	gin.SetMode(gin.TestMode)

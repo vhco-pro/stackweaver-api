@@ -2,7 +2,7 @@
 
 // AUD-046 project read authorization. ProjectHandlerV2.Get (GET
 // /organizations/:name/projects/:project_name) returned project configuration with
-// no membership check — unlike its sibling GetByID, which gates on UserInOrg — so
+// no membership check - unlike its sibling GetByID, which gates on UserInOrg - so
 // any authenticated user could read another tenant's project config by name. This
 // test drives the real handler + real Postgres and asserts cross-tenant and
 // unauthenticated callers are denied while a legitimate member is allowed.

@@ -201,7 +201,7 @@ func (h *PlaybookHandler) resolveDiscoveryContext(c *gin.Context, connectionID s
 // findRegisteredPlaybooks returns the playbooks registered on the given
 // connection, repository, and branch, keyed by playbook path. When projectID
 // is non-nil, only that project's playbooks are returned (the dedupe scope for
-// imports); with uuid.Nil the whole connection is covered (annotation scope —
+// imports); with uuid.Nil the whole connection is covered (annotation scope -
 // if the same path is registered in several projects an arbitrary one wins,
 // which is fine for display purposes). The connection match implies the org
 // boundary: connections are org-scoped and validated by the caller.

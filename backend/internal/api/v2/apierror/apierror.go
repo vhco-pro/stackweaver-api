@@ -14,7 +14,7 @@ import (
 )
 
 // Internal logs err with the given context and replies with a JSON:API 500 whose `detail` is the
-// caller-supplied publicMessage only — never the underlying error. Use for any server-side failure
+// caller-supplied publicMessage only - never the underlying error. Use for any server-side failure
 // (DB, storage, upstream) where the cause is not safe to expose.
 func Internal(c *gin.Context, publicMessage string, err error) {
 	logger.Errorf("%s: %v", publicMessage, err)

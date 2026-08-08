@@ -3,7 +3,7 @@
 // AUD-041 Zitadel webhook replay protection. verifySignature authenticated the HMAC but
 // never checked the signed timestamp for freshness, so a captured valid idp-sync /
 // complement-token request could be replayed indefinitely to re-drive sso_groups/RBAC.
-// These are plain unit tests (no build tag — they run in CI).
+// These are plain unit tests (no build tag - they run in CI).
 
 package handlers
 
@@ -37,7 +37,7 @@ func TestVerifySignature_TimestampFreshness(t *testing.T) {
 	t.Run("replayed old request is rejected", func(t *testing.T) {
 		stale := now - int64((10 * time.Minute).Seconds()) // 10 min old, valid HMAC
 		if verifySignature(signZitadel(body, key, stale), body, key, false) {
-			t.Fatal("a validly-signed but stale request must be rejected (replay) — AUD-041")
+			t.Fatal("a validly-signed but stale request must be rejected (replay) - AUD-041")
 		}
 	})
 
@@ -56,7 +56,7 @@ func TestVerifySignature_TimestampFreshness(t *testing.T) {
 	})
 
 	t.Run("non-numeric timestamp is rejected", func(t *testing.T) {
-		// Valid HMAC over a non-numeric timestamp string — signature passes, freshness must not.
+		// Valid HMAC over a non-numeric timestamp string - signature passes, freshness must not.
 		mac := hmac.New(sha256.New, []byte(key))
 		mac.Write([]byte("notanumber." + body))
 		hdr := "t=notanumber,v1=" + hex.EncodeToString(mac.Sum(nil))

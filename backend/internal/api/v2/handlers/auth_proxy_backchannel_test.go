@@ -113,7 +113,7 @@ func TestBackchannel_Verify_HappyPath(t *testing.T) {
 func TestBackchannel_Verify_RejectsMalformedTokens(t *testing.T) {
 	r := newBackchannelTestRig(t)
 
-	// Separate signer with a different key — used for "forged signature" case.
+	// Separate signer with a different key - used for "forged signature" case.
 	otherPriv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate RSA: %v", err)
@@ -130,14 +130,14 @@ func TestBackchannel_Verify_RejectsMalformedTokens(t *testing.T) {
 		t.Fatalf("forge: %v", err)
 	}
 
-	// Build the unsigned version by mutating the algorithm in the header — a
+	// Build the unsigned version by mutating the algorithm in the header - a
 	// real attacker would try `alg: none`. The library refuses to construct
 	// such tokens; we synthesize the JWS manually.
 	unsigned := strings.Join([]string{
 		// {"alg":"none","typ":"JWT"}
 		"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0",
 		// base64url-encode the baseline claims inline would make this test
-		// brittle; "" is sufficient — the parser rejects non-3-part tokens
+		// brittle; "" is sufficient - the parser rejects non-3-part tokens
 		// before claim parsing.
 		"",
 		"",
@@ -310,7 +310,7 @@ func TestBackchannel_EndSessionDispatch_Forged(t *testing.T) {
 // A logout_token whose `aud` does NOT contain THIS RP's client_id
 // must be rejected, even if signed by the trusted Zitadel JWKS and
 // otherwise well-formed. Previously the verifier only checked
-// `len(aud) > 0` — any logout_token issued for ANY other RP on the
+// `len(aud) > 0` - any logout_token issued for ANY other RP on the
 // same Zitadel instance would have terminated sessions in this app.
 func TestBackchannel_RejectsWrongAudience(t *testing.T) {
 	r := newBackchannelTestRig(t)
@@ -340,7 +340,7 @@ func TestBackchannel_RejectsWrongAudience(t *testing.T) {
 }
 
 // TestBackchannel_AcceptsAudienceArrayContainingClientID: positive case
-// for the array shape — when this RP's client_id IS in the audience
+// for the array shape - when this RP's client_id IS in the audience
 // list (alongside others), the token is still accepted. Pins that
 // the new audience check doesn't break the legitimate multi-aud
 // scenario (some IdPs include both the RP's client_id AND a service
@@ -568,7 +568,7 @@ func TestBackchannel_Verify_KidRotation_ForceRefreshAndRetry(t *testing.T) {
 }
 
 // Round 25 hardening (item 17 / R25a #1): the force-refresh guard MUST
-// only fire when the kid is unknown — a known kid that fails verify is
+// only fire when the kid is unknown - a known kid that fails verify is
 // a real bad signature, not a rotation, and must NOT trigger a refresh
 // (or an attacker posting garbage tokens with the right kid could farm
 // JWKS refreshes).
@@ -603,7 +603,7 @@ func TestBackchannel_Verify_KnownKidBadSig_DoesNotRefresh(t *testing.T) {
 	wantInitial := fetches
 
 	// Sign a token with keyB but advertise kid `key-a` (which IS in
-	// the cache). Verify will fail — but kidUnknown returns false,
+	// the cache). Verify will fail - but kidUnknown returns false,
 	// so we MUST NOT refresh.
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: keyB, KeyID: "key-a"}},
@@ -658,14 +658,14 @@ func TestBackchannel_Verify_JTIReplayShortCircuitsVerify(t *testing.T) {
 
 	// Replay: must short-circuit. We can't directly count signature
 	// verifies (no instrumentation), so we instead verify that the
-	// dedup machinery returned the cached entry — which carries
+	// dedup machinery returned the cached entry - which carries
 	// the same sid/sub even after we mutate the verifier's accepted
 	// issuer set to one that would normally REJECT this token.
 	r.verifier.acceptedIss = map[string]bool{"https://only-this.example.com": true}
 
 	second, err := r.verifier.verifyLogoutToken(context.Background(), token)
 	if err != nil {
-		t.Fatalf("replay verify rejected after issuer mutation — dedup did NOT short-circuit: %v", err)
+		t.Fatalf("replay verify rejected after issuer mutation - dedup did NOT short-circuit: %v", err)
 	}
 	if second.SID != "sess-abc" || second.Subject != "user-1" {
 		t.Errorf("replay must surface cached sid+sub; got sid=%q sub=%q", second.SID, second.Subject)

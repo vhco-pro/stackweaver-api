@@ -440,7 +440,7 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		AccountName:    adoOrgName,
 		AccountType:    "organization",
 	}
-	// Encrypt tokens at rest (#95, AUD-005) before persisting — matches the create path
+	// Encrypt tokens at rest (#95, AUD-005) before persisting - matches the create path
 	// in vcs_connections.go. No-op when encryption is disabled.
 	if h.vcsRegistry != nil {
 		if err := h.vcsRegistry.EncryptTokens(connection); err != nil {
@@ -532,7 +532,7 @@ func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
 	}
 }
 
-// handleAzureDevOpsPushEvent handles Azure DevOps git.push events — triggers plan-and-apply runs.
+// handleAzureDevOpsPushEvent handles Azure DevOps git.push events - triggers plan-and-apply runs.
 func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context, wp *vcs.WebhookPayload, payload []byte) {
 	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(wp.Repository, wp.Branch)
 	if err != nil {
@@ -619,7 +619,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 			defer func() { _ = os.RemoveAll(tempDir) }()
 
 			// AUD-135: validate the ADO-webhook-supplied clone URL + commit at the git sink with the
-			// same gitargs guard the GitHub/PR paths already use — otherwise a flag-shaped value
+			// same gitargs guard the GitHub/PR paths already use - otherwise a flag-shaped value
 			// (e.g. commit `--upload-pack=…`) argument-injects into git. `--` stops option parsing.
 			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
 			safeCommit := gitargs.CommitSHARe.FindString(commitHash)
@@ -771,7 +771,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	})
 }
 
-// handleAzureDevOpsPullRequestEvent handles Azure DevOps git.pullrequest.* events — triggers speculative plan runs.
+// handleAzureDevOpsPullRequestEvent handles Azure DevOps git.pullrequest.* events - triggers speculative plan runs.
 func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.Context, wp *vcs.WebhookPayload, payload []byte) {
 	if wp.BaseBranch == "" || wp.HeadBranch == "" {
 		logger.Infof("Azure DevOps PR event missing base/head branch, ignoring")
@@ -877,7 +877,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 			}
 			defer func() { _ = os.RemoveAll(tempDir) }()
 
-			// AUD-135: same gitargs guard as the push path — validate ADO-supplied URL/commit at the
+			// AUD-135: same gitargs guard as the push path - validate ADO-supplied URL/commit at the
 			// sink so a flag-shaped value can't argument-inject into git; `--` stops option parsing.
 			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
 			safeCommit := gitargs.CommitSHARe.FindString(commitHash)
@@ -1046,7 +1046,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 
 // orgFromInstallation resolves the organization that owns the GitHub App installation a
 // delivery came from. AUD-124: webhook events must be attributed to the *validated*
-// installation's org, not "the first workspace matching this repo name" — otherwise an
+// installation's org, not "the first workspace matching this repo name" - otherwise an
 // attacker who installs the app on a same-named repo files their payloads into a victim
 // org's webhook-event log. Returns nil when the installation can't be resolved, so the
 // caller falls back to the (untrusted) repo-name heuristic only when there is no better
@@ -1072,7 +1072,7 @@ func (h *VCSAppInstallationHandlerV2) recordWebhookEvent(trustedOrgID *uuid.UUID
 	}
 
 	// AUD-124: prefer the org bound to the validated installation. Only fall back to the
-	// repo-name heuristic when no trusted org was supplied — a same-named repo in another
+	// repo-name heuristic when no trusted org was supplied - a same-named repo in another
 	// org must never redirect attribution.
 	orgID := trustedOrgID
 	if orgID == nil && repoFullName != "" {
@@ -1215,7 +1215,7 @@ func (h *VCSAppInstallationHandlerV2) filterInventoriesByInstallation(inventorie
 // (AUD-102 ADO residual). ADO has no installation id, but each connection is bound to one ADO
 // organization (conn.AccountName), and the org is recoverable from the delivery's repository
 // remoteUrl. Keep only workspaces whose connection is an ADO connection for the delivery's org
-// — a same-named project/repo in another ADO org (all of which share the one webhook secret)
+// - a same-named project/repo in another ADO org (all of which share the one webhook secret)
 // can no longer inject runs. Fails closed: an empty/unresolved org keeps nothing.
 func (h *VCSAppInstallationHandlerV2) filterWorkspacesByADOOrg(workspaces []models.Workspace, adoOrg string) []models.Workspace {
 	kept := make([]models.Workspace, 0, len(workspaces))
@@ -1279,7 +1279,7 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 	logger.Infof("Received payload (size: %d bytes)", len(payload))
 
 	// AUD-002: authenticate the delivery via HMAC-SHA256 of the raw body BEFORE parsing
-	// anything. This webhook secret is the only authentication on the endpoint — without
+	// anything. This webhook secret is the only authentication on the endpoint - without
 	// this check an unauthenticated attacker could forge push/PR events and trigger
 	// plan-and-apply runs. Fail closed: reject when the secret is unset or the signature is
 	// missing/invalid (the routes sit outside the auth middleware group).
@@ -1819,7 +1819,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			// Sanitise webhook-supplied inputs by rebinding through a strict
 			// regex match. Using FindString (which returns the matched
 			// substring or "") creates a value CodeQL Go's taint tracker
-			// recognises as derived solely from the regex — stronger than
+			// recognises as derived solely from the regex - stronger than
 			// an inline MatchString guard, which doesn't propagate across
 			// goroutine variable captures. (Wave 8 / D1+D2.)
 			commitHash = gitargs.CommitSHARe.FindString(commitHash)
@@ -1857,21 +1857,21 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			}()
 
 			// Clone using the workspace's VCS connection auth token. AUD-130: never fall
-			// back to an unauthenticated clone of the payload-supplied repo — for a private
+			// back to an unauthenticated clone of the payload-supplied repo - for a private
 			// workspace that would run against un-authenticated code (or a same-named public
 			// repo an attacker controls). If we cannot build an authenticated URL, skip.
 			if vcsConn == nil || h.vcsRegistry == nil {
-				logger.Warnf("Workspace %s has no usable VCS connection — skipping webhook clone (AUD-130)", ws.ID)
+				logger.Warnf("Workspace %s has no usable VCS connection - skipping webhook clone (AUD-130)", ws.ID)
 				return
 			}
 			provider, provErr := h.vcsRegistry.GetProvider(vcsConn)
 			if provErr != nil {
-				logger.Warnf("Failed to get VCS provider for workspace %s: %v — skipping", ws.ID, provErr)
+				logger.Warnf("Failed to get VCS provider for workspace %s: %v - skipping", ws.ID, provErr)
 				return
 			}
 			freshToken, tokErr := provider.GetFreshToken(ctx, vcsConn)
 			if tokErr != nil || freshToken == "" {
-				logger.Warnf("No authenticated clone token for workspace %s (repo %s) — skipping to avoid unauthenticated clone (AUD-130)", ws.ID, ws.VCSRepository)
+				logger.Warnf("No authenticated clone token for workspace %s (repo %s) - skipping to avoid unauthenticated clone (AUD-130)", ws.ID, ws.VCSRepository)
 				return
 			}
 			cloneURL := provider.BuildCloneURL(vcsConn, freshToken, ws.VCSRepository)
@@ -1898,7 +1898,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			if err := cmd.Run(); err != nil {
 				logger.Errorf("Failed to checkout commit %s for workspace %s: %v", commitHash, ws.ID, err)
 				// Try to fetch the commit if checkout failed.
-				// Re-bind through the regex right before the sink — CodeQL
+				// Re-bind through the regex right before the sink - CodeQL
 				// loses the barrier when the value crosses an error branch.
 				safeCommit := gitargs.CommitSHARe.FindString(commitHash)
 				if safeCommit == "" {
@@ -2355,16 +2355,16 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			}()
 
 			// Clone using the GitHub App installation token. AUD-130: never fall back to an
-			// unauthenticated clone of the payload-supplied repo for a connected workspace —
+			// unauthenticated clone of the payload-supplied repo for a connected workspace -
 			// skip if we can't authenticate.
 			if vcsConn == nil || vcsConn.InstallationID == "" || h.githubAppManager == nil || !h.githubAppManager.IsEnabled() {
-				logger.Warnf("Workspace %s has no usable GitHub App installation — skipping PR clone (AUD-130)", ws.ID)
+				logger.Warnf("Workspace %s has no usable GitHub App installation - skipping PR clone (AUD-130)", ws.ID)
 				return
 			}
 			githubService := h.githubAppManager.GetService()
 			installToken, err := githubService.GenerateInstallationToken(ctx, vcsConn.InstallationID)
 			if err != nil {
-				logger.Warnf("Failed to generate installation token for workspace %s: %v — skipping to avoid unauthenticated clone (AUD-130)", ws.ID, err)
+				logger.Warnf("Failed to generate installation token for workspace %s: %v - skipping to avoid unauthenticated clone (AUD-130)", ws.ID, err)
 				return
 			}
 			cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", installToken, repositoryFullName)
@@ -2387,7 +2387,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			cmd.Dir = tempDir
 			if err := cmd.Run(); err != nil {
 				logger.Errorf("Failed to checkout branch %s for workspace %s: %v", headBranch, ws.ID, err)
-				// Re-bind through the regex right before the sink — CodeQL loses
+				// Re-bind through the regex right before the sink - CodeQL loses
 				// the barrier across the error branch.
 				safeBranch := gitargs.RefNameRe.FindString(headBranch)
 				if safeBranch == "" {

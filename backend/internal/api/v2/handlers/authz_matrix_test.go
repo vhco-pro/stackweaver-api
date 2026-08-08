@@ -4,7 +4,7 @@
 //
 // Each authorization fix from the codebase audit (docs/internal/codebase-audit-2026-06-analysis.md)
 // adds its endpoint × caller-role cases here so the missing-permission-check class can never ship
-// silently again. The harness drives real handlers over real Postgres/GORM — no mocks — because the
+// silently again. The harness drives real handlers over real Postgres/GORM - no mocks - because the
 // defect class lives in the handler↔rbac wiring, which mocks would hide.
 //
 // Gated behind the `integration` build tag; skips unless $TEST_DATABASE_URL is set, e.g.
@@ -48,7 +48,7 @@ func setupAuthzTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("connect test db: %v", err)
 	}
 	// Migrate the full model set: the team-membership handlers load teams through the rbac
-	// service, which preloads project/workspace/org access rows — a partial migrate set only
+	// service, which preloads project/workspace/org access rows - a partial migrate set only
 	// passes against a DB that already has those tables (dev) and fails on a fresh CI Postgres.
 	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -302,7 +302,7 @@ func TestAuthzTeamMembers_AddUsers(t *testing.T) {
 		// Permission gate (same as the org-membership path).
 		{"member without perms adds by email -> 403", f.member.ID, f.devTeam.ID, f.lead.Email, http.StatusForbidden},
 		{"anonymous -> 401", uuid.Nil, f.devTeam.ID, f.lead.Email, http.StatusUnauthorized},
-		// Tenant safety: the outsider is an orgB member, not orgA — must not resolve into an orgA team.
+		// Tenant safety: the outsider is an orgB member, not orgA - must not resolve into an orgA team.
 		{"owner adds cross-org user by email -> 422", f.owner.ID, f.devTeam.ID, f.outsider.Email, http.StatusUnprocessableEntity},
 		// Unknown email.
 		{"owner adds unknown email -> 404", f.owner.ID, f.devTeam.ID, "nobody-" + uuid.NewString()[:8] + "@test.local", http.StatusNotFound},
@@ -371,7 +371,7 @@ func TestAuthzTeamMembers_RemoveUsers(t *testing.T) {
 		t.Error("member was not removed from the team")
 	}
 	if !f.userInTeam(t, f.devTeam.ID, f.lead.ID) {
-		t.Error("lead was wrongly removed — remove is not targeted")
+		t.Error("lead was wrongly removed - remove is not targeted")
 	}
 }
 
@@ -412,7 +412,7 @@ func TestAuthzTeamMembers_RemoveOrganizationMemberships(t *testing.T) {
 }
 
 // TestAuthzTeamMembers_ListOrganizationMemberships: the read side must at least be
-// org-scoped — team membership rosters (usernames + emails) are tenant data.
+// org-scoped - team membership rosters (usernames + emails) are tenant data.
 func TestAuthzTeamMembers_ListOrganizationMemberships(t *testing.T) {
 	f := setupTeamAuthzFixture(t)
 

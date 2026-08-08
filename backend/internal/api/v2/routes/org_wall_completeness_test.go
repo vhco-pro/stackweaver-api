@@ -4,15 +4,15 @@
 // fail-closed: an api-key request to any /api/v2 route absent from
 // middleware's wallRegistry is denied with 403. That is the right security
 // default, but it means a route added without a registry entry silently
-// breaks API-token automation (the UI keeps working — JWT sessions bypass
-// the wall — so the gap is invisible in browser testing). Exactly that
+// breaks API-token automation (the UI keeps working - JWT sessions bypass
+// the wall - so the gap is invisible in browser testing). Exactly that
 // happened to ~10 Ansible/VCS routes.
 //
 // This test builds the REAL /api/v2 surface via SetupV2Routes (which wires
 // every sub-router, including SetupAnsibleRoutes/SetupAnsibleWorkflowRoutes)
 // and asserts every walled route is classified. Routes that SetupV2Routes
-// deliberately registers on the ROOT router — token-in-query, signature- or
-// callback-authenticated endpoints that never pass the wall — are listed in
+// deliberately registers on the ROOT router - token-in-query, signature- or
+// callback-authenticated endpoints that never pass the wall - are listed in
 // wallExemptions with their justification; a new /api/v2 route must either
 // be classified or consciously added there.
 
@@ -88,14 +88,14 @@ func TestOrgWallRegistryCompleteness(t *testing.T) {
 		walked++
 		if !middleware.WallClassified(rt.Path) {
 			missing++
-			t.Errorf("unclassified walled route: %s %s — api-key tokens get a fail-closed 403 here; add it to wallRegistry (org_wall_registry.go) or, if it is deliberately root-registered with its own auth, to wallExemptions in this test", rt.Method, rt.Path)
+			t.Errorf("unclassified walled route: %s %s - api-key tokens get a fail-closed 403 here; add it to wallRegistry (org_wall_registry.go) or, if it is deliberately root-registered with its own auth, to wallExemptions in this test", rt.Method, rt.Path)
 		}
 	}
 
 	// Sanity floor: if the router failed to assemble, the loop above would
 	// vacuously pass. The real surface is far larger than this.
 	if walked < 100 {
-		t.Fatalf("only %d /api/v2 routes walked — SetupV2Routes did not build the full surface", walked)
+		t.Fatalf("only %d /api/v2 routes walked - SetupV2Routes did not build the full surface", walked)
 	}
 	t.Logf("walked %d walled routes, %d unclassified", walked, missing)
 }
