@@ -48,7 +48,7 @@ func safeStorageFilename(name string) (string, bool) {
 //
 // Signing model (matches HashiCorp's): the PUBLISHER signs the SHA256SUMS file offline with the
 // private half of a GPG key whose public half was uploaded via tfe_registry_gpg_key, then uploads
-// the binary, SHA256SUMS and SHA256SUMS.sig. The server never holds a private key — it stores and
+// the binary, SHA256SUMS and SHA256SUMS.sig. The server never holds a private key - it stores and
 // serves these artifacts and advertises the public key to Terraform at install time.
 type RegistryProviderPublishingHandler struct {
 	providerRepo         *repository.ProviderRepository
@@ -139,7 +139,7 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "os and arch are required")
 		return
 	}
-	// AUD-107: os/arch become path segments in the storage key — reject anything
+	// AUD-107: os/arch become path segments in the storage key - reject anything
 	// but a lowercase alphanumeric/underscore token so they cannot escape the prefix.
 	if !platformSegmentRE.MatchString(os) || !platformSegmentRE.MatchString(arch) {
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "os and arch must match [a-z0-9_]+")
@@ -171,7 +171,7 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		return
 	}
 	// AUD-107: the multipart filename becomes the final path segment of the storage
-	// key — reduce it to a safe base name so it cannot inject separators or traversal.
+	// key - reduce it to a safe base name so it cannot inject separators or traversal.
 	filename, ok := safeStorageFilename(file.Filename)
 	if !ok {
 		regProvErr(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "invalid provider filename")
@@ -192,7 +192,7 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 	// The publisher signs SHA256SUMS offline with the private half of the registered
 	// GPG key. The server must confirm (a) the detached signature is valid for THIS
 	// org's key and (b) the binary just received is actually the one that signed
-	// SHA256SUMS lists — otherwise the registry would serve, and vouch for, artifacts
+	// SHA256SUMS lists - otherwise the registry would serve, and vouch for, artifacts
 	// it never checked. Verifying first also avoids leaving objects behind on rejection.
 	shasum, err := hashUpload(file)
 	if err != nil {
@@ -310,7 +310,7 @@ func readUpload(fh *multipart.FileHeader) ([]byte, error) {
 }
 
 // hashUpload streams an uploaded file through SHA-256 without buffering it, returning the
-// lowercase hex digest — used to confirm the provider binary is the one SHA256SUMS covers.
+// lowercase hex digest - used to confirm the provider binary is the one SHA256SUMS covers.
 func hashUpload(fh *multipart.FileHeader) (string, error) {
 	f, err := fh.Open()
 	if err != nil {

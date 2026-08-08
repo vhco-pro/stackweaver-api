@@ -365,7 +365,7 @@ func (h *RegistryProviderHandler) DownloadProvider(c *gin.Context) {
 	}
 
 	// Track the download without blocking the response. AUD-062: capture request-derived values
-	// before the goroutine — gin reuses *gin.Context after the handler returns (data race otherwise).
+	// before the goroutine - gin reuses *gin.Context after the handler returns (data race otherwise).
 	platformID := platform.ID
 	ip := c.ClientIP()
 	ua := c.GetHeader("User-Agent")

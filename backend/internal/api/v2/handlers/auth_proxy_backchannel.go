@@ -47,7 +47,7 @@ const seenJTITTL = logoutTokenMaxAge + 60*time.Second
 
 // seenJTICap bounds the in-memory replay-detection set so an attacker
 // posting fake jtis can't grow memory unbounded. Round 25 Wave 5
-// (item 18 / R25a #2). Real Zitadel jti values are random uuids — 10k
+// (item 18 / R25a #2). Real Zitadel jti values are random uuids - 10k
 // entries × 36 bytes per uuid + map overhead ≈ ~1 MB, well within the
 // per-process budget.
 const seenJTICap = 10_000
@@ -84,7 +84,7 @@ type backchannelVerifier struct {
 
 	// revokedSIDs tracks sids seen in valid logout_tokens. Values are the
 	// expiry time after which the entry can be reaped. A real deployment
-	// would back this with Redis so multiple API replicas share state —
+	// would back this with Redis so multiple API replicas share state -
 	// noted as a follow-up; single-replica dev is correct with the map.
 	revokedSIDs sync.Map // map[string]time.Time
 
@@ -93,7 +93,7 @@ type backchannelVerifier struct {
 	// replayed to amplify CPU work (signature verify) on the verifier.
 	// We record jti on successful verify and short-circuit subsequent
 	// replays of the same jti as a fast-path success (backchannel
-	// logout is idempotent — re-seeing a known-good logout token
+	// logout is idempotent - re-seeing a known-good logout token
 	// should always be treated the same way).
 	seenJTIsMu  sync.Mutex
 	seenJTIs    map[string]*list.Element // jti → list element with expiry
@@ -104,7 +104,7 @@ type backchannelVerifier struct {
 // seenJTIEntry is the value stored in the seenJTIs LRU. Round 25 Wave 5
 // (item 18 / R25a #2): we cache sid + sub alongside jti so a replay
 // short-circuit can return the original claims rather than synthetic
-// empty ones — RevokeSID gets called again (idempotent), logging stays
+// empty ones - RevokeSID gets called again (idempotent), logging stays
 // accurate, and the contract ("logout_token returned valid claims")
 // holds for callers that inspect SID/Subject.
 type seenJTIEntry struct {
@@ -115,11 +115,11 @@ type seenJTIEntry struct {
 }
 
 // newBackchannelVerifier constructs the verifier. `expectedClientID` is the
-// OIDC client_id this RP is registered under at Zitadel — Round 23 Finding 1
+// OIDC client_id this RP is registered under at Zitadel - Round 23 Finding 1
 // requires that any accepted logout_token's `aud` contain this value, per
 // OIDC Back-Channel Logout 1.0 §2.6 step 4. Empty string DISABLES audience
 // binding (legacy behaviour, retained only so existing tests that don't
-// know an `aud` need not be rewritten — production callers MUST pass the
+// know an `aud` need not be rewritten - production callers MUST pass the
 // real client id).
 //
 // Round 25 hardening (item 26): all accepted issuers are canonicalised
@@ -203,7 +203,7 @@ func (b *backchannelVerifier) lookupJTI(jti string) *seenJTIEntry {
 // peekJTI extracts the `jti` claim from a JWS payload without verifying
 // the signature. Used as a fast-path replay-detection check before the
 // expensive signature verify. The unverified jti is only used as an
-// LRU lookup key — an attacker forging a jti that happens to collide
+// LRU lookup key - an attacker forging a jti that happens to collide
 // with a real cached one would simply trigger a benign short-circuit
 // success response (backchannel logout is idempotent), not a security
 // bypass. The LRU bound prevents cache poisoning.
@@ -212,7 +212,7 @@ func peekJTIUnverified(jws *jose.JSONWebSignature) string {
 		return ""
 	}
 	// jose's `UnsafePayloadWithoutVerification` returns the payload
-	// bytes without checking the signature — exactly what we want
+	// bytes without checking the signature - exactly what we want
 	// here, where we only need a non-trust-load lookup key.
 	payload := jws.UnsafePayloadWithoutVerification()
 	if len(payload) == 0 {
@@ -229,7 +229,7 @@ func peekJTIUnverified(jws *jose.JSONWebSignature) string {
 
 // canonicalIssuer normalises an issuer URL for symmetric comparison.
 // Strips surrounding whitespace, trailing slashes, and lowercases the
-// scheme + host portion (RFC 3986 §3.2.2 — host is case-insensitive).
+// scheme + host portion (RFC 3986 §3.2.2 - host is case-insensitive).
 // Path is preserved verbatim because some IdPs use case-sensitive path
 // segments (Zitadel's default `/oauth/v2` is lowercase, but the
 // canonicalisation can't safely assume that for every operator).
@@ -243,7 +243,7 @@ func canonicalIssuer(s string) string {
 	// Format is `<scheme>://<host>[:port][/path]`.
 	schemeEnd := strings.Index(s, "://")
 	if schemeEnd < 0 {
-		// Doesn't look like a URL — best-effort lowercase the whole thing.
+		// Doesn't look like a URL - best-effort lowercase the whole thing.
 		return strings.ToLower(s)
 	}
 	hostStart := schemeEnd + 3
@@ -263,7 +263,7 @@ func canonicalIssuer(s string) string {
 // Round 25 Wave 5 (item 18 / R25a #2): a fast-path replay-detection
 // gate runs after JWS parse but BEFORE signature verify. A repeated
 // jti returns the previously-cached claims as a synthetic success
-// (backchannel logout is idempotent — we already RevokeSID'd the
+// (backchannel logout is idempotent - we already RevokeSID'd the
 // session on the first call, so a replay is a no-op anyway). The
 // unverified jti is only used as an LRU lookup key; an attacker
 // forging a jti can at most trigger a benign short-circuit, not
@@ -285,7 +285,7 @@ func (b *backchannelVerifier) verifyLogoutToken(ctx context.Context, raw string)
 	// Read the unverified jti and short-circuit if we've already seen
 	// it. The cached entry carries sid + sub from the original verify,
 	// so the synthetic claims surfaced to handleBackchannelLogout
-	// preserve the contract (RevokeSID is called again — idempotent —
+	// preserve the contract (RevokeSID is called again - idempotent -
 	// and logging stays accurate). The peek is "unverified" but the
 	// jti is only used as an LRU lookup key, not for any trust
 	// decision.
@@ -305,7 +305,7 @@ func (b *backchannelVerifier) verifyLogoutToken(ctx context.Context, raw string)
 		return nil, fmt.Errorf("decode logout_token claims: %w", err)
 	}
 
-	// §2.6 checks — these run in order of cheapest-to-most-expensive and each
+	// §2.6 checks - these run in order of cheapest-to-most-expensive and each
 	// returns a distinct error so tests can pin the exact rejection reason.
 	// Round 25 hardening (item 26): canonicalise the claim-side issuer the
 	// same way the accepted-set was canonicalised so trivial whitespace /
@@ -320,7 +320,7 @@ func (b *backchannelVerifier) verifyLogoutToken(ctx context.Context, raw string)
 	// step 4 requires the RP to verify its own client_id is in the
 	// audience set. Without this, any Zitadel-signed logout_token
 	// issued for ANY other registered RP on the same Zitadel instance
-	// would terminate sessions in this app — cross-RP forced-logout
+	// would terminate sessions in this app - cross-RP forced-logout
 	// DoS. The `aud` claim per spec may be either a JSON string or a
 	// JSON array of strings; handle both.
 	if b.expectedClientID != "" {
@@ -367,7 +367,7 @@ func (b *backchannelVerifier) verifyLogoutToken(ctx context.Context, raw string)
 	// on success so subsequent replays of this token short-circuit
 	// the signature verify AND surface the original claims to the
 	// caller. Empty jti is a no-op (older Zitadel versions may not
-	// emit one — we simply don't dedup those tokens).
+	// emit one - we simply don't dedup those tokens).
 	b.rememberJTI(claims.JTI, claims.SID, claims.Subject)
 
 	return &claims, nil
@@ -385,7 +385,7 @@ func parseAudienceClaim(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("empty audience")
 	}
-	// Try the array shape first — most common from Zitadel.
+	// Try the array shape first - most common from Zitadel.
 	var arr []string
 	if err := json.Unmarshal(raw, &arr); err == nil {
 		return arr, nil
@@ -407,7 +407,7 @@ func parseAudienceClaim(raw json.RawMessage) ([]string, error) {
 // rotation triggers up to a `jwksTTL` window (10 min) of failed
 // verifications until the cache expires naturally. The single-retry
 // guard + kid-not-cached gate together prevent an attacker posting
-// garbage tokens from farming JWKS refreshes — a token whose kid IS
+// garbage tokens from farming JWKS refreshes - a token whose kid IS
 // in the cache and still fails verify is a real bad signature, not a
 // rotation, so we don't refresh on it.
 func (b *backchannelVerifier) verifySignature(ctx context.Context, jws *jose.JSONWebSignature) ([]byte, error) {
@@ -427,7 +427,7 @@ func (b *backchannelVerifier) verifySignature(ctx context.Context, jws *jose.JSO
 		return nil, fmt.Errorf("no usable JWKS keys")
 	}
 
-	logger.Infof("backchannelVerifier: kid not in cached JWKS — forcing one refresh and retrying")
+	logger.Infof("backchannelVerifier: kid not in cached JWKS - forcing one refresh and retrying")
 	payload, lastErr, err = b.tryVerify(ctx, jws, true)
 	if err != nil {
 		return nil, err
@@ -443,7 +443,7 @@ func (b *backchannelVerifier) verifySignature(ctx context.Context, jws *jose.JSO
 
 // tryVerify runs one verification pass. `forceRefresh=true` bypasses
 // the JWKS TTL cache and re-fetches from Zitadel. Returns (payload,
-// lastVerifyErr, fetchErr) — `payload != nil` means success; both nil
+// lastVerifyErr, fetchErr) - `payload != nil` means success; both nil
 // means "no key matched, no verify error captured" (empty JWKS edge).
 func (b *backchannelVerifier) tryVerify(ctx context.Context, jws *jose.JSONWebSignature, forceRefresh bool) ([]byte, error, error) {
 	keys, err := b.getKeys(ctx, forceRefresh)
@@ -466,11 +466,11 @@ func (b *backchannelVerifier) tryVerify(ctx context.Context, jws *jose.JSONWebSi
 
 // kidUnknown reports whether the JWS references a kid that is NOT in
 // the currently cached JWKS. Returns true when the kid header is empty
-// (we treat unknown-kid and missing-kid the same — both warrant a
+// (we treat unknown-kid and missing-kid the same - both warrant a
 // refresh attempt). Read-only on the cache; safe to call after
 // tryVerify failed.
 //
-// Reads the kid from the PROTECTED header — go-jose's `Signature.Header`
+// Reads the kid from the PROTECTED header - go-jose's `Signature.Header`
 // is the merged (protected + unprotected) view and is documented as
 // "may or may not have been signed and in general should not be
 // trusted." For OIDC backchannel logout JWTs (compact serialization)
@@ -485,7 +485,7 @@ func (b *backchannelVerifier) kidUnknown(jws *jose.JSONWebSignature) bool {
 		// Defense in depth: fall through to the merged header in case
 		// a future Zitadel change moves kid to the unprotected header.
 		// Worst case is we attempt a refresh on a token that doesn't
-		// warrant one — bounded by the single-retry guard.
+		// warrant one - bounded by the single-retry guard.
 		kid = jws.Signatures[0].Header.KeyID
 	}
 	if kid == "" {
@@ -503,7 +503,7 @@ func (b *backchannelVerifier) kidUnknown(jws *jose.JSONWebSignature) bool {
 
 // getKeys returns the cached JWKS or re-fetches from Zitadel if stale.
 // `forceRefresh=true` bypasses the TTL check (Round 25 item 17 /
-// R25a #1 — used by tryVerify to recover from a Zitadel key rotation
+// R25a #1 - used by tryVerify to recover from a Zitadel key rotation
 // that happened before the natural cache expiry).
 func (b *backchannelVerifier) getKeys(ctx context.Context, forceRefresh bool) ([]jose.JSONWebKey, error) {
 	if !forceRefresh {
@@ -606,7 +606,7 @@ func (p *AuthProxy) handleBackchannelLogout(c *gin.Context, token string) {
 		// Subject-only logout is a hint to invalidate all sessions for that user
 		// across this RP. We don't maintain a sub→sid map yet; log and move on.
 		// Treating this as success matches OIDC guidance ("RP MUST make a best
-		// effort") — the JWT was valid, we just can't act on it.
+		// effort") - the JWT was valid, we just can't act on it.
 		logger.Infof("backchannel logout accepted (sub-only): sub=%s", claims.Subject)
 	}
 

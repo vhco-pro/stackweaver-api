@@ -2,7 +2,7 @@
 
 // AUD-104 / AUD-105 variable-set secret handling. Sensitive variable-set values were
 // stored in cleartext at rest (no encryption-on-write, unlike workspace variables), and
-// the Update path naively overwrote the value with whatever the client sent — so a client
+// the Update path naively overwrote the value with whatever the client sent - so a client
 // that round-tripped a masked read (the SPA and the TFE provider both resubmit the whole
 // resource when editing an unrelated field) silently replaced the real secret with the
 // "••••••••" placeholder, breaking every consuming run. These tests drive the real handler
@@ -139,16 +139,16 @@ func TestVarsetSecretEncryption(t *testing.T) {
 		t.Fatalf("reload stored var: %v", err)
 	}
 	if !stored.Encrypted {
-		t.Fatal("sensitive value not marked Encrypted — AUD-104 regression")
+		t.Fatal("sensitive value not marked Encrypted - AUD-104 regression")
 	}
 	if stored.Value == secret {
-		t.Fatal("sensitive value stored in cleartext at rest — AUD-104 regression")
+		t.Fatal("sensitive value stored in cleartext at rest - AUD-104 regression")
 	}
 	if plain, err := varSvc.GetDecryptedVariableSetValue(stored); err != nil || plain != secret {
 		t.Fatalf("stored ciphertext did not decrypt to the secret: plain=%q err=%v", plain, err)
 	}
 
-	// The read path must never return the real value — it masks sensitive values.
+	// The read path must never return the real value - it masks sensitive values.
 	_, getResp := do(http.MethodGet, base+"/"+varID, "")
 	if v := getResp["data"].(map[string]any)["attributes"].(map[string]any)["value"]; v != maskedValue {
 		t.Fatalf("read path leaked sensitive value: %v", v)
@@ -183,7 +183,7 @@ func TestVarsetSecretEncryption(t *testing.T) {
 		t.Fatalf("reload after rotate: %v", err)
 	}
 	if afterRotate.Value == rotated {
-		t.Fatal("rotated sensitive value stored in cleartext — AUD-104 regression")
+		t.Fatal("rotated sensitive value stored in cleartext - AUD-104 regression")
 	}
 	if plain, err := varSvc.GetDecryptedVariableSetValue(afterRotate); err != nil || plain != rotated {
 		t.Fatalf("rotated value did not roundtrip: plain=%q err=%v", plain, err)

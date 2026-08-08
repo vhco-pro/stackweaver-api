@@ -42,7 +42,7 @@ func TestTestingReset_404WithoutEnv(t *testing.T) {
 }
 
 func TestTestingReset_404WithWrongEnvValue(t *testing.T) {
-	// Anything other than the exact sentinel value returns 404 — confirms the
+	// Anything other than the exact sentinel value returns 404 - confirms the
 	// env check is not a substring / truthiness check.
 	for _, v := range []string{"production", "staging", "E2E-TEST", "e2e", "true", "1"} {
 		t.Run(v, func(t *testing.T) {

@@ -16,8 +16,8 @@ import (
 )
 
 // OIDCConfigDispatchHandler serves the TFE-compatible OIDC configuration routes that are shared by all
-// cloud providers (Azure, AWS, GCP, Vault). terraform-provider-tfe uses a single set of URLs —
-// POST/GET /organizations/:name/oidc-configurations and GET/PATCH/DELETE /oidc-configurations/:id —
+// cloud providers (Azure, AWS, GCP, Vault). terraform-provider-tfe uses a single set of URLs -
+// POST/GET /organizations/:name/oidc-configurations and GET/PATCH/DELETE /oidc-configurations/:id -
 // and distinguishes providers by the JSON:API `data.type` on create and by the ID prefix on the by-id
 // routes. This handler owns those routes and delegates to the per-provider handler:
 //   - create:  by `data.type`  (azure-oidc-configurations | aws-oidc-configurations | gcp-oidc-configurations)

@@ -13,7 +13,7 @@ func CORSMiddleware() gin.HandlerFunc {
 	// AUD-070: only credential-trust localhost origins outside production. In production
 	// (GIN_MODE=release, the same gate the rest of the app uses) the real frontend origin is
 	// configured via CORS_EXTRA_ORIGINS, so trusting any localhost variant there is pure attack
-	// surface — a page a victim was tricked into loading from their own localhost could otherwise
+	// surface - a page a victim was tricked into loading from their own localhost could otherwise
 	// pivot into the API with credentials.
 	allowLocalhost := os.Getenv("GIN_MODE") != "release"
 
@@ -59,7 +59,7 @@ func CORSMiddleware() gin.HandlerFunc {
 		// Round 24 Finding 2 (HIGH): the previous prefix check
 		// (`origin[:16] == "http://localhost"`) matched
 		// `http://localhost.evil.com:1234` because there was no
-		// host-boundary delimiter — combined with
+		// host-boundary delimiter - combined with
 		// `Allow-Credentials: true` an attacker who tricks a victim
 		// into navigating to a `localhost.<attacker>` host could
 		// pivot into the auth proxy with cookies attached. The fix:
@@ -74,7 +74,7 @@ func CORSMiddleware() gin.HandlerFunc {
 		// AUD-157: the preflight previously set Access-Control-Allow-Origin + Allow-Credentials
 		// for ANY origin before consulting `allowed`, so an arbitrary origin got a credentialed
 		// 204. It was not independently exploitable (the real-request path below IS gated, so the
-		// browser blocked reads), but the preflight must match that gate — only allowed origins
+		// browser blocked reads), but the preflight must match that gate - only allowed origins
 		// (and the localhost variants folded into `allowed` above) get the credentialed headers.
 		if c.Request.Method == "OPTIONS" {
 			if allowed && origin != "" {
@@ -107,9 +107,9 @@ func CORSMiddleware() gin.HandlerFunc {
 // the host boundary so `http://localhost.evil.com` does NOT match.
 //
 // Accepted shapes:
-//   - http://localhost            (no port, no path — exact match)
+//   - http://localhost            (no port, no path - exact match)
 //   - http://localhost:NNNN       (any port)
-//   - http://localhost/path        (defensive — Origin headers don't carry paths in practice but be tolerant)
+//   - http://localhost/path        (defensive - Origin headers don't carry paths in practice but be tolerant)
 //   - same for http://127.0.0.1 and http://[::1]
 //
 // Rejected:

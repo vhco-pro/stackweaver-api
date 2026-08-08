@@ -96,7 +96,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 
 	// AUD-063: each metric is a single aggregate COUNT rather than loading every row and taking
 	// len() (the old code paged up to 10k runs/jobs into memory per org and ran one ListByProject
-	// per project — an N+1). A repository error now fails the whole request with a 500 instead of a
+	// per project - an N+1). A repository error now fails the whole request with a 500 instead of a
 	// silent `continue` that under-reported totals as if nothing were wrong.
 	statErr := func(detail string, err error) bool {
 		if err == nil {

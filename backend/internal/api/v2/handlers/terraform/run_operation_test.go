@@ -1,8 +1,8 @@
 // Copyright (c) 2026 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
-// Unit tests for resolveRunOperation — the run-create operation/apply-intent mapping. The key
+// Unit tests for resolveRunOperation - the run-create operation/apply-intent mapping. The key
 // compatibility contract: a normal go-tfe run (RunCreateOptions with auto-apply present, plan-only
-// false, is-destroy false — e.g. tfe_workspace_run) must resolve to an APPLYABLE plan-and-apply run,
+// false, is-destroy false - e.g. tfe_workspace_run) must resolve to an APPLYABLE plan-and-apply run,
 // not a non-applyable plan-only. Also covers plan-only, is-destroy, the per-run auto-apply intent, the
 // frontend/legacy operation + auto-apply-after-plan fallbacks, and the removed plan/apply operations.
 

@@ -349,7 +349,7 @@ func (h *AdminTerraformVersionsHandler) Update(c *gin.Context) {
 		}
 	}
 
-	// Handle archs update — only process archs with non-empty URLs.
+	// Handle archs update - only process archs with non-empty URLs.
 	// The provider's plan modifier can send archs with url="" when the user
 	// didn't specify archs in config; we must not let those overwrite real data.
 	validArchs := filterValidArchs(req.Data.Attributes.Archs)
@@ -585,7 +585,7 @@ func marshalArchs(archs []terraformVersionArch) *string {
 // formatTerraformVersion formats a TerraformVersion as a JSON:API resource.
 func formatTerraformVersion(v *models.TerraformVersion) gin.H {
 	// Return stored archs if they exist (user explicitly provided them).
-	// Otherwise return empty array — this prevents the provider's
+	// Otherwise return empty array - this prevents the provider's
 	// PreserveAMD64ArchsOnChange plan modifier from corrupting archs by
 	// setting url=null when url isn't in the user's config.
 	var archs []gin.H

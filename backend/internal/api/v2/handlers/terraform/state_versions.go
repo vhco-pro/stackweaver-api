@@ -656,7 +656,7 @@ func buildMaterializedResources(rows []models.StateVersionResource) []gin.H {
 }
 
 // materializedOutputs returns TFE-compatible outputs for a state version, read from the
-// materialized state_version_outputs table (State Storage Rework — the single source of truth).
+// materialized state_version_outputs table (State Storage Rework - the single source of truth).
 // cryptoSvc decrypts sensitive output values stored encrypted at rest (#95); pass nil when
 // encryption is disabled.
 func materializedOutputs(repo *repository.StateVersionOutputRepository, version *models.StateVersion, maskSensitive bool, cryptoSvc *crypto.CryptoService) []gin.H {

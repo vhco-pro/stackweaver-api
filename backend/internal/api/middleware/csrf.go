@@ -37,7 +37,7 @@ func CSRFProtection(allowedOrigins []string) gin.HandlerFunc {
 				c.Next()
 				return
 			}
-			// Origin present but not in allowlist — reject
+			// Origin present but not in allowlist - reject
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":    http.StatusForbidden,
 				"message": "cross-origin request blocked",
@@ -46,7 +46,7 @@ func CSRFProtection(allowedOrigins []string) gin.HandlerFunc {
 			return
 		}
 
-		// No Origin header — fall back to Referer
+		// No Origin header - fall back to Referer
 		referer := c.GetHeader("Referer")
 		if referer != "" {
 			parsed, err := url.Parse(referer)
@@ -57,7 +57,7 @@ func CSRFProtection(allowedOrigins []string) gin.HandlerFunc {
 					return
 				}
 			}
-			// Referer present but not from allowed origin — reject
+			// Referer present but not from allowed origin - reject
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":    http.StatusForbidden,
 				"message": "cross-origin request blocked",
@@ -66,8 +66,8 @@ func CSRFProtection(allowedOrigins []string) gin.HandlerFunc {
 			return
 		}
 
-		// No Origin AND no Referer — this can happen with direct API calls (curl, etc.)
-		// or same-origin requests in some browsers. Allow it — the session cookie
+		// No Origin AND no Referer - this can happen with direct API calls (curl, etc.)
+		// or same-origin requests in some browsers. Allow it - the session cookie
 		// provides the authorization, and SameSite=Lax prevents cross-site attachment.
 		c.Next()
 	}

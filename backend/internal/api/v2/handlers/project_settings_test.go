@@ -1,6 +1,6 @@
 // Copyright (c) 2026 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
-// Unit tests for applyProjectSettings — the tfe_project_settings mapping (default execution mode +
+// Unit tests for applyProjectSettings - the tfe_project_settings mapping (default execution mode +
 // default agent pool + setting-overwrites) onto a Project. Covers the branches that do not touch the
 // agent-pool repository (validation, mode transitions, overwrite clearing, and the agent-requires-pool
 // rule). The pool-lookup branch is exercised end-to-end by the runtime harness.

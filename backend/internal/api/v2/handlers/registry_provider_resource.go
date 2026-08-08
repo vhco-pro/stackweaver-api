@@ -284,7 +284,7 @@ func (h *RegistryProviderResourceHandler) DeleteProviderByID(c *gin.Context) {
 
 // gcProviderStorage best-effort deletes a deleted provider's artifacts (binaries, SHA256SUMS,
 // signatures) from object storage. The DB cascade has already removed the rows, so any failure here
-// only leaves orphaned objects — it is logged, never fatal. Objects live under
+// only leaves orphaned objects - it is logged, never fatal. Objects live under
 // providers/{org}/{name}/... ; the trailing slash keeps "foo" from also matching "foobar".
 func (h *RegistryProviderResourceHandler) gcProviderStorage(ctx context.Context, provider *models.Provider) {
 	if h.storage == nil {

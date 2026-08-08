@@ -65,7 +65,7 @@ type Service struct {
 
 // NewService constructs the auth service with the production repos.
 // The signature accepts the concrete `*repository.UserRepository` so
-// production callers stay simple — Go's structural typing means the
+// production callers stay simple - Go's structural typing means the
 // concrete repo satisfies the `UserLookup` interface automatically.
 func NewService(userRepo *repository.UserRepository) *Service {
 	return &Service{
@@ -73,7 +73,7 @@ func NewService(userRepo *repository.UserRepository) *Service {
 	}
 }
 
-// NewServiceWithLookups is the test-friendly constructor — accepts
+// NewServiceWithLookups is the test-friendly constructor - accepts
 // the lookup interface directly so unit tests can pass a mock
 // without depending on the concrete repo type or a live database.
 // Production callers should keep using `NewService`.
@@ -159,7 +159,7 @@ func (s *Service) GetUserFromToken(tokenString string) (*models.User, error) {
 		// The "tfe-" prefix is authoritative (#503): an API token is never
 		// a JWT, so a lookup miss is terminal. Falling through to JWT
 		// verification surfaced revoked/unknown keys as "token is not a
-		// JWT (got opaque token)" — misdirecting operators toward Zitadel
+		// JWT (got opaque token)" - misdirecting operators toward Zitadel
 		// configuration instead of the token's lifecycle.
 		return nil, errors.New("invalid or revoked API token")
 	}
@@ -270,7 +270,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		tokenString := parts[1]
 
 		// Debug logging for authentication attempts.
-		// Round 25 hardening (item 16): never log raw token bytes — even
+		// Round 25 hardening (item 16): never log raw token bytes - even
 		// the first 10 characters of a TFE-style API token (`tfe-…`)
 		// carry enough entropy to be useful in a log-correlation attack
 		// if Debug is ever enabled in production. Log a SHA-256-truncated
@@ -322,7 +322,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			// The "tfe-" prefix is authoritative (#503): an API token is
 			// never a JWT, so a lookup miss is terminal. Falling through
 			// to JWT verification surfaced revoked/unknown keys as "token
-			// is not a JWT (got opaque token)" — misdirecting operators
+			// is not a JWT (got opaque token)" - misdirecting operators
 			// toward Zitadel configuration instead of the token's
 			// lifecycle.
 			logger.Warnf("auth: api token rejected: unknown or revoked (id: %s)", shortTokenID(tokenString))
@@ -474,7 +474,7 @@ func (s *Service) GetTokenClaims(c *gin.Context) (*oidc.AccessTokenClaims, error
 // Returns empty string if the user has no avatar or the call fails.
 // Only works for JWT auth (requires a valid access token).
 func (s *Service) FetchUserInfoPicture(ctx context.Context, c *gin.Context) string {
-	// Only fetch for JWT auth — API key / TFE token don't work with Zitadel UserInfo
+	// Only fetch for JWT auth - API key / TFE token don't work with Zitadel UserInfo
 	authMethod, _ := c.Get("auth_method")
 	if authMethod != "jwt" {
 		return ""

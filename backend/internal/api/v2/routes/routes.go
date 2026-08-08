@@ -43,7 +43,7 @@ func SetupV2Routes(
 	authService *auth.Service,
 	githubAppManager *vcs.GitHubAppManager,
 ) {
-	// OIDC Discovery Endpoints (unauthenticated — Azure AD calls these to verify tokens)
+	// OIDC Discovery Endpoints (unauthenticated - Azure AD calls these to verify tokens)
 	// These must be on the root router, not under /api/v2/, and without auth middleware
 	oidcSigningKey, err := oidc.NewSigningKey()
 	if err != nil {
@@ -64,7 +64,7 @@ func SetupV2Routes(
 
 	// Shared AES-256-GCM service for encryption at rest (#95): state objects, sensitive
 	// output values, and VCS connection tokens all encrypt under the single ENCRYPTION_KEY.
-	// nil when no valid key is configured (dev/legacy) — every consumer treats nil as
+	// nil when no valid key is configured (dev/legacy) - every consumer treats nil as
 	// "store plaintext", preserving backward compatibility with pre-encryption data.
 	var atRestCrypto *crypto.CryptoService
 	if keyBytes := encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")); len(keyBytes) > 0 {
@@ -83,7 +83,7 @@ func SetupV2Routes(
 	// same key; the orchestrator (which mints them at delivery) resolves the identical key.
 	terraformHandlers.SetTaskTokenSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
 	// AUD-155: sign the Azure DevOps OAuth `state` with the same key so the callback can prove it
-	// minted the state (the flow is stateless — no session store). An unset key fails state
+	// minted the state (the flow is stateless - no session store). An unset key fails state
 	// verification closed rather than trusting a forgeable state.
 	handlers.SetOAuthStateSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
 
@@ -220,7 +220,7 @@ func SetupV2Routes(
 	// Projects by ID (TFE-compatible - provider reads projects by ID after creation)
 	// TFE-compatible: GET /api/v2/projects/:id (for go-tfe Read)
 	v2.GET("/projects/:id", projectHandler.GetByID)
-	// TFE-compatible: PATCH /api/v2/projects/:id (go-tfe Projects.Update — tfe_project + tfe_project_settings)
+	// TFE-compatible: PATCH /api/v2/projects/:id (go-tfe Projects.Update - tfe_project + tfe_project_settings)
 	v2.PATCH("/projects/:id", projectHandler.UpdateByID)
 	// TFE-compatible: project tag bindings (tfe_project tags, data.tfe_project effective_tags)
 	v2.GET("/projects/:id/tag-bindings", tagBindingHandler.GetProjectTagBindings)
@@ -584,7 +584,7 @@ func SetupV2Routes(
 	// Run-task result callback: the external service PATCHes its verdict here with the webhook's
 	// access_token. ROOT router (outside the auth middleware, like the ansible provisioning
 	// callback); the handler verifies the stateless token itself. Body capped BEFORE any read
-	// (CRIT-1 lesson) — 8MiB leaves room for outcome payloads (each outcome body ≤ 1MB).
+	// (CRIT-1 lesson) - 8MiB leaves room for outcome payloads (each outcome body ≤ 1MB).
 	r.PATCH("/api/v2/task-results/:id/callback",
 		middleware.MaxBodyBytes(8<<20),
 		runHandler.TaskResultCallback)
@@ -675,7 +675,7 @@ func SetupV2Routes(
 	// TFE expects: /api/v2/workspaces/:id/state-versions
 	// IMPORTANT: Register remove-resource BEFORE the group to ensure proper route matching
 	v2.POST("/workspaces/:id/state-versions/remove-resource", stateVersionHandler.RemoveResource)
-	// TFE: GET /workspaces/:id/current-state-version — latest state version + hosted-state-download-url (fixes tfe_* drift)
+	// TFE: GET /workspaces/:id/current-state-version - latest state version + hosted-state-download-url (fixes tfe_* drift)
 	v2.GET("/workspaces/:id/current-state-version", stateVersionHandler.CurrentStateVersion)
 	// Current state version outputs/resources served from the materialized tables (State Storage Rework).
 	v2.GET("/workspaces/:id/current-state-version-outputs", stateVersionHandler.CurrentStateVersionOutputs)
@@ -716,7 +716,7 @@ func SetupV2Routes(
 	variables := v2.Group("/workspaces/:id/vars")
 	{
 		variables.GET("", variableHandler.ListByWorkspace)
-		variables.GET("/:variable_id", variableHandler.Get) // TFE: Show variable — provider Read/refresh
+		variables.GET("/:variable_id", variableHandler.Get) // TFE: Show variable - provider Read/refresh
 		variables.POST("", variableHandler.Create)
 		variables.PATCH("/:variable_id", variableHandler.Update)
 		variables.DELETE("/:variable_id", variableHandler.Delete)
@@ -763,7 +763,7 @@ func SetupV2Routes(
 		variableSetVars := variableSets.Group("/:id/relationships/vars")
 		{
 			variableSetVars.GET("", variableSetHandler.ListVariableSetVariables)
-			variableSetVars.GET("/:variable_id", variableSetHandler.GetVariableSetVariable) // TFE: Show var — provider Read/refresh
+			variableSetVars.GET("/:variable_id", variableSetHandler.GetVariableSetVariable) // TFE: Show var - provider Read/refresh
 			variableSetVars.POST("", variableSetHandler.CreateVariableSetVariable)
 			variableSetVars.PATCH("/:variable_id", variableSetHandler.UpdateVariableSetVariable)
 			variableSetVars.DELETE("/:variable_id", variableSetHandler.DeleteVariableSetVariable)
@@ -782,13 +782,13 @@ func SetupV2Routes(
 		varsetsById.DELETE("/:id/relationships/projects", variableSetHandler.UnassignProject)
 		// Note: Job templates inherit variable sets from projects automatically (TFE-compatible)
 		varsetsById.GET("/:id/relationships/vars", variableSetHandler.ListVariableSetVariables)
-		varsetsById.GET("/:id/relationships/vars/:variable_id", variableSetHandler.GetVariableSetVariable) // TFE: Show var — provider Read/refresh
+		varsetsById.GET("/:id/relationships/vars/:variable_id", variableSetHandler.GetVariableSetVariable) // TFE: Show var - provider Read/refresh
 		varsetsById.POST("/:id/relationships/vars", variableSetHandler.CreateVariableSetVariable)
 		varsetsById.PATCH("/:id/relationships/vars/:variable_id", variableSetHandler.UpdateVariableSetVariable)
 		varsetsById.DELETE("/:id/relationships/vars/:variable_id", variableSetHandler.DeleteVariableSetVariable)
 	}
 
-	// TFE Token Management — user-bound tokens (`terraform login` / PATs).
+	// TFE Token Management - user-bound tokens (`terraform login` / PATs).
 	// Backed by the unified api_keys table (kind="user") via the apikey service.
 	apiKeyRepo := repository.NewAPIKeyRepository(db)
 	tokenAPIKeyService := apikey.NewService(apiKeyRepo, orgRepo, projectRepo, teamRepo)
@@ -959,7 +959,7 @@ func SetupV2Routes(
 		}
 	}
 
-	// VCS install routes (authenticated) — registered unconditionally so the handler
+	// VCS install routes (authenticated) - registered unconditionally so the handler
 	// can return an actionable error when GitHub App is not configured, instead of a bare 404.
 	// The Azure DevOps install route must also not depend on GitHub App status.
 	{
@@ -1112,7 +1112,7 @@ func SetupV2Routes(
 			logger.Warnf("registry: could not generate an ephemeral artifact-URL signing key: %v", err)
 		} else {
 			handlers.SetArtifactTokenSecret(ephemeral)
-			logger.Warnf("registry: ENCRYPTION_KEY unset — signing provider-artifact capability URLs with an ephemeral per-process key (set ENCRYPTION_KEY for stability across restarts/instances)")
+			logger.Warnf("registry: ENCRYPTION_KEY unset - signing provider-artifact capability URLs with an ephemeral per-process key (set ENCRYPTION_KEY for stability across restarts/instances)")
 		}
 	}
 
@@ -1173,7 +1173,7 @@ func SetupV2Routes(
 		registryV2Providers.GET("/:namespace/:name/downloads/summary", providerHandler.GetProviderDownloadsSummary)
 	}
 
-	// tfe_registry_provider resource CRUD (Authenticated) — go-tfe registry-providers surface.
+	// tfe_registry_provider resource CRUD (Authenticated) - go-tfe registry-providers surface.
 	// List/Create on the org collection; Read/Delete by the composite :registry_name/:namespace/:name;
 	// version/platform publishing hangs off the composite provider address.
 	orgRegistryProviders := v2.Group("/organizations/:name/registry-providers")
@@ -1191,7 +1191,7 @@ func SetupV2Routes(
 		registryProvidersByID.DELETE("/:id", providerResourceHandler.DeleteProviderByID)
 	}
 
-	// GPG Key Management Routes (Authenticated) — TFE-compatible private-registry paths.
+	// GPG Key Management Routes (Authenticated) - TFE-compatible private-registry paths.
 	// go-tfe hardcodes /api/registry/{registry}/v2/gpg-keys (registry is always "private";
 	// namespace is the org name), so these live on the engine root rather than under /api/v2.
 	registryGPGKeys := r.Group("/api/registry/:registry/v2/gpg-keys")
@@ -1383,7 +1383,7 @@ func SetupV2Routes(
 		}
 	}
 
-	// Zitadel Actions V2 Webhooks (unauthenticated — Zitadel calls these directly)
+	// Zitadel Actions V2 Webhooks (unauthenticated - Zitadel calls these directly)
 	// These webhooks handle SSO group claim passthrough for automatic team assignment.
 	// They use HMAC signature verification instead of JWT auth.
 	// See: https://zitadel.com/docs/guides/integrate/actions/usage
@@ -1393,7 +1393,7 @@ func SetupV2Routes(
 	// `io.ReadAll(c.Request.Body)` BEFORE signature verification, so an
 	// unauthenticated attacker streaming a multi-GB body can OOM the API
 	// regardless of the HMAC gate. The Wave 1 body cap was wired only on
-	// `/auth/*` and missed this surface — closes the gap.
+	// `/auth/*` and missed this surface - closes the gap.
 	zitadelWebhookHandler := handlers.NewZitadelWebhookHandler()
 	zitadelActions := r.Group("/api/v2/zitadel/actions")
 	zitadelActions.Use(middleware.MaxBodyBytes(64 * 1024))
@@ -1422,7 +1422,7 @@ func ansibleEncryptionKeyBytes() []byte {
 
 // newWebhookTemplateLaunchService builds the job service used by VCS push
 // webhooks to launch templates with launch_on_webhook: full variable-set
-// merging, update-on-launch gating, and server-side clone-URL resolution —
+// merging, update-on-launch gating, and server-side clone-URL resolution -
 // identical semantics to UI launches.
 func newWebhookTemplateLaunchService(db *gorm.DB, q queue.Queue, vcsRegistry *vcs.ProviderRegistry, vcsConnectionRepo *repository.VCSConnectionRepository) *ansible.JobService {
 	encryptionKey := ansibleEncryptionKeyBytes()

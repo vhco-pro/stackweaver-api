@@ -36,7 +36,7 @@ func testingResetHandler(limiter *middleware.IPRateLimiter, proxy *v2handlers.Au
 		if os.Getenv("STACKWEAVER_ENV") != testingE2EEnvValue {
 			// Deliberately indistinguishable from an unregistered route so a
 			// misbuilt production binary behaves like a production binary.
-			// AbortWithStatus — c.Status alone is buffered until handler return,
+			// AbortWithStatus - c.Status alone is buffered until handler return,
 			// which test recorders read as the default 200.
 			c.AbortWithStatus(http.StatusNotFound)
 			return
@@ -55,7 +55,7 @@ func testingResetHandler(limiter *middleware.IPRateLimiter, proxy *v2handlers.Au
 			cleared = append(cleared, "loginname_lockout")
 		}
 
-		// Fixture user cleanup is tracked separately (F-pre-2) — it requires
+		// Fixture user cleanup is tracked separately (F-pre-2) - it requires
 		// calling Zitadel's user management API with a dedicated fixtures PAT.
 		// This handler is the hook the helper will grow into.
 		c.JSON(http.StatusOK, gin.H{

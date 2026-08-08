@@ -2,8 +2,8 @@
 
 // AUD-138 VCS-connection read authorization matrix. The repository/branch/
 // file-content read endpoints (and Get metadata) performed NO membership check,
-// so any authenticated caller — including JWT identities, which bypass the org
-// wall — could enumerate/read another tenant's private source through the victim
+// so any authenticated caller - including JWT identities, which bypass the org
+// wall - could enumerate/read another tenant's private source through the victim
 // org's decrypted VCS token by connection id. These tests drive the real handler
 // + real rbac.Service + real Postgres and assert cross-tenant and unauthenticated
 // callers are denied while a legitimate org member is allowed.
@@ -134,7 +134,7 @@ func TestVCSConnectionAuthz_CrossTenantDenied(t *testing.T) {
 }
 
 // TestVCSConnectionAuthz_MemberAllowed confirms a legitimate org member still reads
-// the connection metadata — the gate must not break the happy path.
+// the connection metadata - the gate must not break the happy path.
 func TestVCSConnectionAuthz_MemberAllowed(t *testing.T) {
 	f := setupVCSConnAuthzFixture(t)
 	if code := vcsConnReq(t, f, "/vcs-connections/"+f.connID.String(), f.member.ID); code != http.StatusOK {

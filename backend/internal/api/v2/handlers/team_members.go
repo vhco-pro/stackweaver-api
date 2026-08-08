@@ -41,7 +41,7 @@ func NewTeamMemberHandlerV2(
 }
 
 // requireTeamMembershipManagement gates team-membership mutations (AUD-003). The owners
-// team is only manageable by owners themselves — a ManageTeams/ManageMembership grant is
+// team is only manageable by owners themselves - a ManageTeams/ManageMembership grant is
 // not enough, since owners hold every permission and adding yourself would be escalation.
 // Other teams accept either org-level grant (TFE semantics). Writes the JSON:API error
 // response and returns false when the caller is not allowed.
@@ -141,7 +141,7 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 		return
 	}
 
-	// AUD-003 (read side): team rosters carry usernames + emails — tenant data.
+	// AUD-003 (read side): team rosters carry usernames + emails - tenant data.
 	// Require the caller to be a member of the team's organization.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
@@ -288,7 +288,7 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 		return
 	}
 
-	// AUD-003: mutating team membership requires team-management permission —
+	// AUD-003: mutating team membership requires team-management permission -
 	// without this check any org member could add themselves to the owners team.
 	if !h.requireTeamMembershipManagement(c, team) {
 		return
@@ -470,7 +470,7 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 		return
 	}
 
-	// AUD-003: removing members requires the same permission as adding them —
+	// AUD-003: removing members requires the same permission as adding them -
 	// without this check any org member could strip all owners from a team (lockout).
 	if !h.requireTeamMembershipManagement(c, team) {
 		return
@@ -539,19 +539,19 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 // resolveTeamMemberIdentifier resolves a tfe_team_members `usernames` entry to an existing user that
 // belongs to the team's organization. TFE addresses team members by a unique username; Stackweaver
 // provisions users from Zitadel without a populated username, so the identifier is resolved by EMAIL
-// (case-insensitive) — the stable, org-portable identity (documented divergence). The user must
+// (case-insensitive) - the stable, org-portable identity (documented divergence). The user must
 // already be a member of the team's organization (tenant safety: no cross-org resolution, and you add
 // existing org members to teams, matching TFE). Returns the user, or writes a JSON:API error + false.
 func (h *TeamMemberHandlerV2) resolveTeamMemberIdentifier(c *gin.Context, team *models.Team, identifier string) (*models.User, bool) {
 	user, err := h.userRepo.GetByEmailCaseInsensitive(identifier)
 	if err != nil || user == nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("No user found for %q — Stackweaver identifies team members by email; ensure the user exists and is a member of the organization", identifier)}}})
+		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("No user found for %q - Stackweaver identifies team members by email; ensure the user exists and is a member of the organization", identifier)}}})
 		return nil, false
 	}
 	// Tenant safety: the user must be a member of the team's organization. This both matches TFE
 	// (team members are drawn from org members) and prevents adding/probing users from other orgs.
 	if _, err := h.orgRepo.GetMember(team.OrganizationID, user.ID); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": fmt.Sprintf("User %q is not a member of this organization — add them to the organization before adding them to a team", identifier)}}})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": fmt.Sprintf("User %q is not a member of this organization - add them to the organization before adding them to a team", identifier)}}})
 		return nil, false
 	}
 	return user, true
@@ -660,7 +660,7 @@ func (h *TeamMemberHandlerV2) RemoveUsers(c *gin.Context) {
 		if userRef.Type != "users" {
 			continue
 		}
-		// Resolve by email but do NOT require current org membership on removal — a user removed from
+		// Resolve by email but do NOT require current org membership on removal - a user removed from
 		// the org should still be strippable from the team, and destroy paths must be forgiving.
 		user, err := h.userRepo.GetByEmailCaseInsensitive(userRef.ID)
 		if err != nil || user == nil {

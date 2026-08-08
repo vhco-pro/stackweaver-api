@@ -14,7 +14,7 @@ import (
 
 // Run-task access tokens (the `access_token` in the webhook payload). Same stateless HMAC design as
 // log tokens (AUD-045): payload `task-result:<taskrs-id>:<run-id>:<exp>` signed with the resolved
-// ENCRYPTION_KEY — no DB row, survives restarts, and even if it leaks it only authorizes ONE task
+// ENCRYPTION_KEY - no DB row, survives restarts, and even if it leaks it only authorizes ONE task
 // result's callback plus that run's plan-json/config-version downloads for its lifetime.
 //
 // TTL = the 60-minute hard execution cap: a service that has not called back within the cap has

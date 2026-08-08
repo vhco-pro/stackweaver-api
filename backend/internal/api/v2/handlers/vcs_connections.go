@@ -312,7 +312,7 @@ func (h *VCSConnectionHandlerV2) Delete(c *gin.Context) {
 }
 
 // requireOrgMembership gates an action on the caller being a member of orgID.
-// Writes the JSON:API error and returns false when unauthorized — 401 (no auth),
+// Writes the JSON:API error and returns false when unauthorized - 401 (no auth),
 // 403 (not a member). JWT/browser identities bypass the org-resolution wall, so
 // this per-handler check is the only defense for them.
 func (h *VCSConnectionHandlerV2) requireOrgMembership(c *gin.Context, orgID uuid.UUID) bool {
@@ -344,7 +344,7 @@ func (h *VCSConnectionHandlerV2) authorizeVCSConnectionRead(c *gin.Context, conn
 
 // getProvider resolves the ProviderService for a connection and handles error responses.
 // Returns nil if an error was written to c. It first enforces org membership
-// (AUD-138) — every provider-backed read goes through here, so this is the single
+// (AUD-138) - every provider-backed read goes through here, so this is the single
 // choke point that gates repository/branch/file-content listing.
 func (h *VCSConnectionHandlerV2) getProvider(c *gin.Context, connection *models.VCSConnection) vcs.ProviderService {
 	if !h.authorizeVCSConnectionRead(c, connection) {

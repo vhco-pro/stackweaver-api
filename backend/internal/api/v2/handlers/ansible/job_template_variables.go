@@ -50,7 +50,7 @@ func (h *JobTemplateVariableHandlerV2) SetRepositories(orgRepo *repository.Organ
 // authorizeTemplate loads the job template named by the :id path param and gates the
 // caller against it via the template's project-scoped RBAC. AUD-100: every method
 // here previously "checked RBAC" with only `c.Get("user_id")` (any authenticated
-// user, any org), because the handler was constructed with a nil rbacService — so
+// user, any org), because the handler was constructed with a nil rbacService - so
 // any JWT identity could read/mutate/delete extra-vars on any tenant's job template
 // by UUID. write=true requires job-template-write, else read. Returns the template
 // and true when authorized; writes the JSON:API error and returns false otherwise.

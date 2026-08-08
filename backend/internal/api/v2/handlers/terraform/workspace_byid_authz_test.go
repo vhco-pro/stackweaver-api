@@ -4,8 +4,8 @@
 // routes DeleteByID (DELETE /workspaces/:id), SafeDeleteByID (POST
 // /workspaces/:id/actions/safe-delete) and UpdateByID (PATCH /workspaces/:id)
 // performed NO RBAC check, while their org+name twins (Update/Delete) gate on
-// org-manage OR workspace-write. Any authenticated user — including JWT identities,
-// which bypass the org wall — could delete or reconfigure (repoint VCS repo, change
+// org-manage OR workspace-write. Any authenticated user - including JWT identities,
+// which bypass the org wall - could delete or reconfigure (repoint VCS repo, change
 // agent pool) any workspace by UUID. These tests drive the real handler + real
 // rbac.Service + real Postgres and assert cross-tenant and unauthenticated callers
 // are denied while a legitimate org member is allowed.
@@ -106,12 +106,12 @@ func setupWorkspaceByIDAuthzFixture(t *testing.T) *wsAuthzFixture {
 		orgRepo,
 		repository.NewVCSConnectionRepository(db),
 		repository.NewTeamRepository(db),
-		nil, // poolRepo — unused on the gated paths
-		nil, // runRepo — unused on the gated paths
+		nil, // poolRepo - unused on the gated paths
+		nil, // runRepo - unused on the gated paths
 		authService,
-		nil, // activityService — by-ID handlers don't log
+		nil, // activityService - by-ID handlers don't log
 		rbacService,
-		nil, // vcsRegistry — maybeRegisterADOWebhook is nil-safe
+		nil, // vcsRegistry - maybeRegisterADOWebhook is nil-safe
 		db,
 	)
 
@@ -179,7 +179,7 @@ func TestWorkspaceByIDAuthz_CrossTenantDenied(t *testing.T) {
 }
 
 // TestWorkspaceByIDAuthz_OwnerAllowed confirms a legitimate org member (owners team,
-// admin project access) can still update their own workspace by ID — the gate must
+// admin project access) can still update their own workspace by ID - the gate must
 // not break the happy path.
 func TestWorkspaceByIDAuthz_OwnerAllowed(t *testing.T) {
 	f := setupWorkspaceByIDAuthzFixture(t)

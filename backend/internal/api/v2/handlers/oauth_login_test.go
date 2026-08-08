@@ -30,7 +30,7 @@ func TestVerifyPKCE(t *testing.T) {
 		t.Error("verifyPKCE returned true for an empty challenge")
 	}
 
-	// A plain (non-S256) challenge equal to the verifier must be rejected — we
+	// A plain (non-S256) challenge equal to the verifier must be rejected - we
 	// only support S256, so a verifier can never equal its own challenge.
 	if verifyPKCE(verifier, verifier) {
 		t.Error("verifyPKCE accepted a plain challenge (S256 required)")

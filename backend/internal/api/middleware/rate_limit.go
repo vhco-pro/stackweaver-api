@@ -90,7 +90,7 @@ func (rl *IPRateLimiter) getLimiter(ip string) *rate.Limiter {
 }
 
 // Reset clears all per-IP rate-limit state. Intended for E2E test harnesses
-// to restore a clean slate between specs — never call from production code
+// to restore a clean slate between specs - never call from production code
 // paths. Guarded at the call site by the `e2e` build tag + runtime env check.
 func (rl *IPRateLimiter) Reset() {
 	rl.mu.Lock()

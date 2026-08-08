@@ -13,7 +13,7 @@ import (
 // GPGService validates GPG public keys and verifies detached signatures for the
 // provider registry's trust plane. All crypto is performed in-process with
 // github.com/ProtonMail/go-crypto (the maintained OpenPGP fork): it never shells
-// out to the gpg binary and, deliberately, never signs on a publisher's behalf —
+// out to the gpg binary and, deliberately, never signs on a publisher's behalf -
 // publishers sign SHA256SUMS offline and the server only verifies (AUD-106).
 type GPGService struct{}
 
@@ -23,7 +23,7 @@ func NewGPGService() *GPGService {
 }
 
 // ParseGPGKey validates an ASCII-armored GPG public key and returns its 16-character
-// (64-bit) long key ID in uppercase hex — the identifier the Terraform registry protocol
+// (64-bit) long key ID in uppercase hex - the identifier the Terraform registry protocol
 // keys signature verification on. It performs a structured OpenPGP parse and rejects
 // anything that is not a single, well-formed public key. There are deliberately no regex
 // fallbacks and no shelling out to the gpg binary, so arbitrary text can never be accepted
@@ -47,7 +47,7 @@ func (s *GPGService) ParseGPGKey(asciiArmor string) (keyID string, err error) {
 // VerifyDetachedSignature verifies that signature is a valid OpenPGP detached signature
 // over signed, produced by the private half of the key whose public half is publicKeyASCII.
 // The keyring is built from ONLY that one key, so a signature made by any other key is
-// rejected — the registry can therefore vouch that a published SHA256SUMS was signed by the
+// rejected - the registry can therefore vouch that a published SHA256SUMS was signed by the
 // exact GPG key registered to the org (AUD-106). Both binary and ASCII-armored detached
 // signatures are accepted; SHA256SUMS.sig is conventionally a binary detached signature.
 func (s *GPGService) VerifyDetachedSignature(publicKeyASCII string, signed, signature []byte) error {

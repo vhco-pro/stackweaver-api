@@ -16,7 +16,7 @@ import (
 // AUD-123: the Terraform registry-protocol endpoints (`/v1/providers`, `/v1/modules`) are
 // registered on the root engine with NO auth middleware, because genuinely-public providers
 // must stay anonymously reachable for `terraform init`. That left every PRIVATE provider and
-// (all) module readable and downloadable — binaries included — by any unauthenticated caller.
+// (all) module readable and downloadable - binaries included - by any unauthenticated caller.
 // These helpers gate the private artifacts per-resource: parse the optional Bearer token the
 // Terraform CLI sends for a private registry, and require org membership.
 
@@ -32,7 +32,7 @@ func registryBearerToken(c *gin.Context) string {
 
 // registryCaller resolves the (optional) authenticated user, or nil for an anonymous request.
 // It prefers a user already established on the context (if some upstream middleware ran), then
-// falls back to the Bearer token — the `/v1` groups have no AuthMiddleware, so the token path
+// falls back to the Bearer token - the `/v1` groups have no AuthMiddleware, so the token path
 // is the norm. It never writes a response.
 func registryCaller(c *gin.Context, authService *auth.Service) *models.User {
 	if user, err := authService.GetUserFromContext(c); err == nil && user != nil {
@@ -52,7 +52,7 @@ func registryCaller(c *gin.Context, authService *auth.Service) *models.User {
 // authorizeRegistryRead gates a registry-protocol read/download of an org-owned artifact.
 // A public artifact is always allowed. A private one requires a valid Bearer token whose user
 // belongs to the owning org: a missing/invalid token yields 401, and a valid token for a
-// non-member yields 404 — a non-member must not be able to confirm a private artifact exists.
+// non-member yields 404 - a non-member must not be able to confirm a private artifact exists.
 // On denial it writes the response and returns false; otherwise it returns true.
 func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *repository.OrganizationRepository, orgID uuid.UUID, public bool) bool {
 	if public {
@@ -72,7 +72,7 @@ func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *r
 }
 
 // registryAccessibleOrgs returns the subset of orgIDs the (optional) caller may see private
-// artifacts for — the orgs they are a member of. Used to filter list/search results so private
+// artifacts for - the orgs they are a member of. Used to filter list/search results so private
 // entries never leak to callers who are not members. An anonymous caller gets an empty set.
 // Membership is checked once per distinct org.
 func registryAccessibleOrgs(c *gin.Context, authService *auth.Service, orgRepo *repository.OrganizationRepository, orgIDs []uuid.UUID) map[uuid.UUID]bool {

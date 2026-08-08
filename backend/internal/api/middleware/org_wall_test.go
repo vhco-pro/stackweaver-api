@@ -366,7 +366,7 @@ func TestOrgWall_ProjectScopedTokenDefersToHandler(t *testing.T) {
 }
 
 // AUD-042: a token bound to the target org whose scopes are malformed cannot be
-// authorized — it must fail closed for mutating methods (previously it failed
+// authorized - it must fail closed for mutating methods (previously it failed
 // open and was allowed to write).
 func TestOrgWall_MalformedScopeDeniedWrite(t *testing.T) {
 	org := uuid.New()
@@ -391,7 +391,7 @@ func TestOrgWall_MalformedScopeDeniedWrite(t *testing.T) {
 }
 
 // A malformed-scope token may still perform reads (the token is bound to this org
-// and reads are lower risk) — only mutations fail closed.
+// and reads are lower risk) - only mutations fail closed.
 func TestOrgWall_MalformedScopeAllowedRead(t *testing.T) {
 	org := uuid.New()
 	key := &models.APIKey{
@@ -416,7 +416,7 @@ func TestOrgWall_MalformedScopeAllowedRead(t *testing.T) {
 
 // AUD-042: a token bound to the target org but carrying no scope applicable to it
 // (no org-level scope for this org, no project/team scope) has no basis to mutate
-// — it must fail closed for mutating methods rather than defer to a handler.
+// - it must fail closed for mutating methods rather than defer to a handler.
 func TestOrgWall_NoApplicableScopeDeniedWrite(t *testing.T) {
 	org := uuid.New()
 	otherOrg := uuid.New()
@@ -440,7 +440,7 @@ func TestOrgWall_NoApplicableScopeDeniedWrite(t *testing.T) {
 	}
 }
 
-// An unrestricted (empty-scopes) org-bound token retains full access — the
+// An unrestricted (empty-scopes) org-bound token retains full access - the
 // backward-compatible default must not be tightened by AUD-042.
 func TestOrgWall_UnrestrictedTokenAllowedWrite(t *testing.T) {
 	org := uuid.New()

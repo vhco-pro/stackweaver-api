@@ -132,7 +132,7 @@ func TestRunnerAuthz_AuthorizeRun(t *testing.T) {
 	}{
 		// The crown-jewel denial: a runner in org B must never touch org A's run.
 		{"cross-org runner denied (artifacts)", f.runnerB1, &assignedRun, false, false},
-		// Same org, same pool, but not the assignee — denied once the run is claimed.
+		// Same org, same pool, but not the assignee - denied once the run is claimed.
 		{"non-assignee same-org runner denied", f.runnerA2, &assignedRun, false, false},
 		// The assigned runner is allowed.
 		{"assigned runner allowed", f.runnerA1, &assignedRun, false, true},

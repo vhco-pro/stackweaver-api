@@ -41,7 +41,7 @@ func TestFormatGPGKeyResponse_TFEShape(t *testing.T) {
 		t.Fatalf("attributes has unexpected type %T", resp["attributes"])
 	}
 
-	// Kebab-case attribute names only — the provider unmarshals via jsonapi kebab tags.
+	// Kebab-case attribute names only - the provider unmarshals via jsonapi kebab tags.
 	wantAttrs := map[string]any{
 		"ascii-armor":     key.ASCIIArmor,
 		"key-id":          "9FC214C0",

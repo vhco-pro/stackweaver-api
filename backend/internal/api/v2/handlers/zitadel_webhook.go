@@ -58,22 +58,22 @@ func NewZitadelWebhookHandler() *ZitadelWebhookHandler {
 // returned `true` on signature mismatch (only logged a warning) and
 // also returned `true` when no signing key was configured. The
 // /zitadel/webhooks/{idp-sync,complement-token} endpoints are on the
-// public API surface — anyone could POST forged IdP claims (e.g.
+// public API surface - anyone could POST forged IdP claims (e.g.
 // fake group membership) and the team-syncer would honour them,
 // bypassing RBAC. Now we hard-reject on either condition. In
 // production, missing signing key is also a fatal misconfiguration.
 func verifySignature(sigHeader, rawBody, signingKey string, isProduction bool) bool {
 	if signingKey == "" {
 		if isProduction {
-			logger.Errorf("Zitadel webhook: signing key MISSING in production — refusing webhook (set ZITADEL_WEBHOOK_*_KEY)")
+			logger.Errorf("Zitadel webhook: signing key MISSING in production - refusing webhook (set ZITADEL_WEBHOOK_*_KEY)")
 		} else {
-			logger.Warnf("Zitadel webhook: no signing key configured — refusing webhook (set ZITADEL_WEBHOOK_*_KEY to enable)")
+			logger.Warnf("Zitadel webhook: no signing key configured - refusing webhook (set ZITADEL_WEBHOOK_*_KEY to enable)")
 		}
 		return false
 	}
 
 	if sigHeader == "" {
-		logger.Warnf("Zitadel webhook: missing zitadel-signature header — refusing webhook")
+		logger.Warnf("Zitadel webhook: missing zitadel-signature header - refusing webhook")
 		return false
 	}
 
@@ -100,21 +100,21 @@ func verifySignature(sigHeader, rawBody, signingKey string, isProduction bool) b
 	computed := hex.EncodeToString(mac.Sum(nil))
 
 	if !hmac.Equal([]byte(computed), []byte(signature)) {
-		logger.Warnf("Zitadel webhook: signature mismatch — refusing webhook")
+		logger.Warnf("Zitadel webhook: signature mismatch - refusing webhook")
 		return false
 	}
 
 	// AUD-041: the signature proves the request is authentic but not that it is recent.
 	// The timestamp is inside the HMAC (so it cannot be altered without the key), yet a
-	// captured valid request could be replayed indefinitely — re-driving sso_groups/RBAC
+	// captured valid request could be replayed indefinitely - re-driving sso_groups/RBAC
 	// sync. Reject when the signed timestamp is outside ±5 minutes of now.
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
-		logger.Warnf("Zitadel webhook: unparseable timestamp %q — refusing webhook", timestamp)
+		logger.Warnf("Zitadel webhook: unparseable timestamp %q - refusing webhook", timestamp)
 		return false
 	}
 	if age := time.Since(time.Unix(ts, 0)); age > webhookTolerance || age < -webhookTolerance {
-		logger.Warnf("Zitadel webhook: timestamp outside tolerance (age %s) — refusing replay", age.Round(time.Second))
+		logger.Warnf("Zitadel webhook: timestamp outside tolerance (age %s) - refusing replay", age.Round(time.Second))
 		return false
 	}
 
@@ -284,7 +284,7 @@ func extractGroupsFromOAuthTokens(idpInfo map[string]interface{}) []string {
 	return nil
 }
 
-// extractGroupsFromJWT decodes a JWT payload (without verification — we trust Zitadel)
+// extractGroupsFromJWT decodes a JWT payload (without verification - we trust Zitadel)
 // and extracts group claims.
 func extractGroupsFromJWT(token, tokenName string) []string {
 	parts := strings.Split(token, ".")

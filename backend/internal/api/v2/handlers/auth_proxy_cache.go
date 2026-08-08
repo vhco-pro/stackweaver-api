@@ -15,7 +15,7 @@ import (
 //
 // Each entry keeps the fresh payload and expiry so hot reads need no I/O, plus
 // a separate stalePayload copy that survives past expiry. When Zitadel returns
-// a 5xx we'd rather hand the SPA a slightly stale set of flags than a 502 — a
+// a 5xx we'd rather hand the SPA a slightly stale set of flags than a 502 - a
 // cached loginSettings from 20 minutes ago still renders the login form; a 502
 // bricks it. The stale copy is trimmed back to a ceiling so we don't serve
 // arbitrarily old data.
@@ -33,16 +33,16 @@ type settingsCacheEntry struct {
 // The previous version had no eviction beyond TTL on the assumption that
 // the key space was fixed (8 endpoints × low-cardinality org scope).
 // But the cache key includes `ctx.orgId`, which is read from a query
-// parameter on unauthenticated `/auth/settings/*` endpoints — so an
+// parameter on unauthenticated `/auth/settings/*` endpoints - so an
 // attacker can mint unique `ctx.orgId` values to fill the cache. The
 // LRU cap prevents memory exhaustion.
 //
 // Single-flight on misses (F-chaos-2 hardening item 1) is still
-// deferred — the thundering-herd test hasn't shown it matters in
+// deferred - the thundering-herd test hasn't shown it matters in
 // practice, and the LRU eviction is orthogonal to that work.
 //
 // The full reject-unknown-`ctx.orgId` half of R25c H-1 is deferred
-// until item 21 (LookupOrgByDomain TTL cache) lands — without a known-
+// until item 21 (LookupOrgByDomain TTL cache) lands - without a known-
 // org set, the only fail-closed option is "reject every ctx.orgId
 // from unauth callers," which would break the SPA's per-org branding
 // lookup. The LRU cap alone bounds the attacker's blast radius.
@@ -60,7 +60,7 @@ type settingsCache struct {
 	// Round 25 Wave 8 (item 1 / F-chaos-2): singleflight deduplicates
 	// concurrent cache misses for the same key. Without it, 50
 	// concurrent cold-cache requests for `/v2/settings/login` produced
-	// 50 upstream Zitadel fetches — a thundering-herd amplifier.
+	// 50 upstream Zitadel fetches - a thundering-herd amplifier.
 	// `singleflight.Group.Do` ensures all concurrent callers for the
 	// same key wait on a single in-flight upstream fetch and share
 	// the result.
@@ -104,7 +104,7 @@ func (s *settingsCache) get(key string) ([]byte, bool) {
 		s.misses.Add(1)
 		return nil, false
 	}
-	// Touch — a cache hit moves the entry to the MRU front.
+	// Touch - a cache hit moves the entry to the MRU front.
 	s.lru.MoveToFront(el)
 	s.hits.Add(1)
 	return entry.payload, true
@@ -123,7 +123,7 @@ func (s *settingsCache) stale(key string) ([]byte, bool) {
 	if len(entry.stalePayload) == 0 || time.Now().After(entry.staleUntil) {
 		return nil, false
 	}
-	// Touch — serving the stale entry indicates it's still useful.
+	// Touch - serving the stale entry indicates it's still useful.
 	s.lru.MoveToFront(el)
 	s.staleServed.Add(1)
 	return entry.stalePayload, true
@@ -134,7 +134,7 @@ func (s *settingsCache) stale(key string) ([]byte, bool) {
 // On insert overflow, the LRU entry is evicted.
 func (s *settingsCache) set(key string, payload []byte, ttl time.Duration) {
 	now := time.Now()
-	// Defensive copy — callers pass slices that may be reused.
+	// Defensive copy - callers pass slices that may be reused.
 	buf := make([]byte, len(payload))
 	copy(buf, payload)
 
@@ -197,7 +197,7 @@ func (s *settingsCache) Metrics() SettingsCacheMetrics {
 // 25 Wave 8 (item 1 / F-chaos-2). The returned error is whatever `fn`
 // returned (or a singleflight forwarding error). The boolean reports
 // whether the caller was the leader (true) or a piggy-backer (false)
-// — used by the metrics counters.
+// - used by the metrics counters.
 func (s *settingsCache) fetchOrShare(key string, fn func() (any, error)) (any, bool, error) {
 	leader := false
 	v, err, shared := s.flight.Do(key, func() (any, error) {
@@ -218,7 +218,7 @@ func (s *settingsCache) fetchOrShare(key string, fn func() (any, error)) (any, b
 // The exact paths here are the ones Zitadel v4 actually exposes (verified
 // against a live v4.13 instance). An earlier plan iteration used
 // camelCase variants (`passwordComplexitySettings`, `legalAndSupportSettings`)
-// that returned 404 — fixed during Phase-A re-verification.
+// that returned 404 - fixed during Phase-A re-verification.
 var settingsTTL = map[string]time.Duration{
 	"/v2/settings/login":               15 * time.Minute,
 	"/v2/settings/branding":            1 * time.Hour,

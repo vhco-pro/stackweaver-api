@@ -114,7 +114,7 @@ type projectSettingOverwritesReq struct {
 
 // tagBindingsRel captures the `tag-bindings` relationship in a project/workspace request. The tfe
 // provider serialises the `tags` map here with the key/value INLINE in each relationship-data member's
-// attributes (a non-standard JSON:API shape — the attributes are not sideloaded into top-level
+// attributes (a non-standard JSON:API shape - the attributes are not sideloaded into top-level
 // `included`).
 type tagBindingsRel struct {
 	TagBindings *struct {
@@ -185,7 +185,7 @@ func (r *UpdateProjectRequestV2) tagsPresent() bool {
 // orgName is the organization name (not UUID) as TFE uses organization name as the primary identifier
 func formatProjectResponse(project *models.Project, orgName string) gin.H {
 	// TFE tfe_project_settings: default workspace execution settings on the project. setting-overwrites
-	// tells the provider which values the project specifies itself (vs. deferring to org defaults) —
+	// tells the provider which values the project specifies itself (vs. deferring to org defaults) -
 	// mirrors the per-workspace overwrite logic (a non-remote mode / a set pool is an explicit overwrite).
 	execMode := project.DefaultExecutionMode
 	if execMode == "" {
@@ -559,7 +559,7 @@ func (h *ProjectHandlerV2) GetByID(c *gin.Context) {
 
 	data := formatProjectResponseWithCounts(project, org.Name)
 	resp := gin.H{"data": data}
-	// TFE ?include=effective-tag-bindings — the provider's tfe_project resource + data.tfe_project read
+	// TFE ?include=effective-tag-bindings - the provider's tfe_project resource + data.tfe_project read
 	// the project's tags this way. A project's effective tags equal its own bindings.
 	if includeHasEffectiveTagBindings(c) {
 		bindings, _ := h.tagRepo.ListByProject(project.ID)

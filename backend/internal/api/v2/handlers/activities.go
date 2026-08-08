@@ -118,7 +118,7 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		}
 	}
 	// With no authorized org/workspace scope, a caller may only see their own
-	// rows — this both preserves the "my activities" default and prevents a bare
+	// rows - this both preserves the "my activities" default and prevents a bare
 	// user_id filter from reading another user's activity.
 	if orgID == nil && workspaceID == nil {
 		userID = &user.ID

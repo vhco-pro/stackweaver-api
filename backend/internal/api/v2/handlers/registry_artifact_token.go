@@ -14,13 +14,13 @@ import (
 
 // AUD-123 gated the Terraform provider-install byte-stream endpoints (binary / SHA256SUMS / .sig)
 // on org membership. But the provider-install protocol fetches the download_url / shasums_url /
-// shasums_signature_url WITHOUT sending registry credentials — Terraform treats them as opaque
+// shasums_signature_url WITHOUT sending registry credentials - Terraform treats them as opaque
 // artifact links (exactly as HashiCorp's TFE hands back separately-signed CDN URLs). So membership
 // gating those URLs broke `terraform init` for private providers: the SHASUMS fetch 401s.
 //
 // The fix keeps AUD-123's gate for direct access while restoring install: the AUTHENTICATED metadata
-// endpoint (DownloadProvider) embeds a short-TTL capability token — scoped to a single provider
-// version and HMAC-signed with the deployment's ENCRYPTION_KEY — in those URLs, and the stream
+// endpoint (DownloadProvider) embeds a short-TTL capability token - scoped to a single provider
+// version and HMAC-signed with the deployment's ENCRYPTION_KEY - in those URLs, and the stream
 // endpoints accept a valid token as an ALTERNATIVE to membership. Only a caller who already passed
 // the membership check on the metadata endpoint receives working artifact URLs, so a non-member
 // still cannot download a private binary.

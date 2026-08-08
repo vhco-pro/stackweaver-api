@@ -19,7 +19,7 @@ import (
 )
 
 // maskedValue is the placeholder returned for a sensitive variable value on every read
-// path — the real value is never sent to clients (TFE-compatible). It is defined once so
+// path - the real value is never sent to clients (TFE-compatible). It is defined once so
 // the write paths (AUD-105) can reliably detect a round-tripped masked value and skip it.
 const maskedValue = "••••••••"
 
@@ -60,7 +60,7 @@ func NewVariableSetHandlerV2(
 }
 
 // encryptVarsetValue encrypts a variable-set variable's value in place when it is
-// sensitive, setting the Encrypted flag — mirroring the workspace-variable path
+// sensitive, setting the Encrypted flag - mirroring the workspace-variable path
 // (variable.Service.CreateVariable). Non-sensitive values are stored verbatim with
 // Encrypted=false. When no variable service is configured the value is left as-is so
 // callers degrade to the previous (plaintext) behavior rather than erroring; in
@@ -84,8 +84,8 @@ func (h *VariableSetHandlerV2) encryptVarsetValue(v *models.VariableSetVariable)
 // variable set at the given level ("read"/"write") via rbac.CheckVariableSetPermission.
 // It writes the JSON:API error and returns false when unauthorized. AUD-101: every
 // endpoint here previously fetched the user and then discarded it (`_ = user`) under a
-// TODO, so any authenticated JWT identity could read/write variable sets — including
-// by-ID routes that carry no org name — in any organization.
+// TODO, so any authenticated JWT identity could read/write variable sets - including
+// by-ID routes that carry no org name - in any organization.
 func (h *VariableSetHandlerV2) authorizeVarset(c *gin.Context, userID uuid.UUID, variableSet *models.VariableSet, level string) bool {
 	allowed, err := h.rbacService.CheckVariableSetPermission(c.Request.Context(), userID, variableSet, level)
 	if err != nil {
@@ -395,7 +395,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	}
 
 	// Get organization for relationships if not already retrieved (AUD-129: a missing
-	// org row is an internal FK inconsistency, not a client error — fail loudly rather
+	// org row is an internal FK inconsistency, not a client error - fail loudly rather
 	// than nil-deref on org.Name below).
 	if org == nil {
 		org, err = h.orgRepo.GetByID(variableSet.OrganizationID)
@@ -1915,7 +1915,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	}
 	// AUD-105: a nil value means "unchanged"; a value equal to the masked placeholder means
 	// the client round-tripped a masked read (the SPA and the TFE provider resubmit the whole
-	// resource when editing an unrelated field) — writing it would silently overwrite the real
+	// resource when editing an unrelated field) - writing it would silently overwrite the real
 	// secret with bullets and break every consuming run. Only overwrite when a genuine new
 	// value is supplied, and (AUD-104) encrypt it at rest when sensitive. Leaving the value
 	// untouched preserves the existing stored ciphertext/plaintext and its Encrypted flag.

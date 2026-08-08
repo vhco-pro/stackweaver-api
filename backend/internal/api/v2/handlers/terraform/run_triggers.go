@@ -203,7 +203,7 @@ func (h *RunTriggerHandlerV2) Delete(c *gin.Context) {
 	rt, err := h.runTriggerRepo.GetByID(c.Param("id"))
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			// Already gone — idempotent for destroy.
+			// Already gone - idempotent for destroy.
 			c.Status(http.StatusNoContent)
 			return
 		}

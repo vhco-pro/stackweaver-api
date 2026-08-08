@@ -11,7 +11,7 @@ import (
 )
 
 // OIDCWellKnownHandler serves the OIDC discovery endpoints.
-// These are unauthenticated — Azure AD calls them to validate workload identity tokens.
+// These are unauthenticated - Azure AD calls them to validate workload identity tokens.
 type OIDCWellKnownHandler struct {
 	signingKey *oidc.SigningKey
 	issuerURL  string

@@ -22,13 +22,13 @@ const CallingRunnerKey = "calling_runner"
 // self-hosted runner and rejects everyone else.
 //
 // AUD-001: the runner job handlers previously trusted a runner_id supplied in the
-// request body and were classified agnostic() in the org wall — so any authenticated
+// request body and were classified agnostic() in the org wall - so any authenticated
 // principal (including plain JWT browser sessions) could pull another tenant's
 // decrypted credentials/OIDC tokens, overwrite state, or forge job output. This
 // middleware closes that by requiring an API-key identity whose scopes bind it to
 // exactly one runner (minted at registration via apikey.CreateRunnerToken). The
 // resolved runner is the ONLY identity the handlers trust; the body runner_id is
-// no longer authoritative. JWT/browser identities are refused outright — they have
+// no longer authoritative. JWT/browser identities are refused outright - they have
 // no business on the runner control plane.
 //
 // The /runner/register route is exempt (a runner has no identity yet): it stays on
@@ -87,7 +87,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 
 		runner, err := runnerRepo.GetByID(runnerID)
 		if err != nil || runner == nil {
-			// The runner the token names no longer exists — treat as unauthorized.
+			// The runner the token names no longer exists - treat as unauthorized.
 			logger.Debugf("RunnerAuth: token references unknown runner %s: %v", runnerID, err)
 			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{
 				"status": "401", "title": "Unauthorized", "detail": "runner not found",

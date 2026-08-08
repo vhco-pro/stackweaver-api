@@ -4,7 +4,7 @@ package middleware
 
 import "github.com/google/uuid"
 
-// resolver adapters — one per resource type. Each wraps an OrgResolver
+// resolver adapters - one per resource type. Each wraps an OrgResolver
 // method so a route entry can reference it by value.
 var (
 	rOrgMembership          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByOrgMembershipID(v) }
@@ -264,7 +264,7 @@ var wallRegistry = map[string]routeEntry{
 	// middleware.RunnerAuth, which authenticates the caller as one specific runner
 	// (via its runner-scoped token) and rejects JWT/browser identities. The handlers
 	// then bind each job to the runner's org/pool/assignment, so the wall treats
-	// them as agnostic — org resolution happens against the runner identity.
+	// them as agnostic - org resolution happens against the runner identity.
 	"/api/v2/runner/register":           agnostic(),
 	"/api/v2/runner/heartbeat":          agnostic(),
 	"/api/v2/runner/deregister":         agnostic(),
@@ -293,7 +293,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/ansible/credentials": orgByName(),
 	"/api/v2/ansible/credentials/:id":                 resource("id", rAnsibleCredential),
 
-	// --- ansible: org-wall gap closure (#615) — routes added without
+	// --- ansible: org-wall gap closure (#615) - routes added without
 	// classification; the fail-closed wall 403'd every api-key token here. ---
 	"/api/v2/organizations/:name/ansible/adhoc-modules":                           orgByName(),
 	"/api/v2/organizations/:name/ansible/vcs-playbook-files":                      orgByName(),
@@ -373,7 +373,7 @@ func orgListCreate() routeEntry { return routeEntry{agnostic: true} }
 // WallClassified reports whether a gin route pattern is classified in the
 // org-resolution wall registry. Exported for the registry-completeness test
 // (routes package), which walks the real engine's routes and fails on any
-// walled /api/v2 route missing from the registry — the fail-closed wall turns
+// walled /api/v2 route missing from the registry - the fail-closed wall turns
 // an unclassified route into a 403 for every api-key token (#615), so gaps
 // must surface at test time, not in production automation.
 func WallClassified(fullPath string) bool {

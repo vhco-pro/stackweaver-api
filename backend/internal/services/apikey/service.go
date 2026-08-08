@@ -77,10 +77,10 @@ func GetKeyPrefix(key string) string {
 //
 // Every API key MUST be bound to exactly one organization (single-org token
 // invariant). A key with no scopes, or whose scopes do not resolve to an
-// organization, is rejected — there is no instance-wide token for non-admins.
+// organization, is rejected - there is no instance-wide token for non-admins.
 func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, expiresAt *time.Time) (*models.APIKey, string, error) {
 	// Reject empty/nil scopes outright. Under the single-org token model an
-	// empty scope means "deny", not "full access" — the caller must declare a
+	// empty scope means "deny", not "full access" - the caller must declare a
 	// scope that binds the key to an organization.
 	if len(scopes) == 0 {
 		return nil, "", fmt.Errorf("API key must declare at least one scope bound to an organization")
@@ -198,7 +198,7 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 
 	// Enforce the single-org token invariant: the scopes must resolve to exactly
 	// one organization. A key that binds to no org (e.g. only legacy/user/wildcard
-	// scopes) is rejected — there is no instance-wide token for non-admins.
+	// scopes) is rejected - there is no instance-wide token for non-admins.
 	if orgID == nil {
 		return nil, "", fmt.Errorf("API key must be scoped to exactly one organization (use an org, project, or team scope)")
 	}
@@ -225,7 +225,7 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 	return apiKey, key, nil
 }
 
-// CreateUserToken creates a user-bound (acts-as-user) token — the personal
+// CreateUserToken creates a user-bound (acts-as-user) token - the personal
 // access / `terraform login` token. Unlike an org-bound API key it is NOT
 // pinned to a single organization: it is authorized by the owning user's
 // organization memberships at the request boundary. It therefore carries no
@@ -282,7 +282,7 @@ func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name stri
 		return nil, "", fmt.Errorf("failed to hash runner token: %w", err)
 	}
 
-	// Explicit per-permission runner scopes (no wildcards — those are rejected by
+	// Explicit per-permission runner scopes (no wildcards - those are rejected by
 	// the scope validator). GetScopedRunners keys off the "runner" scope type, so
 	// any of these lets the runner-auth middleware recover this runner's id.
 	scopes := models.StringArray{

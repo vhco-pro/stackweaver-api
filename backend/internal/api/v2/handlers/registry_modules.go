@@ -199,7 +199,7 @@ func (h *RegistryModuleHandler) GetModule(c *gin.Context) {
 		})
 		return
 	}
-	// AUD-123: every module belongs to an org's private registry — gate on membership.
+	// AUD-123: every module belongs to an org's private registry - gate on membership.
 	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
 		return
 	}
@@ -286,7 +286,7 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 		return
 	}
 
-	// Track download asynchronously. AUD-062: capture request-derived values before the goroutine —
+	// Track download asynchronously. AUD-062: capture request-derived values before the goroutine -
 	// gin pools and reuses *gin.Context after the handler returns, so reading c inside the goroutine
 	// is a data race.
 	ipAddress := c.ClientIP()

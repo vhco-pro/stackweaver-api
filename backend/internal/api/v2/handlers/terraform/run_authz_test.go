@@ -2,8 +2,8 @@
 
 // AUD-010 run control-plane authorization matrix. The run action/read endpoints
 // (Get/GetPlan/GetLogs/GetApply/GetPlanLogs/GetApplyLogs/Cancel/Discard/ForceCancel/
-// ForceExecute) performed NO RBAC check, so any authenticated user — including JWT
-// identities, which bypass the org wall — could read another tenant's plan/apply
+// ForceExecute) performed NO RBAC check, so any authenticated user - including JWT
+// identities, which bypass the org wall - could read another tenant's plan/apply
 // logs or cancel/discard/force-execute their runs by run id. These tests drive the
 // real handler + real rbac.Service + real Postgres and assert cross-tenant and
 // unauthenticated callers are denied while a legitimate org member is allowed.
@@ -169,7 +169,7 @@ func TestRunAuthz_CrossTenantDenied(t *testing.T) {
 }
 
 // TestRunAuthz_OwnerAllowedRead confirms a legitimate org member (owners team) still
-// reads their own run — the gate must not break the happy path.
+// reads their own run - the gate must not break the happy path.
 func TestRunAuthz_OwnerAllowedRead(t *testing.T) {
 	f := setupRunAuthzFixture(t)
 	if code := runAuthzReq(t, f, http.MethodGet, "/runs/"+f.runID, f.owner.ID); code != http.StatusOK {

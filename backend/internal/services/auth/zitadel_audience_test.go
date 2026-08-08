@@ -3,7 +3,7 @@
 // AUD-012 audience enforcement. VerifyToken previously discarded the audience-check error,
 // so any token signed by the same Zitadel instance (for any client/project) authenticated
 // and auto-provisioned a user. Real user access tokens are issued to the frontend PKCE
-// client, so their `aud` carries the frontend client id — enforcement must accept that while
+// client, so their `aud` carries the frontend client id - enforcement must accept that while
 // rejecting tokens minted for other clients.
 
 package auth

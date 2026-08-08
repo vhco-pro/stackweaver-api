@@ -98,7 +98,7 @@ func TestCSRF_AllowsPOSTWithNoOriginNoReferer(t *testing.T) {
 	r := setupCSRFRouter([]string{"http://localhost:5173"})
 	w := httptest.NewRecorder()
 	req := newReq(http.MethodPost, "/auth/sessions", strings.NewReader("{}"))
-	// No Origin, no Referer — direct API call (curl, etc.)
+	// No Origin, no Referer - direct API call (curl, etc.)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {

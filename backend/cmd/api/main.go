@@ -135,7 +135,7 @@ func main() {
 	rebuildCompositeIndex("idx_project_playbook", "project_id")
 	rebuildCompositeIndex("idx_project_template", "project_id")
 	// AUD-019: the same single-column-index accident affected workspace, runner,
-	// Ansible credential and Ansible inventory names — all globally unique instead
+	// Ansible credential and Ansible inventory names - all globally unique instead
 	// of scoped to their project/organization. Drop the legacy indexes so AutoMigrate
 	// rebuilds them as the intended composite (scope, name) indexes.
 	rebuildCompositeIndex("idx_project_workspace", "project_id")
@@ -149,7 +149,7 @@ func main() {
 
 	// queued_at (NULL = held by the template concurrency gate) is introduced by
 	// this release. Detect whether the column predates this startup so jobs
-	// created before the column existed can be backfilled exactly once below —
+	// created before the column existed can be backfilled exactly once below -
 	// without the backfill they would all look "held" and be re-dispatched.
 	var hasQueuedAt bool
 	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ansible_jobs' AND column_name = 'queued_at')").Scan(&hasQueuedAt).Error; err != nil {
@@ -159,7 +159,7 @@ func main() {
 
 	// Notification dispatch markers are introduced by this release. Detect
 	// whether they predate this startup so pre-existing finished jobs can be
-	// marked notified exactly once below — otherwise attaching a notification
+	// marked notified exactly once below - otherwise attaching a notification
 	// channel later would replay every historical job as a fresh notification.
 	var hasNotifyMarkers bool
 	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ansible_jobs' AND column_name = 'notified_finished_at')").Scan(&hasNotifyMarkers).Error; err != nil {
@@ -178,7 +178,7 @@ func main() {
 
 	// run_triggers (tfe_run_trigger) + runs.run_triggers_fired_at are introduced by this release. Detect
 	// whether the marker column predates this startup so pre-existing applied runs can be marked
-	// already-fired exactly once below — otherwise the run-trigger worker would replay every historical
+	// already-fired exactly once below - otherwise the run-trigger worker would replay every historical
 	// apply as a fresh downstream run on upgrade.
 	var hasRunTriggersFired bool
 	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'runs' AND column_name = 'run_triggers_fired_at')").Scan(&hasRunTriggersFired).Error; err != nil {
@@ -188,7 +188,7 @@ func main() {
 
 	// AUD-150: variable_sets.global is introduced by this release. It decouples the TFE `global` flag
 	// from ownership (previously both were crammed into `scope`). Detect whether the column predates
-	// this startup so legacy rows can be backfilled exactly once below — without it every legacy set
+	// this startup so legacy rows can be backfilled exactly once below - without it every legacy set
 	// would read global=false and org-wide sets would stop applying to all workspaces.
 	var hasVarsetGlobal bool
 	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'variable_sets' AND column_name = 'global')").Scan(&hasVarsetGlobal).Error; err != nil {
@@ -218,7 +218,7 @@ func main() {
 	if err := db.Raw("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_users_email'").Scan(&emailIdxDef).Error; err != nil {
 		logger.Warnf("Failed to inspect idx_users_email: %v", err)
 	} else if emailIdxDef != "" && !strings.Contains(emailIdxDef, "WHERE") {
-		// Legacy full unique index — drop it so the partial index below replaces it.
+		// Legacy full unique index - drop it so the partial index below replaces it.
 		if err := db.Exec("DROP INDEX IF EXISTS idx_users_email").Error; err != nil {
 			logger.Warnf("Failed to drop legacy idx_users_email: %v", err)
 		} else {
@@ -298,7 +298,7 @@ func main() {
 	}
 
 	// Schedules consolidation: the embedded per-template cron fields were never
-	// executed by anything — migrate them into real AnsibleSchedule rows (which
+	// executed by anything - migrate them into real AnsibleSchedule rows (which
 	// the scheduler does run) and switch the embedded flag off. Idempotent:
 	// after the first run no template has schedule_enabled set.
 	if err := db.Exec(`
@@ -317,7 +317,7 @@ func main() {
 	// State Storage Rework: object storage is now the single source of truth for raw state.
 	// The legacy state_versions.state_data jsonb column is dropped. On a deployment upgrading
 	// from an older release the column still exists with data, so FIRST materialize any
-	// not-yet-materialized history from it (raw SQL — the model no longer maps the column),
+	// not-yet-materialized history from it (raw SQL - the model no longer maps the column),
 	// THEN drop it. Guarded by column existence so this is a no-op on already-migrated DBs.
 	{
 		var hasStateDataCol bool
@@ -405,15 +405,15 @@ func main() {
 
 	// AUD-023: reconcile foreign-key ON DELETE behavior. GORM's AutoMigrate creates foreign keys
 	// but never alters an existing constraint's ON DELETE clause, so every historical constraint is
-	// NO ACTION — which is why deleting a parent relied on long, hand-ordered manual cascades in the
+	// NO ACTION - which is why deleting a parent relied on long, hand-ordered manual cascades in the
 	// repositories (fragile: one missed child orphans rows or wedges the delete). This converts each
 	// constraint to its intended behavior so the database enforces integrity as a backstop, covering
-	// the full organization/project object graph (an interconnected closure — it must be converted as
+	// the full organization/project object graph (an interconnected closure - it must be converted as
 	// one consistent set, since a partial conversion would make a parent delete fail against a
 	// leftover NO ACTION reference). The rules (see models.FKDeleteRules):
 	//   - CASCADE for compositions and junction rows (a child that cannot exist without its parent),
 	//     so a single DELETE reaches every descendant.
-	//   - SET NULL for nullable references whose row outlives the parent — critically the org-scoped
+	//   - SET NULL for nullable references whose row outlives the parent - critically the org-scoped
 	//     resources (schedules, variable sets, workflows, inventories, credentials, configs) that
 	//     survive a *project* delete but point at project-scoped rows being removed; without SET NULL
 	//     those surviving references would block the delete.
@@ -433,7 +433,7 @@ func main() {
 			return
 		}
 		if def == "" {
-			return // constraint absent on this schema variant — nothing to reconcile
+			return // constraint absent on this schema variant - nothing to reconcile
 		}
 		want := "ON DELETE " + behavior
 		if strings.Contains(def, want) {
@@ -456,7 +456,7 @@ func main() {
 		}
 	}
 	// Some pure GORM many-to-many join tables (variable_set_projects, variable_set_workspaces) are
-	// created with NO foreign keys at all on a fresh migrate — so deleting a variable set, project,
+	// created with NO foreign keys at all on a fresh migrate - so deleting a variable set, project,
 	// or workspace leaves orphaned join rows (the reconciliation below can only convert constraints
 	// that already exist). Older DBs migrated by earlier GORM versions do have these FKs (as
 	// NO ACTION), so this only creates what is missing; existing constraints are left for the
@@ -537,7 +537,7 @@ func main() {
 	authService.RegisterAudience(zitadelClientID)
 	zitadelFrontendClientID := os.Getenv("ZITADEL_FRONTEND_CLIENT_ID")
 	if zitadelFrontendClientID == "" {
-		logger.Warn("ZITADEL_FRONTEND_CLIENT_ID not set — access-token audience enforcement (AUD-012) may reject real user tokens. Set it to the frontend OIDC client_id.")
+		logger.Warn("ZITADEL_FRONTEND_CLIENT_ID not set - access-token audience enforcement (AUD-012) may reject real user tokens. Set it to the frontend OIDC client_id.")
 	}
 	authService.RegisterAudience(zitadelFrontendClientID)
 
@@ -741,7 +741,7 @@ func main() {
 
 		// The held-job gates (template concurrency, update-on-launch syncs,
 		// constructed rebuilds) apply to every launch regardless of this flag,
-		// and the scheduler tick is their only release path — so without the
+		// and the scheduler tick is their only release path - so without the
 		// scheduler, held jobs would stay pending forever. Run a minimal
 		// release loop instead.
 		var releaseQueue queue.Queue
@@ -822,12 +822,12 @@ func main() {
 	// logout_token from any other RP on the same instance can terminate
 	// sessions in this app (Round 23 Finding 1). The handler-side check
 	// in `getBackchannelVerifier` would also panic, but only on first
-	// backchannel request — possibly hours/days after deploy. Failing
+	// backchannel request - possibly hours/days after deploy. Failing
 	// here at startup gives the operator instant feedback (pod
 	// CrashLoopBackOff visible in helm install output).
 	isProduction := os.Getenv("GIN_MODE") == "release"
 	if isProduction && loginServicePAT != "" && zitadelClientID == "" {
-		logger.Errorf("startup: ZITADEL_API_CLIENT_ID is empty in production — refusing to start. Set ZITADEL_API_CLIENT_ID to the OIDC client_id this RP is registered under at Zitadel (required for backchannel-logout audience binding per OIDC §2.6).")
+		logger.Errorf("startup: ZITADEL_API_CLIENT_ID is empty in production - refusing to start. Set ZITADEL_API_CLIENT_ID to the OIDC client_id this RP is registered under at Zitadel (required for backchannel-logout audience binding per OIDC §2.6).")
 		os.Exit(1)
 	}
 
@@ -838,7 +838,7 @@ func main() {
 		if mode := os.Getenv("STACKWEAVER_NOTIFICATION_MODE"); mode == "email" {
 			notificationMode = handlers.NotificationModeEmail
 		}
-		// F-sec-5/6 lockout — env-overridable so prod / staging / dev
+		// F-sec-5/6 lockout - env-overridable so prod / staging / dev
 		// can each pick a sensible threshold. The defaults inside
 		// NewAuthProxy (5 attempts in 15 min) cover the common case;
 		// here we only override when the operator explicitly opts in.
@@ -895,16 +895,16 @@ func main() {
 					logger.Errorf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 (production refuses to start with a bad shared secret): %v", err)
 					os.Exit(1)
 				}
-				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 — falling back to per-process random secret: %v", err)
+				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 - falling back to per-process random secret: %v", err)
 			case len(decoded) < 32:
 				if isProduction {
-					logger.Errorf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) — production refuses to start", len(decoded))
+					logger.Errorf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) - production refuses to start", len(decoded))
 					os.Exit(1)
 				}
-				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) — falling back to per-process random secret", len(decoded))
+				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) - falling back to per-process random secret", len(decoded))
 			default:
 				decoySecret = decoded
-				logger.Info("auth proxy: STACKWEAVER_DECOY_SECRET configured — decoy ids will be stable across replicas")
+				logger.Info("auth proxy: STACKWEAVER_DECOY_SECRET configured - decoy ids will be stable across replicas")
 			}
 		}
 
@@ -928,7 +928,7 @@ func main() {
 		})
 		logger.Info("Auth Proxy initialized for custom login UI")
 	} else {
-		logger.Warn("Auth Proxy not initialized — ZITADEL_LOGIN_SERVICE_USER_TOKEN not set")
+		logger.Warn("Auth Proxy not initialized - ZITADEL_LOGIN_SERVICE_USER_TOKEN not set")
 	}
 
 	// Setup routes

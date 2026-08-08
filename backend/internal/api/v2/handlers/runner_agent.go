@@ -54,12 +54,12 @@ type RunnerAgentHandler struct {
 	vaultOIDCRepo    *repository.VaultOIDCConfigurationRepository
 	oidcTokenService *oidc.TokenService
 	db               *gorm.DB
-	// State materialization (outputs/resources) — optional, injected after creation
+	// State materialization (outputs/resources) - optional, injected after creation
 	stateMaterializer *state.Materializer
-	// State object access (encryption at rest) — optional, injected after creation.
+	// State object access (encryption at rest) - optional, injected after creation.
 	// Routes self-hosted-runner state reads/writes through the encrypt/decrypt chokepoint.
 	stateService *state.Service
-	// Redis log buffer — optional, injected after creation. When set, agent job output streams
+	// Redis log buffer - optional, injected after creation. When set, agent job output streams
 	// through Redis (O(1) APPEND) instead of the O(n²) read-modify-write on object storage
 	// (AUD-028), and is copied to MinIO once at completion.
 	logBuffer *logbuffer.RedisLogBuffer
@@ -247,7 +247,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	registeringUserID, _ := c.Get("user_id")
 	registeringUserUUID, _ := registeringUserID.(uuid.UUID)
 
-	// Check if runner with this name already exists — if so, re-register (update and reuse)
+	// Check if runner with this name already exists - if so, re-register (update and reuse)
 	existing, _ := h.runnerRepo.GetByName(pool.OrganizationID, req.Name)
 	if existing != nil {
 		// Re-register: update the existing runner entry and return it
@@ -307,7 +307,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	clientIP := c.ClientIP()
 
 	// Create the runner. AUD-080: parse the API key ID the same safe way as the re-register branch
-	// above — a bare type assertion panics if the middleware stored api_key_id as a non-uuid.UUID.
+	// above - a bare type assertion panics if the middleware stored api_key_id as a non-uuid.UUID.
 	apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
 	now := time.Now()
 	maxJobs := req.MaxConcurrentJobs
@@ -415,7 +415,7 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 
 	// AUD-001: the authenticated runner (from its runner-scoped token) is the only
 	// identity we trust. A runner may only heartbeat as itself, so the body
-	// runner_id must match — otherwise a runner could drive another runner's job
+	// runner_id must match - otherwise a runner could drive another runner's job
 	// offers/reservations.
 	runner, ok := callingRunner(c)
 	if !ok {
@@ -444,7 +444,7 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 	// Determine available capacity: use explicit field if sent, otherwise derive from runner settings
 	availableCapacity := req.AvailableCapacity
 	if availableCapacity == 0 && req.CurrentJobs == 0 {
-		// Runner didn't send available_capacity but has no current jobs — it has capacity
+		// Runner didn't send available_capacity but has no current jobs - it has capacity
 		maxJobs := runner.MaxConcurrentJobs
 		if maxJobs <= 0 {
 			maxJobs = 1
@@ -585,7 +585,7 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	}
 
 	// AUD-001: authorize the authenticated runner for this run (same org + agent
-	// pool; run may still be unassigned — this is the assignment point) and bind
+	// pool; run may still be unassigned - this is the assignment point) and bind
 	// the run to the authenticated runner, not the body runner_id.
 	runnerCaller, ok := callingRunner(c)
 	if !ok {
@@ -599,7 +599,7 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 
 	// AUD-007/112: atomically claim this run for dispatch before starting it. The heartbeat offers
 	// the same pending/applying run to every agent runner in the pool; the claim (a conditional
-	// UPDATE that wins for exactly one caller) ensures the run is started — and therefore applied —
+	// UPDATE that wins for exactly one caller) ensures the run is started - and therefore applied -
 	// on only one machine. A runner that loses the race gets 409 and skips the job. A run that was
 	// canceled in the meantime is no longer pending/applying, so the claim also fails → 409.
 	claimed, err := repository.NewRunRepository(h.db).ClaimForDispatch(runID)
@@ -618,7 +618,7 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	switch run.Status { //nolint:exhaustive // only pending/pre_plan_completed and applying need action on job start
 	case models.RunStatusPending, models.RunStatusPrePlanCompleted:
 		// pre_plan_completed = the run's pre_plan task stage passed; it dispatches like pending
-		// (a run with an UNPASSED pre_plan stage never gets here — ClaimForDispatch refuses it).
+		// (a run with an UNPASSED pre_plan stage never gets here - ClaimForDispatch refuses it).
 		run.Status = models.RunStatusPlanning
 		run.StartedAt = &now
 	case models.RunStatusApplying:
@@ -651,7 +651,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 
 	// Terraform run output - store in MinIO logs for the run
 	if strings.HasPrefix(jobIDStr, "run-") {
-		// AUD-001: only the assigned runner may append to a run's logs — otherwise
+		// AUD-001: only the assigned runner may append to a run's logs - otherwise
 		// any runner could poison another tenant's plan/apply output.
 		var run models.Run
 		if err := h.db.First(&run, "id = ?", jobIDStr).Error; err != nil {
@@ -671,8 +671,8 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 			if req.Stream == "apply" {
 				phase = "apply"
 			}
-			// AUD-028: stream through Redis (O(1) APPEND) when available — the same buffer the
-			// remote-runner path uses — instead of the O(n²) read-modify-write on object storage.
+			// AUD-028: stream through Redis (O(1) APPEND) when available - the same buffer the
+			// remote-runner path uses - instead of the O(n²) read-modify-write on object storage.
 			// It is copied to MinIO once at JobComplete. Fall back to the object-storage append
 			// when no Redis buffer is configured.
 			if h.logBuffer != nil {
@@ -976,7 +976,7 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 		return
 	}
 
-	// AUD-001: only the runner that owns the job may complete it — otherwise a
+	// AUD-001: only the runner that owns the job may complete it - otherwise a
 	// caller could force-complete/fail another tenant's job. Gate on the job's
 	// org/pool/reservation before mutating any status.
 	if completeJob, jErr := h.ansibleJobRepo.GetByID(jobID); jErr == nil {
@@ -1073,7 +1073,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		return
 	}
 
-	// AUD-001: only the assigned runner may complete a run — this handler flips run
+	// AUD-001: only the assigned runner may complete a run - this handler flips run
 	// status (planned/applied/failed), can trigger auto-apply, and finalizes logs.
 	if !h.authorizeRunnerForRun(c, &run, true) {
 		return
@@ -1081,7 +1081,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 
 	// JobComplete is terminal for whichever phase this job ran, so no more output will
 	// follow: append the ETX end-of-text marker to the phase logs. Finalizing both
-	// phases is safe — it is idempotent (a missing or already-terminated object is left
+	// phases is safe - it is idempotent (a missing or already-terminated object is left
 	// untouched), so the plan job finalizes plan.log while apply.log is still absent,
 	// and the later apply job finalizes apply.log without touching the framed plan.log.
 	for _, phase := range []string{"plan", "apply"} {
@@ -1119,7 +1119,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		// Store the FULL parsed plan JSON (all top-level keys), matching the platform runner. The
 		// old subset (resource_changes/output_changes only) was enough for hasChanges() detection
 		// but starved the plans/:id/json-output endpoint that run-task services (plan_json_api_url)
-		// and go-tfe read — agent runs must serve the same plan JSON platform runs do.
+		// and go-tfe read - agent runs must serve the same plan JSON platform runs do.
 		if req.PlanJSON != "" {
 			var planData map[string]interface{}
 			if err := json.Unmarshal([]byte(req.PlanJSON), &planData); err == nil {
@@ -1149,7 +1149,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			shouldAutoApply := false
 			if (run.AutoApplyAfterPlan || run.AutoApply) && (run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy) {
 				// go-tfe `auto-apply: true` (e.g. tfe_workspace_run fire-and-forget) auto-applies
-				// regardless of VCS/workspace settings — it is an explicit per-run intent.
+				// regardless of VCS/workspace settings - it is an explicit per-run intent.
 				if run.AutoApply {
 					shouldAutoApply = true
 					logger.Infof("Auto-applying run %s: per-run auto-apply intent (go-tfe auto-apply)", runID)
@@ -1170,7 +1170,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 
 			// Run-task gate: a run with a post_plan task stage pauses at post_plan_running; the
 			// continuation applies the planned/completed/applying decision after the stage passes.
-			// Mirrors the platform runner's gate in backend/cmd/runner/main.go — the two finalize
+			// Mirrors the platform runner's gate in backend/cmd/runner/main.go - the two finalize
 			// paths must gate identically.
 			hasPostPlanStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostPlan)
 			if tsErr != nil {
@@ -1188,7 +1188,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 				// Clear the dispatch claim consumed by the PLAN job start, or no agent can ever claim
 				// the apply phase (ClaimForDispatch requires a NULL claim) and the run wedges at
 				// `applying`. The manual-confirm path already clears it; this auto-apply path never
-				// did (pre-existing bug, found while wiring run tasks — see #554). Cleared via a
+				// did (pre-existing bug, found while wiring run tasks - see #554). Cleared via a
 				// separate UPDATE before the Save below persists the applying status.
 				if clearErr := repository.NewRunRepository(h.db).ClearDispatch(runID); clearErr != nil {
 					logger.Warnf("Failed to clear dispatch claim for auto-applied run %s: %v", runID, clearErr)
@@ -1613,7 +1613,7 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 			inventoryJSON, err = ansible.FilterInventoryJSONForSlice(inventoryJSON, job.SliceNumber, job.SliceCount)
 			if err != nil {
 				// Fail the job rather than shipping no inventory (which would run
-				// against zero hosts and report success) — mirrors the platform
+				// against zero hosts and report success) - mirrors the platform
 				// runner, which hard-fails the same slice error.
 				logger.Warnf("Failed to slice inventory for job %s: %v", job.ID, err)
 				job.Status = models.AnsibleJobStatusFailed
@@ -1892,7 +1892,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	}
 
 	// AWS OIDC (self-hosted runner): inject keyless-auth env for the aws provider. AWS reads the token
-	// from a file, which we can't write on the agent's host — so we pass the raw token as
+	// from a file, which we can't write on the agent's host - so we pass the raw token as
 	// AWS_WEB_IDENTITY_TOKEN and the agent materializes it (materializeAWSWebIdentityToken).
 	if h.awsOIDCRepo != nil && h.oidcTokenService != nil {
 		var project models.Project
@@ -1939,7 +1939,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 
 	// GCP OIDC (self-hosted runner): inject keyless-auth env for the google provider via Workload
 	// Identity Federation. GCP reads an external-account credential-config JSON (referenced by
-	// GOOGLE_APPLICATION_CREDENTIALS) that in turn points at a token file — neither of which we can
+	// GOOGLE_APPLICATION_CREDENTIALS) that in turn points at a token file - neither of which we can
 	// write on the agent's host. So we pass the raw token + the config attrs and the agent
 	// materializes both files (materializeGCPWorkloadIdentity).
 	if h.gcpOIDCRepo != nil && h.oidcTokenService != nil {
@@ -1989,8 +1989,8 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	}
 
 	// Vault OIDC (self-hosted runner): inject the raw token + Vault config so the agent can perform the
-	// JWT login itself. Only the agent's host can reach the customer's Vault, so — unlike Azure/AWS/GCP
-	// where the cloud provider does the exchange — the agent runs the login (materializeVaultToken) and
+	// JWT login itself. Only the agent's host can reach the customer's Vault, so - unlike Azure/AWS/GCP
+	// where the cloud provider does the exchange - the agent runs the login (materializeVaultToken) and
 	// exports VAULT_ADDR + VAULT_TOKEN for the run's vault provider.
 	if h.vaultOIDCRepo != nil && h.oidcTokenService != nil {
 		var project models.Project
@@ -2061,7 +2061,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 }
 
 // projectNameByID returns a project's name for display on offered jobs, or "" if
-// it can't be resolved (best-effort — the agent only uses it for labelling).
+// it can't be resolved (best-effort - the agent only uses it for labelling).
 func (h *RunnerAgentHandler) projectNameByID(projectID uuid.UUID) string {
 	var project models.Project
 	if err := h.db.Select("name").First(&project, "id = ?", projectID).Error; err != nil {
@@ -2086,7 +2086,7 @@ func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]
 
 	// Ansible jobs: each polling runner ATOMICALLY reserves its own pending jobs by
 	// stamping runner_id under FOR UPDATE SKIP LOCKED. Without this, simultaneous
-	// pollers all get offered the same top job and contend on the claim — which
+	// pollers all get offered the same top job and contend on the claim - which
 	// funnels every sibling slice onto whichever runner wins the race (no
 	// distribution). SKIP LOCKED makes concurrent pollers grab DISJOINT rows, so N
 	// slices spread across N idle agents. Held jobs (queued_at NULL, waiting on the
@@ -2330,7 +2330,7 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		}
 	}
 
-	// AUD-018: atomically reserve the next version through the shared path — retries on the
+	// AUD-018: atomically reserve the next version through the shared path - retries on the
 	// (workspace_id, version) unique-violation instead of the old racy MAX(version)+1, and rejects
 	// a serial regression (a stale push) with 409. Row-first, then object storage keyed on the
 	// reserved version; roll the row back if the object write fails.

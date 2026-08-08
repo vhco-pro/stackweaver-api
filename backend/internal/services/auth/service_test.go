@@ -18,8 +18,8 @@ import (
 // Programmatic-token auth regression.
 //
 // Plan contract (docs/internal/plans/security/api-key-org-scoping-enforcement-plan.md):
-// all programmatic tokens — org-bound automation keys and user-bound
-// (`terraform login`) tokens — are now `tfe-`-prefixed api_keys. The
+// all programmatic tokens - org-bound automation keys and user-bound
+// (`terraform login`) tokens - are now `tfe-`-prefixed api_keys. The
 // legacy separate `tfe_tokens` table was retired, so `GetUserFromToken`
 // resolves a `tfe-`-prefixed token through a single api-key lookup.
 //
@@ -31,7 +31,7 @@ import (
 // # Why mocks instead of a real Postgres
 //
 // The auth service's lookup interfaces (`UserLookup`, `APIKeyVerifier`)
-// are narrow — exactly the methods `GetUserFromToken` calls. Mocks here
+// are narrow - exactly the methods `GetUserFromToken` calls. Mocks here
 // exercise the SAME code path the production service runs, just with
 // deterministic repos. bcrypt-of-API-key and gorm have their own
 // upstream coverage.
@@ -141,7 +141,7 @@ func TestGetUserFromToken_NonTFEPrefixSkipsAPIKey(t *testing.T) {
 	// Token without the `tfe-` prefix must NOT touch the api-key
 	// lookup path. Without a JWT verifier set, the call falls through
 	// to the "authentication service not initialized" error. What
-	// matters is that the api-key lookup didn't fire — a regression
+	// matters is that the api-key lookup didn't fire - a regression
 	// where the prefix check was inverted would call it.
 	apiKey := &mockAPIKeyService{}
 	userRepo := &mockUserRepo{}
@@ -164,7 +164,7 @@ func TestGetUserFromToken_APIKeyMissingServiceFailsCleanly(t *testing.T) {
 	userRepo := &mockUserRepo{}
 
 	svc := NewServiceWithLookups(userRepo)
-	// Deliberately do NOT call SetAPIKeyService — apiKeyService stays nil.
+	// Deliberately do NOT call SetAPIKeyService - apiKeyService stays nil.
 
 	_, err := svc.GetUserFromToken("tfe-something")
 	if err == nil {
@@ -176,7 +176,7 @@ func TestGetUserFromToken_UnknownTFETokenIsTerminal(t *testing.T) {
 	// #503: a `tfe-` token that fails api-key lookup must be rejected
 	// outright, NOT handed to JWT verification. With no verifier set,
 	// the legacy fallthrough returned "authentication service not
-	// initialized" — the truthful invalid-token error proves the prefix
+	// initialized" - the truthful invalid-token error proves the prefix
 	// is authoritative.
 	apiKey := &mockAPIKeyService{} // every lookup fails
 
@@ -195,7 +195,7 @@ func TestGetUserFromToken_UnknownTFETokenIsTerminal(t *testing.T) {
 func TestGetUserFromToken_APIKeyValidButOrphanedUser(t *testing.T) {
 	// API key matches but the linked user is gone (e.g. orphaned key
 	// after a user delete). Service must NOT return a nil-user with
-	// nil-error — the contract is "either valid user or error".
+	// nil-error - the contract is "either valid user or error".
 	apiKeyID := uuid.New()
 	missingUserID := uuid.New()
 
@@ -330,7 +330,7 @@ func TestAuthenticateMiddleware_UnknownTFETokenIsTerminal(t *testing.T) {
 	// legacy fallthrough produced a 500 ("authentication service not
 	// initialized"), so the 401 + truthful detail proves the prefix is
 	// authoritative. Applies equally to a valid JWT wearing a `tfe-`
-	// prefix — the declared kind wins.
+	// prefix - the declared kind wins.
 	apiKeySvc := &mockAPIKeyService{} // every lookup fails
 
 	w := runMiddlewareExpectingRejection(t, apiKeySvc, &mockUserRepo{}, "tfe-revoked-or-unknown")

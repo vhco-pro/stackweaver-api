@@ -5,7 +5,7 @@
 // scope). On a repo-name collision an attacker's payloads are filed into a victim org's
 // webhook-event log. The fix derives the org from the validated installation instead.
 // This test drives the real handler + Postgres and proves attribution follows the
-// installation, not the repo name — with a control showing the old heuristic mis-attributes.
+// installation, not the repo name - with a control showing the old heuristic mis-attributes.
 //
 // Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Cleanup is strictly
 // row-scoped. Run with:
@@ -46,7 +46,7 @@ func TestWebhookEventAttribution(t *testing.T) {
 	sfx := uuid.NewString()[:8]
 
 	// orgA owns the GitHub App installation "111". orgB happens to have a workspace for the
-	// SAME repo full_name "acme/infra" — the collision the attacker exploits.
+	// SAME repo full_name "acme/infra" - the collision the attacker exploits.
 	orgA := &models.Organization{ID: uuid.New(), Name: "wha-a-" + sfx}
 	orgB := &models.Organization{ID: uuid.New(), Name: "wha-b-" + sfx}
 	connA := &models.VCSConnection{ID: uuid.New(), OrganizationID: orgA.ID, Provider: models.VCSProviderGitHub, InstallationID: "111-" + sfx}
@@ -92,7 +92,7 @@ func TestWebhookEventAttribution(t *testing.T) {
 		return ev.OrganizationID
 	}
 
-	// FIXED path: attribution derived from the validated installation "111" (orgA) — even
+	// FIXED path: attribution derived from the validated installation "111" (orgA) - even
 	// though the only workspace matching repo "acme/infra" belongs to orgB.
 	h.recordWebhookEvent(h.orgFromInstallation(connA.InstallationID), "push", "github", repo, "main", newMarker, "ignored", "test", 200, "{}")
 	if org := orgOf(newMarker); org == nil || *org != orgA.ID {
@@ -100,7 +100,7 @@ func TestWebhookEventAttribution(t *testing.T) {
 	}
 
 	// CONTROL (pre-fix behavior): with no trusted org, the repo-name heuristic mis-attributes
-	// the very same delivery to orgB — the victim. This is exactly the bug the fix removes.
+	// the very same delivery to orgB - the victim. This is exactly the bug the fix removes.
 	h.recordWebhookEvent(nil, "push", "github", repo, "main", oldMarker, "ignored", "test", 200, "{}")
 	if org := orgOf(oldMarker); org == nil || *org != orgB.ID {
 		t.Fatalf("control expectation broken: heuristic attributed to %v, want orgB %v (collision victim)", org, orgB.ID)

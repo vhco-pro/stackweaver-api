@@ -79,8 +79,8 @@ func setupRegistryAuthzFixture(t *testing.T) *registryAuthzFixture {
 	orgRepo := repository.NewOrganizationRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
 	rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db))
-	// publisher/github/vcs are only reached on a successful create — not exercised by
-	// the denial cases here — so nil is safe for this authorization matrix.
+	// publisher/github/vcs are only reached on a successful create - not exercised by
+	// the denial cases here - so nil is safe for this authorization matrix.
 	h := NewRegistryPublishingHandler(
 		repository.NewModuleRepository(db), repository.NewModuleVersionRepository(db),
 		orgRepo, nil, authService, rbacService, nil, nil,

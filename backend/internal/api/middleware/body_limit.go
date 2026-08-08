@@ -18,7 +18,7 @@ import (
 // single attacker streaming a multi-GB body to /auth/sessions can
 // exhaust API memory before any handler-level validation runs.
 //
-// 64KiB is the chosen default — every legitimate auth body fits in a
+// 64KiB is the chosen default - every legitimate auth body fits in a
 // few KB (loginName, password, TOTP code, passkey assertion). The cap
 // is generous enough that no real flow trips it but tight enough that
 // a flood of the maximum size is bounded at ~6.4MB per 100 in-flight

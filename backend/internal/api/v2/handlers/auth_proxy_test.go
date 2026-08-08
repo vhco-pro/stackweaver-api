@@ -327,7 +327,7 @@ func TestGetPublicHost_FallbackToHost(t *testing.T) {
 //
 // Behind a TLS-terminating reverse proxy (Cloudflare Tunnel, k8s ingress,
 // nginx) the api receives an http connection but the browser-visible URL
-// is https. `X-Forwarded-Proto` is the source of truth in that layout —
+// is https. `X-Forwarded-Proto` is the source of truth in that layout -
 // the previous "scheme = http unless TLS" rule mis-built the discovery
 // doc + IdP success URLs as http://… and the SPA redirect chain broke.
 
@@ -375,7 +375,7 @@ func TestGetPublicBaseURL_FallsBackToTLSDetection(t *testing.T) {
 //
 // IdP success/failure URLs land on the SPA, not the api. In split-domain
 // deployments (api on api.example.com, SPA on app.example.com) using the
-// api's own host produces a 404 — the SPA route doesn't exist there.
+// api's own host produces a 404 - the SPA route doesn't exist there.
 // PublicFrontendURL gives operators an explicit override; same-origin
 // deployments (network_mode: host on a single localhost) leave it unset
 // and fall through to the request-derived host.
@@ -444,7 +444,7 @@ func TestInjectReturnCodeFlags_OTPEmail(t *testing.T) {
 	proxy.injectReturnCodeFlags(body)
 
 	// Wave 14: Zitadel v4 expects returnCode as an empty message
-	// (`{}`) rather than a boolean — see injectReturnCodeFlags for
+	// (`{}`) rather than a boolean - see injectReturnCodeFlags for
 	// the rationale. The shape ON THE WIRE is `{"returnCode": {}}`.
 	challenges := body["challenges"].(map[string]any)
 	otpEmail := challenges["otpEmail"].(map[string]any)
@@ -628,7 +628,7 @@ func TestSearchSessions_OverridesClientQueries(t *testing.T) {
 	proxy := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: mockZitadel.URL, PAT: "test-pat"})
 
 	// Seed the caller's sessions cookie by running writeSessionCookie, then
-	// replaying the resulting Set-Cookie back on a fresh request — mirrors how
+	// replaying the resulting Set-Cookie back on a fresh request - mirrors how
 	// the browser would round-trip the cookie and matches Gin's URL-encoding.
 	seed := httptest.NewRecorder()
 	seedCtx, _ := gin.CreateTestContext(seed)
@@ -921,7 +921,7 @@ func TestLookupOrgByDomain_CaseInsensitiveCache(t *testing.T) {
 // --- Origin/Referer CSRF tests (via middleware) ---
 
 func TestCSRFProtection_is_tested_via_middleware_package(t *testing.T) {
-	// CSRF is implemented in middleware/csrf.go — tests belong in that package.
+	// CSRF is implemented in middleware/csrf.go - tests belong in that package.
 	// This test documents that the CSRF middleware is wired to /auth/* routes
 	// via setupAuthProxyRoutes in routes.go.
 	t.Log("CSRF tests live in backend/internal/api/middleware/csrf_test.go")
@@ -958,7 +958,7 @@ func TestCustomRequestHeaders_AllPairsReachUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// Three pairs — covers single-host (instance-host pattern from D4)
+	// Three pairs - covers single-host (instance-host pattern from D4)
 	// + two diagnostic headers an operator might add. The trailing
 	// comma exercises the same edge case as TestParseCustomHeaders_TrailingComma.
 	custom := "x-zitadel-instance-host:zitadel.example.com,x-trace-id:abc-123,x-tenant:acme,"
@@ -979,7 +979,7 @@ func TestCustomRequestHeaders_AllPairsReachUpstream(t *testing.T) {
 		t.Fatal("upstream handler did not capture headers (request never arrived?)")
 	}
 
-	// Each parsed pair MUST land on the upstream request — values
+	// Each parsed pair MUST land on the upstream request - values
 	// preserved verbatim, no truncation, no shuffling.
 	wants := map[string]string{
 		"X-Zitadel-Instance-Host": "zitadel.example.com",
@@ -992,7 +992,7 @@ func TestCustomRequestHeaders_AllPairsReachUpstream(t *testing.T) {
 		}
 	}
 
-	// PAT must also be set — guards against a regression where the
+	// PAT must also be set - guards against a regression where the
 	// custom-header injection clobbered the Authorization header.
 	if got := captured.Get("Authorization"); got != "Bearer test-pat" {
 		t.Errorf("Authorization header: want %q, got %q", "Bearer test-pat", got)
@@ -1039,7 +1039,7 @@ func TestStartIdP_SuccessUrlPriorityChain(t *testing.T) {
 		// requestHost is the gin request's `Host` field (the
 		// last-resort fallback per `getPublicHost`).
 		requestHost string
-		// xForwardedProto controls the scheme — when set, beats the
+		// xForwardedProto controls the scheme - when set, beats the
 		// `r.TLS == nil → http` fallback.
 		xForwardedProto string
 		wantHostInURL   string
@@ -1175,7 +1175,7 @@ func TestStartIdP_NoHeadersDoesNotCrash(t *testing.T) {
 	}()
 	proxy.StartIdP(c)
 
-	// Some 2xx — the URL might be schemeless / hostless but the
+	// Some 2xx - the URL might be schemeless / hostless but the
 	// handler must complete without crashing.
 	if w.Code >= 500 {
 		t.Errorf("StartIdP 5xx'd on bare request (want 2xx fallback); got %d", w.Code)
@@ -1229,7 +1229,7 @@ func TestCustomRequestHeaders_EmptyConfig(t *testing.T) {
 
 // fakeUpstream returns an httptest.Server that routes /v2/settings/login
 // to a synthesized policy response and /v2/sessions to the configured
-// session handler. Two-call test harness — most F-sec-7 tests need
+// session handler. Two-call test harness - most F-sec-7 tests need
 // both endpoints answered.
 func fakeUpstream(loginPolicy map[string]any, sessionHandler http.HandlerFunc) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1269,7 +1269,7 @@ func TestCreateSession_FakesDecoyOnUnknownUserWhenPolicyEnabled(t *testing.T) {
 
 	proxy.CreateSession(c)
 
-	// Decoy MUST fake a 201 Created — same status path as a real success.
+	// Decoy MUST fake a 201 Created - same status path as a real success.
 	if w.Code != http.StatusCreated {
 		t.Fatalf("decoy must return 201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -1281,7 +1281,7 @@ func TestCreateSession_FakesDecoyOnUnknownUserWhenPolicyEnabled(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decoy body must unmarshal: %v: %s", err, w.Body.String())
 	}
-	// Decoy id MUST NOT carry a visible "decoy-" tell — it has to look
+	// Decoy id MUST NOT carry a visible "decoy-" tell - it has to look
 	// like a real Zitadel snowflake (numeric only).
 	for _, ch := range resp.SessionID {
 		if ch < '0' || ch > '9' {
@@ -1340,7 +1340,7 @@ func TestCreateSession_NoDecoyForUserIDCheck(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	// userId-based check — no enumeration leak to mask, since attackers
+	// userId-based check - no enumeration leak to mask, since attackers
 	// can't probe for arbitrary user IDs the way they can probe email
 	// loginNames. Forward the 404 truthfully.
 	c.Request = newTestRequestWithBody(http.MethodPost, "/auth/sessions",
@@ -1406,7 +1406,7 @@ func TestUpdateSession_DecoyShortCircuitsWithCanonicalPasswordInvalid(t *testing
 	}
 	// Critical: Zitadel MUST NOT have been called. A decoy id
 	// forwarded upstream would 404 (different shape from real
-	// password-failure) — the short-circuit closes that gap.
+	// password-failure) - the short-circuit closes that gap.
 	if zitadelHit {
 		t.Errorf("decoy update must NOT forward to Zitadel (would leak via different error shape)")
 	}
@@ -1445,7 +1445,7 @@ func TestBuildDecoySessionResponse_LooksRealAndUnique(t *testing.T) {
 	if parsed.SessionID != id {
 		t.Errorf("returned id (%q) must match body sessionId (%q)", id, parsed.SessionID)
 	}
-	// Decoy id must look like a Zitadel snowflake — pure digits, no
+	// Decoy id must look like a Zitadel snowflake - pure digits, no
 	// "decoy-" prefix that would tip off a network observer.
 	for _, ch := range parsed.SessionID {
 		if ch < '0' || ch > '9' {
@@ -1456,7 +1456,7 @@ func TestBuildDecoySessionResponse_LooksRealAndUnique(t *testing.T) {
 	if len(parsed.SessionToken) < 40 {
 		t.Errorf("decoy token must be a realistic length, got %d chars", len(parsed.SessionToken))
 	}
-	// Two consecutive decoys MUST differ — fixed decoy ids would let
+	// Two consecutive decoys MUST differ - fixed decoy ids would let
 	// attackers detect the fake by repeating the probe.
 	otherBody, otherID := buildDecoySessionResponse()
 	if id == otherID {
@@ -1469,14 +1469,14 @@ func TestBuildDecoySessionResponse_LooksRealAndUnique(t *testing.T) {
 
 // --- Audit Round 20 follow-up: decoy short-circuits on
 // GetSession / DeleteSession / FinalizeAuthRequest. These three
-// handlers each had a bypass — forwarding the decoy to Zitadel
+// handlers each had a bypass - forwarding the decoy to Zitadel
 // produced a distinguishably different status (404) than a real
 // loginName-only session (200/412/200), letting an attacker
 // enumerate users by skipping the SPA's normal PATCH flow.
 
 func TestGetSession_DecoyShortCircuitsWithRealisticShape(t *testing.T) {
 	// Round 21 Finding 1: the decoy GET must mirror Zitadel's full
-	// loginName-only response shape — a populated `factors.user` block
+	// loginName-only response shape - a populated `factors.user` block
 	// with id/loginName/organizationId, plus top-level sequence /
 	// creationDate / changeDate. The previous version emitted
 	// `factors: {}` which was wire-distinguishable from a real session.
@@ -1555,7 +1555,7 @@ func TestGetSession_DecoyShortCircuitsWithRealisticShape(t *testing.T) {
 }
 
 // TestGetSession_DecoyIDsAreDeterministicPerLoginName: Round 21 Finding 1
-// — two probes of the SAME unknown loginName must produce identical fake
+// - two probes of the SAME unknown loginName must produce identical fake
 // user/org ids; otherwise an attacker hitting the same decoy twice would
 // see divergent ids while a real user would see stable ones.
 func TestGetSession_DecoyIDsAreDeterministicPerLoginName(t *testing.T) {
@@ -1703,12 +1703,12 @@ func TestFinalizeAuthRequest_DecoyShortCircuitsWith412(t *testing.T) {
 
 // TestUpdateSession_DecoyHitsLockoutAt429: Round 21 Finding 2.
 // 5 wrong-password PATCHes against a decoy must produce 5x 400, then
-// the 6th must 429 — mirroring the real-user lockout path. Without
+// the 6th must 429 - mirroring the real-user lockout path. Without
 // this parity, an attacker counting consecutive 400s vs (5x 400 + 429)
 // has a single-bit oracle for "user exists".
 func TestUpdateSession_DecoyHitsLockoutAt429(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Decoys must NEVER reach upstream — assert it doesn't here.
+		// Decoys must NEVER reach upstream - assert it doesn't here.
 		t.Errorf("decoy PATCH must not forward to Zitadel")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1747,7 +1747,7 @@ func TestUpdateSession_DecoyHitsLockoutAt429(t *testing.T) {
 			t.Errorf("decoy attempt %d: want 400 (canonical password-invalid), got %d", i, got)
 		}
 	}
-	// 6th attempt MUST 429 — same as a real user at threshold.
+	// 6th attempt MUST 429 - same as a real user at threshold.
 	if got := patch(); got != http.StatusTooManyRequests {
 		t.Errorf("decoy attempt 6 (post-threshold): want 429, got %d", got)
 	}
@@ -1848,12 +1848,12 @@ func TestSearchSessions_MixedCookieSplicesDecoyRows(t *testing.T) {
 // TestUpdateSession_MixedFactorBodyDoesNotConsumeSlot: Round 21
 // Finding 4. A PATCH carrying `password + totp` (or any other
 // multi-factor body) that 4xxs from Zitadel must NOT count as a
-// password failure — the upstream rejection might be due to the
+// password failure - the upstream rejection might be due to the
 // other factor, not the password. Without this guard, an attacker
 // (or transient SPA bug) can lock honest users by triggering 4xxs
 // on a non-password branch.
 func TestUpdateSession_MixedFactorBodyDoesNotConsumeSlot(t *testing.T) {
-	// Upstream always 4xxs — simulating a server-side rejection that
+	// Upstream always 4xxs - simulating a server-side rejection that
 	// might be password OR totp.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1881,7 +1881,7 @@ func TestUpdateSession_MixedFactorBodyDoesNotConsumeSlot(t *testing.T) {
 	mixedPatch := func() int {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
-		// Multi-factor body — a plausible attack/bug shape.
+		// Multi-factor body - a plausible attack/bug shape.
 		c.Request = newTestRequestWithBody(http.MethodPatch, "/auth/sessions/"+sessionID,
 			`{"checks":{"password":{"password":"x"},"totp":{"code":"123"}}}`)
 		c.Params = gin.Params{{Key: "id", Value: sessionID}}
@@ -1904,7 +1904,7 @@ func TestUpdateSession_MixedFactorBodyDoesNotConsumeSlot(t *testing.T) {
 }
 
 // TestUpdateSession_PureSinglePasswordCheckStillCounts: Round 21
-// Finding 4 — inverse property. A pure password-only PATCH that 4xxs
+// Finding 4 - inverse property. A pure password-only PATCH that 4xxs
 // upstream must still consume the slot, otherwise F-sec-5/6 is broken.
 func TestUpdateSession_PureSinglePasswordCheckStillCounts(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1948,7 +1948,7 @@ func TestUpdateSession_PureSinglePasswordCheckStillCounts(t *testing.T) {
 		}
 	}
 	if got := pwPatch(); got != http.StatusTooManyRequests {
-		t.Errorf("attempt 6 (post-threshold): want 429, got %d — F-sec-5/6 lockout broken", got)
+		t.Errorf("attempt 6 (post-threshold): want 429, got %d - F-sec-5/6 lockout broken", got)
 	}
 }
 
@@ -1971,7 +1971,7 @@ func TestIsPureSinglePasswordCheck(t *testing.T) {
 		{"missing inner password", `{"checks":{"password":{}}}`, false},
 		{"non-string password", `{"checks":{"password":{"password":1234}}}`, false},
 		// Round 22 Finding 4: top-level keys alongside `checks` must
-		// also disqualify the body — `lifetime`/`metadata` validation
+		// also disqualify the body - `lifetime`/`metadata` validation
 		// failures upstream would otherwise count as password failures.
 		{"top-level lifetime sibling", `{"checks":{"password":{"password":"x"}},"lifetime":"3600s"}`, false},
 		{"top-level metadata sibling", `{"checks":{"password":{"password":"x"}},"metadata":{"foo":"bar"}}`, false},
@@ -2230,7 +2230,7 @@ func TestSearchSessions_DecoyOnlyEmitsDetailsEnvelope(t *testing.T) {
 
 // TestSettingsProxy_DecoyOrgIDStripsCtxParam: Round 22 Finding 3.
 // `GetLoginSettings ?ctx.orgId=<decoyOrgId>` must NOT forward the
-// decoy orgId to Zitadel — Zitadel's per-org response (404 or
+// decoy orgId to Zitadel - Zitadel's per-org response (404 or
 // instance-default fallback) is wire-distinguishable from a real
 // org's customized policy. Strip the param so the upstream call is
 // unscoped (instance-default).
@@ -2266,7 +2266,7 @@ func TestSettingsProxy_DecoyOrgIDStripsCtxParam(t *testing.T) {
 	}
 }
 
-// TestSettingsProxy_RealOrgIDPassesThrough: regression — a real org
+// TestSettingsProxy_RealOrgIDPassesThrough: regression - a real org
 // id that's NOT in the decoy set must still forward verbatim.
 func TestSettingsProxy_RealOrgIDPassesThrough(t *testing.T) {
 	var receivedQuery string
@@ -2293,7 +2293,7 @@ func TestSettingsProxy_RealOrgIDPassesThrough(t *testing.T) {
 }
 
 // --- Audit Round 23 (PasswordReset / ChangePassword / VerifyEmail
-// canonicalization — F-sec-7 from a different angle) ---
+// canonicalization - F-sec-7 from a different angle) ---
 
 // TestPasswordReset_UnknownUserCanonicalizesToSuccess: Round 23
 // Finding 2 (MODERATE). Direct probing of `/auth/users/<guess>/
@@ -2329,7 +2329,7 @@ func TestPasswordReset_UnknownUserCanonicalizesToSuccess(t *testing.T) {
 	}
 }
 
-// TestPasswordReset_KnownUserPassesThrough: regression — a real
+// TestPasswordReset_KnownUserPassesThrough: regression - a real
 // 200 response from Zitadel must forward verbatim (including any
 // returnCode body in dev mode).
 func TestPasswordReset_KnownUserPassesThrough(t *testing.T) {
@@ -2362,7 +2362,7 @@ func TestPasswordReset_KnownUserPassesThrough(t *testing.T) {
 
 // TestChangePassword_UnknownUserCanonicalizesToCodeInvalid: Round 23
 // Finding 2 (MODERATE) for the change-password endpoint. Unknown
-// userId 404 must canonicalize to a "code is invalid" 4xx — same
+// userId 404 must canonicalize to a "code is invalid" 4xx - same
 // shape Zitadel emits for a wrong verificationCode (reset flow) or
 // wrong currentPassword (in-app change flow) on a real user.
 func TestChangePassword_UnknownUserCanonicalizesToCodeInvalid(t *testing.T) {
@@ -2395,7 +2395,7 @@ func TestChangePassword_UnknownUserCanonicalizesToCodeInvalid(t *testing.T) {
 
 // TestVerifyEmail_UnknownUserCanonicalizesToCodeInvalid: Round 23
 // Finding 3 (MODERATE). Same canonicalization shape as
-// ChangePassword — a wrong code on a real user 4xxs with the
+// ChangePassword - a wrong code on a real user 4xxs with the
 // canonical shape, so an unknown user must produce the same shape
 // to avoid the enumeration oracle.
 //
@@ -2498,7 +2498,7 @@ func TestIsIssuedDecoyOrgID_PrunesExpired(t *testing.T) {
 
 // Round 25 hardening (item 27 / R25b F6): deriveDecoySequence pins the
 // determinism contract. Same secret + key MUST produce the same value
-// on every call — otherwise an attacker probing the same loginName
+// on every call - otherwise an attacker probing the same loginName
 // twice would see divergent decoy responses (a wire-distinguisher
 // from real users, whose responses are stable across probes). Output
 // must also be in the documented [1, 50] range.
@@ -2525,7 +2525,7 @@ func TestDeriveDecoySequence_DeterministicAndBounded(t *testing.T) {
 
 // Round 25 Wave 3 (item 24 / R25c H-3): the decoyOrgIDs map is now
 // LRU-bounded. An attacker probing many distinct loginNames must NOT
-// grow memory unbounded — overflow evicts the LRU entry.
+// grow memory unbounded - overflow evicts the LRU entry.
 func TestDecoyOrgIDs_LRUEvictionOnOverflow(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2557,7 +2557,7 @@ func TestDecoyOrgIDs_LRUEvictionOnOverflow(t *testing.T) {
 
 // Round 25 Wave 3 (item 24 / R25c H-3): the sweeper goroutine must
 // prune entries past their expiry. Manually invoke sweepDecoyOrgIDs
-// (deterministic — don't rely on the background ticker's timing).
+// (deterministic - don't rely on the background ticker's timing).
 func TestDecoyOrgIDs_SweeperPrunesExpired(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2691,7 +2691,7 @@ func TestSessionCookie_SignAndVerifyRoundTrip(t *testing.T) {
 }
 
 // Round 25 Wave 6 (item 19 / R25a #3): a tampered cookie (signature
-// modified) MUST be treated as absent — caller silently re-authenticates
+// modified) MUST be treated as absent - caller silently re-authenticates
 // rather than 4xx'ing.
 func TestSessionCookie_TamperedSignatureTreatedAsAbsent(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
@@ -2751,7 +2751,7 @@ func TestSessionCookie_UnsignedLegacyCookieTreatedAsAbsent(t *testing.T) {
 
 // Round 25 Wave 6 (item 6 / Round 22 OOS): when a shared decoy secret
 // is provided via config, two AuthProxy instances produce identical
-// decoy ids for the same loginName — the contract HA replicas need.
+// decoy ids for the same loginName - the contract HA replicas need.
 func TestDecoySecret_SharedAcrossReplicas(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer upstream.Close()
@@ -2971,7 +2971,7 @@ func TestLoginNameLimiter_CanonicalisedDecoyKey(t *testing.T) {
 		t.Fatalf("first two case-variant probes must be allowed under threshold; got %v %v", got1, got2)
 	}
 	if got3 {
-		t.Errorf("third case-variant probe MUST be locked out (threshold=2 reached) — case canonicalisation regression")
+		t.Errorf("third case-variant probe MUST be locked out (threshold=2 reached) - case canonicalisation regression")
 	}
 }
 
@@ -2981,7 +2981,7 @@ func TestLoginNameLimiter_CanonicalisedDecoyKey(t *testing.T) {
 // matching) see the same value regardless of casing the user typed.
 // Pre-fix, `Alice@x.com` and `alice@x.com` produced DIFFERENT fake
 // user/org ids on the decoy path while a real user with case-
-// insensitive Zitadel resolution returned the SAME real ids — a
+// insensitive Zitadel resolution returned the SAME real ids - a
 // real-vs-decoy oracle that re-opened F-sec-7 from a different angle.
 func TestExtractLoginNameFromCheck_CanonicalisesCase(t *testing.T) {
 	cases := []struct {

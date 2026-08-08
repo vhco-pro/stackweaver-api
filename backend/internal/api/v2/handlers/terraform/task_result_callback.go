@@ -12,7 +12,7 @@ import (
 	"github.com/michielvha/stackweaver/core/services/runtask"
 )
 
-// TaskResultCallback handles PATCH /task-results/:id/callback — the endpoint an external run-task
+// TaskResultCallback handles PATCH /task-results/:id/callback - the endpoint an external run-task
 // service PATCHes with its verdict, authenticated by the webhook's `access_token` (a stateless
 // run-scoped bearer; see task_result_token.go). Registered on the ROOT router (like the ansible
 // provisioning callback) with a body cap, since it is outside the normal auth middleware.
@@ -135,7 +135,7 @@ func (h *RunHandlerV2) TaskResultCallback(c *gin.Context) {
 
 	// A terminal verdict may finish the stage: reload it with fresh results and let the shared
 	// engine fold the outcome and continue (or block) the run. Errors here are logged, not
-	// returned — the orchestrator's finalize backstop retries within a tick.
+	// returned - the orchestrator's finalize backstop retries within a tick.
 	if status != models.TaskResultStatusRunning {
 		stage, serr := h.taskStageRepo.GetByID(tr.TaskStageID)
 		if serr == nil {

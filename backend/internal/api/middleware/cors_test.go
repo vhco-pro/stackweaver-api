@@ -12,7 +12,7 @@ import (
 )
 
 // TestIsLocalhostOrigin pins Round 24 Finding 2's host-boundary
-// anchor — the previous prefix check (`origin[:16] == "http://
+// anchor - the previous prefix check (`origin[:16] == "http://
 // localhost"`) accepted `http://localhost.evil.com` because there
 // was no delimiter. Combined with `Allow-Credentials: true` an
 // attacker who tricks a victim into navigating to a `localhost.<a>`
@@ -24,7 +24,7 @@ func TestIsLocalhostOrigin(t *testing.T) {
 		origin string
 		want   bool
 	}{
-		// Accepted shapes — exact host, host:port, host/path
+		// Accepted shapes - exact host, host:port, host/path
 		{"localhost no port", "http://localhost", true},
 		{"localhost with port 5173", "http://localhost:5173", true},
 		{"localhost with port 3000", "http://localhost:3000", true},
@@ -34,7 +34,7 @@ func TestIsLocalhostOrigin(t *testing.T) {
 		{"IPv6 localhost no port", "http://[::1]", true},
 		{"IPv6 localhost with port", "http://[::1]:5173", true},
 
-		// THE FINDING — these used to be accepted, now rejected
+		// THE FINDING - these used to be accepted, now rejected
 		{"R24-2: localhost.evil.com", "http://localhost.evil.com", false},
 		{"R24-2: localhost.evil.com:1234", "http://localhost.evil.com:1234", false},
 		{"R24-2: localhostevil (no dot)", "http://localhostevil", false},
@@ -89,7 +89,7 @@ func TestCORSMiddleware_LocalhostGatedByProdMode(t *testing.T) {
 }
 
 // AUD-157: the OPTIONS preflight must reflect Access-Control-Allow-Origin (+ credentials) only for
-// allowed origins — previously it reflected ANY origin before the allowed check.
+// allowed origins - previously it reflected ANY origin before the allowed check.
 func TestCORSPreflight_GatedOnAllowedOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("GIN_MODE", "release") // localhost not trusted; only CORS_EXTRA_ORIGINS allowed

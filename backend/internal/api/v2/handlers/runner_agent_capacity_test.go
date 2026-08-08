@@ -100,7 +100,7 @@ func newAnsibleAgent(t *testing.T, db *gorm.DB, orgID, poolID uuid.UUID, name st
 }
 
 // An idle runner with MaxConcurrentJobs=1 must be offered at most one job even
-// when several pending jobs sit in its pool — the cap that stops a single
+// when several pending jobs sit in its pool - the cap that stops a single
 // fast-polling runner from scooping a whole batch of sibling slices.
 func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 	db := setupTestDB(t)
@@ -149,7 +149,7 @@ func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 	}
 
 	// The offered job is now reserved (runner_id stamped, still pending), which
-	// counts against the runner's capacity — a second poll before it finishes is
+	// counts against the runner's capacity - a second poll before it finishes is
 	// offered nothing further.
 	offered, err = h.findPendingJobsForRunner(runner)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 }
 
 // Two idle runners polling the same pool of pending jobs must reserve DISJOINT
-// jobs — the SKIP-LOCKED reservation that makes sibling slices distribute across
+// jobs - the SKIP-LOCKED reservation that makes sibling slices distribute across
 // agents instead of funnelling onto whichever runner wins a shared claim race.
 func TestFindPendingJobs_DistributesAcrossRunners(t *testing.T) {
 	db := setupTestDB(t)
@@ -200,6 +200,6 @@ func TestFindPendingJobs_DistributesAcrossRunners(t *testing.T) {
 		t.Fatalf("each runner should reserve exactly 1 job, got A=%d B=%d", len(offeredA), len(offeredB))
 	}
 	if offeredA[0].JobID == offeredB[0].JobID {
-		t.Fatalf("runners reserved the SAME job %s — not distributed", offeredA[0].JobID)
+		t.Fatalf("runners reserved the SAME job %s - not distributed", offeredA[0].JobID)
 	}
 }
