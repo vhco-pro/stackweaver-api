@@ -245,7 +245,7 @@ func (v *ZitadelVerifier) VerifyToken(ctx context.Context, tokenString string) (
 	}
 
 	// Validate issuer
-	if err := oidc.CheckIssuer(claims, v.issuer); err != nil {
+	if err := oidc.CheckIssuerWithISSVerifier(claims, v.issuer, nil); err != nil {
 		return nil, nil, fmt.Errorf("issuer validation failed: %w", err)
 	}
 
