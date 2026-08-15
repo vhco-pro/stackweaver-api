@@ -3,12 +3,14 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -18,11 +20,12 @@ import (
 
 // AgentPoolHandlerV2 handles TFE-compatible agent pool API.
 type AgentPoolHandlerV2 struct {
-	poolRepo    *repository.AgentPoolRepository
-	runnerRepo  *repository.RunnerRepository
-	orgRepo     *repository.OrganizationRepository
-	authService *auth.Service
-	rbacService *rbac.Service
+	poolRepo      *repository.AgentPoolRepository
+	apiKeyService *apikey.Service
+	runnerRepo    *repository.RunnerRepository
+	orgRepo       *repository.OrganizationRepository
+	authService   *auth.Service
+	rbacService   *rbac.Service
 }
 
 // NewAgentPoolHandlerV2 creates an AgentPoolHandlerV2.
@@ -509,4 +512,114 @@ func extractProjectIDs(refs []jsonAPIRef) []uuid.UUID {
 		}
 	}
 	return ids
+}
+
+// SetAPIKeyService wires the API key service used by QueueDepth to enforce agent-token
+// pool binding. Set after construction because the service is built later in route
+// registration; QueueDepth resolves it per request and degrades safely if unset.
+func (h *AgentPoolHandlerV2) SetAPIKeyService(s *apikey.Service) {
+	h.apiKeyService = s
+}
+
+// QueueDepth returns how much work an agent pool has waiting and how many runners it
+// has to execute it.
+// GET /api/v2/agent-pools/:id/queue-depth
+//
+// This exists for the Kubernetes runner operator: its KEDA external scaler polls this
+// every 10-15s and scales runner pods on the result, so the response is deliberately
+// small and cheap (six COUNTs, no row materialisation) and safe to call frequently.
+// See docs/internal/plans/infrastructure/runners/kubernetes-runner-operator-plan.md.
+//
+// Auth accepts two identities, because two very different callers need it:
+//
+//   - An **org-scoped `runner:register` API key** - what the operator holds, via the
+//     Secret named by `RunnerPool.spec.tokenSecretRef`. Note this cannot use the
+//     RunnerAuth middleware: that requires a token bound to exactly one *runner* and
+//     explicitly rejects registration keys, but the operator has no runner identity of
+//     its own. The scope check mirrors runner registration instead. Agent tokens bound
+//     to a single pool may only read that pool.
+//   - A **user with manage-agent-pools permission**, so the same data is reachable from
+//     the UI or by an operator debugging a pool by hand.
+func (h *AgentPoolHandlerV2) QueueDepth(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid agent pool id"}}})
+		return
+	}
+
+	pool, err := h.poolRepo.GetByID(id, false)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Agent pool not found"}}})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get agent pool"}}})
+		return
+	}
+
+	if !h.authorizeQueueDepth(c, pool, id) {
+		return
+	}
+
+	depth, err := h.poolRepo.QueueDepth(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to compute queue depth"}}})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"type": "queue-depths",
+			"id":   id.String(),
+			"attributes": gin.H{
+				"pending-terraform-jobs": depth.PendingTerraformJobs,
+				"pending-ansible-jobs":   depth.PendingAnsibleJobs,
+				"total-pending":          depth.TotalPending,
+				"busy-runners":           depth.BusyRunners,
+				"total-runners":          depth.TotalRunners,
+				"idle-runners":           depth.IdleRunners,
+			},
+		},
+	})
+}
+
+// authorizeQueueDepth allows either an org-scoped runner:register API key (the operator)
+// or a user holding manage-agent-pools. It writes the error response and returns false
+// when the caller is allowed neither.
+func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.AgentPool, poolID uuid.UUID) bool {
+	if method, _ := c.Get("auth_method"); method == "api_key" {
+		scopes, _ := c.Get("api_key_scopes")
+		scopeStrs, ok := scopes.([]string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "invalid API key scopes"}}})
+			return false
+		}
+		checker, cerr := apikey.NewScopeChecker(scopeStrs)
+		if cerr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "invalid API key scopes"}}})
+			return false
+		}
+		if !checker.HasOrgPermission(pool.OrganizationID, "runner:register") && !checker.IsUnrestricted() {
+			// Fall through to the user path: an ordinary user API key may still carry
+			// manage-agent-pools, and should read the pool the same way the UI does.
+			return h.requireManageAgentPools(c, pool.OrganizationID)
+		}
+		// Pool-binding enforcement, matching runner registration: an agent token
+		// (tfe_agent_token) is bound to one pool and must not read another's depth.
+		// An ordinary org-level runner:register key has no binding and may read any
+		// pool in its organization.
+		if h.apiKeyService != nil {
+			if raw, exists := c.Get("api_key_id"); exists {
+				if keyID, perr := uuid.Parse(fmt.Sprintf("%v", raw)); perr == nil {
+					if bound, berr := h.apiKeyService.AgentPoolBindingForKey(keyID); berr == nil && bound != nil && *bound != poolID {
+						c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "this agent token is bound to a different agent pool"}}})
+						return false
+					}
+				}
+			}
+		}
+		return true
+	}
+
+	return h.requireManageAgentPools(c, pool.OrganizationID)
 }
