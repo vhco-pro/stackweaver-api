@@ -114,9 +114,10 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/projects/:id/relationships/team-access/:access_id": resource("access_id", rTeamProjectAccess),
 
 	// --- agent pools ---
-	"/api/v2/organizations/:name/agent-pools":       orgByName(),
-	"/api/v2/agent-pools/:id":                       resource("id", rAgentPool),
-	"/api/v2/agent-pools/:id/agents":                resource("id", rAgentPool),
+	"/api/v2/organizations/:name/agent-pools": orgByName(),
+	"/api/v2/agent-pools/:id":                 resource("id", rAgentPool),
+	"/api/v2/agent-pools/:id/agents":          resource("id", rAgentPool),
+
 	"/api/v2/agent-pools/:id/authentication-tokens": resource("id", rAgentPool),
 	"/api/v2/authentication-tokens/:id":             resource("id", rAuthToken),
 
@@ -265,15 +266,23 @@ var wallRegistry = map[string]routeEntry{
 	// (via its runner-scoped token) and rejects JWT/browser identities. The handlers
 	// then bind each job to the runner's org/pool/assignment, so the wall treats
 	// them as agnostic - org resolution happens against the runner identity.
-	"/api/v2/runner/register":           agnostic(),
-	"/api/v2/runner/heartbeat":          agnostic(),
-	"/api/v2/runner/deregister":         agnostic(),
-	"/api/v2/runner/jobs/:id/start":     agnostic(),
-	"/api/v2/runner/jobs/:id/output":    agnostic(),
-	"/api/v2/runner/jobs/:id/complete":  agnostic(),
-	"/api/v2/runner/jobs/:id/state":     agnostic(),
-	"/api/v2/runner/jobs/:id/artifacts": agnostic(),
-	"/api/v2/runner/jobs/:id/status":    agnostic(),
+	// Queue depth for the Kubernetes runner operator's KEDA scaler. Agnostic for the
+	// same reason as /runner/register: the caller presents an org-scoped
+	// runner:register key, which grants no coarse read level, so the wall's
+	// scope-vs-method check would deny the GET before the handler ran. The handler
+	// does the org enforcement itself - it resolves the pool, requires
+	// runner:register on THAT pool's organization, honours agent-token pool binding,
+	// and otherwise falls back to manage-agent-pools RBAC.
+	"/api/v2/agent-pools/:id/queue-depth": agnostic(),
+	"/api/v2/runner/register":             agnostic(),
+	"/api/v2/runner/heartbeat":            agnostic(),
+	"/api/v2/runner/deregister":           agnostic(),
+	"/api/v2/runner/jobs/:id/start":       agnostic(),
+	"/api/v2/runner/jobs/:id/output":      agnostic(),
+	"/api/v2/runner/jobs/:id/complete":    agnostic(),
+	"/api/v2/runner/jobs/:id/state":       agnostic(),
+	"/api/v2/runner/jobs/:id/artifacts":   agnostic(),
+	"/api/v2/runner/jobs/:id/status":      agnostic(),
 
 	// --- ansible: inventories ---
 	"/api/v2/organizations/:name/ansible/inventories":           orgByName(),

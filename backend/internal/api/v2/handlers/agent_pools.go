@@ -538,8 +538,12 @@ func (h *AgentPoolHandlerV2) SetAPIKeyService(s *apikey.Service) {
 //     explicitly rejects registration keys, but the operator has no runner identity of
 //     its own. The scope check mirrors runner registration instead. Agent tokens bound
 //     to a single pool may only read that pool.
-//   - A **user with manage-agent-pools permission**, so the same data is reachable from
+//   - A **JWT/session user with manage-agent-pools**, so the same data is reachable from
 //     the UI or by an operator debugging a pool by hand.
+//
+// An api-key caller is authorized *only* by the scope check - there is deliberately no
+// fallback to the key owner's RBAC, because that would let a narrowly-scoped token act
+// with its owner's full permissions across organizations.
 func (h *AgentPoolHandlerV2) QueueDepth(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -600,9 +604,20 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 			return false
 		}
 		if !checker.HasOrgPermission(pool.OrganizationID, "runner:register") && !checker.IsUnrestricted() {
-			// Fall through to the user path: an ordinary user API key may still carry
-			// manage-agent-pools, and should read the pool the same way the UI does.
-			return h.requireManageAgentPools(c, pool.OrganizationID)
+			// Deny outright - do NOT fall back to the key owner's RBAC. This route is
+			// org-wall-agnostic (the wall's scope-vs-method check would reject a
+			// runner:register key on a GET), so this check IS the tenant boundary for
+			// api-key callers. An earlier revision fell through to
+			// requireManageAgentPools here, which let a key scoped to
+			// org:A:runner:register read org B's queue depth whenever its human owner
+			// happened to hold manage-agent-pools on B - a token-scope escalation.
+			// Confirmed live before the fix: a main-scoped key returned 200 for an
+			// acme-corp pool.
+			c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{
+				"status": "403", "title": "Forbidden",
+				"detail": "API key does not have runner:register scope for this organization",
+			}}})
+			return false
 		}
 		// Pool-binding enforcement, matching runner registration: an agent token
 		// (tfe_agent_token) is bound to one pool and must not read another's depth.
