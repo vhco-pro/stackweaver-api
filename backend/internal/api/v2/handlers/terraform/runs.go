@@ -1278,6 +1278,21 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	})
 }
 
+// runHasApplyPhase reports whether a run operation produces an apply phase, and
+// therefore apply logs.
+//
+// Destroy runs use the same two-phase plan/apply flow as plan-and-apply, and their
+// output is stored under the "apply" phase by both the platform runner
+// (backend/cmd/runner/main.go) and agent mode (handlers/runner_agent.go JobLogs).
+//
+// This predicate is shared by GetApply and GetApplyLogs deliberately: the two had
+// drifted apart, with GetApply admitting destroy while GetApplyLogs rejected it, so
+// destroy logs were stored but unreachable (#107). Keeping one definition stops them
+// diverging again.
+func runHasApplyPhase(op models.RunOperation) bool {
+	return op == models.RunOperationPlanAndApply || op == models.RunOperationDestroy
+}
+
 // GetApply returns the apply output for a run (TFE-compatible)
 // GET /api/v2/applies/:id
 // Per TFE API docs: https://developer.hashicorp.com/terraform/enterprise/api-docs/applies
@@ -1290,7 +1305,7 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 	}
 
 	// Plan-and-apply and destroy runs have apply phases (destroy uses same two-phase flow)
-	if run.Operation != models.RunOperationPlanAndApply && run.Operation != models.RunOperationDestroy {
+	if !runHasApplyPhase(run.Operation) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"errors": []gin.H{
 				{
@@ -1989,14 +2004,15 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 		return
 	}
 
-	// Only plan-and-apply runs have apply logs
-	if run.Operation != models.RunOperationPlanAndApply {
+	// Rejecting destroy here made stored destroy logs unreachable even though the
+	// frontend requests them via useRunPolling for destroy runs (#107).
+	if !runHasApplyPhase(run.Operation) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "400",
 					"title":  "Bad Request",
-					"detail": "Apply logs only available for plan-and-apply runs",
+					"detail": "Apply logs only available for plan-and-apply and destroy runs",
 				},
 			},
 		})
