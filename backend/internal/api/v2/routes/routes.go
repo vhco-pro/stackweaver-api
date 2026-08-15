@@ -241,6 +241,12 @@ func SetupV2Routes(
 	agentPools := v2.Group("/agent-pools")
 	{
 		agentPools.GET("/:id/agents", agentPoolHandler.ListAgents)
+		// Queue depth for the Kubernetes runner operator's KEDA external scaler
+		// (polled every 10-15s). Authorized for an org-scoped runner:register key -
+		// what the operator holds - or a user with manage-agent-pools; it cannot use
+		// middleware.RunnerAuth, which requires a token bound to one runner and
+		// rejects registration keys outright.
+		agentPools.GET("/:id/queue-depth", agentPoolHandler.QueueDepth)
 		agentPools.GET("/:id", agentPoolHandler.GetByID)
 		agentPools.PATCH("/:id", agentPoolHandler.Update)
 		agentPools.DELETE("/:id", agentPoolHandler.Delete)
@@ -792,6 +798,10 @@ func SetupV2Routes(
 	// Backed by the unified api_keys table (kind="user") via the apikey service.
 	apiKeyRepo := repository.NewAPIKeyRepository(db)
 	tokenAPIKeyService := apikey.NewService(apiKeyRepo, orgRepo, projectRepo, teamRepo)
+	// Agent-token pool binding for GET /agent-pools/:id/queue-depth. Wired here rather
+	// than through the constructor because the service is built after the agent-pool
+	// handler; the route resolves it per request.
+	agentPoolHandler.SetAPIKeyService(tokenAPIKeyService)
 	tokenHandler := handlers.NewTokenHandlerV2(tokenAPIKeyService, authService)
 	tokens := v2.Group("/tokens")
 	{
