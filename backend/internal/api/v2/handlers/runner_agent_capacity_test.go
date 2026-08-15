@@ -147,16 +147,29 @@ func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 	if len(offered) != 1 {
 		t.Fatalf("expected 1 job offered (capacity=1), got %d", len(offered))
 	}
+	firstJobID := offered[0].JobID
 
-	// The offered job is now reserved (runner_id stamped, still pending), which
-	// counts against the runner's capacity - a second poll before it finishes is
-	// offered nothing further.
+	// A second poll before the job finishes must not hand out ADDITIONAL work - the
+	// reservation counts against capacity, so the other two pending jobs stay unoffered.
+	//
+	// It does, however, re-offer the SAME held job. That is deliberate: the reserve
+	// query only returns rows it newly stamped (it matches `runner_id IS NULL`), so
+	// before this an offer the agent dropped was never offered again, and
+	// ReleaseStaleAnsibleReservations only frees reservations held by OFFLINE runners -
+	// an online agent stranded the slice forever and wedged its own capacity. Found on
+	// the kind harness: 2 agents, 3 slices, one slice pending on an online runner until
+	// the spec timed out. This assertion previously expected 0, which conflated "no new
+	// work" with "nothing at all" and encoded the starvation as intended behaviour.
 	offered, err = h.findPendingJobsForRunner(runner)
 	if err != nil {
 		t.Fatalf("findPendingJobsForRunner (full): %v", err)
 	}
-	if len(offered) != 0 {
-		t.Fatalf("expected 0 jobs offered when runner already holds a reserved job, got %d", len(offered))
+	if len(offered) != 1 {
+		t.Fatalf("expected the held job to be re-offered and no new work (1), got %d", len(offered))
+	}
+	if offered[0].JobID != firstJobID {
+		t.Fatalf("expected the SAME held job re-offered (%s), got %s - a different job means capacity was exceeded",
+			firstJobID, offered[0].JobID)
 	}
 }
 
