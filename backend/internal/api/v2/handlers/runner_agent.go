@@ -2091,8 +2091,38 @@ func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]
 	// distribution). SKIP LOCKED makes concurrent pollers grab DISJOINT rows, so N
 	// slices spread across N idle agents. Held jobs (queued_at NULL, waiting on the
 	// template concurrency gate) are not offered. A reservation is released if the
-	// runner goes offline before starting (see ReleaseReservationsForOfflineRunners).
+	// runner goes offline before starting (see ReleaseStaleAnsibleReservations in
+	// core/repository/runner.go, driven by services/runner/monitor.go).
 	if runner.CanExecuteAnsible() && h.ansibleJobRepo != nil {
+		// Re-offer anything this runner already holds a reservation on but never
+		// started. The reserve query below only ever RETURNS rows it newly stamped
+		// (it matches `runner_id IS NULL`), so an offer the agent dropped - the
+		// response was lost, or it arrived while the agent was mid-job and was
+		// discarded - is never offered again. ReleaseStaleAnsibleReservations only
+		// frees reservations held by OFFLINE runners, so an online agent strands that
+		// job permanently AND wedges its own capacity, since `outstanding` below still
+		// counts it. Proven on the kind harness: with 2 agents and 3 slices, one slice
+		// sat `pending` holding an online runner's id indefinitely while the spec timed
+		// out. Re-offering makes it self-heal on the next poll; a job the agent is
+		// actually executing is `running`, not `pending`, so this cannot steal live
+		// work, and a duplicate offer is rejected by the atomic claim in JobStart.
+		var held []models.AnsibleJob
+		if err := h.db.
+			Where("runner_id = ? AND status = ? AND queued_at IS NOT NULL",
+				runner.ID, models.AnsibleJobStatusPending).
+			Order("created_at ASC").
+			Limit(maxJobs).
+			Find(&held).Error; err != nil {
+			return pendingJobs, err
+		}
+		for i := range held {
+			pendingJobs = append(pendingJobs, PendingJob{
+				JobID:         held[i].ID.String(),
+				JobType:       "ansible_job",
+				WorkspaceName: h.projectNameByID(held[i].ProjectID),
+			})
+		}
+
 		// Outstanding = jobs this runner has reserved or is running but hasn't
 		// finished. Caps reservations to the runner's free capacity.
 		var outstanding int64
