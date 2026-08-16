@@ -1607,6 +1607,10 @@ func (h *PlaybookHandler) CreateTemplate(c *gin.Context) {
 		return
 	}
 
+	// A credential supplied as a relationship must also land in the attachment
+	// set, which is what the template UI lists.
+	h.syncLegacyCredentialIntoSet(template, nil)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"data": formatJobTemplateResponse(template),
 	})
@@ -1795,6 +1799,10 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 		})
 		return
 	}
+
+	// A credential supplied as a relationship must also land in the attachment
+	// set, which is what the template UI lists.
+	h.syncLegacyCredentialIntoSet(template, nil)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"data": formatJobTemplateResponse(template),
@@ -2027,7 +2035,10 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		}
 	}
 
-	// Handle credential relationship update
+	// Handle credential relationship update. Remember what the template pointed
+	// at first, so the attachment set can be corrected after the save.
+	previousCredentialID := template.CredentialID
+	credentialRelationshipChanged := req.Data.Relationships.Credential.Data != nil
 	if req.Data.Relationships.Credential.Data != nil {
 		if req.Data.Relationships.Credential.Data.ID == "" {
 			// Explicitly setting to null (remove credential assignment)
@@ -2060,6 +2071,12 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	// Mirror the reassignment into the attachment set, dropping whichever
+	// credential the template used to point at.
+	if credentialRelationshipChanged {
+		h.syncLegacyCredentialIntoSet(template, previousCredentialID)
 	}
 
 	// Reload the template from database to get updated relationships
@@ -2247,6 +2264,51 @@ func formatPlaybooksResponse(playbooks []models.AnsiblePlaybook) []gin.H {
 }
 
 // formatJobTemplateResponse formats a job template for JSON:API response
+// syncLegacyCredentialIntoSet mirrors a template's legacy CredentialID into the
+// multi-credential attachment set, which is the source of truth the template UI
+// and `GET /job-templates/:id/credentials` read from.
+//
+// The attach endpoint already syncs the other way (attaching a machine credential
+// updates CredentialID), but create/update set only CredentialID, so a template
+// created over the API with a `credential` relationship - which the API itself
+// documents and returns - showed "No credentials attached" in the UI despite
+// having a working credential. Execution was never affected: the runner unions
+// the set with the job's CredentialID.
+//
+// `previous` is the credential the template pointed at before this change, if any,
+// so a reassignment does not leave the old one orphaned in the set. Failures are
+// logged rather than surfaced: the template itself is already saved and usable,
+// and the legacy field still drives execution.
+func (h *PlaybookHandler) syncLegacyCredentialIntoSet(template *models.AnsibleJobTemplate, previous *uuid.UUID) {
+	if h.credentialRepo == nil {
+		return
+	}
+
+	// Drop the credential this template used to mirror, unless it is still the
+	// one in use (no change) - otherwise the set accumulates stale machine
+	// credentials and AttachCredential rejects the new one as a type conflict.
+	if previous != nil && (template.CredentialID == nil || *previous != *template.CredentialID) {
+		if err := h.templateRepo.DetachCredential(template.ID, *previous); err != nil {
+			logger.Warnf("Failed to detach previous credential %s from template %s: %v", previous, template.ID, err)
+		}
+	}
+
+	if template.CredentialID == nil {
+		return
+	}
+
+	cred, err := h.credentialRepo.GetByID(*template.CredentialID)
+	if err != nil {
+		logger.Warnf("Failed to load credential %s while syncing template %s: %v", template.CredentialID, template.ID, err)
+		return
+	}
+	if err := h.templateRepo.AttachCredential(template.ID, cred); err != nil {
+		// A type conflict means the user already curated the set through the
+		// dedicated endpoint; their choice wins over the legacy field.
+		logger.Warnf("Failed to attach credential %s to template %s: %v", template.CredentialID, template.ID, err)
+	}
+}
+
 func formatJobTemplateResponse(template *models.AnsibleJobTemplate) gin.H {
 	relationships := gin.H{
 		"project": gin.H{
