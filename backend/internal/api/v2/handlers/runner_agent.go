@@ -798,6 +798,9 @@ func (h *RunnerAgentHandler) parseAndStoreAgentEvent(jobID uuid.UUID, eventData 
 			// Update the ansible job stats directly
 			job, err := h.ansibleJobRepo.GetByID(jobID)
 			if err == nil {
+				// The stats map is keyed by host, so its size is the authoritative
+				// host count for the run - the only place it is reported.
+				job.HostsTotal = len(stats)
 				job.HostsOk = totalOk
 				job.HostsChanged = totalChanged
 				job.HostsFailed = totalFailed

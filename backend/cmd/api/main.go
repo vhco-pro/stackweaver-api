@@ -167,15 +167,6 @@ func main() {
 		hasNotifyMarkers = true // fail safe: never backfill on uncertainty
 	}
 
-	// The template multi-credential join table is introduced by this release;
-	// when it doesn't exist yet, seed it from the legacy single credential_id
-	// after AutoMigrate creates it.
-	var hasTemplateCredentials bool
-	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ansible_job_template_credentials')").Scan(&hasTemplateCredentials).Error; err != nil {
-		logger.Warnf("Failed to inspect ansible_job_template_credentials table: %v", err)
-		hasTemplateCredentials = true // fail safe: never backfill on uncertainty
-	}
-
 	// run_triggers (tfe_run_trigger) + runs.run_triggers_fired_at are introduced by this release. Detect
 	// whether the marker column predates this startup so pre-existing applied runs can be marked
 	// already-fired exactly once below - otherwise the run-trigger worker would replay every historical
@@ -287,14 +278,31 @@ func main() {
 		logger.Info("Backfilled notification dispatch markers for pre-existing jobs and workflow runs")
 	}
 
-	// One-time backfill: seed the multi-credential set from the legacy single
-	// credential reference.
-	if !hasTemplateCredentials {
-		if err := db.Exec("INSERT INTO ansible_job_template_credentials (ansible_job_template_id, ansible_credential_id) SELECT id, credential_id FROM ansible_job_templates WHERE credential_id IS NOT NULL ON CONFLICT DO NOTHING").Error; err != nil {
-			logger.Warnf("Failed to backfill ansible_job_template_credentials: %v", err)
-		} else {
-			logger.Info("Backfilled ansible_job_template_credentials from legacy credential_id")
-		}
+	// Heal the multi-credential set from the legacy single credential reference.
+	//
+	// This used to run only on the release that introduced the join table, but
+	// template create/update wrote just `credential_id` and never the set, so
+	// every template created over the API with a `credential` relationship drifted
+	// straight back out of it and showed "No credentials attached" in the UI. The
+	// handler now syncs both, and this runs on every startup to repair the rows
+	// created while it did not.
+	//
+	// Only fills a gap: a template that already has a credential of the same type
+	// attached is left alone, since the set allows at most one per type and a
+	// curated set is the user's choice. Idempotent by construction.
+	if err := db.Exec(`
+		INSERT INTO ansible_job_template_credentials (ansible_job_template_id, ansible_credential_id)
+		SELECT t.id, t.credential_id
+		FROM ansible_job_templates t
+		JOIN ansible_credentials c ON c.id = t.credential_id
+		WHERE t.credential_id IS NOT NULL
+		  AND NOT EXISTS (
+		    SELECT 1 FROM ansible_job_template_credentials tc
+		    JOIN ansible_credentials attached ON attached.id = tc.ansible_credential_id
+		    WHERE tc.ansible_job_template_id = t.id AND attached.type = c.type
+		  )
+		ON CONFLICT DO NOTHING`).Error; err != nil {
+		logger.Warnf("Failed to reconcile ansible_job_template_credentials: %v", err)
 	}
 
 	// Schedules consolidation: the embedded per-template cron fields were never
