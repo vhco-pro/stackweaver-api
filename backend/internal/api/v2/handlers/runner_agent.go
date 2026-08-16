@@ -815,6 +815,7 @@ func (h *RunnerAgentHandler) parseAndStoreAgentEvent(jobID uuid.UUID, eventData 
 			Event:     "v2_playbook_on_stats",
 			EventData: eventData,
 			Stdout:    rawLine + "\n",
+			Timestamp: ansible.EventTimestamp(eventData, time.Now().UTC()),
 		}
 		_ = h.ansibleJobRepo.CreateEventNextCounter(event)
 		return
@@ -918,10 +919,23 @@ func (h *RunnerAgentHandler) parseAndStoreAgentEvent(jobID uuid.UUID, eventData 
 		Changed:   changed,
 		Failed:    failed,
 		Skipped:   skipped,
+		Timestamp: ansible.EventTimestamp(eventData, time.Now().UTC()),
 	}
 
 	if unreachable {
 		event.Failed = true
+	}
+
+	// Same derivation as the platform runner: the top-level flags read above are
+	// not what the jsonl callback emits on a result line, hosts[<name>] is.
+	if derived, ok := ansible.DeriveHostResult(eventData, ansible.EventVerb(eventData)); ok {
+		if derived.Host != "" {
+			event.Host = derived.Host
+		}
+		event.Event = derived.Event
+		event.Changed = derived.Changed
+		event.Failed = derived.Failed
+		event.Skipped = derived.Skipped
 	}
 
 	_ = h.ansibleJobRepo.CreateEventNextCounter(event)
@@ -2133,18 +2147,27 @@ func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]
 			return pendingJobs, err
 		}
 		if capacity := maxJobs - int(outstanding); capacity > 0 {
+			// The picking query MUST be a CTE, not a subquery of `WHERE id IN (…)`.
+			// A locking subquery is not guaranteed to be evaluated once: Postgres
+			// may re-run it while the UPDATE walks candidate rows, and each run
+			// returns a fresh unlocked row, so `LIMIT n` stops bounding anything -
+			// a runner with capacity 1 reserved every pending job in its pool,
+			// which is the opposite of the distribution this code exists for. A
+			// CTE is evaluated exactly once, so the limit holds.
 			var reserved []models.AnsibleJob
 			if err := h.db.Raw(`
-				UPDATE ansible_jobs SET runner_id = ?, updated_at = now()
-				WHERE id IN (
+				WITH picked AS (
 					SELECT id FROM ansible_jobs
 					WHERE status = ? AND agent_pool_id = ? AND queued_at IS NOT NULL AND runner_id IS NULL
 					ORDER BY created_at ASC
 					LIMIT ?
 					FOR UPDATE SKIP LOCKED
 				)
-				RETURNING *`,
-				runner.ID, models.AnsibleJobStatusPending, runner.AgentPoolID, capacity).
+				UPDATE ansible_jobs SET runner_id = ?, updated_at = now()
+				FROM picked
+				WHERE ansible_jobs.id = picked.id
+				RETURNING ansible_jobs.*`,
+				models.AnsibleJobStatusPending, runner.AgentPoolID, capacity, runner.ID).
 				Scan(&reserved).Error; err != nil {
 				return pendingJobs, err
 			}
