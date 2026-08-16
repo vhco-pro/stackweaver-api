@@ -83,12 +83,14 @@ type LaunchJobRequest struct {
 					Type string `json:"type"`
 				} `json:"data"`
 			} `json:"inventory"`
-			Credential struct {
-				Data *struct {
+			// Credentials is the job's credential set (AWX-style: at most one per
+			// type, vault credentials may repeat with distinct vault IDs).
+			Credentials struct {
+				Data []struct {
 					ID   string `json:"id"`
 					Type string `json:"type"`
 				} `json:"data"`
-			} `json:"credential,omitempty"`
+			} `json:"credentials,omitempty"`
 		} `json:"relationships"`
 	} `json:"data"`
 }
@@ -397,10 +399,10 @@ func (h *JobHandler) Launch(c *gin.Context) {
 		return
 	}
 
-	// Parse credential ID (optional)
-	var credentialID *uuid.UUID
-	if req.Data.Relationships.Credential.Data != nil {
-		cid, err := uuid.Parse(req.Data.Relationships.Credential.Data.ID)
+	// Parse the credential set (optional)
+	var credentialIDs []uuid.UUID
+	for _, ref := range req.Data.Relationships.Credentials.Data {
+		cid, err := uuid.Parse(ref.ID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"errors": []gin.H{
@@ -409,7 +411,7 @@ func (h *JobHandler) Launch(c *gin.Context) {
 			})
 			return
 		}
-		credentialID = &cid
+		credentialIDs = append(credentialIDs, cid)
 	}
 
 	// Parse job type
@@ -473,7 +475,7 @@ func (h *JobHandler) Launch(c *gin.Context) {
 		SkipTags:       req.Data.Attributes.SkipTags,
 		Verbosity:      req.Data.Attributes.Verbosity,
 		Forks:          req.Data.Attributes.Forks,
-		CredentialID:   credentialID,
+		CredentialIDs:  credentialIDs,
 		BecomeEnabled:  req.Data.Attributes.BecomeEnabled,
 		DiffMode:       req.Data.Attributes.DiffMode,
 		AnsibleVersion: req.Data.Attributes.AnsibleVersion,
@@ -612,10 +614,10 @@ func (h *JobHandler) LaunchByOrganization(c *gin.Context) {
 		return
 	}
 
-	// Parse credential ID (optional)
-	var credentialID *uuid.UUID
-	if req.Data.Relationships.Credential.Data != nil {
-		cid, err := uuid.Parse(req.Data.Relationships.Credential.Data.ID)
+	// Parse the credential set (optional)
+	var credentialIDs []uuid.UUID
+	for _, ref := range req.Data.Relationships.Credentials.Data {
+		cid, err := uuid.Parse(ref.ID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"errors": []gin.H{
@@ -624,7 +626,7 @@ func (h *JobHandler) LaunchByOrganization(c *gin.Context) {
 			})
 			return
 		}
-		credentialID = &cid
+		credentialIDs = append(credentialIDs, cid)
 	}
 
 	// Parse job type
@@ -652,7 +654,7 @@ func (h *JobHandler) LaunchByOrganization(c *gin.Context) {
 		SkipTags:       req.Data.Attributes.SkipTags,
 		Verbosity:      req.Data.Attributes.Verbosity,
 		Forks:          req.Data.Attributes.Forks,
-		CredentialID:   credentialID,
+		CredentialIDs:  credentialIDs,
 		BecomeEnabled:  req.Data.Attributes.BecomeEnabled,
 		DiffMode:       req.Data.Attributes.DiffMode,
 		AnsibleVersion: req.Data.Attributes.AnsibleVersion,
@@ -1388,13 +1390,14 @@ func formatJobResponse(job *models.AnsibleJob) gin.H {
 		}
 	}
 
-	if job.CredentialID != nil {
-		relationships["credential"] = gin.H{
-			"data": gin.H{
-				"id":   job.CredentialID.String(),
-				"type": "ansible-credentials",
-			},
+	// The job's own credential set, as snapshotted at launch. Preloaded by the
+	// job repository; an empty set simply omits the relationship.
+	if len(job.Credentials) > 0 {
+		refs := make([]gin.H, 0, len(job.Credentials))
+		for _, cred := range job.Credentials {
+			refs = append(refs, gin.H{"id": cred.ID.String(), "type": "ansible-credentials"})
 		}
+		relationships["credentials"] = gin.H{"data": refs}
 	}
 
 	if job.CreatedBy != nil {

@@ -302,12 +302,16 @@ type CreateJobTemplateRequest struct {
 					Type string `json:"type"`
 				} `json:"data"`
 			} `json:"inventory"`
-			Credential struct {
-				Data *struct {
+			// Credentials is the template's credential set (AWX-style: at most one
+			// per type, vault credentials may repeat with distinct vault IDs).
+			// Omitting it on update leaves the set untouched; sending an empty
+			// array clears it.
+			Credentials struct {
+				Data []struct {
 					ID   string `json:"id"`
 					Type string `json:"type"`
 				} `json:"data"`
-			} `json:"credential,omitempty"`
+			} `json:"credentials,omitempty"`
 			AgentPool struct {
 				Data *struct {
 					ID   string `json:"id"`
@@ -358,12 +362,16 @@ type UpdateJobTemplateRequest struct {
 					Type string `json:"type"`
 				} `json:"data"`
 			} `json:"inventory,omitempty"`
-			Credential struct {
-				Data *struct {
+			// Credentials is the template's credential set (AWX-style: at most one
+			// per type, vault credentials may repeat with distinct vault IDs).
+			// Omitting it on update leaves the set untouched; sending an empty
+			// array clears it.
+			Credentials struct {
+				Data []struct {
 					ID   string `json:"id"`
 					Type string `json:"type"`
 				} `json:"data"`
-			} `json:"credential,omitempty"`
+			} `json:"credentials,omitempty"`
 			AgentPool struct {
 				Data *struct {
 					ID   string `json:"id"`
@@ -1526,9 +1534,9 @@ func (h *PlaybookHandler) CreateTemplate(c *gin.Context) {
 	}
 
 	// Parse credential ID (optional)
-	var credentialID *uuid.UUID
-	if req.Data.Relationships.Credential.Data != nil {
-		cid, err := uuid.Parse(req.Data.Relationships.Credential.Data.ID)
+	var credentialIDs []uuid.UUID
+	for _, ref := range req.Data.Relationships.Credentials.Data {
+		cid, err := uuid.Parse(ref.ID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"errors": []gin.H{
@@ -1537,7 +1545,7 @@ func (h *PlaybookHandler) CreateTemplate(c *gin.Context) {
 			})
 			return
 		}
-		credentialID = &cid
+		credentialIDs = append(credentialIDs, cid)
 	}
 
 	// Parse agent pool ID (optional)
@@ -1571,7 +1579,6 @@ func (h *PlaybookHandler) CreateTemplate(c *gin.Context) {
 		ProjectID:         projectID,
 		PlaybookID:        playbookID,
 		InventoryID:       inventoryID,
-		CredentialID:      credentialID,
 		AgentPoolID:       agentPoolID,
 		Name:              req.Data.Attributes.Name,
 		Description:       req.Data.Attributes.Description,
@@ -1607,9 +1614,7 @@ func (h *PlaybookHandler) CreateTemplate(c *gin.Context) {
 		return
 	}
 
-	// A credential supplied as a relationship must also land in the attachment
-	// set, which is what the template UI lists.
-	h.syncLegacyCredentialIntoSet(template, nil)
+	h.applyTemplateCredentials(c, template, credentialIDs)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"data": formatJobTemplateResponse(template),
@@ -1728,9 +1733,9 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 	}
 
 	// Parse credential ID (optional)
-	var credentialID *uuid.UUID
-	if req.Data.Relationships.Credential.Data != nil {
-		cid, err := uuid.Parse(req.Data.Relationships.Credential.Data.ID)
+	var credentialIDs []uuid.UUID
+	for _, ref := range req.Data.Relationships.Credentials.Data {
+		cid, err := uuid.Parse(ref.ID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"errors": []gin.H{
@@ -1739,7 +1744,7 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 			})
 			return
 		}
-		credentialID = &cid
+		credentialIDs = append(credentialIDs, cid)
 	}
 
 	// Parse agent pool ID (optional)
@@ -1764,7 +1769,6 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 		ProjectID:         projectID,
 		PlaybookID:        playbookID,
 		InventoryID:       inventoryID,
-		CredentialID:      credentialID,
 		AgentPoolID:       agentPoolID,
 		Name:              req.Data.Attributes.Name,
 		Description:       req.Data.Attributes.Description,
@@ -1800,9 +1804,7 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 		return
 	}
 
-	// A credential supplied as a relationship must also land in the attachment
-	// set, which is what the template UI lists.
-	h.syncLegacyCredentialIntoSet(template, nil)
+	h.applyTemplateCredentials(c, template, credentialIDs)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"data": formatJobTemplateResponse(template),
@@ -1879,13 +1881,13 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 	}
 
 	// Debug logging: Check what relationships were received
-	logger.Debugf("UpdateTemplate: Received request - Inventory.Data: %v, Credential.Data: %v",
-		req.Data.Relationships.Inventory.Data != nil, req.Data.Relationships.Credential.Data != nil)
+	logger.Debugf("UpdateTemplate: Received request - Inventory.Data: %v, Credentials.Data: %d",
+		req.Data.Relationships.Inventory.Data != nil, len(req.Data.Relationships.Credentials.Data))
 	if req.Data.Relationships.Inventory.Data != nil {
 		logger.Debugf("UpdateTemplate: Inventory ID in request: %s", req.Data.Relationships.Inventory.Data.ID)
 	}
-	if req.Data.Relationships.Credential.Data != nil {
-		logger.Debugf("UpdateTemplate: Credential ID in request: %s", req.Data.Relationships.Credential.Data.ID)
+	if len(req.Data.Relationships.Credentials.Data) > 0 {
+		logger.Debugf("UpdateTemplate: %d credential(s) in request", len(req.Data.Relationships.Credentials.Data))
 	}
 
 	if req.Data.Attributes.Name != nil {
@@ -2035,17 +2037,13 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		}
 	}
 
-	// Handle credential relationship update. Remember what the template pointed
-	// at first, so the attachment set can be corrected after the save.
-	previousCredentialID := template.CredentialID
-	credentialRelationshipChanged := req.Data.Relationships.Credential.Data != nil
-	if req.Data.Relationships.Credential.Data != nil {
-		if req.Data.Relationships.Credential.Data.ID == "" {
-			// Explicitly setting to null (remove credential assignment)
-			logger.Debugf("UpdateTemplate: Clearing CredentialID (was %v)", template.CredentialID)
-			template.CredentialID = nil
-		} else {
-			cid, err := uuid.Parse(req.Data.Relationships.Credential.Data.ID)
+	// Credential set update. Omitting the relationship leaves the set alone;
+	// sending it (including an empty array) replaces it wholesale.
+	credentialsProvided := req.Data.Relationships.Credentials.Data != nil
+	var credentialIDs []uuid.UUID
+	if credentialsProvided {
+		for _, ref := range req.Data.Relationships.Credentials.Data {
+			cid, err := uuid.Parse(ref.ID)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"errors": []gin.H{
@@ -2054,16 +2052,11 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 				})
 				return
 			}
-			oldCredID := "nil"
-			if template.CredentialID != nil {
-				oldCredID = template.CredentialID.String()
-			}
-			logger.Debugf("UpdateTemplate: Setting CredentialID from %s to %s", oldCredID, cid.String())
-			template.CredentialID = &cid
+			credentialIDs = append(credentialIDs, cid)
 		}
 	}
 
-	logger.Debugf("UpdateTemplate: Before Save - InventoryID: %s, CredentialID: %v", template.InventoryID.String(), template.CredentialID)
+	logger.Debugf("UpdateTemplate: Before Save - InventoryID: %s", template.InventoryID.String())
 	if err := h.templateRepo.Update(template); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -2073,10 +2066,19 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		return
 	}
 
-	// Mirror the reassignment into the attachment set, dropping whichever
-	// credential the template used to point at.
-	if credentialRelationshipChanged {
-		h.syncLegacyCredentialIntoSet(template, previousCredentialID)
+	// Replace the credential set when the caller sent one.
+	if credentialsProvided {
+		existing, listErr := h.templateRepo.ListCredentials(template.ID)
+		if listErr != nil {
+			logger.Warnf("Failed to list credentials for template %s: %v", template.ID, listErr)
+		} else {
+			for _, cred := range existing {
+				if err := h.templateRepo.DetachCredential(template.ID, cred.ID); err != nil {
+					logger.Warnf("Failed to detach credential %s from template %s: %v", cred.ID, template.ID, err)
+				}
+			}
+		}
+		h.applyTemplateCredentials(c, template, credentialIDs)
 	}
 
 	// Reload the template from database to get updated relationships
@@ -2090,8 +2092,7 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		return
 	}
 
-	logger.Debugf("UpdateTemplate: After reload - InventoryID: %s, CredentialID: %v",
-		updatedTemplate.InventoryID.String(), updatedTemplate.CredentialID)
+	logger.Debugf("UpdateTemplate: After reload - InventoryID: %s", updatedTemplate.InventoryID.String())
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": formatJobTemplateResponse(updatedTemplate),
@@ -2264,49 +2265,34 @@ func formatPlaybooksResponse(playbooks []models.AnsiblePlaybook) []gin.H {
 }
 
 // formatJobTemplateResponse formats a job template for JSON:API response
-// syncLegacyCredentialIntoSet mirrors a template's legacy CredentialID into the
-// multi-credential attachment set, which is the source of truth the template UI
-// and `GET /job-templates/:id/credentials` read from.
+// applyTemplateCredentials replaces a template's credential set with the given
+// IDs, enforcing the AWX one-credential-per-type rule via AttachCredential.
 //
-// The attach endpoint already syncs the other way (attaching a machine credential
-// updates CredentialID), but create/update set only CredentialID, so a template
-// created over the API with a `credential` relationship - which the API itself
-// documents and returns - showed "No credentials attached" in the UI despite
-// having a working credential. Execution was never affected: the runner unions
-// the set with the job's CredentialID.
-//
-// `previous` is the credential the template pointed at before this change, if any,
-// so a reassignment does not leave the old one orphaned in the set. Failures are
-// logged rather than surfaced: the template itself is already saved and usable,
-// and the legacy field still drives execution.
-func (h *PlaybookHandler) syncLegacyCredentialIntoSet(template *models.AnsibleJobTemplate, previous *uuid.UUID) {
-	if h.credentialRepo == nil {
+// The set is the template's only record of what it runs with, so a rejected
+// credential is a real error rather than something to log past - but the
+// template row itself is already saved by the time this runs, so a failure is
+// reported without unwinding it. Callers pass the parsed relationship IDs.
+func (h *PlaybookHandler) applyTemplateCredentials(c *gin.Context, template *models.AnsibleJobTemplate, credentialIDs []uuid.UUID) {
+	if h.credentialRepo == nil || len(credentialIDs) == 0 {
 		return
 	}
-
-	// Drop the credential this template used to mirror, unless it is still the
-	// one in use (no change) - otherwise the set accumulates stale machine
-	// credentials and AttachCredential rejects the new one as a type conflict.
-	if previous != nil && (template.CredentialID == nil || *previous != *template.CredentialID) {
-		if err := h.templateRepo.DetachCredential(template.ID, *previous); err != nil {
-			logger.Warnf("Failed to detach previous credential %s from template %s: %v", previous, template.ID, err)
+	for _, id := range credentialIDs {
+		cred, err := h.credentialRepo.GetByID(id)
+		if err != nil {
+			logger.Warnf("Failed to load credential %s for template %s: %v", id, template.ID, err)
+			continue
+		}
+		// Tenant boundary: credentials are org-scoped and the template's org
+		// comes via its project.
+		if template.Project.OrganizationID != uuid.Nil && template.Project.OrganizationID != cred.OrganizationID {
+			logger.Warnf("Refusing to attach credential %s from another organization to template %s", id, template.ID)
+			continue
+		}
+		if err := h.templateRepo.AttachCredential(template.ID, cred); err != nil {
+			logger.Warnf("Failed to attach credential %s to template %s: %v", id, template.ID, err)
 		}
 	}
-
-	if template.CredentialID == nil {
-		return
-	}
-
-	cred, err := h.credentialRepo.GetByID(*template.CredentialID)
-	if err != nil {
-		logger.Warnf("Failed to load credential %s while syncing template %s: %v", template.CredentialID, template.ID, err)
-		return
-	}
-	if err := h.templateRepo.AttachCredential(template.ID, cred); err != nil {
-		// A type conflict means the user already curated the set through the
-		// dedicated endpoint; their choice wins over the legacy field.
-		logger.Warnf("Failed to attach credential %s to template %s: %v", template.CredentialID, template.ID, err)
-	}
+	_ = c
 }
 
 func formatJobTemplateResponse(template *models.AnsibleJobTemplate) gin.H {
@@ -2331,13 +2317,12 @@ func formatJobTemplateResponse(template *models.AnsibleJobTemplate) gin.H {
 		},
 	}
 
-	if template.CredentialID != nil {
-		relationships["credential"] = gin.H{
-			"data": gin.H{
-				"id":   template.CredentialID.String(),
-				"type": "ansible-credentials",
-			},
+	if len(template.Credentials) > 0 {
+		refs := make([]gin.H, 0, len(template.Credentials))
+		for _, cred := range template.Credentials {
+			refs = append(refs, gin.H{"id": cred.ID.String(), "type": "ansible-credentials"})
 		}
+		relationships["credentials"] = gin.H{"data": refs}
 	}
 
 	if template.AgentPoolID != nil {

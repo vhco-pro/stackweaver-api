@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -152,14 +151,6 @@ func (h *PlaybookHandler) AttachTemplateCredential(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": err.Error()}}})
 		return
 	}
-	// Keep the legacy single credential reference in sync with the machine
-	// credential so older consumers keep working.
-	if cred.Type == models.CredentialTypeSSH || cred.Type == models.CredentialTypeMachineSSH {
-		template.CredentialID = &cred.ID
-		if err := h.templateRepo.Update(template); err != nil {
-			logger.Warnf("Failed to sync legacy credential_id on template %s: %v", template.ID, err)
-		}
-	}
 	c.JSON(http.StatusCreated, gin.H{"data": formatTemplateCredential(cred)})
 }
 
@@ -178,12 +169,6 @@ func (h *PlaybookHandler) DetachTemplateCredential(c *gin.Context) {
 	if err := h.templateRepo.DetachCredential(template.ID, credID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to detach credential"}}})
 		return
-	}
-	if template.CredentialID != nil && *template.CredentialID == credID {
-		template.CredentialID = nil
-		if err := h.templateRepo.Update(template); err != nil {
-			logger.Warnf("Failed to clear legacy credential_id on template %s: %v", template.ID, err)
-		}
 	}
 	c.Status(http.StatusNoContent)
 }

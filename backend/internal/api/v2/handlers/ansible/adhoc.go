@@ -161,7 +161,9 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		return
 	}
 
-	var credentialID *uuid.UUID
+	// Ad hoc commands take a single credential (as in AWX); the job stores it as
+	// a one-element set like any other launch.
+	var credentialIDs []uuid.UUID
 	if attrs.CredentialID != "" {
 		id, err := uuid.Parse(attrs.CredentialID)
 		if err != nil {
@@ -176,7 +178,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 			response.BadRequest(c, "Credential not found in this organization")
 			return
 		}
-		credentialID = &id
+		credentialIDs = append(credentialIDs, id)
 	}
 
 	var agentPoolID *uuid.UUID
@@ -204,7 +206,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		Limit:         attrs.Limit,
 		Verbosity:     attrs.Verbosity,
 		Forks:         attrs.Forks,
-		CredentialID:  credentialID,
+		CredentialIDs: credentialIDs,
 		AgentPoolID:   agentPoolID,
 		BecomeEnabled: attrs.BecomeEnabled,
 		ExtraVars:     attrs.ExtraVars,

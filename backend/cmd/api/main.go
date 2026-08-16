@@ -278,31 +278,71 @@ func main() {
 		logger.Info("Backfilled notification dispatch markers for pre-existing jobs and workflow runs")
 	}
 
-	// Heal the multi-credential set from the legacy single credential reference.
+	// Retire the legacy single-credential columns in favour of the credential
+	// SETS that now hold this on both templates and jobs.
 	//
-	// This used to run only on the release that introduced the join table, but
-	// template create/update wrote just `credential_id` and never the set, so
-	// every template created over the API with a `credential` relationship drifted
-	// straight back out of it and showed "No credentials attached" in the UI. The
-	// handler now syncs both, and this runs on every startup to repair the rows
-	// created while it did not.
+	// Order matters: copy each surviving credential_id into the relevant set,
+	// then drop the columns. Both steps are guarded on the column still existing,
+	// so this is a no-op on every startup after the first.
 	//
-	// Only fills a gap: a template that already has a credential of the same type
-	// attached is left alone, since the set allows at most one per type and a
-	// curated set is the user's choice. Idempotent by construction.
-	if err := db.Exec(`
-		INSERT INTO ansible_job_template_credentials (ansible_job_template_id, ansible_credential_id)
-		SELECT t.id, t.credential_id
-		FROM ansible_job_templates t
-		JOIN ansible_credentials c ON c.id = t.credential_id
-		WHERE t.credential_id IS NOT NULL
-		  AND NOT EXISTS (
-		    SELECT 1 FROM ansible_job_template_credentials tc
-		    JOIN ansible_credentials attached ON attached.id = tc.ansible_credential_id
-		    WHERE tc.ansible_job_template_id = t.id AND attached.type = c.type
-		  )
-		ON CONFLICT DO NOTHING`).Error; err != nil {
-		logger.Warnf("Failed to reconcile ansible_job_template_credentials: %v", err)
+	// Templates: only fills a gap. A template that already has a credential of
+	// the same type attached is left alone - the set permits one per type and a
+	// curated set is the user's own choice.
+	var templateHasLegacyColumn bool
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ansible_job_templates' AND column_name = 'credential_id')").Scan(&templateHasLegacyColumn).Error; err != nil {
+		logger.Warnf("Failed to inspect ansible_job_templates.credential_id: %v", err)
+	} else if templateHasLegacyColumn {
+		if err := db.Exec(`
+			INSERT INTO ansible_job_template_credentials (ansible_job_template_id, ansible_credential_id)
+			SELECT t.id, t.credential_id
+			FROM ansible_job_templates t
+			JOIN ansible_credentials c ON c.id = t.credential_id
+			WHERE t.credential_id IS NOT NULL
+			  AND NOT EXISTS (
+			    SELECT 1 FROM ansible_job_template_credentials tc
+			    JOIN ansible_credentials attached ON attached.id = tc.ansible_credential_id
+			    WHERE tc.ansible_job_template_id = t.id AND attached.type = c.type
+			  )
+			ON CONFLICT DO NOTHING`).Error; err != nil {
+			logger.Warnf("Failed to migrate template credential_id into the credential set: %v", err)
+		} else if err := db.Exec("ALTER TABLE ansible_job_templates DROP COLUMN credential_id").Error; err != nil {
+			logger.Warnf("Failed to drop ansible_job_templates.credential_id: %v", err)
+		} else {
+			logger.Info("Migrated ansible_job_templates.credential_id into ansible_job_template_credentials and dropped the column")
+		}
+	}
+
+	// Jobs: a historical job's credential is part of the record of what ran, so
+	// it is copied onto the job's own set rather than resolved from its template
+	// (which may since have changed, or been deleted).
+	var jobHasLegacyColumn bool
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ansible_jobs' AND column_name = 'credential_id')").Scan(&jobHasLegacyColumn).Error; err != nil {
+		logger.Warnf("Failed to inspect ansible_jobs.credential_id: %v", err)
+	} else if jobHasLegacyColumn {
+		// Seed each job from its own credential_id, then top up from the
+		// template set it would have resolved at run time, so historical jobs
+		// keep the vault/cloud credentials they actually ran with.
+		if err := db.Exec(`
+			INSERT INTO ansible_job_credentials (ansible_job_id, ansible_credential_id)
+			SELECT j.id, j.credential_id FROM ansible_jobs j
+			WHERE j.credential_id IS NOT NULL
+			ON CONFLICT DO NOTHING`).Error; err != nil {
+			logger.Warnf("Failed to migrate job credential_id into the credential set: %v", err)
+		}
+		if err := db.Exec(`
+			INSERT INTO ansible_job_credentials (ansible_job_id, ansible_credential_id)
+			SELECT j.id, tc.ansible_credential_id
+			FROM ansible_jobs j
+			JOIN ansible_job_template_credentials tc ON tc.ansible_job_template_id = j.template_id
+			WHERE j.template_id IS NOT NULL
+			ON CONFLICT DO NOTHING`).Error; err != nil {
+			logger.Warnf("Failed to seed job credential sets from their templates: %v", err)
+		}
+		if err := db.Exec("ALTER TABLE ansible_jobs DROP COLUMN credential_id").Error; err != nil {
+			logger.Warnf("Failed to drop ansible_jobs.credential_id: %v", err)
+		} else {
+			logger.Info("Migrated ansible_jobs.credential_id into ansible_job_credentials and dropped the column")
+		}
 	}
 
 	// Schedules consolidation: the embedded per-template cron fields were never

@@ -77,6 +77,14 @@ func (h *ProvisioningCallbackHandler) Handle(c *gin.Context) {
 		return
 	}
 
+	// Snapshot the template's credential set onto this launch, as a normal
+	// template launch does.
+	templateCredentialIDs, err := h.templateRepo.ListCredentialIDs(template.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to read template credentials"}}})
+		return
+	}
+
 	input := ansible.LaunchJobInput{
 		ProjectID:     template.ProjectID,
 		PlaybookID:    template.PlaybookID,
@@ -90,7 +98,7 @@ func (h *ProvisioningCallbackHandler) Handle(c *gin.Context) {
 		SkipTags:      template.SkipTags,
 		Verbosity:     template.Verbosity,
 		Forks:         template.Forks,
-		CredentialID:  template.CredentialID,
+		CredentialIDs: templateCredentialIDs,
 		AgentPoolID:   template.AgentPoolID,
 		BecomeEnabled: template.BecomeEnabled,
 		DiffMode:      template.DiffMode,

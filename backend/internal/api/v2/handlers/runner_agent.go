@@ -1535,23 +1535,12 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	// machine credential; skipped when already in the set).
 	var decryptedPassword string
 	if h.credentialRepo != nil && h.cryptoService != nil {
+		// The job's own credential set, snapshotted at launch - not the
+		// template's live set, so an edit to the template cannot change what an
+		// already-dispatched job authenticates with.
 		var credIDs []uuid.UUID
-		if job.TemplateID != nil {
-			if err := h.db.Raw("SELECT ansible_credential_id FROM ansible_job_template_credentials WHERE ansible_job_template_id = ? ORDER BY ansible_credential_id", *job.TemplateID).Scan(&credIDs).Error; err != nil {
-				logger.Warnf("Failed to list template credentials for job %s: %v", job.ID, err)
-			}
-		}
-		if job.CredentialID != nil {
-			found := false
-			for _, id := range credIDs {
-				if id == *job.CredentialID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				credIDs = append(credIDs, *job.CredentialID)
-			}
+		if err := h.db.Raw("SELECT ansible_credential_id FROM ansible_job_credentials WHERE ansible_job_id = ? ORDER BY ansible_credential_id", job.ID).Scan(&credIDs).Error; err != nil {
+			logger.Warnf("Failed to list credentials for job %s: %v", job.ID, err)
 		}
 
 		decrypt := func(v string) string {
@@ -1651,11 +1640,23 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 			}
 			// If we have a credential with a username, inject ansible_user so the runner uses it
 			// (avoids falling back to the runner process user e.g. "iac" in Docker)
-			if job.CredentialID != nil && h.credentialRepo != nil {
-				if cred, err := h.credentialRepo.GetByID(*job.CredentialID); err == nil && cred.Username != "" {
+			if h.credentialRepo != nil {
+				var machineCredIDs []uuid.UUID
+				if err := h.db.Raw("SELECT ansible_credential_id FROM ansible_job_credentials WHERE ansible_job_id = ? ORDER BY ansible_credential_id", job.ID).Scan(&machineCredIDs).Error; err != nil {
+					logger.Warnf("Failed to list credentials for job %s: %v", job.ID, err)
+				}
+				for _, id := range machineCredIDs {
+					cred, err := h.credentialRepo.GetByID(id)
+					if err != nil || cred.Username == "" {
+						continue
+					}
+					if cred.Type != models.CredentialTypeSSH && cred.Type != models.CredentialTypeMachineSSH {
+						continue
+					}
 					if injected, err := injectUserIntoInventory(inventoryJSON, cred.Username); err == nil {
 						inventoryJSON = injected
 					}
+					break
 				}
 			}
 			response.InventoryContent = inventoryJSON
