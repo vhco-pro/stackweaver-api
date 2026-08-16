@@ -153,6 +153,36 @@ func (h *JobHandler) ListByProject(c *gin.Context) {
 		return
 	}
 
+	// filter[slice-group-id] returns the sibling slices of one sliced launch -
+	// the whole fan-out, unpaginated, because a caller asking for it wants to
+	// present them as the single logical run they were.
+	if groupStr := c.Query("filter[slice-group-id]"); groupStr != "" {
+		groupID, parseErr := uuid.Parse(groupStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{
+				"status": "400", "title": "Bad Request", "detail": "Invalid filter[slice-group-id]: must be a UUID",
+			}}})
+			return
+		}
+		siblings, listErr := h.jobService.ListJobsBySliceGroup(projectID, groupID)
+		if listErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{
+				"status": "500", "title": "Internal Server Error", "detail": "Failed to list jobs",
+			}}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"data": formatJobsResponse(siblings),
+			"meta": gin.H{"pagination": gin.H{
+				"current-page": 1,
+				"page-size":    len(siblings),
+				"total-count":  len(siblings),
+				"total-pages":  1,
+			}},
+		})
+		return
+	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
 	if perPage > 100 {
@@ -941,6 +971,16 @@ func (h *JobHandler) Delete(c *gin.Context) {
 
 // GetEvents retrieves events for a job
 // GET /api/v2/ansible/jobs/:id/events
+// validEventStatuses are the values filter[status] accepts - the same vocabulary
+// the run viewer's status tiles use.
+var validEventStatuses = map[string]bool{
+	"ok": true, "changed": true, "failed": true, "unreachable": true, "skipped": true,
+}
+
+// maxEventsPerPoll caps one `?after=` response; a burst larger than this is
+// picked up by the next poll.
+const maxEventsPerPoll = 2000
+
 func (h *JobHandler) GetEvents(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
@@ -999,6 +1039,51 @@ func (h *JobHandler) GetEvents(c *gin.Context) {
 		return
 	}
 
+	// filter[host] / filter[status] / filter[task] / filter[counter] narrow the
+	// stream in the database instead of in the browser, which is what keeps a
+	// 500-host run usable. They compose with each other, with `after`, and with
+	// pagination.
+	filter := repository.EventFilter{
+		Host: c.Query("filter[host]"),
+		Task: c.Query("filter[task]"),
+	}
+
+	if status := c.Query("filter[status]"); status != "" {
+		if !validEventStatuses[status] {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{
+				"status": "400", "title": "Bad Request",
+				"detail": "Invalid filter[status]: must be one of ok, changed, failed, unreachable, skipped",
+			}}})
+			return
+		}
+		filter.Status = status
+	}
+
+	if counterStr := c.Query("filter[counter]"); counterStr != "" {
+		counter, parseErr := strconv.Atoi(counterStr)
+		if parseErr != nil || counter < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{
+				"status": "400", "title": "Bad Request", "detail": "Invalid filter[counter]: must be a non-negative integer",
+			}}})
+			return
+		}
+		filter.Counter = &counter
+	}
+
+	// fields[events]=summary drops the heavy parts of each event (stdout,
+	// gathered facts, module args, loop results) so a client that only needs to
+	// draw the run does not download megabytes of module output.
+	summary := false
+	if fields := c.Query("fields[events]"); fields != "" {
+		if fields != "summary" {
+			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{
+				"status": "400", "title": "Bad Request", "detail": "Invalid fields[events]: the only supported value is \"summary\"",
+			}}})
+			return
+		}
+		summary = true
+	}
+
 	// Incremental live polling: ?after=<counter> returns only events newer
 	// than the given counter, so a polling client appends instead of
 	// re-downloading the whole history every interval.
@@ -1008,12 +1093,13 @@ func (h *JobHandler) GetEvents(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid after parameter"}}})
 			return
 		}
-		events, listErr := h.jobService.GetJobEventsAfter(id, after)
+		filter.After = &after
+		events, _, listErr := h.jobService.GetJobEventsFiltered(id, filter, maxEventsPerPoll, 0)
 		if listErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get job events"}}})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": formatEventsResponse(events)})
+		c.JSON(http.StatusOK, gin.H{"data": formatEventsResponse(events, summary)})
 		return
 	}
 
@@ -1024,7 +1110,7 @@ func (h *JobHandler) GetEvents(c *gin.Context) {
 	}
 	offset := (page - 1) * perPage
 
-	events, total, err := h.jobService.GetJobEvents(id, perPage, offset)
+	events, total, err := h.jobService.GetJobEventsFiltered(id, filter, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"errors": []gin.H{
@@ -1035,7 +1121,7 @@ func (h *JobHandler) GetEvents(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data": formatEventsResponse(events),
+		"data": formatEventsResponse(events, summary),
 		"meta": gin.H{
 			"pagination": gin.H{
 				"current-page": page,
@@ -1394,10 +1480,103 @@ func formatEventResponse(event *models.AnsibleJobEvent) gin.H {
 }
 
 // formatEventsResponse formats multiple events for JSON:API response
-func formatEventsResponse(events []models.AnsibleJobEvent) []gin.H {
+func formatEventsResponse(events []models.AnsibleJobEvent, summary bool) []gin.H {
 	result := make([]gin.H, len(events))
 	for i, event := range events {
+		if summary {
+			result[i] = formatEventSummaryResponse(&event)
+			continue
+		}
 		result[i] = formatEventResponse(&event)
 	}
 	return result
+}
+
+// maxSummaryMsgLen keeps a summary row small even when a module returns an
+// essay; the full text is one filter[counter] fetch away.
+const maxSummaryMsgLen = 200
+
+// formatEventSummaryResponse is the `fields[events]=summary` projection: enough
+// to draw a run (what happened, to whom, when, and how long it took) without the
+// payload that makes a fleet run expensive - stdout/stderr, gathered facts,
+// module args, and loop results all stay behind.
+func formatEventSummaryResponse(event *models.AnsibleJobEvent) gin.H {
+	summaryData := gin.H{}
+	if verb, ok := event.EventData["_event"].(string); ok {
+		summaryData["_event"] = verb
+	}
+	if ts, ok := event.EventData["_timestamp"].(string); ok {
+		summaryData["_timestamp"] = ts
+	}
+	if task, ok := event.EventData["task"].(map[string]interface{}); ok {
+		slim := gin.H{}
+		for _, key := range []string{"id", "name", "path", "duration"} {
+			if v, ok := task[key]; ok {
+				slim[key] = v
+			}
+		}
+		summaryData["task"] = slim
+	}
+	if play, ok := event.EventData["play"].(map[string]interface{}); ok {
+		slim := gin.H{}
+		for _, key := range []string{"id", "name", "path", "duration"} {
+			if v, ok := play[key]; ok {
+				slim[key] = v
+			}
+		}
+		summaryData["play"] = slim
+	}
+	if stats, ok := event.EventData["stats"]; ok {
+		// The recap is already per-host counters; it is what the totals come
+		// from, so it survives the projection whole.
+		summaryData["stats"] = stats
+	}
+	if hosts, ok := event.EventData["hosts"].(map[string]interface{}); ok {
+		slimHosts := gin.H{}
+		for name, raw := range hosts {
+			result, _ := raw.(map[string]interface{})
+			slim := gin.H{}
+			for _, key := range []string{"action", "changed", "failed", "skipped", "unreachable", "rc", "attempts", "skip_reason"} {
+				if v, ok := result[key]; ok {
+					slim[key] = v
+				}
+			}
+			if msg, ok := result["msg"].(string); ok {
+				if len(msg) > maxSummaryMsgLen {
+					msg = msg[:maxSummaryMsgLen] + "…"
+				}
+				slim["msg"] = msg
+			}
+			slimHosts[name] = slim
+		}
+		summaryData["hosts"] = slimHosts
+	}
+
+	return gin.H{
+		"id":   event.ID.String(),
+		"type": "ansible-job-events",
+		"attributes": gin.H{
+			"counter":    event.Counter,
+			"event-type": event.Event,
+			"event-data": summaryData,
+			"host":       event.Host,
+			"task":       event.Task,
+			"play":       event.Play,
+			"role":       event.Role,
+			"changed":    event.Changed,
+			"failed":     event.Failed,
+			"skipped":    event.Skipped,
+			"timestamp":  event.Timestamp.Format("2006-01-02T15:04:05Z"),
+			"created-at": event.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			"summary":    true,
+		},
+		"relationships": gin.H{
+			"job": gin.H{
+				"data": gin.H{
+					"id":   event.JobID.String(),
+					"type": "ansible-jobs",
+				},
+			},
+		},
+	}
 }
