@@ -1249,6 +1249,23 @@ func SetupV2Routes(
 		dashboard.GET("/stats", dashboardHandler.GetStats)
 	}
 
+	// Usage & Analytics: one aggregated payload per organization, replacing the per-workspace fetch
+	// cascade the page used to run in the browser.
+	analyticsHandler := handlers.NewAnalyticsHandler(
+		orgRepo,
+		projectRepo,
+		workspaceRepo,
+		runRepo,
+		ansibleJobRepo,
+		ansiblePlaybookRepo,
+		ansibleJobTemplateRepo,
+		ansibleInventoryRepo,
+		auditLogRepo,
+		authService,
+	)
+	v2.GET("/organizations/:name/analytics", analyticsHandler.GetOrganizationAnalytics)
+	v2.GET("/organizations/:name/analytics/executions", analyticsHandler.GetOrganizationExecutions)
+
 	// ==========================================
 	// Ansible Routes Setup
 	// ==========================================
