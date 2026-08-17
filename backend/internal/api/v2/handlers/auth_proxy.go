@@ -838,11 +838,39 @@ func (p *AuthProxy) writeSessionCookie(c *gin.Context, entries []sessionEntry) {
 	signed := p.signSessionCookie(data) + "." + string(data)
 
 	maxAge := 0 // session-only (DR-7)
-	secure := p.config.IsProduction
+	// Secure tracks the browser-visible scheme, not just GIN_MODE. Gating it
+	// on IsProduction alone shipped a Secure-less session cookie over TLS on
+	// every https deployment that isn't running GIN_MODE=release - the
+	// tunnelled dev stack, and any self-host that leaves GIN_MODE unset - so
+	// the cookie rode along on plain-http requests to the same host, where a
+	// network attacker who can force one (an injected http subresource, ARP
+	// or DNS spoofing on a shared network) reads the Zitadel session tokens
+	// in cleartext. IsProduction stays as a floor so a production deploy is
+	// Secure even if the proxy hop drops the header.
+	secure := p.config.IsProduction || requestIsHTTPS(c)
 	sameSite := http.SameSiteLaxMode
 
 	c.SetSameSite(sameSite)
 	c.SetCookie(SessionCookieName, signed, maxAge, "/auth", "", secure, true)
+}
+
+// requestIsHTTPS reports whether the browser-visible request arrived over
+// TLS, using the same scheme priority as getPublicBaseURL: the
+// X-Forwarded-Proto hop first (the api normally sits behind TLS
+// termination, so Request.TLS is nil even when the browser is on https),
+// then direct TLS. A chain of proxies appends to the header, and the
+// leftmost value is the original client scheme.
+//
+// Trusting a client-settable header is safe in this direction: the only
+// thing a forged X-Forwarded-Proto: https buys an attacker is a Secure
+// flag on their own cookie, which withholds it from their own plain-http
+// requests. There is no value to gain by turning hardening on.
+func requestIsHTTPS(c *gin.Context) bool {
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+		first, _, _ := strings.Cut(proto, ",")
+		return strings.EqualFold(strings.TrimSpace(first), "https")
+	}
+	return c.Request.TLS != nil
 }
 
 // clearSessionEntry removes a specific session entry from the cookie by session ID.

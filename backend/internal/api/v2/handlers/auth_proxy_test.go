@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -267,6 +268,71 @@ func TestSessionCookieNotSecureInDev(t *testing.T) {
 		}
 	}
 	t.Error("sessions cookie not found")
+}
+
+// TestSessionCookieSecureTracksScheme pins the property the old
+// `secure := p.config.IsProduction` got wrong: an https deployment that is
+// not running GIN_MODE=release (the tunnelled dev stack, any self-host that
+// leaves GIN_MODE unset) emitted the session cookie without Secure, so the
+// browser attached it to plain-http requests to the same host. Secure now
+// follows the browser-visible scheme, with IsProduction as a floor.
+func TestSessionCookieSecureTracksScheme(t *testing.T) {
+	cases := []struct {
+		name         string
+		isProduction bool
+		forwarded    string // X-Forwarded-Proto, "" to omit
+		directTLS    bool
+		wantSecure   bool
+	}{
+		{name: "dev over plain http stays insecure", wantSecure: false},
+		{name: "dev behind https-terminating proxy", forwarded: "https", wantSecure: true},
+		{name: "dev behind https proxy chain takes leftmost", forwarded: "https, http", wantSecure: true},
+		{name: "dev behind https proxy is case-insensitive", forwarded: "HTTPS", wantSecure: true},
+		{name: "dev behind http-terminating proxy stays insecure", forwarded: "http", wantSecure: false},
+		{name: "dev on direct TLS", directTLS: true, wantSecure: true},
+		{name: "production without any scheme signal still secure", isProduction: true, wantSecure: true},
+		{name: "production behind an http hop still secure", isProduction: true, forwarded: "http", wantSecure: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := NewAuthProxy(AuthProxyConfig{
+				ZitadelInternalURL: "http://localhost:8080",
+				PAT:                "test-pat",
+				IsProduction:       tc.isProduction,
+			})
+
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = newTestRequest(http.MethodGet, "/")
+			if tc.forwarded != "" {
+				c.Request.Header.Set("X-Forwarded-Proto", tc.forwarded)
+			}
+			if tc.directTLS {
+				c.Request.TLS = &tls.ConnectionState{}
+			}
+
+			proxy.writeSessionCookie(c, []sessionEntry{{ID: "test-id", Token: "test-token"}})
+
+			for _, cookie := range w.Result().Cookies() {
+				if cookie.Name == SessionCookieName {
+					if cookie.Secure != tc.wantSecure {
+						t.Errorf("Secure = %v, want %v", cookie.Secure, tc.wantSecure)
+					}
+					// The other two attributes are unconditional; a
+					// scheme change must never quietly drop them.
+					if !cookie.HttpOnly {
+						t.Error("expected HttpOnly regardless of scheme")
+					}
+					if cookie.SameSite != http.SameSiteLaxMode {
+						t.Errorf("expected SameSite=Lax, got %v", cookie.SameSite)
+					}
+					return
+				}
+			}
+			t.Fatal("sessions cookie not found")
+		})
+	}
 }
 
 // --- getPublicHost tests ---
