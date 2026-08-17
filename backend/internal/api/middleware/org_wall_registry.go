@@ -86,6 +86,8 @@ var wallRegistry = map[string]routeEntry{
 	// List + create carry no single target org (create has no parent).
 	"/api/v2/organizations":                                orgListCreate(),
 	"/api/v2/organizations/:name":                          orgByName(),
+	"/api/v2/organizations/:name/analytics":                orgByName(),
+	"/api/v2/organizations/:name/analytics/executions":     orgByName(),
 	"/api/v2/organizations/:name/entitlement-set":          orgByName(),
 	"/api/v2/organizations/:name/organization-memberships": orgByName(),
 	"/api/v2/organizations/:name/effective-permissions":    orgByName(),
