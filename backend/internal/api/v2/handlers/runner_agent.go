@@ -163,7 +163,7 @@ type RegisterRequest struct {
 	OSType               string   `json:"os_type"`
 	OSVersion            string   `json:"os_version"`
 	AgentVersion         string   `json:"agent_version"`
-	TerraformVersion     string   `json:"terraform_version"`
+	TofuVersion          string   `json:"tofu_version"`
 	AnsibleVersion       string   `json:"ansible_version"`
 	AvailableCollections []string `json:"available_collections"`
 	MaxConcurrentJobs    int      `json:"max_concurrent_jobs"`
@@ -180,6 +180,19 @@ type RegisterResponse struct {
 // Register registers a new runner
 // POST /api/v2/runner/register
 // Requires an API key with runner:register scope
+// deriveRunnerType maps reported tool capabilities to a runner type. A runner that reports both
+// (or neither) is treated as combined.
+func deriveRunnerType(tofuVersion, ansibleVersion string) models.RunnerType {
+	switch {
+	case tofuVersion != "" && ansibleVersion == "":
+		return models.RunnerTypeTofu
+	case ansibleVersion != "" && tofuVersion == "":
+		return models.RunnerTypeAnsible
+	default:
+		return models.RunnerTypeCombined
+	}
+}
+
 func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -256,12 +269,17 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		existing.IPAddress = c.ClientIP()
 		now := time.Now()
 		existing.LastHeartbeatAt = &now
-		if req.TerraformVersion != "" {
-			existing.TerraformVersion = req.TerraformVersion
+		if req.TofuVersion != "" {
+			existing.TofuVersion = req.TofuVersion
 		}
 		if req.AnsibleVersion != "" {
 			existing.AnsibleVersion = req.AnsibleVersion
 		}
+		// Refresh the runner type from the capabilities just reported. Without this a row keeps
+		// whatever type it was first created with, so a runner whose capabilities changed - or one
+		// created under an older enum value - stays permanently unroutable: it heartbeats as Online
+		// while FindAvailableRunner never matches it and every job sits pending, silently.
+		existing.RunnerType = deriveRunnerType(req.TofuVersion, req.AnsibleVersion)
 		apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
 		existing.RegisteredWithAPIKeyID = &apiKeyUUID
 		if err := h.runnerRepo.Update(existing); err != nil {
@@ -296,12 +314,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	}
 
 	// Determine runner type based on versions
-	runnerType := models.RunnerTypeCombined
-	if req.TerraformVersion != "" && req.AnsibleVersion == "" {
-		runnerType = models.RunnerTypeTerraform
-	} else if req.AnsibleVersion != "" && req.TerraformVersion == "" {
-		runnerType = models.RunnerTypeAnsible
-	}
+	runnerType := deriveRunnerType(req.TofuVersion, req.AnsibleVersion)
 
 	// Get client IP
 	clientIP := c.ClientIP()
@@ -326,7 +339,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		OSType:                 req.OSType,
 		OSVersion:              req.OSVersion,
 		AgentVersion:           req.AgentVersion,
-		TerraformVersion:       req.TerraformVersion,
+		TofuVersion:            req.TofuVersion,
 		AnsibleVersion:         req.AnsibleVersion,
 		AvailableCollections:   models.RunnerCollections(req.AvailableCollections),
 		MaxConcurrentJobs:      maxJobs,
@@ -1326,7 +1339,7 @@ func (h *RunnerAgentHandler) Deregister(c *gin.Context) {
 // JobArtifactsResponse contains all files needed to execute an ansible job
 type JobArtifactsResponse struct {
 	JobID            string                 `json:"job_id"`
-	JobType          string                 `json:"job_type"` // "ansible_job" or "terraform_run"
+	JobType          string                 `json:"job_type"` // "ansible_job" or "tofu_run"
 	PlaybookContent  string                 `json:"playbook_content,omitempty"`
 	PlaybookPath     string                 `json:"playbook_path,omitempty"`
 	InventoryContent string                 `json:"inventory_content,omitempty"`
@@ -1759,22 +1772,22 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	}
 
 	// Resolve terraform version: workspace -> org default
-	tfVersion := run.Workspace.TerraformVersion
+	tfVersion := run.Workspace.TofuVersion
 	if tfVersion == "" {
 		// Look up org default via workspace -> project -> organization
 		var project models.Project
 		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
 			var org models.Organization
 			if err := h.db.First(&org, "id = ?", project.OrganizationID).Error; err == nil {
-				tfVersion = org.DefaultTerraformVersion
+				tfVersion = org.DefaultTofuVersion
 			}
 		}
 	}
 
 	response := gin.H{
 		"job_id":            run.ID,
-		"job_type":          "terraform_run",
-		"terraform_version": tfVersion,
+		"job_type":          "tofu_run",
+		"tofu_version":      tfVersion,
 		"working_directory": run.Workspace.WorkingDirectory,
 	}
 
@@ -2217,7 +2230,7 @@ func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]
 				}
 				pendingJobs = append(pendingJobs, PendingJob{
 					JobID:         run.ID,
-					JobType:       "terraform_run",
+					JobType:       "tofu_run",
 					WorkspaceID:   run.WorkspaceID,
 					WorkspaceName: run.Workspace.Name,
 					RunType:       runType,

@@ -278,7 +278,7 @@ func SetupV2Routes(
 
 	// Admin: Terraform Versions (TFE-compatible)
 	// Reference: https://developer.hashicorp.com/terraform/enterprise/api-docs/admin/terraform-versions
-	adminTFVersionHandler := handlers.NewAdminTerraformVersionsHandler(db, authService)
+	adminTFVersionHandler := handlers.NewAdminTofuVersionsHandler(db, authService)
 	adminTFVersions := v2.Group("/admin/terraform-versions")
 	{
 		adminTFVersions.GET("", adminTFVersionHandler.List)

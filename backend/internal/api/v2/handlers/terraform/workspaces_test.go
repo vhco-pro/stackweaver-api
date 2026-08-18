@@ -34,7 +34,7 @@ func TestFormatWorkspaceResponse_Basic(t *testing.T) {
 	ws := &models.Workspace{
 		ID:               "ws-abcdef1234567890",
 		Name:             "production",
-		TerraformVersion: "1.9.0",
+		TofuVersion:      "1.9.0",
 		WorkingDirectory: "infra/",
 		AutoApply:        true,
 		ExecutionMode:    "remote",

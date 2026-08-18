@@ -1555,6 +1555,58 @@ func sliceLogBytes(logs []byte, offset, limit int) []byte {
 // Supports all execution modes: remote, local, and agent
 // TFE returns logs as plain text
 // TFE supports token authentication via query parameter (for Terraform CLI)
+// fetchPhaseLogs returns the log bytes for one run phase, reading the live Redis buffer first and
+// falling back to object storage.
+//
+// Both the remote and the agent execution paths stream output through this same buffer (AUD-028)
+// and copy it to storage once at completion, so both want identical read behaviour. GetLogs had
+// it; GetPlanLogs and GetApplyLogs read storage only, which made live output invisible for the
+// entire duration of every agent run - the UI showed nothing until the run finished, and anything
+// polling the phase endpoints (including the cancel-mid-apply E2E) could never observe an
+// in-flight apply (#676). Three hand-rolled copies of this logic are what let the fix land on one
+// endpoint and miss two, hence the shared helper.
+//
+// Returns (logs, true) when the caller should continue. When it returns false the HTTP response
+// has already been written.
+func (h *RunHandlerV2) fetchPhaseLogs(c *gin.Context, runID, phase string, offset, limit int) ([]byte, bool) {
+	var logs []byte
+
+	if h.logBufferService != nil {
+		ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
+		logsStr, rErr := h.logBufferService.Get(ctx, runID, phase, offset, limit)
+		switch {
+		case rErr != nil:
+			logger.Infof("[LOGS] Error getting logs from Redis for run %s phase %s: %v", runID, phase, rErr)
+		case logsStr != "":
+			return []byte(logsStr), true
+		}
+	}
+
+	if h.storageClient == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"errors": []gin.H{
+				{
+					"status": "503",
+					"title":  "Service Unavailable",
+					"detail": "Storage client not initialized",
+				},
+			},
+		})
+		return nil, false
+	}
+
+	logsKey := fmt.Sprintf("runs/%s/logs/%s.log", runID, phase)
+	stored, err := h.storageClient.Get(c.Request.Context(), logsKey)
+	if err != nil {
+		// TFE returns 200 OK with an empty body when logs do not exist yet.
+		logger.Infof("[LOGS] %s logs not found for run %s: %v", phase, runID, err)
+		c.Data(http.StatusOK, "text/plain", []byte(""))
+		return nil, false
+	}
+	logs = sliceLogBytes(stored, offset, limit)
+	return logs, true
+}
+
 func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 	logger.Infof("[LOGS DEBUG] GetLogs called for run ID: %s", c.Param("id"))
 	// TFE-compatible: Support token in query parameter (for Terraform CLI log-read-url)
@@ -1684,62 +1736,13 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 	// Handle different execution modes
 	var logs []byte
 	switch workspace.ExecutionMode {
-	case "remote":
-		// Remote execution: check Redis first (for active runs), then fall back to MinIO
-		var logsStr string
-
-		// Try Redis first if log buffer service is available
-		if h.logBufferService != nil {
-			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
-			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
-			if err == nil && logsStr != "" {
-				// Found logs in Redis, convert to bytes
-				logs = []byte(logsStr)
-			} else if err != nil {
-				// Error accessing Redis, log but continue to MinIO fallback
-				logger.Infof("[LOGS] Error getting logs from Redis for run %s phase %s: %v", run.ID, phase, err)
-			}
-			// If logsStr is empty, continue to MinIO fallback
-		}
-
-		// Fall back to MinIO if Redis didn't have logs
-		if len(logs) == 0 {
-			if h.storageClient == nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "503",
-							"title":  "Service Unavailable",
-							"detail": "Storage client not initialized",
-						},
-					},
-				})
-				return
-			}
-
-			// TFE-compatible log path: runs/{run_id}/logs/{phase}.log
-			// Both plan-and-apply and destroy runs use plan/apply phases
-			var logsKey string
-			if run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy {
-				logsKey = fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
-			} else {
-				logsKey = fmt.Sprintf("runs/%s/logs/%s.log", run.ID, run.Operation)
-			}
-			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
-			if err != nil {
-				// REMOVED: Fallback logic that returned plan logs when apply logs don't exist
-				// This was causing plan logs to appear in apply phase terminal output
-				// TFE returns 200 OK with empty body when logs don't exist (not 204 or 404)
-				// This allows Terraform to successfully fetch the endpoint even if logs aren't ready yet
-				// Log the error for debugging but don't return it to client
-				logger.Infof("[LOGS] Logs not found for run %s at %s: %v", run.ID, logsKey, err)
-				c.Data(http.StatusOK, "text/plain", []byte(""))
-				return
-			}
-
-			// Apply the byte offset/limit window to the full object read from
-			// storage (the Redis path already sliced server-side via GETRANGE).
-			logs = sliceLogBytes(logs, offset, limit)
+	case "remote", "agent":
+		// Remote and agent runs both stream through the Redis buffer and land in object storage
+		// at completion, so they read identically. See fetchPhaseLogs.
+		var ok bool
+		logs, ok = h.fetchPhaseLogs(c, run.ID, phase, offset, limit)
+		if !ok {
+			return
 		}
 
 	case "local":
@@ -1748,45 +1751,6 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		// TODO: Implement log upload endpoint for local execution mode
 		c.Data(http.StatusOK, "text/plain", []byte(""))
 		return
-
-	case "agent":
-		// Agent execution: logs are streamed by the agent to the backend. AUD-028: they now go
-		// through the same Redis log buffer as remote runs (O(1) APPEND) and are copied to MinIO
-		// once at completion, so read Redis first (live runs) then fall back to MinIO (completed
-		// or Redis-evicted). This mirrors the "remote" branch above.
-		if h.logBufferService != nil {
-			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
-			if logsStr, rErr := h.logBufferService.Get(ctx, run.ID, phase, offset, limit); rErr == nil && logsStr != "" {
-				logs = []byte(logsStr)
-			} else if rErr != nil {
-				logger.Infof("[LOGS] Error getting agent logs from Redis for run %s phase %s: %v", run.ID, phase, rErr)
-			}
-		}
-
-		if len(logs) == 0 {
-			if h.storageClient == nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "503",
-							"title":  "Service Unavailable",
-							"detail": "Storage client not initialized",
-						},
-					},
-				})
-				return
-			}
-
-			// Use the phase determined above (either from query parameter or status-based)
-			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, phase)
-			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
-			if err != nil {
-				// TFE returns 200 OK with empty body when logs don't exist
-				c.Data(http.StatusOK, "text/plain", []byte(""))
-				return
-			}
-			logs = sliceLogBytes(logs, offset, limit)
-		}
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
@@ -1877,80 +1841,19 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 	// Handle different execution modes
 	var logs []byte
 	switch workspace.ExecutionMode {
-	case "remote":
-		// Remote execution: check Redis first (for active runs), then fall back to MinIO
-		var logsStr string
-
-		// Try Redis first if log buffer service is available
-		if h.logBufferService != nil {
-			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
-			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
-			if err == nil && logsStr != "" {
-				// Found logs in Redis, convert to bytes
-				logs = []byte(logsStr)
-			} else if err != nil {
-				// Error accessing Redis, log but continue to MinIO fallback
-				logger.Infof("[LOGS] Error getting logs from Redis for run %s phase %s: %v", run.ID, phase, err)
-			}
-		}
-
-		// Fall back to MinIO if Redis didn't have logs
-		if len(logs) == 0 {
-			if h.storageClient == nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "503",
-							"title":  "Service Unavailable",
-							"detail": "Storage client not initialized",
-						},
-					},
-				})
-				return
-			}
-
-			// TFE-compatible log path: runs/{run_id}/logs/plan.log
-			logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
-			if err != nil {
-				// TFE returns 200 OK with empty body when logs don't exist
-				logger.Infof("[LOGS] Plan logs not found for run %s: %v", run.ID, err)
-				c.Data(http.StatusOK, "text/plain", []byte(""))
-				return
-			}
-
-			// Apply the byte offset/limit window to the full object read from
-			// storage (the Redis path already sliced server-side via GETRANGE).
-			logs = sliceLogBytes(logs, offset, limit)
+	case "remote", "agent":
+		// Remote and agent runs both stream through the Redis buffer and land in object storage
+		// at completion, so they read identically. See fetchPhaseLogs.
+		var ok bool
+		logs, ok = h.fetchPhaseLogs(c, run.ID, phase, offset, limit)
+		if !ok {
+			return
 		}
 
 	case "local":
 		// Local execution: logs are generated on user's machine
 		c.Data(http.StatusOK, "text/plain", []byte(""))
 		return
-
-	case "agent":
-		// Agent execution: logs sent by agent to backend, stored in MinIO
-		if h.storageClient == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "503",
-						"title":  "Service Unavailable",
-						"detail": "Storage client not initialized",
-					},
-				},
-			})
-			return
-		}
-
-		logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
-		logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
-		if err != nil {
-			c.Data(http.StatusOK, "text/plain", []byte(""))
-			return
-		}
-		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
@@ -2054,82 +1957,19 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 	// Handle different execution modes
 	var logs []byte
 	switch workspace.ExecutionMode {
-	case "remote":
-		// Remote execution: check Redis first (for active runs), then fall back to MinIO
-		var logsStr string
-
-		// Try Redis first if log buffer service is available
-		if h.logBufferService != nil {
-			ctx := c.Request.Context() // AUD-048: a disconnected log-poller cancels the Redis/MinIO fetch
-			logsStr, err = h.logBufferService.Get(ctx, run.ID, phase, offset, limit)
-			if err == nil && logsStr != "" {
-				// Found logs in Redis, convert to bytes
-				logs = []byte(logsStr)
-			} else if err != nil {
-				// Error accessing Redis, log but continue to MinIO fallback
-				logger.Infof("[LOGS] Error getting logs from Redis for run %s phase %s: %v", run.ID, phase, err)
-			}
-		}
-
-		// Fall back to MinIO if Redis didn't have logs
-		if len(logs) == 0 {
-			if h.storageClient == nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "503",
-							"title":  "Service Unavailable",
-							"detail": "Storage client not initialized",
-						},
-					},
-				})
-				return
-			}
-
-			// TFE-compatible log path: runs/{run_id}/logs/apply.log
-			// NOTE: No fallback to plan logs - this endpoint only returns apply logs
-			logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
-			if err != nil {
-				// TFE returns 200 OK with empty body when logs don't exist
-				// This is correct behavior - apply logs simply don't exist yet or were cancelled
-				logger.Infof("[LOGS] Apply logs not found for run %s: %v", run.ID, err)
-				c.Data(http.StatusOK, "text/plain", []byte(""))
-				return
-			}
-
-			// Apply the byte offset/limit window to the full object read from
-			// storage (the Redis path already sliced server-side via GETRANGE).
-			logs = sliceLogBytes(logs, offset, limit)
+	case "remote", "agent":
+		// Remote and agent runs both stream through the Redis buffer and land in object storage
+		// at completion, so they read identically. See fetchPhaseLogs.
+		var ok bool
+		logs, ok = h.fetchPhaseLogs(c, run.ID, phase, offset, limit)
+		if !ok {
+			return
 		}
 
 	case "local":
 		// Local execution: logs are generated on user's machine
 		c.Data(http.StatusOK, "text/plain", []byte(""))
 		return
-
-	case "agent":
-		// Agent execution: logs sent by agent to backend, stored in MinIO
-		if h.storageClient == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "503",
-						"title":  "Service Unavailable",
-						"detail": "Storage client not initialized",
-					},
-				},
-			})
-			return
-		}
-
-		logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
-		logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
-		if err != nil {
-			c.Data(http.StatusOK, "text/plain", []byte(""))
-			return
-		}
-		logs = sliceLogBytes(logs, offset, limit)
 
 	default:
 		// Unknown execution mode, try to get logs from storage anyway

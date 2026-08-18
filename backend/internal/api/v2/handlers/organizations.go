@@ -19,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/tofu"
 	"gorm.io/gorm"
 )
 
@@ -134,7 +135,7 @@ func buildTFEOrganizationResponse(org *models.Organization) gin.H {
 			"session-remember":                    nil,
 			"collaborator-auth-policy":            collaboratorAuthPolicy,
 			"cost-estimation-enabled":             org.CostEstimationEnabled,
-			"default-terraform-version":           org.DefaultTerraformVersion,
+			"default-terraform-version":           org.DefaultTofuVersion,
 			"default-execution-mode":              defaultExecutionMode,
 			"ansible-job-retention-days":          org.AnsibleJobRetentionDays,
 			"ansible-adhoc-modules":               org.AnsibleAdHocModules,
@@ -562,19 +563,19 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	}
 
 	// Set the latest stable Terraform version as org default
-	if org.DefaultTerraformVersion == "" && h.db != nil {
-		var versions []models.TerraformVersion
+	if org.DefaultTofuVersion == "" && h.db != nil {
+		var versions []models.TofuVersion
 		if err := h.db.Where("enabled = ? AND beta = ? AND deprecated = ?", true, false, false).
 			Find(&versions).Error; err == nil && len(versions) > 0 {
 			// Sort by semver descending to find the latest
 			sort.Slice(versions, func(i, j int) bool {
-				return compareVersions(versions[i].Version, versions[j].Version) > 0
+				return tofu.CompareVersions(versions[i].Version, versions[j].Version) > 0
 			})
-			org.DefaultTerraformVersion = versions[0].Version
+			org.DefaultTofuVersion = versions[0].Version
 			if err := h.orgRepo.Update(org); err != nil {
-				logger.Warnf("Failed to set default terraform version for org %s: %v", org.Name, err)
+				logger.Warnf("Failed to set default opentofu version for org %s: %v", org.Name, err)
 			} else {
-				logger.Infof("Set default terraform version for org %s to %s", org.Name, versions[0].Version)
+				logger.Infof("Set default opentofu version for org %s to %s", org.Name, versions[0].Version)
 			}
 		}
 	}
@@ -715,7 +716,7 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		org.CostEstimationEnabled = *newCostEstimationEnabled
 	}
 	if newDefaultTerraformVersion != nil {
-		org.DefaultTerraformVersion = *newDefaultTerraformVersion
+		org.DefaultTofuVersion = *newDefaultTerraformVersion
 	}
 	if newAnsibleJobRetentionDays != nil && *newAnsibleJobRetentionDays >= 0 {
 		org.AnsibleJobRetentionDays = *newAnsibleJobRetentionDays

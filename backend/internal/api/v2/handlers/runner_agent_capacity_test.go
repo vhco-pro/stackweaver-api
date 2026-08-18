@@ -89,7 +89,7 @@ func newAnsibleAgent(t *testing.T, db *gorm.DB, orgID, poolID uuid.UUID, name st
 		AgentPoolID:       poolID,
 		Name:              name,
 		Status:            models.RunnerStatusOnline,
-		AnsibleVersion:    "2.16.0", // CanExecuteAnsible() true; no TerraformVersion → tf branch skipped
+		AnsibleVersion:    "2.16.0", // CanExecuteAnsible() true; no TofuVersion → tofu branch skipped
 		MaxConcurrentJobs: 1,
 	}
 	if err := db.Create(r).Error; err != nil {
@@ -128,7 +128,7 @@ func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 		Name:              "captest-runner-" + suffix,
 		Status:            models.RunnerStatusOnline,
 		AnsibleVersion:    "2.16.0", // makes CanExecuteAnsible() true
-		MaxConcurrentJobs: 1,        // TerraformVersion left empty → terraform branch skipped
+		MaxConcurrentJobs: 1,        // TofuVersion left empty → tofu branch skipped
 	}
 	if err := db.Create(runner).Error; err != nil {
 		t.Fatalf("seed runner: %v", err)
