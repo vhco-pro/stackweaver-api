@@ -2699,18 +2699,18 @@ func (h *VCSAppInstallationHandlerV2) isWorkspaceAffectedByFiles(workspace model
 	workingDir = strings.TrimPrefix(workingDir, "/")
 	workingDir = strings.TrimSuffix(workingDir, "/")
 
-	// If WorkingDirectory is empty (root-level workspace), only match files at repository root
-	// Root-level files have no directory separator (no "/" in the path)
+	// A root-level workspace (empty or "/" working directory) is affected by ANY
+	// change in the repository. This matches isWorkspaceAffected, which serves the
+	// GitHub push path, and the documented contract in
+	// docs/features/terraform/vcs-path-filtering.md ("Trigger for any file change
+	// in the repository").
+	//
+	// This previously matched only files at the repository root (no "/" in the
+	// path), so the same workspace triggered on a GitHub push but not on a GitHub
+	// pull request or any Azure DevOps event - a change under modules/ was silently
+	// skipped on those paths.
 	if workingDir == "" {
-		for _, file := range changedFiles {
-			// Normalize file path (remove leading slash)
-			normalizedFile := strings.TrimPrefix(file, "/")
-			// Check if file is at root level (no directory separator)
-			if normalizedFile != "" && !strings.Contains(normalizedFile, "/") {
-				return true
-			}
-		}
-		return false
+		return len(changedFiles) > 0
 	}
 
 	// Add trailing slash for proper prefix matching
