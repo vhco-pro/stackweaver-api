@@ -312,19 +312,44 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	// Check if user has permission to manage teams (team project access requires team management permission)
-	hasPermission, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
-	if err != nil || !hasPermission {
+	// Reading team access is gated on organization membership, not team-management
+	// permission - see teamAccessVisible in team_access_visibility.go for the TFE rule
+	// this implements. Writes below remain admin-only.
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	if err != nil || !inOrg {
 		c.JSON(http.StatusForbidden, gin.H{
 			"errors": []gin.H{
 				{
 					"status": "403",
 					"title":  "Forbidden",
-					"detail": "Only organization admins can manage team project access",
+					"detail": "You must be a member of this organization (via team membership)",
 				},
 			},
 		})
 		return
+	}
+
+	// Callers who can manage teams see every access row; everyone else sees rows for
+	// organization-visible teams plus secret teams they belong to.
+	isTeamAdmin, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
+	if err != nil {
+		isTeamAdmin = false
+	}
+	var memberOf map[uuid.UUID]bool
+	if !isTeamAdmin {
+		memberOf, err = callerTeamIDs(h.teamRepo, user.ID, org.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "500",
+						"title":  "Internal Server Error",
+						"detail": "Failed to resolve team memberships",
+					},
+				},
+			})
+			return
+		}
 	}
 
 	// Get all team project accesses for this project
@@ -342,10 +367,13 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	// Format responses
-	data := make([]gin.H, len(accesses))
-	for i, access := range accesses {
-		data[i] = formatTeamProjectAccessResponse(&access)
+	// Format responses, hiding rows the caller is not entitled to see
+	data := make([]gin.H, 0, len(accesses))
+	for i := range accesses {
+		if !teamAccessVisible(accesses[i].Team, memberOf, isTeamAdmin) {
+			continue
+		}
+		data = append(data, formatTeamProjectAccessResponse(&accesses[i]))
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -254,6 +254,30 @@ func (h *TeamWorkspaceAccessHandlerV2) List(c *gin.Context) {
 		return
 	}
 
+	// Callers who can manage teams see every access row; everyone else sees rows for
+	// organization-visible teams plus secret teams they belong to. See
+	// teamAccessVisible in team_access_visibility.go for the TFE rule this implements.
+	isTeamAdmin, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
+	if err != nil {
+		isTeamAdmin = false
+	}
+	var memberOf map[uuid.UUID]bool
+	if !isTeamAdmin {
+		memberOf, err = callerTeamIDs(h.teamRepo, user.ID, org.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "500",
+						"title":  "Internal Server Error",
+						"detail": "Failed to resolve team memberships",
+					},
+				},
+			})
+			return
+		}
+	}
+
 	// Get team access for workspace
 	accessList, err := h.teamRepo.GetWorkspaceAccess(workspaceID)
 	if err != nil {
@@ -269,10 +293,13 @@ func (h *TeamWorkspaceAccessHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	// Format response
-	data := make([]gin.H, len(accessList))
+	// Format response, hiding rows the caller is not entitled to see
+	data := make([]gin.H, 0, len(accessList))
 	for i := range accessList {
-		data[i] = formatTeamWorkspaceAccessResponse(&accessList[i])
+		if !teamAccessVisible(accessList[i].Team, memberOf, isTeamAdmin) {
+			continue
+		}
+		data = append(data, formatTeamWorkspaceAccessResponse(&accessList[i]))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
