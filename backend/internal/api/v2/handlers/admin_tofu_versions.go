@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,25 +15,29 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/tofu"
 	"gorm.io/gorm"
 )
 
-// AdminTerraformVersionsHandler handles the /admin/terraform-versions endpoints.
+// AdminTofuVersionsHandler handles the /admin/terraform-versions endpoints.
+//
+// The route and payload keep TFE's "terraform" naming because that is the contract
+// terraform-provider-tfe speaks; the versions served are OpenTofu releases.
 // Access restricted to users in an "owners" team (site admins).
 // TFE API docs: https://developer.hashicorp.com/terraform/enterprise/api-docs/admin/terraform-versions
-type AdminTerraformVersionsHandler struct {
+type AdminTofuVersionsHandler struct {
 	db          *gorm.DB
 	authService *auth.Service
 }
 
-// NewAdminTerraformVersionsHandler creates a new handler.
-func NewAdminTerraformVersionsHandler(db *gorm.DB, authService *auth.Service) *AdminTerraformVersionsHandler {
-	return &AdminTerraformVersionsHandler{db: db, authService: authService}
+// NewAdminTofuVersionsHandler creates a new handler.
+func NewAdminTofuVersionsHandler(db *gorm.DB, authService *auth.Service) *AdminTofuVersionsHandler {
+	return &AdminTofuVersionsHandler{db: db, authService: authService}
 }
 
 // requireAdmin checks that the authenticated user is in an "owners" team.
 // Returns false and sends a 404 (matching TFE behavior) if not authorized.
-func (h *AdminTerraformVersionsHandler) requireAdmin(c *gin.Context) bool {
+func (h *AdminTofuVersionsHandler) requireAdmin(c *gin.Context) bool {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil || user == nil {
 		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found"}}})
@@ -59,16 +61,16 @@ func (h *AdminTerraformVersionsHandler) requireAdmin(c *gin.Context) bool {
 
 // List all terraform versions.
 // GET /api/v2/admin/terraform-versions
-func (h *AdminTerraformVersionsHandler) List(c *gin.Context) {
+func (h *AdminTofuVersionsHandler) List(c *gin.Context) {
 	if !h.requireAdmin(c) {
 		return
 	}
 
-	var versions []models.TerraformVersion
+	var versions []models.TofuVersion
 
 	// Order by semantic version: split into major.minor.patch numeric parts for proper sorting
 	// e.g. 1.13.0 > 1.9.8 > 1.5.0 (not lexicographic where 1.9 > 1.13)
-	query := h.db.Model(&models.TerraformVersion{}).Order(`
+	query := h.db.Model(&models.TofuVersion{}).Order(`
 		CAST(split_part(regexp_replace(version, '-.*$', ''), '.', 1) AS INTEGER) DESC,
 		CAST(split_part(regexp_replace(version, '-.*$', ''), '.', 2) AS INTEGER) DESC,
 		CAST(split_part(regexp_replace(version, '-.*$', ''), '.', 3) AS INTEGER) DESC,
@@ -116,8 +118,8 @@ func (h *AdminTerraformVersionsHandler) List(c *gin.Context) {
 
 	// Compute live workspace usage counts for the fetched page.
 	type usageRow struct {
-		TerraformVersion string
-		Count            int
+		TofuVersion string
+		Count       int
 	}
 	versionStrings := make([]string, 0, len(versions))
 	for _, v := range versions {
@@ -127,12 +129,12 @@ func (h *AdminTerraformVersionsHandler) List(c *gin.Context) {
 	if len(versionStrings) > 0 {
 		var rows []usageRow
 		h.db.Model(&models.Workspace{}).
-			Select("terraform_version, COUNT(*) AS count").
-			Where("terraform_version IN ?", versionStrings).
-			Group("terraform_version").
+			Select("tofu_version, COUNT(*) AS count").
+			Where("tofu_version IN ?", versionStrings).
+			Group("tofu_version").
 			Scan(&rows)
 		for _, r := range rows {
-			usageCounts[r.TerraformVersion] = r.Count
+			usageCounts[r.TofuVersion] = r.Count
 		}
 	}
 
@@ -158,14 +160,14 @@ func (h *AdminTerraformVersionsHandler) List(c *gin.Context) {
 
 // Read a single terraform version by ID.
 // GET /api/v2/admin/terraform-versions/:id
-func (h *AdminTerraformVersionsHandler) Read(c *gin.Context) {
+func (h *AdminTofuVersionsHandler) Read(c *gin.Context) {
 	if !h.requireAdmin(c) {
 		return
 	}
 
 	id := c.Param("id")
 
-	var version models.TerraformVersion
+	var version models.TofuVersion
 	if err := h.db.First(&version, "id = ?", id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Terraform version not found"}}})
@@ -204,7 +206,7 @@ type terraformVersionArch struct {
 
 // Create a terraform version.
 // POST /api/v2/admin/terraform-versions
-func (h *AdminTerraformVersionsHandler) Create(c *gin.Context) {
+func (h *AdminTofuVersionsHandler) Create(c *gin.Context) {
 	if !h.requireAdmin(c) {
 		return
 	}
@@ -221,7 +223,7 @@ func (h *AdminTerraformVersionsHandler) Create(c *gin.Context) {
 	}
 
 	// Check uniqueness
-	var existing models.TerraformVersion
+	var existing models.TofuVersion
 	if err := h.db.Where("version = ?", req.Data.Attributes.Version).First(&existing).Error; err == nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Version already exists", "detail": fmt.Sprintf("Terraform version %s already exists", req.Data.Attributes.Version)}}})
 		return
@@ -248,10 +250,10 @@ func (h *AdminTerraformVersionsHandler) Create(c *gin.Context) {
 
 	// Auto-generate URL if not provided
 	if url == "" {
-		url = fmt.Sprintf("https://releases.hashicorp.com/terraform/%s/terraform_%s_linux_amd64.zip", req.Data.Attributes.Version, req.Data.Attributes.Version)
+		url = tofu.DownloadURL(req.Data.Attributes.Version, "linux", "amd64")
 	}
 
-	version := &models.TerraformVersion{
+	version := &models.TofuVersion{
 		Version:   req.Data.Attributes.Version,
 		URL:       url,
 		Sha:       sha,
@@ -296,14 +298,14 @@ type updateTerraformVersionRequest struct {
 
 // Update a terraform version.
 // PATCH /api/v2/admin/terraform-versions/:id
-func (h *AdminTerraformVersionsHandler) Update(c *gin.Context) {
+func (h *AdminTofuVersionsHandler) Update(c *gin.Context) {
 	if !h.requireAdmin(c) {
 		return
 	}
 
 	id := c.Param("id")
 
-	var version models.TerraformVersion
+	var version models.TofuVersion
 	if err := h.db.First(&version, "id = ?", id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Terraform version not found"}}})
@@ -374,14 +376,14 @@ func (h *AdminTerraformVersionsHandler) Update(c *gin.Context) {
 
 // Delete a terraform version.
 // DELETE /api/v2/admin/terraform-versions/:id
-func (h *AdminTerraformVersionsHandler) Delete(c *gin.Context) {
+func (h *AdminTofuVersionsHandler) Delete(c *gin.Context) {
 	if !h.requireAdmin(c) {
 		return
 	}
 
 	id := c.Param("id")
 
-	var version models.TerraformVersion
+	var version models.TofuVersion
 	if err := h.db.First(&version, "id = ?", id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Terraform version not found"}}})
@@ -393,13 +395,13 @@ func (h *AdminTerraformVersionsHandler) Delete(c *gin.Context) {
 
 	// Don't allow deleting official versions (like TFE)
 	if version.Official {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Cannot delete official Terraform version"}}})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Cannot delete official OpenTofu version"}}})
 		return
 	}
 
 	// Check if any workspaces use this version
 	var count int64
-	h.db.Model(&models.Workspace{}).Where("terraform_version = ?", version.Version).Count(&count)
+	h.db.Model(&models.Workspace{}).Where("tofu_version = ?", version.Version).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Cannot delete", "detail": fmt.Sprintf("Version %s is in use by %d workspace(s)", version.Version, count)}}})
 		return
@@ -413,131 +415,53 @@ func (h *AdminTerraformVersionsHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// SeedOfficialVersions seeds the database with official Terraform versions.
-// First attempts to fetch the latest versions from the HashiCorp releases CDN.
-// Falls back to the hardcoded list for air-gapped environments.
-// Called during platform startup.
+// SeedOfficialVersions seeds the database with official OpenTofu versions.
+// First attempts the live version index (see core/tofu.VersionIndexURL, overridable via
+// TOFU_VERSION_INDEX_URL for air-gapped mirrors), falling back to the built-in list when that is
+// unreachable. Called during platform startup.
 func SeedOfficialVersions(db *gorm.DB) {
-	versions := fetchStableVersionsFromCDN()
-	if len(versions) == 0 {
-		logger.Warnf("Could not fetch versions from HashiCorp CDN, using fallback list (%d versions)", len(models.OfficialTerraformVersions))
-		versions = models.OfficialTerraformVersions
+	versions, err := tofu.FetchStableVersions(context.Background())
+	if err != nil || len(versions) == 0 {
+		logger.Warnf("Could not fetch the OpenTofu version index (%v), using fallback list (%d versions)", err, len(models.OfficialTofuVersions))
+		versions = models.OfficialTofuVersions
 	} else {
-		logger.Infof("Fetched %d stable Terraform versions from HashiCorp CDN", len(versions))
+		logger.Infof("Fetched %d stable OpenTofu versions from the version index", len(versions))
 	}
 
 	seedCount := 0
 	for _, ver := range versions {
-		var existing models.TerraformVersion
+		var existing models.TofuVersion
 		if err := db.Where("version = ?", ver).First(&existing).Error; err == nil {
 			continue // Already exists
 		}
 
-		version := &models.TerraformVersion{
+		version := &models.TofuVersion{
 			Version:  ver,
-			URL:      fmt.Sprintf("https://releases.hashicorp.com/terraform/%s/terraform_%s_linux_amd64.zip", ver, ver),
+			URL:      tofu.DownloadURL(ver, "linux", "amd64"),
 			Official: true,
 			Enabled:  true,
-			Beta:     false, // CDN fetch and fallback list both exclude pre-release
+			Beta:     false, // index fetch and fallback list both exclude pre-release
 		}
 		if err := db.Create(version).Error; err != nil {
 			if !strings.Contains(err.Error(), "duplicate") {
-				logger.Warnf("Failed to seed terraform version %s: %v", ver, err)
+				logger.Warnf("Failed to seed opentofu version %s: %v", ver, err)
 			}
 		} else {
 			seedCount++
 		}
 	}
 	if seedCount > 0 {
-		logger.Infof("Seeded %d new Terraform versions", seedCount)
+		logger.Infof("Seeded %d new OpenTofu versions", seedCount)
 	}
-}
-
-// fetchStableVersionsFromCDN fetches available Terraform versions from the HashiCorp
-// releases index. Returns only stable versions (no alpha, beta, rc, dev). Versions
-// older than 1.5.0 are excluded. Returns nil on error (caller should use fallback).
-func fetchStableVersionsFromCDN() []string {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, models.HashiCorpReleasesURL, nil)
-	if err != nil {
-		logger.Warnf("Failed to create request for HashiCorp releases: %v", err)
-		return nil
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		logger.Warnf("Failed to fetch HashiCorp releases index: %v", err)
-		return nil
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Warnf("HashiCorp releases index returned status %d", resp.StatusCode)
-		return nil
-	}
-
-	var index struct {
-		Versions map[string]json.RawMessage `json:"versions"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&index); err != nil {
-		logger.Warnf("Failed to parse HashiCorp releases index: %v", err)
-		return nil
-	}
-
-	var versions []string
-	for ver := range index.Versions {
-		// Skip pre-release versions (alpha, beta, rc, dev)
-		if strings.ContainsAny(ver, "-+") {
-			continue
-		}
-		// Only include 1.x versions with proper semver format
-		parts := strings.Split(ver, ".")
-		if len(parts) != 3 {
-			continue
-		}
-		major, err1 := strconv.Atoi(parts[0])
-		minor, err2 := strconv.Atoi(parts[1])
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		// Only 1.5.0+
-		if major < 1 || (major == 1 && minor < 5) {
-			continue
-		}
-		versions = append(versions, ver)
-	}
-
-	// Sort descending (latest first)
-	sort.Slice(versions, func(i, j int) bool {
-		return compareVersions(versions[i], versions[j]) > 0
-	})
-
-	return versions
-}
-
-// compareVersions compares two semver strings. Returns >0 if a > b, <0 if a < b, 0 if equal.
-func compareVersions(a, b string) int {
-	ap := strings.Split(a, ".")
-	bp := strings.Split(b, ".")
-	for i := 0; i < 3; i++ {
-		av, _ := strconv.Atoi(ap[i])
-		bv, _ := strconv.Atoi(bp[i])
-		if av != bv {
-			return av - bv
-		}
-	}
-	return 0
 }
 
 // ListEnabled returns all enabled, non-deprecated terraform versions.
 // This endpoint does NOT require admin access - any authenticated user can call it.
 // Used by workspace create/edit dialogs to show available versions.
 // GET /api/v2/terraform-versions
-func (h *AdminTerraformVersionsHandler) ListEnabled(c *gin.Context) {
-	var versions []models.TerraformVersion
-	h.db.Model(&models.TerraformVersion{}).
+func (h *AdminTofuVersionsHandler) ListEnabled(c *gin.Context) {
+	var versions []models.TofuVersion
+	h.db.Model(&models.TofuVersion{}).
 		Where("enabled = ? AND deprecated = ?", true, false).
 		Order(`
 			CAST(split_part(regexp_replace(version, '-.*$', ''), '.', 1) AS INTEGER) DESC,
@@ -583,7 +507,7 @@ func marshalArchs(archs []terraformVersionArch) *string {
 }
 
 // formatTerraformVersion formats a TerraformVersion as a JSON:API resource.
-func formatTerraformVersion(v *models.TerraformVersion) gin.H {
+func formatTerraformVersion(v *models.TofuVersion) gin.H {
 	// Return stored archs if they exist (user explicitly provided them).
 	// Otherwise return empty array - this prevents the provider's
 	// PreserveAMD64ArchsOnChange plan modifier from corrupting archs by

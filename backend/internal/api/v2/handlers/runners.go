@@ -328,7 +328,7 @@ func buildRunnerResponse(r *models.Runner) gin.H {
 		"os-version":            r.OSVersion,
 		"agent-version":         r.AgentVersion,
 		"labels":                r.Labels,
-		"terraform-version":     r.TerraformVersion,
+		"tofu-version":          r.TofuVersion,
 		"ansible-version":       r.AnsibleVersion,
 		"available-collections": r.AvailableCollections,
 		"max-concurrent-jobs":   r.MaxConcurrentJobs,

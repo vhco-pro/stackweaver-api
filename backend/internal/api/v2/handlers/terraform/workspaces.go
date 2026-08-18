@@ -723,7 +723,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*repository.VCSConnectionRepository) gin.H {
 	attributes := gin.H{
 		"name":                workspace.Name,
-		"terraform-version":   workspace.TerraformVersion,
+		"terraform-version":   workspace.TofuVersion,
 		"working-directory":   workspace.WorkingDirectory,
 		"auto-apply":          workspace.AutoApply,
 		"auto-queue-runs":     workspace.AutoQueueRuns,
@@ -1305,12 +1305,12 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 
 	// Resolve terraform version: workspace setting -> org default
 	if terraformVersion == "" {
-		terraformVersion = org.DefaultTerraformVersion
+		terraformVersion = org.DefaultTofuVersion
 	}
 
 	// Validate terraform version exists and is enabled (like TFE)
 	if terraformVersion != "" && h.db != nil {
-		var tfVersion models.TerraformVersion
+		var tfVersion models.TofuVersion
 		if err := h.db.Where("version = ? AND enabled = ?", terraformVersion, true).First(&tfVersion).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -1333,7 +1333,7 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		VCSRepository:              vcsRepository,
 		VCSBranch:                  vcsBranch,
 		WorkingDirectory:           workingDirectory,
-		TerraformVersion:           terraformVersion,
+		TofuVersion:                terraformVersion,
 		AutoQueueRuns:              finalAutoQueueRuns,
 		AutoApply:                  finalAutoApply,
 		ExecutionMode:              executionMode,
@@ -1714,12 +1714,12 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		workspace.VCSBranch = attrs.VCSBranch
 	}
 
-	// Update Terraform version
+	// Update the engine version (TFE wire attribute name is retained)
 	if attrs.TerraformVersion != "" {
-		if workspace.TerraformVersion != attrs.TerraformVersion {
+		if workspace.TofuVersion != attrs.TerraformVersion {
 			changes["terraform_version"] = attrs.TerraformVersion
 		}
-		workspace.TerraformVersion = attrs.TerraformVersion
+		workspace.TofuVersion = attrs.TerraformVersion
 	}
 
 	// Update working directory (allow empty string to clear)
@@ -2705,9 +2705,9 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		workspace.Name = attrs.Name
 	}
 
-	// Update Terraform version
+	// Update the engine version (TFE wire attribute name is retained)
 	if attrs.TerraformVersion != "" {
-		workspace.TerraformVersion = attrs.TerraformVersion
+		workspace.TofuVersion = attrs.TerraformVersion
 	}
 
 	// Update working directory

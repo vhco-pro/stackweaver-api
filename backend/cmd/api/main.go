@@ -37,6 +37,7 @@ import (
 	statesvc "github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/tofu"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
@@ -542,6 +543,11 @@ func main() {
 	logger.Info("Database migrations completed successfully")
 
 	// Seed official Terraform versions (like TFE's built-in version catalog)
+	// Surface a mistyped TOFU_RELEASES_URL / TOFU_VERSION_INDEX_URL at boot rather than on the
+	// first run of the day. Non-fatal: an unusable override falls back to upstream.
+	if err := tofu.ValidateSources(); err != nil {
+		logger.Warnf("%v", err)
+	}
 	handlers.SeedOfficialVersions(db)
 	logger.Info("Terraform versions seeded")
 

@@ -85,7 +85,7 @@ func (s *RoutingService) RouteJob(ctx context.Context, workspaceID string, jobTy
 	// Find an available runner in the pool
 	var runnerJobType models.JobType
 	if jobType == "terraform" {
-		runnerJobType = models.JobTypeTerraformRun
+		runnerJobType = models.JobTypeTofuRun
 	} else {
 		runnerJobType = models.JobTypeAnsibleJob
 	}
@@ -148,7 +148,7 @@ func (s *RoutingService) GetPendingJobsForRunner(ctx context.Context, runner *mo
 // PendingJobInfo contains information about a pending job
 type PendingJobInfo struct {
 	JobID         uuid.UUID
-	JobType       string // "ansible_job" or "terraform_run"
+	JobType       string // "ansible_job" or "tofu_run"
 	WorkspaceID   string
 	WorkspaceName string
 	Priority      int
@@ -199,7 +199,7 @@ func (s *RoutingService) isWorkspaceAllowedInPool(workspace *models.Workspace, p
 func (s *RoutingService) FindAvailableRunnerForJob(ctx context.Context, poolID uuid.UUID, jobType string, labels []string) (*models.Runner, error) {
 	var runnerJobType models.JobType
 	if jobType == "terraform" {
-		runnerJobType = models.JobTypeTerraformRun
+		runnerJobType = models.JobTypeTofuRun
 	} else {
 		runnerJobType = models.JobTypeAnsibleJob
 	}
