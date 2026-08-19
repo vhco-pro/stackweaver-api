@@ -3,7 +3,6 @@
 package handlers
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -95,8 +94,16 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 
 	// The admin-only signals are resolved server-side, per organization, so the page never has to
 	// ask for something it will be refused - and never renders a 403 as if it were "nothing to do".
-	changeRequestOrgs := h.orgsWhere(ctx, user.ID, orgIDs, h.rbacService.CheckOrgManageWorkspaces)
-	runnerOrgs := h.orgsWhere(ctx, user.ID, orgIDs, h.rbacService.CheckOrgManageAgentPools)
+	// Resolved in one query for every organization at once: the per-organization Check* helpers each
+	// cost a membership lookup plus a team fetch, so two permissions across a dozen memberships was
+	// ~48 queries on a page whose whole point is spanning organizations.
+	permissions, err := h.rbacService.OrgPermissionsForOrganizations(ctx, user.ID, orgIDs)
+	if err != nil {
+		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve permissions")
+		return
+	}
+	changeRequestOrgs := orgsWithPermission(orgIDs, permissions, rbac.PermissionOrgManageWorkspaces)
+	runnerOrgs := orgsWithPermission(orgIDs, permissions, rbac.PermissionOrgManageAgentPools)
 
 	openChangeRequests, err := repo.CountOpenChangeRequests(changeRequestOrgs)
 	if err != nil {
@@ -234,19 +241,15 @@ func (h *DashboardHandler) GetOperations(c *gin.Context) {
 	})
 }
 
-// orgsWhere returns the subset of orgIDs for which check grants the caller permission. A failing
-// check excludes the organization rather than failing the request: one unreadable signal must not
-// cost the reader the whole page.
-func (h *DashboardHandler) orgsWhere(
-	ctx context.Context,
-	userID uuid.UUID,
+// orgsWithPermission returns the subset of orgIDs where the caller holds the given permission.
+func orgsWithPermission(
 	orgIDs []uuid.UUID,
-	check func(ctx context.Context, userID, orgID uuid.UUID) (bool, error),
+	permissions map[uuid.UUID]map[rbac.Permission]bool,
+	permission rbac.Permission,
 ) []uuid.UUID {
 	allowed := make([]uuid.UUID, 0, len(orgIDs))
 	for _, orgID := range orgIDs {
-		ok, err := check(ctx, userID, orgID)
-		if err == nil && ok {
+		if permissions[orgID][permission] {
 			allowed = append(allowed, orgID)
 		}
 	}

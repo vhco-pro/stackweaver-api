@@ -987,6 +987,96 @@ func (s *Service) IsOrgOwner(ctx context.Context, userID, organizationID uuid.UU
 	return false, nil
 }
 
+// ownerPermissions is everything the owners team carries. Extracted so the per-organization and
+// cross-organization resolvers cannot drift: an owner who is all-powerful on one path and not on
+// the other is the kind of gap nobody notices until it matters.
+func ownerPermissions() map[Permission]bool {
+	return map[Permission]bool{
+		PermissionOrgManageAnsible:            true,
+		PermissionOrgReadAnsible:              true,
+		PermissionOrgManageProjects:           true,
+		PermissionOrgReadProjects:             true,
+		PermissionOrgManageWorkspaces:         true,
+		PermissionOrgReadWorkspaces:           true,
+		PermissionOrgManageTeams:              true,
+		PermissionOrgManageMembership:         true,
+		PermissionOrgManageVCSSettings:        true,
+		PermissionOrgManageProviders:          true,
+		PermissionOrgManageModules:            true,
+		PermissionOrgManagePolicies:           true,
+		PermissionOrgManagePolicyOverrides:    true,
+		PermissionOrgManageRunTasks:           true,
+		PermissionOrgManageAgentPools:         true,
+		PermissionOrgAccessSecretTeams:        true,
+		PermissionOrgManageOrganizationAccess: true,
+		PermissionAnsiblePlaybookRead:         true,
+		PermissionAnsiblePlaybookWrite:        true,
+		PermissionAnsibleInventoryRead:        true,
+		PermissionAnsibleInventoryWrite:       true,
+		PermissionAnsibleCredentialRead:       true,
+		PermissionAnsibleCredentialWrite:      true,
+		PermissionAnsibleJobTemplateRead:      true,
+		PermissionAnsibleJobTemplateWrite:     true,
+		PermissionAnsibleJobRead:              true,
+		PermissionAnsibleJobExecute:           true,
+		PermissionAnsibleAdHocExecute:         true,
+		PermissionAnsibleScheduleRead:         true,
+		PermissionAnsibleScheduleWrite:        true,
+	}
+}
+
+// OrgPermissionsForOrganizations returns the caller's effective org-level permissions for each of
+// the given organizations, resolved in one query rather than one per organization.
+//
+// The per-organization Check* helpers below each cost a membership lookup plus a team fetch, so a
+// caller asking about N organizations and M permissions pays N*M*2 queries. The cross-organization
+// dashboard is exactly that caller. An organization the user has no team in simply gets an empty
+// permission set, which is the same answer the membership check would have produced.
+func (s *Service) OrgPermissionsForOrganizations(
+	ctx context.Context,
+	userID uuid.UUID,
+	orgIDs []uuid.UUID,
+) (map[uuid.UUID]map[Permission]bool, error) {
+	byOrg := make(map[uuid.UUID]map[Permission]bool, len(orgIDs))
+	for _, orgID := range orgIDs {
+		byOrg[orgID] = map[Permission]bool{}
+	}
+	if len(orgIDs) == 0 {
+		return byOrg, nil
+	}
+	if s.teamRepo == nil {
+		return nil, fmt.Errorf("team repository not available")
+	}
+
+	teams, err := s.teamRepo.GetTeamsByUserIDForOrganizations(userID, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	owners := make(map[uuid.UUID]bool, len(orgIDs))
+	for _, team := range teams {
+		perms, ok := byOrg[team.OrganizationID]
+		if !ok {
+			continue
+		}
+		// The owners team carries everything, exactly as checkOrgPermission short-circuits on it.
+		if team.Name == "owners" {
+			owners[team.OrganizationID] = true
+			continue
+		}
+		if team.OrganizationAccess == nil {
+			continue
+		}
+		for perm := range s.getPermissionsFromOrganizationAccess(team.OrganizationAccess) {
+			perms[perm] = true
+		}
+	}
+	for orgID := range owners {
+		byOrg[orgID] = ownerPermissions()
+	}
+	return byOrg, nil
+}
+
 // CheckOrgManageProjects checks if user can manage projects (create/update/delete projects)
 // Team-based: Check if user has manage-projects permission from any team
 func (s *Service) CheckOrgManageProjects(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
@@ -1069,38 +1159,7 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userID, organizat
 	// Owners get all permissions
 	for _, team := range teams {
 		if team.Name == "owners" {
-			return map[Permission]bool{
-				PermissionOrgManageAnsible:            true,
-				PermissionOrgReadAnsible:              true,
-				PermissionOrgManageProjects:           true,
-				PermissionOrgReadProjects:             true,
-				PermissionOrgManageWorkspaces:         true,
-				PermissionOrgReadWorkspaces:           true,
-				PermissionOrgManageTeams:              true,
-				PermissionOrgManageMembership:         true,
-				PermissionOrgManageVCSSettings:        true,
-				PermissionOrgManageProviders:          true,
-				PermissionOrgManageModules:            true,
-				PermissionOrgManagePolicies:           true,
-				PermissionOrgManagePolicyOverrides:    true,
-				PermissionOrgManageRunTasks:           true,
-				PermissionOrgManageAgentPools:         true,
-				PermissionOrgAccessSecretTeams:        true,
-				PermissionOrgManageOrganizationAccess: true,
-				PermissionAnsiblePlaybookRead:         true,
-				PermissionAnsiblePlaybookWrite:        true,
-				PermissionAnsibleInventoryRead:        true,
-				PermissionAnsibleInventoryWrite:       true,
-				PermissionAnsibleCredentialRead:       true,
-				PermissionAnsibleCredentialWrite:      true,
-				PermissionAnsibleJobTemplateRead:      true,
-				PermissionAnsibleJobTemplateWrite:     true,
-				PermissionAnsibleJobRead:              true,
-				PermissionAnsibleJobExecute:           true,
-				PermissionAnsibleAdHocExecute:         true,
-				PermissionAnsibleScheduleRead:         true,
-				PermissionAnsibleScheduleWrite:        true,
-			}, nil
+			return ownerPermissions(), nil
 		}
 	}
 
