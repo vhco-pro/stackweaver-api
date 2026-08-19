@@ -73,7 +73,10 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/terraform-versions":           agnostic(),
 	"/api/v2/activities":                   agnostic(),
 	"/api/v2/activities/recent":            agnostic(),
-	"/api/v2/dashboard/stats":              agnostic(),
+	// The dashboard is cross-organization by construction: it answers for every membership the
+	// caller has, so there is no single target org to resolve.
+	"/api/v2/dashboard/stats":      agnostic(),
+	"/api/v2/dashboard/operations": agnostic(),
 
 	// --- own user tokens (user-bound, no target org) ---
 	"/api/v2/tokens":     agnostic(),

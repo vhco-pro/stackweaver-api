@@ -1233,20 +1233,20 @@ func SetupV2Routes(
 	ansibleJobRepo := repository.NewAnsibleJobRepository(db)
 	ansibleCredentialRepo := repository.NewAnsibleCredentialRepository(db)
 
-	// Dashboard handler
+	// Dashboard handler. Reads through a purpose-built cross-organization repository rather than the
+	// per-resource ones: the dashboard asks every question for every organization at once, which
+	// per-organization repositories can only answer with N queries per metric.
 	dashboardHandler := handlers.NewDashboardHandler(
 		orgRepo,
-		projectRepo,
-		workspaceRepo,
-		runRepo,
-		ansibleJobRepo,
-		ansiblePlaybookRepo,
+		repository.NewDashboardRepository(db),
 		authService,
+		rbacService,
 	)
 
 	dashboard := v2.Group("/dashboard")
 	{
 		dashboard.GET("/stats", dashboardHandler.GetStats)
+		dashboard.GET("/operations", dashboardHandler.GetOperations)
 	}
 
 	// Usage & Analytics: one aggregated payload per organization, replacing the per-workspace fetch
