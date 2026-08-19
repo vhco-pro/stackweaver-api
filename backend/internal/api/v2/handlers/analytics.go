@@ -197,6 +197,18 @@ func (h *AnalyticsHandler) GetOrganizationAnalytics(c *gin.Context) {
 		return
 	}
 
+	// Deliberately unbounded by the selected window: this is the one live figure on an otherwise
+	// historical page, and a run started before the window that is still applying is exactly the
+	// thing an operator wants to see.
+	runningRuns, err := runRepo.RunningNowByOrganization(org.ID)
+	if fail("Failed to count running runs", err) {
+		return
+	}
+	runningJobs, err := jobRepo.RunningNowByOrganization(org.ID)
+	if fail("Failed to count running jobs", err) {
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"type": "analytics",
@@ -215,6 +227,11 @@ func (h *AnalyticsHandler) GetOrganizationAnalytics(c *gin.Context) {
 				"activity":        activityPayload(activityTotal, activityByAction, activityByResource),
 				"resources":       resources,
 				"recent_failures": failurePayload(runFailures, jobFailures, analyticsFailureLimit),
+				"running_now": gin.H{
+					"runs":  runningRuns,
+					"jobs":  runningJobs,
+					"total": runningRuns + runningJobs,
+				},
 			},
 		},
 	})
