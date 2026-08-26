@@ -2087,6 +2087,13 @@ func (h *WorkspaceHandlerV2) Delete(c *gin.Context) {
 	// Check if workspace has active infrastructure (applied runs but no successful destroy)
 	// Skip this check if ?force=true query param OR workspace.ForceDelete attribute is set (TFE force_delete)
 	forceDelete := c.Query("force") == "true" || workspace.ForceDelete
+	if forceDelete && !org.AllowForceDeleteWorkspaces {
+		// tfe_organization allow_force_delete_workspaces: with the org on the TFE default (false),
+		// force-deleting a workspace with resources under management is owner-tier only.
+		if !h.authorizeForceDelete(c, user.ID, org.ID, workspace.ID) {
+			return
+		}
+	}
 	if !forceDelete {
 		hasActiveInfrastructure, err := h.workspaceRepo.HasActiveInfrastructure(workspace.ID)
 		if err != nil {
@@ -2240,6 +2247,23 @@ func (h *WorkspaceHandlerV2) DeleteByID(c *gin.Context) {
 		return
 	}
 
+	// tfe_organization allow_force_delete_workspaces: DELETE /workspaces/:id IS TFE's force
+	// delete. With the org on the TFE default (false), force-deleting a workspace with resources
+	// under management is owner-tier only.
+	org := workspace.Project.Organization
+	if !org.AllowForceDeleteWorkspaces {
+		user, uerr := h.authService.GetUserFromContext(c)
+		if uerr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
+			})
+			return
+		}
+		if !h.authorizeForceDelete(c, user.ID, org.ID, workspace.ID) {
+			return
+		}
+	}
+
 	// Force delete by ID (TFE behavior: DELETE /workspaces/:id is force delete)
 	if err := h.workspaceRepo.Delete(workspace.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -2249,6 +2273,41 @@ func (h *WorkspaceHandlerV2) DeleteByID(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// authorizeForceDelete enforces the tfe_organization allow_force_delete_workspaces policy for a
+// force deletion: when the workspace has resources under management, the caller must hold
+// owner tier (manage-membership). Writes the error response and returns false on denial; a
+// workspace with nothing under management passes (force degrades to a plain delete there).
+func (h *WorkspaceHandlerV2) authorizeForceDelete(c *gin.Context, userID, orgID uuid.UUID, workspaceID string) bool {
+	hasActive, err := h.workspaceRepo.HasActiveInfrastructure(workspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check workspace runs"}},
+		})
+		return false
+	}
+	if !hasActive {
+		return true
+	}
+	isOwner, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), userID, orgID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}},
+		})
+		return false
+	}
+	if !isOwner {
+		c.JSON(http.StatusForbidden, gin.H{
+			"errors": []gin.H{{
+				"status": "403",
+				"title":  "Forbidden",
+				"detail": "Force-deleting a workspace with resources under management requires organization owner permissions, or enable allow-force-delete-workspaces on the organization",
+			}},
+		})
+		return false
+	}
+	return true
 }
 
 // SafeDelete safely deletes a workspace by org+name (checks for active infrastructure)
@@ -2755,6 +2814,14 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		}
 	}
 
+	// Update auto-queue-runs. This handler is the path the stock provider uses for
+	// tfe_workspace updates (go-tfe Workspaces.UpdateByID), so an attribute missing here is
+	// silently dropped on a 200 and the config drifts forever - keep it in sync with the
+	// by-name Update above. Covered by TestWorkspaceUpdateHandlersApplySameAttributes.
+	if attrs.AutoQueueRuns != nil {
+		workspace.AutoQueueRuns = *attrs.AutoQueueRuns
+	}
+
 	// Update auto-apply
 	if attrs.AutoApply != nil {
 		workspace.AutoApply = *attrs.AutoApply
@@ -2788,6 +2855,11 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 	// Update VCS connection
 	if attrs.VCSConnectionID != nil {
 		workspace.VCSConnectionID = attrs.VCSConnectionID
+	}
+
+	// Update VCS provider (see the auto-queue-runs note above on staying in sync with Update)
+	if attrs.VCSProvider != "" {
+		workspace.VCSProvider = attrs.VCSProvider
 	}
 
 	// Update VCS repository

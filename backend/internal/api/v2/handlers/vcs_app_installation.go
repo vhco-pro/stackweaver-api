@@ -815,6 +815,10 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 				pathFiltered = append(pathFiltered, ws)
 			}
 		}
+		// tfe_organization send_passing_statuses_for_untriggered_speculative_plans (ADO): skipped
+		// workspaces still get a passing PR status when their org opts in.
+		h.postUntriggeredPassingStatusesADO(context.Background(),
+			splitUntriggeredWorkspaces(filteredWorkspaces, pathFiltered), wp.PRNumber)
 		if len(pathFiltered) == 0 {
 			h.recordWebhookEvent(nil, "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
 				fmt.Sprintf("No workspaces match changed files (%d with speculative enabled)", len(filteredWorkspaces)),
@@ -962,6 +966,12 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 				return
 			}
 
+			// tfe_organization speculative_plan_management_enabled (default on): cancel superseded
+			// speculative plans for this branch/PR before queueing the new one.
+			if wsOrg := h.orgForWorkspace(&ws); wsOrg == nil || wsOrg.SpeculativePlanManagement() {
+				terraform.AutoCancelSupersededSpeculativeRuns(h.runRepo, h.configVersionRepo, ws.ID, wp.HeadBranch, wp.PRNumber)
+			}
+
 			// Create plan-only (speculative) run
 			run := &models.Run{
 				WorkspaceID:            ws.ID,
@@ -999,6 +1009,10 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 					}
 
 					statusContext := fmt.Sprintf("terraform-plan/%s", ws.Name)
+					if wsOrg := h.orgForWorkspace(&ws); wsOrg != nil && wsOrg.AggregatedCommitStatusEnabled {
+						// tfe_organization aggregated_commit_status_enabled: one rolled-up context.
+						statusContext = "terraform-plan"
+					}
 					token, tokenErr := func() (string, error) {
 						if h.vcsRegistry != nil {
 							if provider, pErr := h.vcsRegistry.GetProvider(vcsConn); pErr == nil {
@@ -2284,6 +2298,10 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 				logger.Infof("Workspace %s (path: %q) skipped - no files in its path were changed", workspace.ID, workspace.WorkingDirectory)
 			}
 		}
+		// tfe_organization send_passing_statuses_for_untriggered_speculative_plans: workspaces the
+		// path filter skipped still get a passing status when their org opts in.
+		h.postUntriggeredPassingStatuses(context.Background(),
+			splitUntriggeredWorkspaces(filteredWorkspaces, finalFilteredWorkspaces), headSHA)
 		if len(finalFilteredWorkspaces) == 0 {
 			logger.Infof("No workspaces match the changed files for PR #%d (found %d workspace(s) but none match path filters)", prNumber, len(filteredWorkspaces))
 			c.JSON(http.StatusOK, gin.H{
@@ -2505,6 +2523,13 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 				return
 			}
 
+			// tfe_organization speculative_plan_management_enabled (default on): a newer commit to
+			// this branch/PR supersedes still-pending speculative plans - cancel them before
+			// queueing the new one.
+			if wsOrg := h.orgForWorkspace(&ws); wsOrg == nil || wsOrg.SpeculativePlanManagement() {
+				terraform.AutoCancelSupersededSpeculativeRuns(h.runRepo, h.configVersionRepo, ws.ID, headBranch, prNumber)
+			}
+
 			// Create plan-only run (speculative)
 			run := &models.Run{
 				WorkspaceID:            ws.ID,
@@ -2578,6 +2603,11 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 				// Status check context: terraform-plan/<workspace-name>
 				statusContext := fmt.Sprintf("terraform-plan/%s", ws.Name)
+				if wsOrg := h.orgForWorkspace(&ws); wsOrg != nil && wsOrg.AggregatedCommitStatusEnabled {
+					// tfe_organization aggregated_commit_status_enabled: one rolled-up context per
+					// commit instead of one per workspace.
+					statusContext = "terraform-plan"
+				}
 
 				logger.Infof("Creating status check for run %s - installationID=%s, owner=%s, repo=%s, sha=%s, context=%s",
 					run.ID, vcsConn.InstallationID, owner, repo, headSHA, statusContext)

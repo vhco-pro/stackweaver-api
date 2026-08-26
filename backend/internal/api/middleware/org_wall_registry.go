@@ -382,7 +382,10 @@ var wallRegistry = map[string]routeEntry{
 // the caller's orgs (filtered downstream) and creation is isolation-neutral
 // (the creator becomes owner of a brand-new org), so neither has a target
 // org for the wall to compare against.
-func orgListCreate() routeEntry { return routeEntry{agnostic: true} }
+// orgListCreate: GET (list) is agnostic - the handler itself narrows an org-bound token's list to
+// its bound org. POST (create) is a user-token capability (matching TFE), so mutations are denied
+// to org-bound tokens.
+func orgListCreate() routeEntry { return routeEntry{agnostic: true, userBoundMutations: true} }
 
 // WallClassified reports whether a gin route pattern is classified in the
 // org-resolution wall registry. Exported for the registry-completeness test

@@ -90,6 +90,12 @@ func (s *DriftDetectionService) run() {
 	}
 }
 
+// defaultAssessmentSchedule paces workspaces that were pulled into drift detection through the
+// assessments flags (workspace assessments_enabled / org assessments_enforced) without a drift
+// schedule of their own. Daily, matching TFE's roughly-every-24h assessment cadence. Never
+// persisted onto the workspace row - it only feeds the in-loop due calculation.
+const defaultAssessmentSchedule = "0 3 * * *"
+
 // processDueDriftChecks finds and executes all due drift detection checks
 func (s *DriftDetectionService) processDueDriftChecks() {
 	ctx := context.Background()
@@ -101,17 +107,41 @@ func (s *DriftDetectionService) processDueDriftChecks() {
 		return
 	}
 
+	// tfe_organization assessments_enforced + workspace assessments_enabled: assessments ARE
+	// drift detection - fold the assessment set into the same loop, with a default daily
+	// schedule when a workspace carries none of its own.
+	assessed := map[string]bool{}
+	if assessedWorkspaces, err := s.workspaceRepo.ListAssessmentWorkspaces(); err != nil {
+		logger.Infof("Error listing assessment workspaces: %v", err)
+	} else {
+		seen := make(map[string]bool, len(workspaces))
+		for i := range workspaces {
+			seen[workspaces[i].ID] = true
+		}
+		for i := range assessedWorkspaces {
+			assessed[assessedWorkspaces[i].ID] = true
+			if !seen[assessedWorkspaces[i].ID] {
+				workspaces = append(workspaces, assessedWorkspaces[i])
+			}
+		}
+	}
+
 	now := time.Now()
 
 	for _, workspace := range workspaces {
-		// Skip if no schedule configured
-		if workspace.DriftDetectionSchedule == "" {
-			continue
+		schedule := workspace.DriftDetectionSchedule
+		if schedule == "" {
+			// Skip if no schedule configured - unless the workspace is assessment-driven, which
+			// falls back to the default daily cadence.
+			if !assessed[workspace.ID] {
+				continue
+			}
+			schedule = defaultAssessmentSchedule
 		}
 
 		// Calculate next run time if not set
 		if workspace.NextDriftCheckAt == nil {
-			nextRun, err := s.calculateNextRun(workspace.DriftDetectionSchedule, workspace.DriftDetectionTimezone, now)
+			nextRun, err := s.calculateNextRun(schedule, workspace.DriftDetectionTimezone, now)
 			if err != nil {
 				logger.Infof("Error calculating next run for workspace %s: %v", workspace.ID, err)
 				continue
@@ -134,7 +164,7 @@ func (s *DriftDetectionService) processDueDriftChecks() {
 		}
 
 		// Calculate and update next run time
-		nextRun, err := s.calculateNextRun(workspace.DriftDetectionSchedule, workspace.DriftDetectionTimezone, now)
+		nextRun, err := s.calculateNextRun(schedule, workspace.DriftDetectionTimezone, now)
 		if err != nil {
 			logger.Infof("Error calculating next run for workspace %s: %v", workspace.ID, err)
 			continue
