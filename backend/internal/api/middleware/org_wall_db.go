@@ -642,3 +642,30 @@ func (r *dbOrgResolver) ByAnsibleWorkflowNodeJobID(id string) (uuid.UUID, error)
 func (r *dbOrgResolver) UserInOrg(userID, orgID uuid.UUID) (bool, error) {
 	return r.org.UserInOrg(userID, orgID)
 }
+
+func (r *dbOrgResolver) OrgDisallowsUserTokens(orgID uuid.UUID) (bool, error) {
+	o, err := r.org.GetByID(orgID)
+	if err != nil {
+		return false, err
+	}
+	return !o.UserTokensAllowed(), nil
+}
+
+// UserIsOrgOwner mirrors rbac.Service.CheckOrgManageMembership's owner tier (owners team, or any
+// team with manage-membership org access) without importing the rbac service into middleware.
+// Membership itself (UserInOrg) is checked by the caller before this exemption matters.
+func (r *dbOrgResolver) UserIsOrgOwner(userID, orgID uuid.UUID) (bool, error) {
+	teams, err := r.team.GetTeamsByUserID(userID, orgID)
+	if err != nil {
+		return false, err
+	}
+	for i := range teams {
+		if teams[i].Name == "owners" {
+			return true, nil
+		}
+		if teams[i].OrganizationAccess != nil && teams[i].OrganizationAccess.ManageMembership {
+			return true, nil
+		}
+	}
+	return false, nil
+}

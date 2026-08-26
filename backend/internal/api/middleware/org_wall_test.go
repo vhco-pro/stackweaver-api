@@ -21,6 +21,9 @@ type fakeResolver struct {
 	err       error
 	member    bool
 	memberErr error
+	// tfe_organization user_tokens_enabled policy knobs.
+	userTokensOff bool
+	orgOwner      bool
 }
 
 func (f *fakeResolver) resolve() (uuid.UUID, error) { return f.org, f.err }
@@ -83,6 +86,14 @@ func (f *fakeResolver) ByAnsibleWorkflowNodeJobID(string) (uuid.UUID, error) { r
 
 func (f *fakeResolver) UserInOrg(uuid.UUID, uuid.UUID) (bool, error) {
 	return f.member, f.memberErr
+}
+
+func (f *fakeResolver) OrgDisallowsUserTokens(uuid.UUID) (bool, error) {
+	return f.userTokensOff, nil
+}
+
+func (f *fakeResolver) UserIsOrgOwner(uuid.UUID, uuid.UUID) (bool, error) {
+	return f.orgOwner, nil
 }
 
 // wallTestCase configures one request through the wall.
@@ -471,5 +482,104 @@ func TestOrgWall_UnrestrictedTokenAllowedWrite(t *testing.T) {
 	})
 	if code != http.StatusOK {
 		t.Fatalf("unrestricted token POST: got %d, want 200", code)
+	}
+}
+
+// --- tfe_organization: org creation is a user-token capability (S1) ---
+
+func TestOrgWall_OrgBoundCannotCreateOrg(t *testing.T) {
+	org := uuid.New()
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/organizations",
+		reqPath:    "/api/v2/organizations",
+		method:     http.MethodPost,
+		tokenKind:  models.APIKeyKindOrg,
+		tokenOrgID: &org,
+		resolver:   &fakeResolver{org: org},
+		wantStatus: http.StatusForbidden,
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("org-bound POST /organizations: got %d, want 403", code)
+	}
+}
+
+func TestOrgWall_UserBoundCanCreateOrg(t *testing.T) {
+	user := uuid.New()
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/organizations",
+		reqPath:    "/api/v2/organizations",
+		method:     http.MethodPost,
+		tokenKind:  models.APIKeyKindUser,
+		userID:     &user,
+		resolver:   &fakeResolver{},
+		wantStatus: http.StatusOK,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("user-bound POST /organizations: got %d, want 200", code)
+	}
+}
+
+func TestOrgWall_OrgBoundCanListOrgs(t *testing.T) {
+	org := uuid.New()
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/organizations",
+		reqPath:    "/api/v2/organizations",
+		tokenKind:  models.APIKeyKindOrg,
+		tokenOrgID: &org,
+		resolver:   &fakeResolver{org: org},
+		wantStatus: http.StatusOK,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("org-bound GET /organizations: got %d, want 200 (handler narrows the list)", code)
+	}
+}
+
+// --- tfe_organization: user_tokens_enabled enforcement (R4) ---
+
+func TestOrgWall_UserTokensDisabledDeniesUserBound(t *testing.T) {
+	org := uuid.New()
+	user := uuid.New()
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/organizations/:name",
+		reqPath:    "/api/v2/organizations/acme",
+		tokenKind:  models.APIKeyKindUser,
+		userID:     &user,
+		resolver:   &fakeResolver{org: org, member: true, userTokensOff: true},
+		wantStatus: http.StatusForbidden,
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("user token with user-tokens disabled: got %d, want 403", code)
+	}
+}
+
+func TestOrgWall_UserTokensDisabledOwnerExempt(t *testing.T) {
+	org := uuid.New()
+	user := uuid.New()
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/organizations/:name",
+		reqPath:    "/api/v2/organizations/acme",
+		tokenKind:  models.APIKeyKindUser,
+		userID:     &user,
+		resolver:   &fakeResolver{org: org, member: true, userTokensOff: true, orgOwner: true},
+		wantStatus: http.StatusOK,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("owner user token with user-tokens disabled: got %d, want 200 (anti-lockout exemption)", code)
+	}
+}
+
+func TestOrgWall_UserTokensEnabledAllowsUserBound(t *testing.T) {
+	org := uuid.New()
+	user := uuid.New()
+	code := runWall(t, wallTestCase{
+		route:      "/api/v2/organizations/:name",
+		reqPath:    "/api/v2/organizations/acme",
+		tokenKind:  models.APIKeyKindUser,
+		userID:     &user,
+		resolver:   &fakeResolver{org: org, member: true},
+		wantStatus: http.StatusOK,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("user token with user-tokens enabled: got %d, want 200", code)
 	}
 }

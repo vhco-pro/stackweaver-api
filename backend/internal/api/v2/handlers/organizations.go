@@ -61,6 +61,45 @@ type OrganizationAttributes struct {
 	// DefaultExecutionMode is the org-wide default workspace execution mode
 	// (tfe_organization_default_settings): remote|agent|local.
 	DefaultExecutionMode *string `json:"default-execution-mode"`
+
+	// tfe_organization policy flags (all optional pointers so PATCH can distinguish unset from
+	// false). See the tfe_organization spec doc for the runtime each one drives.
+	UserTokensEnabled                                 *bool `json:"user-tokens-enabled"`
+	AllowForceDeleteWorkspaces                        *bool `json:"allow-force-delete-workspaces"`
+	AssessmentsEnforced                               *bool `json:"assessments-enforced"`
+	SpeculativePlanManagementEnabled                  *bool `json:"speculative-plan-management-enabled"`
+	AggregatedCommitStatusEnabled                     *bool `json:"aggregated-commit-status-enabled"`
+	SendPassingStatusesForUntriggeredSpeculativePlans *bool `json:"send-passing-statuses-for-untriggered-speculative-plans"`
+}
+
+// applyOrgPolicyAttributes copies the tfe_organization policy flags from a request onto the org
+// (nil = leave unchanged) and enforces the TFE invariant that aggregated commit statuses and
+// passing-statuses-for-untriggered-plans are mutually exclusive. Returns an error detail and false
+// when the resulting state is invalid.
+func applyOrgPolicyAttributes(org *models.Organization, attrs *OrganizationAttributes) (string, bool) {
+	if attrs.UserTokensEnabled != nil {
+		org.UserTokensEnabled = attrs.UserTokensEnabled
+	}
+	if attrs.AllowForceDeleteWorkspaces != nil {
+		org.AllowForceDeleteWorkspaces = *attrs.AllowForceDeleteWorkspaces
+	}
+	if attrs.AssessmentsEnforced != nil {
+		org.AssessmentsEnforced = *attrs.AssessmentsEnforced
+	}
+	if attrs.SpeculativePlanManagementEnabled != nil {
+		org.SpeculativePlanManagementEnabled = attrs.SpeculativePlanManagementEnabled
+	}
+	if attrs.AggregatedCommitStatusEnabled != nil {
+		org.AggregatedCommitStatusEnabled = *attrs.AggregatedCommitStatusEnabled
+	}
+	if attrs.SendPassingStatusesForUntriggeredSpeculativePlans != nil {
+		org.SendPassingStatusesForUntriggeredSpeculativePlans = *attrs.SendPassingStatusesForUntriggeredSpeculativePlans
+	}
+	// TFE rule (go-tfe): aggregated commit statuses require send-passing-statuses to be false.
+	if org.AggregatedCommitStatusEnabled && org.SendPassingStatusesForUntriggeredSpeculativePlans {
+		return "aggregated-commit-status-enabled requires send-passing-statuses-for-untriggered-speculative-plans to be false", false
+	}
+	return "", true
 }
 
 // CreateOrganizationRequestV2 supports both simple JSON and JSON:API format
@@ -107,8 +146,10 @@ type UpdateOrganizationRequestV2 struct {
 	} `json:"data"`
 }
 
-// buildTFEOrganizationResponse creates a TFE-compatible JSON:API response for an organization
-func buildTFEOrganizationResponse(org *models.Organization) gin.H {
+// buildTFEOrganizationResponse creates a TFE-compatible JSON:API response for an organization.
+// defaultProjectID, when non-nil, is emitted as the default-project relationship (the provider's
+// computed default_project_id).
+func buildTFEOrganizationResponse(org *models.Organization, defaultProjectID *uuid.UUID) gin.H {
 	// Use defaults if values are empty
 	collaboratorAuthPolicy := org.CollaboratorAuthPolicy
 	if collaboratorAuthPolicy == "" {
@@ -139,11 +180,19 @@ func buildTFEOrganizationResponse(org *models.Organization) gin.H {
 			"default-execution-mode":              defaultExecutionMode,
 			"ansible-job-retention-days":          org.AnsibleJobRetentionDays,
 			"ansible-adhoc-modules":               org.AnsibleAdHocModules,
-			"speculative-plan-management-enabled": true,
-			"aggregated-commit-status-enabled":    false,
-			"assessments-enforced":                false,
-			"allow-force-delete-workspaces":       false,
-			"send-passing-statuses-for-untriggered-speculative-plans": false,
+			"speculative-plan-management-enabled": org.SpeculativePlanManagement(),
+			"aggregated-commit-status-enabled":    org.AggregatedCommitStatusEnabled,
+			"assessments-enforced":                org.AssessmentsEnforced,
+			"allow-force-delete-workspaces":       org.AllowForceDeleteWorkspaces,
+			"user-tokens-enabled":                 org.UserTokensAllowed(),
+			"send-passing-statuses-for-untriggered-speculative-plans": org.SendPassingStatusesForUntriggeredSpeculativePlans,
+			// Declined surface (see the tfe_organization spec): echoed as drift-free constants.
+			// Sessions are Zitadel's; SAML/HYOK/Stacks/max-TTL have no subsystem.
+			"owners-team-saml-role-id": "",
+			"enforce-hyok":             false,
+			"stacks-enabled":           false,
+			"max-ttl-enabled":          false,
+			"two-factor-conformant":    false,
 			"permissions": gin.H{
 				"can-update":                  true,
 				"can-destroy":                 true,
@@ -179,7 +228,7 @@ func buildTFEOrganizationResponse(org *models.Organization) gin.H {
 				"can-manage-projects":         true,
 			},
 		},
-		"relationships": orgRelationshipsResponse(org),
+		"relationships": orgRelationshipsResponse(org, defaultProjectID),
 		"links": gin.H{
 			"self": "/api/v2/organizations/" + org.Name,
 		},
@@ -237,15 +286,35 @@ func (h *OrganizationHandlerV2) applyOrgDefaultSettings(org *models.Organization
 
 // orgRelationshipsResponse renders the organization's relationships. default-agent-pool is omitted
 // entirely when unset: the provider maps a missing relation to a null default_agent_pool_id, whereas an
-// explicit {"data": null} is equally valid JSON:API but noisier to no benefit.
-func orgRelationshipsResponse(org *models.Organization) gin.H {
+// explicit {"data": null} is equally valid JSON:API but noisier to no benefit. default-project is
+// likewise omitted when the org has no "default" project (pre-bootstrap edge) - the provider
+// nil-guards its read.
+func orgRelationshipsResponse(org *models.Organization, defaultProjectID *uuid.UUID) gin.H {
 	rels := gin.H{}
 	if org.DefaultAgentPoolID != nil {
 		rels["default-agent-pool"] = gin.H{
 			"data": gin.H{"id": org.DefaultAgentPoolID.String(), "type": "agent-pools"},
 		}
 	}
+	if defaultProjectID != nil {
+		rels["default-project"] = gin.H{
+			"data": gin.H{"id": defaultProjectID.String(), "type": "projects"},
+		}
+	}
 	return rels
+}
+
+// defaultProjectID resolves the org's "default" project for the default-project relationship
+// (created by the org bootstrap; nil when absent).
+func (h *OrganizationHandlerV2) defaultProjectID(org *models.Organization) *uuid.UUID {
+	if h.projectRepo == nil {
+		return nil
+	}
+	p, err := h.projectRepo.GetByOrganizationAndName(org.ID, "default")
+	if err != nil || p == nil {
+		return nil
+	}
+	return &p.ID
 }
 
 // List returns all organizations that the user is a member of
@@ -265,20 +334,47 @@ func (h *OrganizationHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	// List organizations where the user has at least one team (team-based access; tenant isolation)
-	orgs, err := h.orgRepo.WithContext(c.Request.Context()).ListByUser(user.ID)
-	if err != nil {
-		logger.Errorf("Failed to list organizations for user %s: %v", user.ID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to list organizations",
+	// List organizations where the user has at least one team (team-based access; tenant
+	// isolation). An ORG-BOUND api-key is narrower still: it sees only its bound org - resolving
+	// via the owning user would let an automation token scoped to one org enumerate every org its
+	// owner belongs to.
+	var orgs []models.Organization
+	if kindVal, isToken := c.Get("token_kind"); isToken {
+		if kind, _ := kindVal.(string); kind == models.APIKeyKindOrg {
+			boundVal, _ := c.Get("token_org_id")
+			boundOrg, ok := boundVal.(uuid.UUID)
+			if !ok {
+				c.JSON(http.StatusForbidden, gin.H{
+					"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "token is not bound to an organization"}},
+				})
+				return
+			}
+			org, err := h.orgRepo.GetByID(boundOrg)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list organizations"}},
+				})
+				return
+			}
+			orgs = []models.Organization{*org}
+		}
+	}
+	if orgs == nil {
+		var err error
+		orgs, err = h.orgRepo.WithContext(c.Request.Context()).ListByUser(user.ID)
+		if err != nil {
+			logger.Errorf("Failed to list organizations for user %s: %v", user.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "500",
+						"title":  "Internal Server Error",
+						"detail": "Failed to list organizations",
+					},
 				},
-			},
-		})
-		return
+			})
+			return
+		}
 	}
 
 	total := int64(len(orgs))
@@ -304,13 +400,35 @@ func (h *OrganizationHandlerV2) List(c *gin.Context) {
 		paginatedOrgs = orgs[start:end]
 	}
 
+	// TFE-compatible JSON:API list (go-tfe Organizations.List decodes JSON:API resource objects,
+	// not raw model structs). The default-project relationship is omitted here (nil): the provider's
+	// list path reads only names + external-ids, and resolving it per row would be an N+1 across the
+	// page. The single-org GET still emits it.
+	data := make([]gin.H, 0, len(paginatedOrgs))
+	for i := range paginatedOrgs {
+		data = append(data, buildTFEOrganizationResponse(&paginatedOrgs[i], nil))
+	}
+
+	// Full TFE pagination meta: go-tfe's multi-page loops advance via next-page, so it must be
+	// present (a missing key decodes to 0 and would wedge a >1-page listing on page[number]=0).
+	totalPages := int((total + int64(perPage) - 1) / int64(perPage))
+	var prevPage, nextPage any
+	if page > 1 {
+		prevPage = page - 1
+	}
+	if page < totalPages {
+		nextPage = page + 1
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"data": paginatedOrgs,
+		"data": data,
 		"meta": gin.H{
 			"pagination": gin.H{
-				"page":     page,
-				"per_page": perPage,
-				"total":    total,
+				"current-page": page,
+				"prev-page":    prevPage,
+				"next-page":    nextPage,
+				"page-size":    perPage,
+				"total-pages":  totalPages,
+				"total-count":  total,
 			},
 		},
 	})
@@ -338,7 +456,7 @@ func (h *OrganizationHandlerV2) Get(c *gin.Context) {
 
 	// TFE-compatible JSON:API response
 	c.JSON(http.StatusOK, gin.H{
-		"data": buildTFEOrganizationResponse(org),
+		"data": buildTFEOrganizationResponse(org, h.defaultProjectID(org)),
 	})
 }
 
@@ -438,6 +556,17 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 		Email:                  email,
 		CollaboratorAuthPolicy: collaboratorAuthPolicy,
 		CostEstimationEnabled:  costEstimationEnabled,
+	}
+
+	// tfe_organization policy flags (the stock provider creates with name+email only and PATCHes
+	// the rest, but the wire contract accepts them on create too).
+	if req.Data != nil {
+		if detail, ok := applyOrgPolicyAttributes(org, &req.Data.Attributes); !ok {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"errors": []gin.H{{"status": "422", "title": "Invalid Attribute", "detail": detail}},
+			})
+			return
+		}
 	}
 
 	if err := h.orgRepo.Create(org); err != nil {
@@ -590,7 +719,7 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 
 	// Return TFE-compatible JSON:API response
 	c.JSON(http.StatusCreated, gin.H{
-		"data": buildTFEOrganizationResponse(org),
+		"data": buildTFEOrganizationResponse(org, h.defaultProjectID(org)),
 	})
 }
 
@@ -733,6 +862,13 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 			})
 			return
 		}
+		// tfe_organization policy flags (pointer semantics: only supplied attributes change).
+		if detail, ok := applyOrgPolicyAttributes(org, &req.Data.Attributes); !ok {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"errors": []gin.H{{"status": "422", "title": "Invalid Attribute", "detail": detail}},
+			})
+			return
+		}
 	}
 
 	if err := h.orgRepo.Update(org); err != nil {
@@ -767,7 +903,7 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 
 	// Return TFE-compatible JSON:API response
 	c.JSON(http.StatusOK, gin.H{
-		"data": buildTFEOrganizationResponse(org),
+		"data": buildTFEOrganizationResponse(org, h.defaultProjectID(org)),
 	})
 }
 

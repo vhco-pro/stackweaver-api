@@ -72,6 +72,15 @@ type OrgResolver interface {
 	// or via a team). It is the membership boundary user-bound tokens and
 	// JWT identities are held to.
 	UserInOrg(userID, orgID uuid.UUID) (bool, error)
+
+	// OrgDisallowsUserTokens reports whether the org has user_tokens_enabled
+	// set to false (tfe_organization): user-bound api-keys are then denied
+	// against the org's routes.
+	OrgDisallowsUserTokens(orgID uuid.UUID) (bool, error)
+	// UserIsOrgOwner reports whether the user holds owner tier in the org
+	// (owners team or manage-membership org access) - the anti-lockout
+	// exemption from the user_tokens_enabled restriction.
+	UserIsOrgOwner(userID, orgID uuid.UUID) (bool, error)
 }
 
 // resolverFunc resolves the target org from a single path parameter value.
@@ -84,6 +93,12 @@ type routeEntry struct {
 	// reads, runner-agent control plane). They are explicitly whitelisted
 	// to pass the wall; they are NOT a fail-closed default.
 	agnostic bool
+	// userBoundMutations further restricts an agnostic route: mutating
+	// methods are denied to ORG-BOUND tokens. Used for POST /organizations -
+	// org creation is a user-token capability (matching TFE), and because
+	// agnostic routes skip scope enforcement entirely, without this even a
+	// read-only org token could create orgs.
+	userBoundMutations bool
 	// orgNameParam, when set, resolves the org by name from this path param.
 	orgNameParam string
 	// param + resolve resolve a RESOURCE_ID route: load the resource named
@@ -129,6 +144,12 @@ func OrgResolutionWall(resolver OrgResolver) gin.HandlerFunc {
 		}
 
 		if entry.agnostic {
+			if entry.userBoundMutations && kind == models.APIKeyKindOrg &&
+				c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+				logger.Warnf("org-wall: org-bound token denied mutation on user-bound-only route %s %s", c.Request.Method, fullPath)
+				denyWall(c, http.StatusForbidden, "organization-scoped tokens cannot create organizations; use a user token")
+				return
+			}
 			c.Next()
 			return
 		}
@@ -179,6 +200,24 @@ func OrgResolutionWall(resolver OrgResolver) gin.HandlerFunc {
 				logger.Warnf("org-wall: user-bound token (user %s) blocked from org %s on %s", userID, targetOrg, fullPath)
 				denyWall(c, http.StatusForbidden, "you are not a member of this organization")
 				return
+			}
+			// tfe_organization user_tokens_enabled: an org may disable user-bound
+			// tokens entirely. Org owners stay exempt (anti-lockout - without an
+			// org token yet, a locked org would be unrecoverable). Fail closed on
+			// lookup errors, consistent with the wall's posture.
+			restricted, restrictErr := resolver.OrgDisallowsUserTokens(targetOrg)
+			if restrictErr != nil {
+				logger.Warnf("org-wall: user-tokens policy lookup failed for org %s on %s: %v", targetOrg, fullPath, restrictErr)
+				denyWall(c, http.StatusForbidden, "unable to verify this organization's token policy")
+				return
+			}
+			if restricted {
+				owner, ownerErr := resolver.UserIsOrgOwner(userID, targetOrg)
+				if ownerErr != nil || !owner {
+					logger.Warnf("org-wall: user-bound token (user %s) denied - user tokens disabled for org %s on %s", userID, targetOrg, fullPath)
+					denyWall(c, http.StatusForbidden, "user tokens are disabled for this organization")
+					return
+				}
 			}
 		default:
 			denyWall(c, http.StatusForbidden, "unrecognized token kind")
