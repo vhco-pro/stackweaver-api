@@ -20,7 +20,10 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 
 COPY --from=builder /build/stackweaver-api /stackweaver-api
-COPY --from=builder /build/config /etc/iac/config
+# No config.yaml is baked in. The API reads CONFIG_PATH, falls back to config/config.yaml, and
+# runs on environment variables alone when neither resolves - which is how both the Helm chart
+# and the Docker Compose bundle deploy it. Shipping the file made a config nothing loads part of
+# a public image, complete with the repo's dev database password.
 
 LABEL org.opencontainers.image.source="https://github.com/vhco-pro/stackweaver-api"
 LABEL org.opencontainers.image.licenses="BUSL-1.1"
