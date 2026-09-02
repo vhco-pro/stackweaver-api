@@ -18,8 +18,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	v2handlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
+	v2handlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 )
 
 // testingE2EEnvValue is the exact value STACKWEAVER_ENV must have for the

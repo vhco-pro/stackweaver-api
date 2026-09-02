@@ -93,12 +93,12 @@ func authzRequest(t *testing.T, router *gin.Engine, method, path string, asUser 
 type teamAuthzFixture struct {
 	router      *gin.Engine
 	teamRepo    *repository.TeamRepository
-	ownersTeam  *models.Team // orgA "owners"
-	devTeam     *models.Team // orgA "developers"
-	owner       *models.User // in orgA owners
-	member      *models.User // in orgA developers, no org-level permissions
-	lead        *models.User // in orgA leads (ManageTeams grant, NOT an owner)
-	outsider    *models.User // member of orgB only
+	ownersTeam  *models.Team            // orgA "owners"
+	devTeam     *models.Team            // orgA "developers"
+	owner       *models.User            // in orgA owners
+	member      *models.User            // in orgA developers, no org-level permissions
+	lead        *models.User            // in orgA leads (ManageTeams grant, NOT an owner)
+	outsider    *models.User            // member of orgB only
 	memberships map[uuid.UUID]uuid.UUID // userID -> orgA OrganizationMember.ID
 }
 

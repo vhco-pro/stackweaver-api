@@ -54,8 +54,8 @@ func TestWebhookEventAttribution(t *testing.T) {
 	wsB := &models.Workspace{ID: "ws-" + sfx, ProjectID: projB.ID, Name: "wsB-" + sfx, VCSRepository: "acme/infra"}
 
 	const repo = "acme/infra"
-	newMarker := "new-" + sfx  // commit marker for the fixed-path event
-	oldMarker := "old-" + sfx  // commit marker for the control (heuristic) event
+	newMarker := "new-" + sfx // commit marker for the fixed-path event
+	oldMarker := "old-" + sfx // commit marker for the control (heuristic) event
 
 	t.Cleanup(func() {
 		db.Where("commit IN ?", []string{newMarker, oldMarker}).Delete(&models.WebhookEvent{})

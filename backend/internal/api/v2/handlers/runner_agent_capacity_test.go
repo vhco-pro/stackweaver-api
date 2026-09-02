@@ -11,9 +11,10 @@
 package handlers
 
 import (
-	"gorm.io/gorm"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
