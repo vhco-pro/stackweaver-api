@@ -40,13 +40,13 @@ import (
 )
 
 type varsetAuthzFixture struct {
-	router    *gin.Engine
-	orgName   string
-	owner     *models.User // orgA owners team
-	projAdmin *models.User // orgA, project admin on projA, no org-manage
-	outsider  *models.User // orgB only
-	orgVarset string       // organization-owned (ProjectID nil)
-	projVarset string      // project-owned (ProjectID = projA)
+	router     *gin.Engine
+	orgName    string
+	owner      *models.User // orgA owners team
+	projAdmin  *models.User // orgA, project admin on projA, no org-manage
+	outsider   *models.User // orgB only
+	orgVarset  string       // organization-owned (ProjectID nil)
+	projVarset string       // project-owned (ProjectID = projA)
 }
 
 func setupVarsetAuthz(t *testing.T) *varsetAuthzFixture {

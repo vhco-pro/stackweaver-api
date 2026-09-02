@@ -46,14 +46,14 @@ func setupRunnerAuthzDB(t *testing.T) *gorm.DB {
 // org A assigned to runner A1. Runner A2 shares org A but is a different runner;
 // runner B1 is in org B.
 type runnerAuthzFixture struct {
-	db        *gorm.DB
-	orgA      uuid.UUID
-	poolA     uuid.UUID
-	poolB     uuid.UUID
-	runnerA1  *models.Runner
-	runnerA2  *models.Runner
-	runnerB1  *models.Runner
-	runAID    string // run in org A / poolA, assigned to runnerA1
+	db         *gorm.DB
+	orgA       uuid.UUID
+	poolA      uuid.UUID
+	poolB      uuid.UUID
+	runnerA1   *models.Runner
+	runnerA2   *models.Runner
+	runnerB1   *models.Runner
+	runAID     string // run in org A / poolA, assigned to runnerA1
 	unassigned string // run in org A / poolA, no runner assigned yet
 }
 

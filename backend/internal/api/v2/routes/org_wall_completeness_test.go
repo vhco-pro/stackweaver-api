@@ -38,7 +38,7 @@ import (
 // (outside the walled v2 group) on purpose. Each carries its own request
 // authentication and never reaches the org wall.
 var wallExemptions = []string{
-	"/api/v2/plans/:id/json-output",             // run-scoped log-read token in query
+	"/api/v2/plans/:id/json-output",               // run-scoped log-read token in query
 	"/api/v2/configuration-versions/:id/download", // run-scoped token in query
 	"/api/v2/configuration-versions/:id/upload",   // TFE upload contract: token in query
 	"/api/v2/task-results/:id/callback",           // run-task HMAC callback
