@@ -1258,15 +1258,34 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 	// Determine which project to use
 	var finalProjectID uuid.UUID
 	if projectID != nil {
-		// Validate project exists and belongs to organization
+		// Validate project exists and belongs to organization.
+		//
+		// The two halves are reported separately on purpose. Collapsing them into one "invalid or
+		// does not belong" string sends readers hunting for a cross-organization authorization bug
+		// when the far more common cause is an ID that simply is not there any more - a stale
+		// fixture, a deleted project, a copied UUID from another environment. That ambiguity cost a
+		// full investigation once already; see
+		// docs/internal/bug-reports/platform/e2e-stale-seed-data-shadows-dev-defaults.md.
 		project, err := h.projectRepo.GetByID(*projectID)
-		if err != nil || project.OrganizationID != org.ID {
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"errors": []gin.H{
 					{
 						"status": "400",
 						"title":  "Bad Request",
-						"detail": "Invalid project ID or project does not belong to this organization",
+						"detail": fmt.Sprintf("Project %s does not exist", projectID.String()),
+					},
+				},
+			})
+			return
+		}
+		if project.OrganizationID != org.ID {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"errors": []gin.H{
+					{
+						"status": "400",
+						"title":  "Bad Request",
+						"detail": fmt.Sprintf("Project %s belongs to a different organization than %s", projectID.String(), org.Name),
 					},
 				},
 			})

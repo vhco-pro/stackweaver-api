@@ -791,7 +791,7 @@ func main() {
 		schedulerService.Start()
 		logger.Info("Ansible Scheduler Service started")
 	} else {
-		logger.Info("Ansible Scheduler Service disabled (set ANSIBLE_SCHEDULER_ENABLED=true to enable)")
+		logger.Info(`Ansible Scheduler Service disabled (ANSIBLE_SCHEDULER_ENABLED="false"; unset it or set any other value to re-enable)`)
 
 		// The held-job gates (template concurrency, update-on-launch syncs,
 		// constructed rebuilds) apply to every launch regardless of this flag,
@@ -854,7 +854,7 @@ func main() {
 		driftDetectionService.Start()
 		logger.Info("Terraform Drift Detection Service started")
 	} else {
-		logger.Info("Terraform Drift Detection Service disabled (set TERRAFORM_DRIFT_DETECTION_ENABLED=true to enable)")
+		logger.Info(`Drift Detection Service disabled (TERRAFORM_DRIFT_DETECTION_ENABLED="false"; unset it or set any other value to re-enable)`)
 	}
 
 	// Initialize and start Runner Monitor Service (marks stale runners as offline)
@@ -866,7 +866,7 @@ func main() {
 		go runnerMonitorService.Start(context.Background())
 		logger.Info("Runner Monitor Service started")
 	} else {
-		logger.Info("Runner Monitor Service disabled (set RUNNER_MONITOR_ENABLED=true to enable)")
+		logger.Info(`Runner Monitor Service disabled (RUNNER_MONITOR_ENABLED="false"; unset it or set any other value to re-enable)`)
 	}
 
 	// Initialize Auth Proxy for custom login UI (replaces the hosted Zitadel login-ui container)

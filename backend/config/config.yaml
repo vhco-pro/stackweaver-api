@@ -1,4 +1,15 @@
 # Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
+#
+# Only the blocks below are read. `Config` in backend/cmd/api/main.go unmarshals exactly
+# `server`, `database` and `zitadel`; anything else in this file is silently discarded.
+# Every value here is also overridable by environment variable (see applyEnvOverrides), which is
+# how the containers and Kubernetes pods configure themselves - the file is the local-run default.
+#
+# Deliberately NOT here, because nothing would read it:
+#   redis   -> REDIS_HOST / REDIS_PORT, defaulting to localhost:6379 in code
+#   storage -> core/storage.ConfigFromEnv() (STORAGE_ENDPOINT, default localhost:3900 for Garage)
+#   logging -> LOG_LEVEL
+#   crypto  -> ENCRYPTION_KEY
 
 server:
   host: "0.0.0.0"
@@ -17,33 +28,7 @@ database:
   max_idle_conns: 5
   conn_max_lifetime: 5m
 
-redis:
-  host: "localhost"
-  port: 6379
-  password: ""
-  db: 0
-  pool_size: 10
-
-storage:
-  provider: "minio"
-  minio:
-    endpoint: "localhost:9000"
-    access_key: "minioadmin"
-    secret_key: "minioadmin"
-    use_ssl: false
-    bucket: "iac-state"
-  s3:
-    region: "us-east-1"
-    bucket: "iac-state"
-
 zitadel:
   issuer: "http://localhost:8080" # Read from ZITADEL_ISSUER environment variable (fallback)
   client_id: "" # Read from ZITADEL_API_CLIENT_ID environment variable
   client_secret: "" # Read from ZITADEL_API_CLIENT_SECRET environment variable
-
-logging:
-  level: "info"
-  format: "json"
-
-crypto:
-  encryption_key: "" # Should be set via environment variable
