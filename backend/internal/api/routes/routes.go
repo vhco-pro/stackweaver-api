@@ -168,19 +168,7 @@ func SetupRoutes(
 // advertises login.v1, but no exchange endpoint is registered) rather than
 // blocking startup - mirroring how log streaming degrades.
 func setupOAuthLoginRoutes(r *gin.Engine, authService *auth.Service, apiKeyService *apikey.Service) {
-	host := os.Getenv("REDIS_HOST")
-	if host == "" {
-		host = "localhost"
-	}
-	port := 6379
-	if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-		if p, err := strconv.Atoi(portStr); err == nil {
-			port = p
-		}
-	}
-	password := os.Getenv("REDIS_PASSWORD")
-
-	redisQueue, err := queue.NewRedisQueue(host, port, password, 0)
+	redisQueue, err := queue.NewRedisQueueFromEnv()
 	if err != nil {
 		logger.Warnf("Failed to initialize Redis for terraform login (login.v1): %v (CLI login will be disabled)", err)
 		return
