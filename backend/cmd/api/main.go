@@ -722,21 +722,12 @@ func main() {
 		// Redis queue so scheduled launches and released held jobs actually
 		// dispatch to platform runners (a nil queue here used to leave scheduled
 		// jobs pending forever).
-		redisHost := os.Getenv("REDIS_HOST")
-		if redisHost == "" {
-			redisHost = "localhost"
-		}
-		redisPort := 6379
-		if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-			if p, perr := strconv.Atoi(portStr); perr == nil {
-				redisPort = p
-			}
-		}
+		//
 		// Assign through an interface var so a connection failure leaves a true
 		// nil queue (a nil *RedisQueue assigned to a queue.Queue is a typed-nil
 		// that defeats the `== nil` dispatch guards and panics on Enqueue).
 		var schedulerQueue queue.Queue
-		if q, qErr := queue.NewRedisQueue(redisHost, redisPort, os.Getenv("REDIS_PASSWORD"), 0); qErr != nil {
+		if q, qErr := queue.NewRedisQueueFromEnv(); qErr != nil {
 			logger.Warnf("Failed to initialize Redis queue for the Ansible scheduler: %v (scheduled platform jobs will not dispatch)", qErr)
 		} else {
 			schedulerQueue = q
@@ -798,23 +789,13 @@ func main() {
 		// and the scheduler tick is their only release path - so without the
 		// scheduler, held jobs would stay pending forever. Run a minimal
 		// release loop instead.
+		// Interface var, assigned only on success - see the scheduler queue above for why a
+		// typed-nil *RedisQueue here would be worse than no queue at all.
 		var releaseQueue queue.Queue
-		{
-			redisHost := os.Getenv("REDIS_HOST")
-			if redisHost == "" {
-				redisHost = "localhost"
-			}
-			redisPort := 6379
-			if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-				if p, perr := strconv.Atoi(portStr); perr == nil {
-					redisPort = p
-				}
-			}
-			if q, qErr := queue.NewRedisQueue(redisHost, redisPort, os.Getenv("REDIS_PASSWORD"), 0); qErr != nil {
-				logger.Warnf("Held-job release loop: Redis unavailable: %v (released platform jobs will not dispatch)", qErr)
-			} else {
-				releaseQueue = q
-			}
+		if q, qErr := queue.NewRedisQueueFromEnv(); qErr != nil {
+			logger.Warnf("Held-job release loop: Redis unavailable: %v (released platform jobs will not dispatch)", qErr)
+		} else {
+			releaseQueue = q
 		}
 		releaseJobService := ansible.NewJobService(
 			repository.NewAnsibleJobRepository(db),

@@ -5,7 +5,6 @@ package routes
 import (
 	"context"
 	"crypto/rand"
-	"fmt"
 	"os"
 	"strconv"
 
@@ -501,18 +500,7 @@ func SetupV2Routes(
 	// Initialize Redis log buffer service for log streaming
 	// Initialize Redis connection for log streaming (reuse same config as Ansible queue)
 	var logBufferService *logbuffer.RedisLogBuffer
-	redisLogHost := os.Getenv("REDIS_HOST")
-	if redisLogHost == "" {
-		redisLogHost = "localhost"
-	}
-	redisLogPort := 6379
-	if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-		if p, parseErr := parsePort(portStr); parseErr == nil {
-			redisLogPort = p
-		}
-	}
-	redisLogPassword := os.Getenv("REDIS_PASSWORD")
-	redisLogQueue, logQueueErr := queue.NewRedisQueue(redisLogHost, redisLogPort, redisLogPassword, 0)
+	redisLogQueue, logQueueErr := queue.NewRedisQueueFromEnv()
 	if logQueueErr != nil {
 		logger.Warnf("Failed to initialize Redis queue for log streaming: %v (log streaming will fall back to MinIO)", logQueueErr)
 	} else {
@@ -920,22 +908,11 @@ func SetupV2Routes(
 			ansiblePlaybookRepoForWebhook := repository.NewAnsiblePlaybookRepository(db)
 
 			// Initialize Ansible Redis queue for inventory sync (reuse same config as SetupAnsibleRoutes)
-			redisHost := os.Getenv("REDIS_HOST")
-			if redisHost == "" {
-				redisHost = "localhost"
-			}
-			redisPort := 6379
-			if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-				if p, err := parsePort(portStr); err == nil {
-					redisPort = p
-				}
-			}
-			redisPassword := os.Getenv("REDIS_PASSWORD")
-
+			//
 			// Assign on success only: a nil *RedisQueue stored in a queue.Queue is
 			// a typed-nil that passes != nil checks and panics on Enqueue.
 			var ansibleQueueForWebhook queue.Queue
-			if q, qErr := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0); qErr != nil {
+			if q, qErr := queue.NewRedisQueueFromEnv(); qErr != nil {
 				logger.Warnf("Failed to initialize Redis queue for inventory sync: %v", qErr)
 			} else {
 				ansibleQueueForWebhook = q
@@ -982,20 +959,8 @@ func SetupV2Routes(
 			ansiblePlaybookRepoForInstall := repository.NewAnsiblePlaybookRepository(db)
 
 			// Initialize Ansible Redis queue for inventory sync (reuse same config)
-			redisHost := os.Getenv("REDIS_HOST")
-			if redisHost == "" {
-				redisHost = "localhost"
-			}
-			redisPort := 6379
-			if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-				if p, err := parsePort(portStr); err == nil {
-					redisPort = p
-				}
-			}
-			redisPassword := os.Getenv("REDIS_PASSWORD")
-
 			var ansibleQueueForInstall queue.Queue
-			if q, qErr := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0); qErr != nil {
+			if q, qErr := queue.NewRedisQueueFromEnv(); qErr != nil {
 				logger.Warnf("Failed to initialize Redis queue for inventory sync: %v", qErr)
 			} else {
 				ansibleQueueForInstall = q
@@ -1037,21 +1002,10 @@ func SetupV2Routes(
 			ansiblePlaybookRepoForADO := repository.NewAnsiblePlaybookRepository(db)
 			webhookEventRepoForADO := repository.NewWebhookEventRepository(db)
 
-			redisHost := os.Getenv("REDIS_HOST")
-			if redisHost == "" {
-				redisHost = "localhost"
-			}
-			redisPort := 6379
-			if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-				if p, err := parsePort(portStr); err == nil {
-					redisPort = p
-				}
-			}
-			redisPassword := os.Getenv("REDIS_PASSWORD")
 			// Assign on success only: a nil *RedisQueue stored in a queue.Queue is
 			// a typed-nil that passes != nil checks and panics on Enqueue.
 			var ansibleQueueForADO queue.Queue
-			if q, adoQueueErr := queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0); adoQueueErr != nil {
+			if q, adoQueueErr := queue.NewRedisQueueFromEnv(); adoQueueErr != nil {
 				logger.Warnf("Failed to initialize Redis queue for ADO webhook: %v", adoQueueErr)
 			} else {
 				ansibleQueueForADO = q
@@ -1271,20 +1225,8 @@ func SetupV2Routes(
 	// ==========================================
 
 	// Initialize Redis queue for Ansible jobs
-	redisHost := os.Getenv("REDIS_HOST")
-	if redisHost == "" {
-		redisHost = "localhost"
-	}
-	redisPort := 6379
-	if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
-		if p, err := parsePort(portStr); err == nil {
-			redisPort = p
-		}
-	}
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-
 	var ansibleRedisQueue *queue.RedisQueue
-	ansibleRedisQueue, err = queue.NewRedisQueue(redisHost, redisPort, redisPassword, 0)
+	ansibleRedisQueue, err = queue.NewRedisQueueFromEnv()
 	if err != nil {
 		logger.Warnf("Failed to initialize Redis queue for Ansible: %v (Ansible job queueing will be disabled)", err)
 	}
@@ -1435,7 +1377,6 @@ func SetupV2Routes(
 	}
 }
 
-// parsePort parses a port string to int
 // ansibleEncryptionKeyBytes derives the 32-byte AES key from
 // ANSIBLE_ENCRYPTION_KEY / ENCRYPTION_KEY, failing loud on a missing/insecure
 // key (AUD-013) unless DEV_INSECURE_KEY=1 is set.
@@ -1472,10 +1413,4 @@ func newWebhookTemplateLaunchService(db *gorm.DB, q queue.Queue, vcsRegistry *vc
 	jobService.SetInventorySourceRepo(repository.NewAnsibleInventorySourceRepository(db))
 	jobService.SetVCSResolver(vcsRegistry, vcsConnectionRepo)
 	return jobService
-}
-
-func parsePort(portStr string) (int, error) {
-	var port int
-	_, err := fmt.Sscanf(portStr, "%d", &port)
-	return port, err
 }
