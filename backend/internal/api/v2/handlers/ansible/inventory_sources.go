@@ -422,7 +422,7 @@ func (h *InventorySourceHandler) Delete(c *gin.Context) {
 // @Success 200 {object} ansible.SyncResult
 // @Failure 400 {object} response.ErrorResponse
 // @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/inventory-sources/{id}/sync [post]
+// @Router /api/v2/ansible/inventory-sources/{source_id}/actions/sync [post]
 func (h *InventorySourceHandler) Sync(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
