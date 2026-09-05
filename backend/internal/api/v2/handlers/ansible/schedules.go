@@ -75,7 +75,7 @@ type UpdateScheduleRequest struct {
 // @Success 201 {object} models.AnsibleSchedule
 // @Failure 400 {object} response.ErrorResponse
 // @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules [post]
+// @Router /api/v2/organizations/{name}/ansible/schedules [post]
 func (h *ScheduleHandler) Create(c *gin.Context) {
 	var req CreateScheduleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -399,7 +399,6 @@ func (h *ScheduleHandler) Get(c *gin.Context) {
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} response.PaginatedResponse
 // @Failure 400 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules [get]
 func (h *ScheduleHandler) List(c *gin.Context) {
 	// Get organization ID from context
 	orgIDStr, exists := c.Get("organization_id")
@@ -589,7 +588,7 @@ func (h *ScheduleHandler) Delete(c *gin.Context) {
 // @Success 200 {object} gin.H
 // @Failure 400 {object} response.ErrorResponse
 // @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{id}/enable [post]
+// @Router /api/v2/ansible/schedules/{schedule_id}/actions/enable [post]
 func (h *ScheduleHandler) Enable(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
@@ -646,7 +645,7 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 // @Success 200 {object} gin.H
 // @Failure 400 {object} response.ErrorResponse
 // @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{id}/disable [post]
+// @Router /api/v2/ansible/schedules/{schedule_id}/actions/disable [post]
 func (h *ScheduleHandler) Disable(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
@@ -704,7 +703,6 @@ func (h *ScheduleHandler) Disable(c *gin.Context) {
 // @Param request body ValidateCronRequest true "Cron expression"
 // @Success 200 {object} ValidateCronResponse
 // @Failure 400 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/validate-cron [post]
 func (h *ScheduleHandler) ValidateCron(c *gin.Context) {
 	var req ValidateCronRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -756,7 +754,6 @@ type ValidateCronResponse struct {
 // @Tags Ansible Schedules
 // @Produce json
 // @Success 200 {object} map[string]string
-// @Router /api/v2/ansible/schedules/cron-presets [get]
 func (h *ScheduleHandler) GetCronPresets(c *gin.Context) {
 	c.JSON(http.StatusOK, models.CronPresets)
 }
