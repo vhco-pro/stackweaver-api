@@ -1,0 +1,54 @@
+{
+  "method": "GET",
+  "path": "/api/v2/runs/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "actions": {
+          "is-cancelable": false,
+          "is-confirmable": false,
+          "is-discardable": false,
+          "is-force-cancelable": false
+        },
+        "completed-at": "\u003ctimestamp\u003e",
+        "created-at": "\u003ctimestamp\u003e",
+        "has-changes": false,
+        "is-destroy": false,
+        "message": "",
+        "operation": "plan-and-apply",
+        "permissions": {
+          "can-apply": false,
+          "can-cancel": true,
+          "can-discard": true,
+          "can-force-cancel": false,
+          "can-force-execute": false
+        },
+        "plan-only": false,
+        "source": "tfe-api",
+        "started-at": "\u003ctimestamp\u003e",
+        "status": "canceled",
+        "status-timestamps": {
+          "planning-at": "\u003ctimestamp\u003e"
+        },
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "plan": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "plans"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "runs"
+    }
+  }
+}

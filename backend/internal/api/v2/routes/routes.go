@@ -14,6 +14,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	ansibleHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible"
 	terraformHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/openapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
@@ -51,6 +52,13 @@ func SetupV2Routes(
 	oidcWellKnownHandler := handlers.NewOIDCWellKnownHandler(oidcSigningKey)
 	r.GET("/.well-known/openid-configuration", oidcWellKnownHandler.OpenIDConfiguration)
 	r.GET("/.well-known/jwks", oidcWellKnownHandler.JWKS)
+
+	// OpenAPI document (unauthenticated). Registered on the ROOT router beside the discovery
+	// endpoints rather than under /api/v2: routes there pass the org-resolution wall, which
+	// fails closed and would 403 every API-key caller until the route were classified, and a
+	// public API description has no organization to resolve. The path matches what
+	// hashicorp/go-tfe v2 fetches from a TFE server.
+	openapi.RegisterRoutes(r)
 
 	// API v2
 	v2 := r.Group("/api/v2")

@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/api/v2/projects/:id/ansible/jobs",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "page-size": 20,
+        "total-count": 0,
+        "total-pages": 0
+      }
+    }
+  }
+}

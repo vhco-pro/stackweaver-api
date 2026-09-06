@@ -1,0 +1,65 @@
+{
+  "method": "GET",
+  "path": "/v1/modules",
+  "status": 200,
+  "body": {
+    "meta": {
+      "current_offset": 0,
+      "limit": 15
+    },
+    "modules": [
+      {
+        "description": "Autopilot cluster wired to a shared VPC with workload identity enabled.",
+        "downloads": 212,
+        "id": "demo/gke-autopilot/google/0.4.0",
+        "name": "gke-autopilot",
+        "namespace": "demo",
+        "owner": "",
+        "provider": "google",
+        "published_at": "\u003ctimestamp\u003e",
+        "source": "",
+        "verified": true,
+        "version": "0.4.0"
+      },
+      {
+        "description": "Flexible-server Postgres with private networking and automated backups.",
+        "downloads": 10,
+        "id": "demo/postgres/azurerm/1.0.0",
+        "name": "postgres",
+        "namespace": "demo",
+        "owner": "",
+        "provider": "azurerm",
+        "published_at": "\u003ctimestamp\u003e",
+        "source": "",
+        "verified": false,
+        "version": "1.0.0"
+      },
+      {
+        "description": "Managed Kubernetes cluster with IRSA, addons and a default node group.",
+        "downloads": 300,
+        "id": "demo/eks-cluster/aws/0.9.0",
+        "name": "eks-cluster",
+        "namespace": "demo",
+        "owner": "",
+        "provider": "aws",
+        "published_at": "\u003ctimestamp\u003e",
+        "source": "",
+        "verified": false,
+        "version": "0.9.0"
+      },
+      {
+        "description": "Opinionated VPC with public and private subnets across three availability zones.",
+        "downloads": 44,
+        "id": "demo/vpc/aws/1.0.0",
+        "name": "vpc",
+        "namespace": "demo",
+        "owner": "",
+        "provider": "aws",
+        "published_at": "\u003ctimestamp\u003e",
+        "source": "",
+        "verified": false,
+        "version": "1.0.0"
+      }
+    ]
+  }
+}

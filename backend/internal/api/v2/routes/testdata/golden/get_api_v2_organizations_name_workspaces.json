@@ -1,0 +1,640 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/workspaces",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "actions": {
+            "is-destroyable": true
+          },
+          "agent-pool-id": null,
+          "allow-destroy-plan": true,
+          "assessments-enabled": false,
+          "auto-apply": false,
+          "auto-apply-run-trigger": false,
+          "auto-queue-runs": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "environment": "default",
+          "execution-mode": "remote",
+          "file-triggers-enabled": true,
+          "force-delete": false,
+          "global-remote-state": false,
+          "latest-change-at": "\u003ctimestamp\u003e",
+          "locked": false,
+          "locked-reason": null,
+          "name": "analytics-warehouse",
+          "operations": true,
+          "permissions": {
+            "can-destroy": true,
+            "can-force-delete": true,
+            "can-force-unlock": true,
+            "can-lock": true,
+            "can-queue-destroy": true,
+            "can-queue-run": true,
+            "can-read-settings": true,
+            "can-unlock": true,
+            "can-update": true,
+            "can-update-variable": true
+          },
+          "queue-all-runs": true,
+          "resource-count": 0,
+          "run-timeout": 7200,
+          "setting-overwrites": {
+            "agent-pool": false,
+            "execution-mode": false
+          },
+          "source": "tfe-api",
+          "speculative-enabled": true,
+          "structured-run-output-enabled": true,
+          "tag-names": [],
+          "terraform-version": "1.12.5",
+          "trigger-patterns": [],
+          "trigger-prefixes": [],
+          "updated-at": "\u003ctimestamp\u003e",
+          "vcs-repo": null,
+          "working-directory": ""
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "agent-pool": {
+            "data": null
+          },
+          "current-run": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "runs"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "workspaces"
+      },
+      {
+        "attributes": {
+          "actions": {
+            "is-destroyable": true
+          },
+          "agent-pool-id": null,
+          "allow-destroy-plan": true,
+          "assessments-enabled": false,
+          "auto-apply": false,
+          "auto-apply-run-trigger": false,
+          "auto-queue-runs": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "environment": "default",
+          "execution-mode": "remote",
+          "file-triggers-enabled": true,
+          "force-delete": false,
+          "global-remote-state": false,
+          "latest-change-at": "\u003ctimestamp\u003e",
+          "locked": false,
+          "locked-reason": null,
+          "name": "payments-prod",
+          "operations": true,
+          "permissions": {
+            "can-destroy": true,
+            "can-force-delete": true,
+            "can-force-unlock": true,
+            "can-lock": true,
+            "can-queue-destroy": true,
+            "can-queue-run": true,
+            "can-read-settings": true,
+            "can-unlock": true,
+            "can-update": true,
+            "can-update-variable": true
+          },
+          "queue-all-runs": true,
+          "resource-count": 0,
+          "run-timeout": 7200,
+          "setting-overwrites": {
+            "agent-pool": false,
+            "execution-mode": false
+          },
+          "source": "tfe-api",
+          "speculative-enabled": true,
+          "structured-run-output-enabled": true,
+          "tag-names": [],
+          "terraform-version": "1.12.5",
+          "trigger-patterns": [],
+          "trigger-prefixes": [],
+          "updated-at": "\u003ctimestamp\u003e",
+          "vcs-repo": null,
+          "working-directory": ""
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "agent-pool": {
+            "data": null
+          },
+          "current-run": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "runs"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "workspaces"
+      },
+      {
+        "attributes": {
+          "actions": {
+            "is-destroyable": true
+          },
+          "agent-pool-id": null,
+          "allow-destroy-plan": true,
+          "assessments-enabled": false,
+          "auto-apply": false,
+          "auto-apply-run-trigger": false,
+          "auto-queue-runs": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "environment": "default",
+          "execution-mode": "remote",
+          "file-triggers-enabled": true,
+          "force-delete": false,
+          "global-remote-state": false,
+          "latest-change-at": "\u003ctimestamp\u003e",
+          "locked": false,
+          "locked-reason": null,
+          "name": "payments-staging",
+          "operations": true,
+          "permissions": {
+            "can-destroy": true,
+            "can-force-delete": true,
+            "can-force-unlock": true,
+            "can-lock": true,
+            "can-queue-destroy": true,
+            "can-queue-run": true,
+            "can-read-settings": true,
+            "can-unlock": true,
+            "can-update": true,
+            "can-update-variable": true
+          },
+          "queue-all-runs": true,
+          "resource-count": 0,
+          "run-timeout": 7200,
+          "setting-overwrites": {
+            "agent-pool": false,
+            "execution-mode": false
+          },
+          "source": "tfe-api",
+          "speculative-enabled": true,
+          "structured-run-output-enabled": true,
+          "tag-names": [],
+          "terraform-version": "1.12.5",
+          "trigger-patterns": [],
+          "trigger-prefixes": [],
+          "updated-at": "\u003ctimestamp\u003e",
+          "vcs-repo": null,
+          "working-directory": ""
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "agent-pool": {
+            "data": null
+          },
+          "current-run": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "runs"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "workspaces"
+      },
+      {
+        "attributes": {
+          "actions": {
+            "is-destroyable": true
+          },
+          "agent-pool-id": null,
+          "allow-destroy-plan": true,
+          "assessments-enabled": false,
+          "auto-apply": false,
+          "auto-apply-run-trigger": false,
+          "auto-queue-runs": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "environment": "default",
+          "execution-mode": "remote",
+          "file-triggers-enabled": true,
+          "force-delete": false,
+          "global-remote-state": false,
+          "latest-change-at": "\u003ctimestamp\u003e",
+          "locked": false,
+          "locked-reason": null,
+          "name": "prod-cluster",
+          "operations": true,
+          "permissions": {
+            "can-destroy": true,
+            "can-force-delete": true,
+            "can-force-unlock": true,
+            "can-lock": true,
+            "can-queue-destroy": true,
+            "can-queue-run": true,
+            "can-read-settings": true,
+            "can-unlock": true,
+            "can-update": true,
+            "can-update-variable": true
+          },
+          "queue-all-runs": true,
+          "resource-count": 0,
+          "run-timeout": 7200,
+          "setting-overwrites": {
+            "agent-pool": false,
+            "execution-mode": false
+          },
+          "source": "tfe-api",
+          "speculative-enabled": true,
+          "structured-run-output-enabled": true,
+          "tag-names": [],
+          "terraform-version": "1.12.5",
+          "trigger-patterns": [],
+          "trigger-prefixes": [],
+          "updated-at": "\u003ctimestamp\u003e",
+          "vcs-repo": null,
+          "working-directory": ""
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "agent-pool": {
+            "data": null
+          },
+          "current-run": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "runs"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "workspaces"
+      },
+      {
+        "attributes": {
+          "actions": {
+            "is-destroyable": true
+          },
+          "agent-pool-id": null,
+          "allow-destroy-plan": true,
+          "assessments-enabled": false,
+          "auto-apply": false,
+          "auto-apply-run-trigger": false,
+          "auto-queue-runs": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "environment": "default",
+          "execution-mode": "remote",
+          "file-triggers-enabled": true,
+          "force-delete": false,
+          "global-remote-state": false,
+          "latest-change-at": "\u003ctimestamp\u003e",
+          "locked": false,
+          "locked-reason": null,
+          "name": "prod-network",
+          "operations": true,
+          "permissions": {
+            "can-destroy": true,
+            "can-force-delete": true,
+            "can-force-unlock": true,
+            "can-lock": true,
+            "can-queue-destroy": true,
+            "can-queue-run": true,
+            "can-read-settings": true,
+            "can-unlock": true,
+            "can-update": true,
+            "can-update-variable": true
+          },
+          "queue-all-runs": true,
+          "resource-count": 0,
+          "run-timeout": 7200,
+          "setting-overwrites": {
+            "agent-pool": false,
+            "execution-mode": false
+          },
+          "source": "tfe-api",
+          "speculative-enabled": true,
+          "structured-run-output-enabled": true,
+          "tag-names": [],
+          "terraform-version": "1.12.5",
+          "trigger-patterns": [],
+          "trigger-prefixes": [],
+          "updated-at": "\u003ctimestamp\u003e",
+          "vcs-repo": null,
+          "working-directory": ""
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "agent-pool": {
+            "data": null
+          },
+          "current-run": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "runs"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "workspaces"
+      },
+      {
+        "attributes": {
+          "actions": {
+            "is-destroyable": true
+          },
+          "agent-pool-id": null,
+          "allow-destroy-plan": true,
+          "assessments-enabled": false,
+          "auto-apply": false,
+          "auto-apply-run-trigger": false,
+          "auto-queue-runs": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "environment": "default",
+          "execution-mode": "remote",
+          "file-triggers-enabled": true,
+          "force-delete": false,
+          "global-remote-state": false,
+          "latest-change-at": "\u003ctimestamp\u003e",
+          "locked": false,
+          "locked-reason": null,
+          "name": "staging-cluster",
+          "operations": true,
+          "permissions": {
+            "can-destroy": true,
+            "can-force-delete": true,
+            "can-force-unlock": true,
+            "can-lock": true,
+            "can-queue-destroy": true,
+            "can-queue-run": true,
+            "can-read-settings": true,
+            "can-unlock": true,
+            "can-update": true,
+            "can-update-variable": true
+          },
+          "queue-all-runs": true,
+          "resource-count": 0,
+          "run-timeout": 7200,
+          "setting-overwrites": {
+            "agent-pool": false,
+            "execution-mode": false
+          },
+          "source": "tfe-api",
+          "speculative-enabled": true,
+          "structured-run-output-enabled": true,
+          "tag-names": [],
+          "terraform-version": "1.12.5",
+          "trigger-patterns": [],
+          "trigger-prefixes": [],
+          "updated-at": "\u003ctimestamp\u003e",
+          "vcs-repo": null,
+          "working-directory": ""
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "agent-pool": {
+            "data": null
+          },
+          "current-run": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "runs"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "workspaces"
+      }
+    ],
+    "included": [
+      {
+        "attributes": {
+          "completed-at": "\u003ctimestamp\u003e",
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false
+          },
+          "plan-only": false,
+          "status": "applied",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "completed-at": "\u003ctimestamp\u003e",
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false
+          },
+          "plan-only": false,
+          "status": "applied",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "completed-at": "\u003ctimestamp\u003e",
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false
+          },
+          "plan-only": false,
+          "status": "failed",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "completed-at": "\u003ctimestamp\u003e",
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "operation": "plan-only",
+          "permissions": {
+            "can-apply": false
+          },
+          "plan-only": true,
+          "status": "failed",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false
+          },
+          "plan-only": false,
+          "status": "applying",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false
+          },
+          "plan-only": false,
+          "status": "applying",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "page": 1,
+        "per_page": 20,
+        "total": 6
+      }
+    }
+  }
+}

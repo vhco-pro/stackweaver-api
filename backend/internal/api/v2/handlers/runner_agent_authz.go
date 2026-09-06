@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -34,9 +35,7 @@ func callingRunner(c *gin.Context) (*models.Runner, bool) {
 // writeRunnerForbidden writes the standard 403 for a runner acting outside its
 // org/pool/assignment.
 func writeRunnerForbidden(c *gin.Context, detail string) {
-	c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{
-		"status": "403", "title": "Forbidden", "detail": detail,
-	}}})
+	jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", detail)
 }
 
 // runOrgAndPool resolves a terraform run's owning organization and agent pool.
@@ -82,9 +81,7 @@ func (h *RunnerAgentHandler) authorizeRunnerForRun(c *gin.Context, run *models.R
 	}
 	orgID, poolID, err := h.runOrgAndPool(run)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{
-			"status": "500", "title": "Internal Server Error", "detail": "failed to resolve run organization",
-		}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to resolve run organization")
 		return false
 	}
 	if orgID != runner.OrganizationID {
@@ -117,9 +114,7 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJob(c *gin.Context, job *m
 	}
 	orgID, poolID, err := h.ansibleJobOrgAndPool(job)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{
-			"status": "500", "title": "Internal Server Error", "detail": "failed to resolve job organization",
-		}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to resolve job organization")
 		return false
 	}
 	if orgID != runner.OrganizationID {

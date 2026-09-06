@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/inventories/:id/syncs",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "total": 0
+    }
+  }
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -145,35 +146,23 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Organization not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Organization not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to list workflows in this organization"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to list workflows in this organization")
 		return
 	}
 
@@ -185,7 +174,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 
 	workflows, total, err := h.workflowRepo.ListByOrganization(org.ID, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to list workflows"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to list workflows")
 		return
 	}
 
@@ -194,10 +183,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 		data[i] = formatWorkflowResponse(&w)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": data,
-		"meta": gin.H{"total": total},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{"total": total})
 }
 
 // Create creates a new workflow
@@ -206,41 +192,29 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Organization not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Organization not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckOrgManageAnsible(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to create workflows in this organization"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to create workflows in this organization")
 		return
 	}
 
 	var req CreateWorkflowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": err.Error()}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -263,7 +237,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	if req.Data.Relationships.Project.Data != nil {
 		projectID, err := uuid.Parse(req.Data.Relationships.Project.Data.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid project ID"}}})
+			jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid project ID")
 			return
 		}
 		workflow.ProjectID = projectID
@@ -273,7 +247,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 		// project foreign key.
 		defaultProject, err := h.projectRepo.GetByOrganizationAndName(org.ID, "default")
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "A project relationship is required (no default project exists)"}}})
+			jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "A project relationship is required (no default project exists)")
 			return
 		}
 		workflow.ProjectID = defaultProject.ID
@@ -287,11 +261,11 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	workflow.CreatedBy = &user.ID
 
 	if err := h.workflowRepo.Create(workflow); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to create workflow"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to create workflow")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatWorkflowResponse(workflow)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatWorkflowResponse(workflow))
 }
 
 // Get retrieves a workflow by ID
@@ -300,23 +274,19 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid workflow ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, edges, err := h.workflowRepo.GetByIDWithEdges(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -329,19 +299,11 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to view this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to view this workflow")
 		return
 	}
 
@@ -360,7 +322,7 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 	}
 	response["relationships"].(gin.H)["edges"] = gin.H{"data": edgesData}
 
-	c.JSON(http.StatusOK, gin.H{"data": response})
+	jsonapi.WriteDocument(c, http.StatusOK, response)
 }
 
 // Update updates a workflow
@@ -369,23 +331,19 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid workflow ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -398,25 +356,17 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to update this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to update this workflow")
 		return
 	}
 
 	var req CreateWorkflowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": err.Error()}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -434,11 +384,11 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.Update(workflow); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to update workflow"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to update workflow")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatWorkflowResponse(workflow)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatWorkflowResponse(workflow))
 }
 
 // Delete deletes a workflow
@@ -447,23 +397,19 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid workflow ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -476,24 +422,16 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to delete this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to delete this workflow")
 		return
 	}
 
 	if err := h.workflowRepo.Delete(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to delete workflow"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to delete workflow")
 		return
 	}
 
@@ -510,23 +448,19 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid workflow ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -539,25 +473,17 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to modify this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to modify this workflow")
 		return
 	}
 
 	var req CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": err.Error()}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -596,11 +522,11 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.CreateNode(node); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to create node"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to create node")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatNodeResponse(node)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatNodeResponse(node))
 }
 
 // ListNodes lists nodes in a workflow
@@ -609,23 +535,19 @@ func (h *WorkflowHandler) ListNodes(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid workflow ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -638,25 +560,17 @@ func (h *WorkflowHandler) ListNodes(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to view this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to view this workflow")
 		return
 	}
 
 	nodes, err := h.workflowRepo.ListNodesByWorkflow(workflowID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to list nodes"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to list nodes")
 		return
 	}
 
@@ -665,7 +579,7 @@ func (h *WorkflowHandler) ListNodes(c *gin.Context) {
 		data[i] = formatNodeResponse(&node)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // UpdateNode updates a node
@@ -674,29 +588,25 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid node ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid node ID")
 		return
 	}
 
 	node, err := h.workflowRepo.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Node not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Node not found")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(node.WorkflowID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -709,25 +619,17 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to modify this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to modify this workflow")
 		return
 	}
 
 	var req CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": err.Error()}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -744,11 +646,11 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.UpdateNode(node); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to update node"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to update node")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatNodeResponse(node)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatNodeResponse(node))
 }
 
 // DeleteNode deletes a node
@@ -757,29 +659,25 @@ func (h *WorkflowHandler) DeleteNode(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid node ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid node ID")
 		return
 	}
 
 	node, err := h.workflowRepo.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Node not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Node not found")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(node.WorkflowID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -792,24 +690,16 @@ func (h *WorkflowHandler) DeleteNode(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to modify this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to modify this workflow")
 		return
 	}
 
 	if err := h.workflowRepo.DeleteNode(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to delete node"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to delete node")
 		return
 	}
 
@@ -826,23 +716,19 @@ func (h *WorkflowHandler) CreateEdge(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid workflow ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -855,25 +741,17 @@ func (h *WorkflowHandler) CreateEdge(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to modify this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to modify this workflow")
 		return
 	}
 
 	var req CreateEdgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": err.Error()}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -888,11 +766,11 @@ func (h *WorkflowHandler) CreateEdge(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.CreateEdge(edge); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to create edge"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to create edge")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatEdgeResponse(edge)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatEdgeResponse(edge))
 }
 
 // ListEdges lists edges in a workflow
@@ -901,23 +779,19 @@ func (h *WorkflowHandler) ListEdges(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid workflow ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -930,25 +804,17 @@ func (h *WorkflowHandler) ListEdges(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to view this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to view this workflow")
 		return
 	}
 
 	edges, err := h.workflowRepo.ListEdgesByWorkflow(workflowID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to list edges"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to list edges")
 		return
 	}
 
@@ -957,7 +823,7 @@ func (h *WorkflowHandler) ListEdges(c *gin.Context) {
 		data[i] = formatEdgeResponse(&edge)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // DeleteEdge deletes an edge
@@ -966,29 +832,25 @@ func (h *WorkflowHandler) DeleteEdge(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"detail": "Invalid edge ID"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid edge ID")
 		return
 	}
 
 	edge, err := h.workflowRepo.GetEdgeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Edge not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Edge not found")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(edge.WorkflowID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"detail": "Workflow not found"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -1001,24 +863,16 @@ func (h *WorkflowHandler) DeleteEdge(c *gin.Context) {
 		&workflow.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to modify this workflow"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to modify this workflow")
 		return
 	}
 
 	if err := h.workflowRepo.DeleteEdge(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"detail": "Failed to delete edge"}}})
+		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to delete edge")
 		return
 	}
 

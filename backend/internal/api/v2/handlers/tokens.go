@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 )
@@ -50,29 +51,13 @@ type TokenResponseV2 struct {
 func (h *TokenHandlerV2) Create(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "User not authenticated",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "User not authenticated")
 		return
 	}
 
 	var req CreateTokenRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -80,30 +65,20 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 	// The description is stored as the key name.
 	apiKey, tokenString, err := h.apiKeyService.CreateUserToken(user.ID, req.Description, req.ExpiresAt)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create token",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create token")
 		return
 	}
 
 	// Return token with plaintext token (only time it's shown)
 	// TFE-compatible response format
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   apiKey.ID,
-			"type": "tokens",
-			"attributes": gin.H{
-				"token":       tokenString, // Plaintext token (only shown once)
-				"description": apiKey.Name,
-				"expires_at":  apiKey.ExpiresAt,
-				"created_at":  apiKey.CreatedAt,
-			},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   apiKey.ID,
+		"type": "tokens",
+		"attributes": gin.H{
+			"token":       tokenString, // Plaintext token (only shown once)
+			"description": apiKey.Name,
+			"expires_at":  apiKey.ExpiresAt,
+			"created_at":  apiKey.CreatedAt,
 		},
 	})
 }
@@ -113,29 +88,13 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 func (h *TokenHandlerV2) List(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "User not authenticated",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "User not authenticated")
 		return
 	}
 
 	tokens, err := h.apiKeyService.ListUserTokens(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to list tokens",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list tokens")
 		return
 	}
 
@@ -155,9 +114,7 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	c.JSON(http.StatusOK, gin.H{
-		"data": responseData,
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, responseData)
 }
 
 // Delete deletes a user-bound token
@@ -165,43 +122,19 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 func (h *TokenHandlerV2) Delete(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "User not authenticated",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "User not authenticated")
 		return
 	}
 
 	tokenID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid token ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid token ID")
 		return
 	}
 
 	// DeleteAPIKey verifies ownership (key belongs to the authenticated user).
 	if err := h.apiKeyService.DeleteAPIKey(tokenID, user.ID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Token not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Token not found")
 		return
 	}
 

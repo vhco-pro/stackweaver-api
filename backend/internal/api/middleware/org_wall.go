@@ -4,11 +4,11 @@ package middleware
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -278,14 +278,5 @@ func scopeAllowsMethod(c *gin.Context, targetOrg uuid.UUID) bool {
 }
 
 func denyWall(c *gin.Context, status int, detail string) {
-	c.JSON(status, gin.H{
-		"errors": []gin.H{
-			{
-				"status": strconv.Itoa(status),
-				"title":  http.StatusText(status),
-				"detail": detail,
-			},
-		},
-	})
-	c.Abort()
+	jsonapi.AbortError(c, status, http.StatusText(status), detail)
 }

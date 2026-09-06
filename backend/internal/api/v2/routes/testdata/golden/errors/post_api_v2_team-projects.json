@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/team-projects",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Key: 'CreateTeamProjectAccessRequestV2.Data.Type' Error:Field validation for 'Type' failed on the 'required' tag",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

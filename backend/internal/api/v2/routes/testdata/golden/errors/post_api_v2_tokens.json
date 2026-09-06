@@ -1,0 +1,17 @@
+{
+  "method": "POST",
+  "path": "/api/v2/tokens",
+  "status": 201,
+  "body": {
+    "data": {
+      "attributes": {
+        "created_at": "\u003ctimestamp\u003e",
+        "description": "",
+        "expires_at": null,
+        "token": "\u003ctoken\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "tokens"
+    }
+  }
+}

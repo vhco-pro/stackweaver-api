@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -37,10 +38,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Only API-key identities may act as runners. Block JWT/browser sessions.
 		if method, _ := c.Get("auth_method"); method != "api_key" {
-			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{
-				"status": "401", "title": "Unauthorized",
-				"detail": "runner control plane requires a runner API key",
-			}}})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "runner control plane requires a runner API key")
 			c.Abort()
 			return
 		}
@@ -48,18 +46,14 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 		raw, exists := c.Get("api_key")
 		apiKey, ok := raw.(*models.APIKey)
 		if !exists || !ok || apiKey == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{
-				"status": "401", "title": "Unauthorized", "detail": "missing API key",
-			}}})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "missing API key")
 			c.Abort()
 			return
 		}
 
 		checker, err := apikey.NewScopeChecker(apiKey.Scopes)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{
-				"status": "401", "title": "Unauthorized", "detail": "invalid API key scopes",
-			}}})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid API key scopes")
 			c.Abort()
 			return
 		}
@@ -73,10 +67,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 			distinct[id] = struct{}{}
 		}
 		if len(distinct) != 1 {
-			c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{
-				"status": "403", "title": "Forbidden",
-				"detail": "this API key is not a runner token",
-			}}})
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this API key is not a runner token")
 			c.Abort()
 			return
 		}
@@ -89,18 +80,14 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 		if err != nil || runner == nil {
 			// The runner the token names no longer exists - treat as unauthorized.
 			logger.Debugf("RunnerAuth: token references unknown runner %s: %v", runnerID, err)
-			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{
-				"status": "401", "title": "Unauthorized", "detail": "runner not found",
-			}}})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "runner not found")
 			c.Abort()
 			return
 		}
 
 		// Defence in depth: the runner's org must match the token's bound org.
 		if apiKey.OrganizationID != nil && *apiKey.OrganizationID != runner.OrganizationID {
-			c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{
-				"status": "403", "title": "Forbidden", "detail": "runner/token organization mismatch",
-			}}})
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "runner/token organization mismatch")
 			c.Abort()
 			return
 		}

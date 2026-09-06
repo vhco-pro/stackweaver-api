@@ -12,6 +12,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/handlers"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	v2handlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	v2routes "github.com/michielvha/stackweaver/backend/internal/api/v2/routes"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
@@ -69,7 +70,7 @@ func SetupRoutes(
 
 	// Health check (supports both GET and HEAD for healthchecks)
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
+		response.Status(c, 200, "ok")
 	})
 	r.HEAD("/health", func(c *gin.Context) {
 		c.Status(200)

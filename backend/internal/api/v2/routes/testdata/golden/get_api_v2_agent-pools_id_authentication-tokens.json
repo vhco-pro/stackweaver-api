@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "path": "/api/v2/agent-pools/:id/authentication-tokens",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "prev-page": null,
+        "total-count": 0,
+        "total-pages": 1
+      }
+    }
+  }
+}

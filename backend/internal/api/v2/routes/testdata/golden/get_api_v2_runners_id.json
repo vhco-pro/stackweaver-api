@@ -1,0 +1,47 @@
+{
+  "method": "GET",
+  "path": "/api/v2/runners/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "agent-pool-id": "\u003cuuid\u003e",
+        "agent-pool-name": "build-agents",
+        "agent-version": "",
+        "ansible-version": "",
+        "available-collections": [],
+        "current-jobs": 0,
+        "description": "",
+        "hostname": "",
+        "ip-address": "",
+        "labels": [],
+        "last-heartbeat-at": "\u003ctimestamp\u003e",
+        "max-concurrent-jobs": 1,
+        "name": "build-agent-01",
+        "os-type": "",
+        "os-version": "",
+        "recent_jobs": [],
+        "registered-at": "\u003ctimestamp\u003e",
+        "runner-type": "combined",
+        "status": "offline",
+        "tofu-version": ""
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "runners"
+    }
+  }
+}

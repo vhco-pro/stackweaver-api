@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/ansible/workflows",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "total": 0
+    }
+  }
+}

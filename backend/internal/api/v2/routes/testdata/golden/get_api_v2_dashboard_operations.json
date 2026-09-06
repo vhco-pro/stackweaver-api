@@ -1,0 +1,55 @@
+{
+  "method": "GET",
+  "path": "/api/v2/dashboard/operations",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "executions": [
+          {
+            "detail": "Ansible job",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-09-05 17:43",
+            "organization_id": "\u003cuuid\u003e",
+            "organization_name": "demo",
+            "platform": "ansible",
+            "started_at": "\u003ctimestamp\u003e",
+            "status": "running"
+          },
+          {
+            "detail": "Ansible job",
+            "id": "\u003cuuid\u003e",
+            "name": "rotate-certificates - 2026-09-05 15:02",
+            "organization_id": "\u003cuuid\u003e",
+            "organization_name": "demo",
+            "platform": "ansible",
+            "started_at": "\u003ctimestamp\u003e",
+            "status": "running"
+          },
+          {
+            "detail": "plan-and-apply",
+            "id": "\u003cid\u003e",
+            "name": "payments-staging",
+            "organization_id": "\u003cuuid\u003e",
+            "organization_name": "demo",
+            "platform": "terraform",
+            "started_at": "\u003ctimestamp\u003e",
+            "status": "applying"
+          },
+          {
+            "detail": "plan-and-apply",
+            "id": "\u003cid\u003e",
+            "name": "staging-cluster",
+            "organization_id": "\u003cuuid\u003e",
+            "organization_name": "demo",
+            "platform": "terraform",
+            "started_at": "\u003ctimestamp\u003e",
+            "status": "applying"
+          }
+        ],
+        "truncated": false
+      },
+      "type": "dashboard-operations"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/vcs-connections/azure-devops/webhook",
+  "status": 401,
+  "body": {
+    "errors": [
+      {
+        "detail": "webhook authentication is not configured",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
+  }
+}

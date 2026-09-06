@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -99,43 +100,43 @@ func (h *GCPOIDCConfigurationHandlerV2) Create(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	// RBAC: user must be able to manage the organization's VCS/OIDC settings
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	ok, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage OIDC configurations"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage OIDC configurations")
 		return
 	}
 
 	var req CreateGCPOIDCConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if req.Data.Type != gcpOIDCConfigType {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be '" + gcpOIDCConfigType + "'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be '"+gcpOIDCConfigType+"'")
 		return
 	}
 
 	if req.Data.Attributes.ServiceAccountEmail == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": "service-account-email is required"}}})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "service-account-email is required")
 		return
 	}
 	if req.Data.Attributes.ProjectNumber == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": "project-number is required"}}})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "project-number is required")
 		return
 	}
 	if req.Data.Attributes.WorkloadProviderName == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": "workload-provider-name is required"}}})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "workload-provider-name is required")
 		return
 	}
 
@@ -147,18 +148,18 @@ func (h *GCPOIDCConfigurationHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.configRepo.Create(config); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create GCP OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create GCP OIDC configuration")
 		return
 	}
 
 	// Reload with organization preloaded
 	config, err = h.configRepo.GetByID(config.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to reload GCP OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to reload GCP OIDC configuration")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatGCPOIDCConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatGCPOIDCConfigResponse(config))
 }
 
 // Read returns a GCP OIDC configuration by ID.
@@ -168,7 +169,7 @@ func (h *GCPOIDCConfigurationHandlerV2) Read(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatGCPOIDCConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatGCPOIDCConfigResponse(config))
 }
 
 // Update updates a GCP OIDC configuration (partial update).
@@ -181,12 +182,12 @@ func (h *GCPOIDCConfigurationHandlerV2) Update(c *gin.Context) {
 
 	var req UpdateGCPOIDCConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if req.Data.Type != gcpOIDCConfigType {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be '" + gcpOIDCConfigType + "'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be '"+gcpOIDCConfigType+"'")
 		return
 	}
 
@@ -204,13 +205,13 @@ func (h *GCPOIDCConfigurationHandlerV2) Update(c *gin.Context) {
 	if len(updates) > 0 {
 		updated, err := h.configRepo.Update(config.ID, updates)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update OIDC configuration"}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update OIDC configuration")
 			return
 		}
 		config = updated
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatGCPOIDCConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatGCPOIDCConfigResponse(config))
 }
 
 // Delete deletes a GCP OIDC configuration.
@@ -221,7 +222,7 @@ func (h *GCPOIDCConfigurationHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.configRepo.Delete(config.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to delete OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete OIDC configuration")
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -233,21 +234,21 @@ func (h *GCPOIDCConfigurationHandlerV2) loadAuthorized(c *gin.Context) (*models.
 	config, err := h.configRepo.GetByID(c.Param("id"))
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "OIDC configuration not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "OIDC configuration not found")
 			return nil, false
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get OIDC configuration")
 		return nil, false
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return nil, false
 	}
 	ok, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, config.OrganizationID)
 	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage OIDC configurations"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage OIDC configurations")
 		return nil, false
 	}
 	return config, true

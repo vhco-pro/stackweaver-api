@@ -1,0 +1,55 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/job-templates/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "allow-callbacks": false,
+        "allow-simultaneous": false,
+        "become-enabled": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "",
+        "diff-mode": false,
+        "enabled": true,
+        "extra-vars": {},
+        "forks": 5,
+        "host-config-key": "",
+        "job-slice-count": 1,
+        "launch-on-webhook": false,
+        "limit": "",
+        "name": "baseline-compliance",
+        "retention-days": null,
+        "schedule-cron": "",
+        "schedule-enabled": false,
+        "skip-tags": "",
+        "tags": "",
+        "timeout-seconds": 0,
+        "updated-at": "\u003ctimestamp\u003e",
+        "verbosity": 0
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "playbook": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-playbooks"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-job-templates"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/v1/providers/:namespace/:name/:version",
+  "status": 404,
+  "body": {
+    "errors": [
+      "Provider not found"
+    ]
+  }
+}

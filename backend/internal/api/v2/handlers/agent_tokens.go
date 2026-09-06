@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -139,7 +140,7 @@ func (h *AgentTokenHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": agentTokenResource(key, token)})
+	jsonapi.WriteDocument(c, http.StatusCreated, agentTokenResource(key, token))
 }
 
 // List returns a pool's agent tokens (metadata only).
@@ -163,16 +164,13 @@ func (h *AgentTokenHandlerV2) List(c *gin.Context) {
 	for _, k := range keys {
 		data = append(data, agentTokenResource(k, ""))
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"data": data,
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": 1,
-				"prev-page":    nil,
-				"next-page":    nil,
-				"total-pages":  1,
-				"total-count":  len(keys),
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
+		"pagination": gin.H{
+			"current-page": 1,
+			"prev-page":    nil,
+			"next-page":    nil,
+			"total-pages":  1,
+			"total-count":  len(keys),
 		},
 	})
 }
@@ -184,7 +182,7 @@ func (h *AgentTokenHandlerV2) ReadByID(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": agentTokenResource(key, "")})
+	jsonapi.WriteDocument(c, http.StatusOK, agentTokenResource(key, ""))
 }
 
 // DeleteByID revokes a single agent token.

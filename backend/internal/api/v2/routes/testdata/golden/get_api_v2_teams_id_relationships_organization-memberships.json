@@ -1,0 +1,125 @@
+{
+  "method": "GET",
+  "path": "/api/v2/teams/:id/relationships/organization-memberships",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "email": "avery.diaz@example.com",
+          "name": "Avery Diaz",
+          "role": null,
+          "status": "active",
+          "username": "avery.diaz@example.com"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "teams": {
+            "data": []
+          },
+          "user": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "users"
+            }
+          }
+        },
+        "type": "organization-memberships"
+      },
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "email": "priya.raman@example.com",
+          "name": "Priya Raman",
+          "role": null,
+          "status": "active",
+          "username": "priya.raman@example.com"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "teams": {
+            "data": []
+          },
+          "user": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "users"
+            }
+          }
+        },
+        "type": "organization-memberships"
+      },
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "email": "tom.okafor@example.com",
+          "name": "Tom Okafor",
+          "role": null,
+          "status": "active",
+          "username": "tom.okafor@example.com"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "teams": {
+            "data": []
+          },
+          "user": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "users"
+            }
+          }
+        },
+        "type": "organization-memberships"
+      }
+    ],
+    "included": [
+      {
+        "attributes": {
+          "email": "avery.diaz@example.com",
+          "name": "Avery Diaz",
+          "username": "avery.diaz@example.com"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "users"
+      },
+      {
+        "attributes": {
+          "email": "priya.raman@example.com",
+          "name": "Priya Raman",
+          "username": "priya.raman@example.com"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "users"
+      },
+      {
+        "attributes": {
+          "email": "tom.okafor@example.com",
+          "name": "Tom Okafor",
+          "username": "tom.okafor@example.com"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "users"
+      }
+    ]
+  }
+}

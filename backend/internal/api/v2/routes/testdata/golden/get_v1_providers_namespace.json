@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/v1/providers/:namespace",
+  "status": 500,
+  "body": {
+    "errors": [
+      "Failed to list providers"
+    ]
+  }
+}

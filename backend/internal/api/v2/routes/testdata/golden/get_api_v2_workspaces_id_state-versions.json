@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/v2/workspaces/:id/state-versions",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "pagination": {
+        "page": 1,
+        "per_page": 20,
+        "total": 0
+      }
+    }
+  }
+}

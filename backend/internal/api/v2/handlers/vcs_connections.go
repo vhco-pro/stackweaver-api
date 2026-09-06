@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -59,9 +60,7 @@ func (h *VCSConnectionHandlerV2) List(c *gin.Context) {
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
@@ -72,9 +71,7 @@ func (h *VCSConnectionHandlerV2) List(c *gin.Context) {
 
 	connections, err := h.vcsConnectionRepo.ListByOrganization(org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list VCS connections"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list VCS connections")
 		return
 	}
 
@@ -97,7 +94,7 @@ func (h *VCSConnectionHandlerV2) List(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": responseData})
+	jsonapi.WriteDocument(c, http.StatusOK, responseData)
 }
 
 // Create creates a new VCS connection
@@ -107,33 +104,25 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage VCS connections. This requires organization-level manage-vcs-settings permission via team membership."}},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage VCS connections. This requires organization-level manage-vcs-settings permission via team membership.")
 		return
 	}
 
 	var req CreateVCSConnectionRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -142,17 +131,13 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		provider != models.VCSProviderGitLab &&
 		provider != models.VCSProviderBitbucket &&
 		provider != models.VCSProviderAzureDevOps {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid provider. Must be 'github', 'gitlab', 'bitbucket', or 'azure_devops'"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid provider. Must be 'github', 'gitlab', 'bitbucket', or 'azure_devops'")
 		return
 	}
 
 	existing, _ := h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, provider)
 	if existing != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": "VCS connection for this provider already exists"}},
-		})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "VCS connection for this provider already exists")
 		return
 	}
 
@@ -160,9 +145,7 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 	if req.TokenExpiresAt != "" {
 		parsed, err := time.Parse(time.RFC3339, req.TokenExpiresAt)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid token_expires_at format. Use ISO 8601 format (RFC3339)"}},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid token_expires_at format. Use ISO 8601 format (RFC3339)")
 			return
 		}
 		tokenExpiresAt = &parsed
@@ -182,35 +165,29 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 	// Encrypt tokens at rest (#95) before persisting. No-op when encryption is disabled.
 	if h.vcsRegistry != nil {
 		if err := h.vcsRegistry.EncryptTokens(connection); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt VCS tokens"}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to encrypt VCS tokens")
 			return
 		}
 	}
 
 	if err := h.vcsConnectionRepo.Create(connection); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create VCS connection"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create VCS connection")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   connection.ID,
-			"type": "vcs-connections",
-			"attributes": gin.H{
-				"provider":         connection.Provider,
-				"account_name":     connection.AccountName,
-				"account_type":     connection.AccountType,
-				"token_expires_at": connection.TokenExpiresAt,
-				"created_at":       connection.CreatedAt,
-				"updated_at":       connection.UpdatedAt,
-			},
-			"relationships": gin.H{
-				"organization": gin.H{"data": gin.H{"id": org.ID, "type": "organizations"}},
-			},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   connection.ID,
+		"type": "vcs-connections",
+		"attributes": gin.H{
+			"provider":         connection.Provider,
+			"account_name":     connection.AccountName,
+			"account_type":     connection.AccountType,
+			"token_expires_at": connection.TokenExpiresAt,
+			"created_at":       connection.CreatedAt,
+			"updated_at":       connection.UpdatedAt,
+		},
+		"relationships": gin.H{
+			"organization": gin.H{"data": gin.H{"id": org.ID, "type": "organizations"}},
 		},
 	})
 }
@@ -220,17 +197,13 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
@@ -239,21 +212,19 @@ func (h *VCSConnectionHandlerV2) Get(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   connection.ID,
-			"type": "vcs-connections",
-			"attributes": gin.H{
-				"provider":         connection.Provider,
-				"account_name":     connection.AccountName,
-				"account_type":     connection.AccountType,
-				"token_expires_at": connection.TokenExpiresAt,
-				"created_at":       connection.CreatedAt,
-				"updated_at":       connection.UpdatedAt,
-			},
-			"relationships": gin.H{
-				"organization": gin.H{"data": gin.H{"id": connection.OrganizationID, "type": "organizations"}},
-			},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":   connection.ID,
+		"type": "vcs-connections",
+		"attributes": gin.H{
+			"provider":         connection.Provider,
+			"account_name":     connection.AccountName,
+			"account_type":     connection.AccountType,
+			"token_expires_at": connection.TokenExpiresAt,
+			"created_at":       connection.CreatedAt,
+			"updated_at":       connection.UpdatedAt,
+		},
+		"relationships": gin.H{
+			"organization": gin.H{"data": gin.H{"id": connection.OrganizationID, "type": "organizations"}},
 		},
 	})
 }
@@ -263,48 +234,36 @@ func (h *VCSConnectionHandlerV2) Get(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
 	org, err := h.orgRepo.GetByID(connection.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to retrieve organization"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage VCS connections. This requires organization-level manage-vcs-settings permission via team membership."}},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage VCS connections. This requires organization-level manage-vcs-settings permission via team membership.")
 		return
 	}
 
 	if err := h.vcsConnectionRepo.Delete(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to delete VCS connection"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete VCS connection")
 		return
 	}
 
@@ -318,16 +277,12 @@ func (h *VCSConnectionHandlerV2) Delete(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) requireOrgMembership(c *gin.Context, orgID uuid.UUID) bool {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
 	inOrg, err := h.orgRepo.UserInOrg(user.ID, orgID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization (via team membership)"}},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return false
 	}
 	return true
@@ -352,9 +307,7 @@ func (h *VCSConnectionHandlerV2) getProvider(c *gin.Context, connection *models.
 	}
 	provider, err := h.vcsRegistry.GetProvider(connection)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to resolve VCS provider: %v", err)}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to resolve VCS provider: %v", err))
 		return nil
 	}
 	return provider
@@ -378,17 +331,13 @@ func isIdentityNotMaterialized(err error) bool {
 func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
@@ -412,30 +361,18 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 	if err != nil {
 		switch {
 		case isNotImplemented(err):
-			c.JSON(http.StatusNotImplemented, gin.H{
-				"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": fmt.Sprintf("Repository listing is not yet supported for %s", connection.Provider)}},
-			})
+			jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", fmt.Sprintf("Repository listing is not yet supported for %s", connection.Provider))
 		case isIdentityNotMaterialized(err):
-			c.JSON(http.StatusForbidden, gin.H{
-				"errors": []gin.H{{
-					"status": "403", "title": "Identity Not Materialized",
-					"detail": "Your Azure DevOps identity has not been activated in this organization. " +
-						"Open https://dev.azure.com/ in a browser, sign in with the same Microsoft account you used to authorize Stackweaver, " +
-						"then delete this VCS connection and reconnect.",
-				}},
-			})
+			jsonapi.WriteError(c, http.StatusForbidden, "Identity Not Materialized", "Your Azure DevOps identity has not been activated in this organization. "+
+				"Open https://dev.azure.com/ in a browser, sign in with the same Microsoft account you used to authorize Stackweaver, "+
+				"then delete this VCS connection and reconnect.")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to list repositories: %v", err)}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to list repositories: %v", err))
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": repos,
-		"meta": gin.H{"pagination": gin.H{"page": page, "per_page": perPage}},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, repos, gin.H{"pagination": gin.H{"page": page, "per_page": perPage}})
 }
 
 // ListProjects lists projects for a VCS connection.
@@ -444,17 +381,13 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
@@ -470,9 +403,7 @@ func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 
 	lister, ok := provider.(vcs.ProjectLister)
 	if !ok {
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": fmt.Sprintf("Project listing is not supported for %s", connection.Provider)}},
-		})
+		jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", fmt.Sprintf("Project listing is not supported for %s", connection.Provider))
 		return
 	}
 
@@ -480,26 +411,16 @@ func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 	if err != nil {
 		switch {
 		case isIdentityNotMaterialized(err):
-			c.JSON(http.StatusForbidden, gin.H{
-				"errors": []gin.H{{
-					"status": "403", "title": "Identity Not Materialized",
-					"detail": "Your Azure DevOps identity has not been activated in this organization. " +
-						"Open https://dev.azure.com/ in a browser, sign in with the same Microsoft account you used to authorize Stackweaver, " +
-						"then delete this VCS connection and reconnect.",
-				}},
-			})
+			jsonapi.WriteError(c, http.StatusForbidden, "Identity Not Materialized", "Your Azure DevOps identity has not been activated in this organization. "+
+				"Open https://dev.azure.com/ in a browser, sign in with the same Microsoft account you used to authorize Stackweaver, "+
+				"then delete this VCS connection and reconnect.")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to list projects: %v", err)}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to list projects: %v", err))
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": projects,
-		"meta": gin.H{"pagination": gin.H{"page": page, "per_page": perPage}},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, projects, gin.H{"pagination": gin.H{"page": page, "per_page": perPage}})
 }
 
 // ListBranches lists branches for a repository
@@ -507,17 +428,13 @@ func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) ListBranches(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
@@ -537,21 +454,14 @@ func (h *VCSConnectionHandlerV2) ListBranches(c *gin.Context) {
 	branches, err := provider.ListBranches(c.Request.Context(), connection, owner, repo, page, perPage)
 	if err != nil {
 		if isNotImplemented(err) {
-			c.JSON(http.StatusNotImplemented, gin.H{
-				"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": fmt.Sprintf("Branch listing is not yet supported for %s", connection.Provider)}},
-			})
+			jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", fmt.Sprintf("Branch listing is not yet supported for %s", connection.Provider))
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to list branches: %v", err)}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to list branches: %v", err))
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": branches,
-		"meta": gin.H{"pagination": gin.H{"page": page, "per_page": perPage}},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, branches, gin.H{"pagination": gin.H{"page": page, "per_page": perPage}})
 }
 
 // GetFileContent retrieves file content from a repository
@@ -559,17 +469,13 @@ func (h *VCSConnectionHandlerV2) ListBranches(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) GetFileContent(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
@@ -589,20 +495,14 @@ func (h *VCSConnectionHandlerV2) GetFileContent(c *gin.Context) {
 	content, err := provider.GetFileContent(c.Request.Context(), connection, owner, repo, path, ref)
 	if err != nil {
 		if isNotImplemented(err) {
-			c.JSON(http.StatusNotImplemented, gin.H{
-				"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": fmt.Sprintf("File content retrieval is not yet supported for %s", connection.Provider)}},
-			})
+			jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", fmt.Sprintf("File content retrieval is not yet supported for %s", connection.Provider))
 		} else {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("Failed to get file content: %v", err)}},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Failed to get file content: %v", err))
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{"content": content, "path": path, "ref": ref},
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{"content": content, "path": path, "ref": ref})
 }
 
 // ListYamlFiles lists all .yaml and .yml files in a repository
@@ -610,17 +510,13 @@ func (h *VCSConnectionHandlerV2) GetFileContent(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) ListYamlFiles(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
@@ -636,18 +532,14 @@ func (h *VCSConnectionHandlerV2) ListYamlFiles(c *gin.Context) {
 	files, err := provider.ListFiles(c.Request.Context(), connection, owner, repo, ref, []string{".yaml", ".yml"})
 	if err != nil {
 		if isNotImplemented(err) {
-			c.JSON(http.StatusNotImplemented, gin.H{
-				"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": fmt.Sprintf("YAML file listing is not yet supported for %s", connection.Provider)}},
-			})
+			jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", fmt.Sprintf("YAML file listing is not yet supported for %s", connection.Provider))
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to list YAML files: %v", err)}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to list YAML files: %v", err))
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": files})
+	jsonapi.WriteDocument(c, http.StatusOK, files)
 }
 
 // ListInventoryFiles lists all inventory files (.ini, .yaml, .yml, .json) in a repository
@@ -655,17 +547,13 @@ func (h *VCSConnectionHandlerV2) ListYamlFiles(c *gin.Context) {
 func (h *VCSConnectionHandlerV2) ListInventoryFiles(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid VCS connection ID"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 		return
 	}
 
 	connection, err := h.vcsConnectionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "VCS connection not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "VCS connection not found")
 		return
 	}
 
@@ -681,16 +569,12 @@ func (h *VCSConnectionHandlerV2) ListInventoryFiles(c *gin.Context) {
 	files, err := provider.ListFiles(c.Request.Context(), connection, owner, repo, ref, []string{".ini", ".yaml", ".yml", ".json"})
 	if err != nil {
 		if isNotImplemented(err) {
-			c.JSON(http.StatusNotImplemented, gin.H{
-				"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": fmt.Sprintf("Inventory file listing is not yet supported for %s", connection.Provider)}},
-			})
+			jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", fmt.Sprintf("Inventory file listing is not yet supported for %s", connection.Provider))
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to list inventory files: %v", err)}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to list inventory files: %v", err))
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": files})
+	jsonapi.WriteDocument(c, http.StatusOK, files)
 }

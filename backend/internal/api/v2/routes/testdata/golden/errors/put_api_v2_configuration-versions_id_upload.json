@@ -1,0 +1,14 @@
+{
+  "method": "PUT",
+  "path": "/api/v2/configuration-versions/:id/upload",
+  "status": 401,
+  "body": {
+    "errors": [
+      {
+        "detail": "Upload token required",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
+  }
+}

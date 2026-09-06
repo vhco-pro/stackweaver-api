@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/v2/modules/:namespace/:name/:provider/downloads/summary",
+  "status": 404,
+  "body": {
+    "errors": [
+      "Module not found"
+    ]
+  }
+}

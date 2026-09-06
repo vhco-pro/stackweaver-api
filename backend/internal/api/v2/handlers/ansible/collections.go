@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/services/ansible"
@@ -109,7 +110,7 @@ func (h *CollectionsHandler) ListPreInstalledCollections(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // ListJobCollections returns collections installed for a specific job
@@ -117,9 +118,7 @@ func (h *CollectionsHandler) ListPreInstalledCollections(c *gin.Context) {
 func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []map[string]string{{"status": "400", "detail": "Invalid job ID"}},
-		})
+		jsonapi.WriteErrorStatusDetail(c, http.StatusBadRequest, "Invalid job ID")
 		return
 	}
 
@@ -129,31 +128,23 @@ func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
 	// is wired in.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []map[string]string{{"status": "401", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteErrorStatusDetail(c, http.StatusUnauthorized, "Authentication required")
 		return
 	}
 	job, err := h.jobService.GetJob(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []map[string]string{{"status": "404", "detail": "Job not found"}},
-		})
+		jsonapi.WriteErrorStatusDetail(c, http.StatusNotFound, "Job not found")
 		return
 	}
 	hasPermission, err := h.rbacService.CheckAnsibleResourcePermission(
 		c.Request.Context(), user.ID, rbac.ResourceTypeAnsibleJob, job.ID.String(), rbac.PermissionAnsibleJobRead, &job.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []map[string]string{{"status": "500", "detail": "Failed to check permissions"}},
-		})
+		jsonapi.WriteErrorStatusDetail(c, http.StatusInternalServerError, "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []map[string]string{{"status": "403", "detail": "You don't have permission to view this job"}},
-		})
+		jsonapi.WriteErrorStatusDetail(c, http.StatusForbidden, "You don't have permission to view this job")
 		return
 	}
 
@@ -167,10 +158,7 @@ func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
 func (h *CollectionsHandler) SearchGalaxyCollections(c *gin.Context) {
 	// This would call the Galaxy API in a real implementation
 	// For now, return a placeholder response
-	c.JSON(http.StatusOK, gin.H{
-		"data": []interface{}{},
-		"meta": map[string]interface{}{
-			"message": "Galaxy search not yet implemented. Browse collections at https://galaxy.ansible.com",
-		},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, []interface{}{}, map[string]interface{}{
+		"message": "Galaxy search not yet implemented. Browse collections at https://galaxy.ansible.com",
 	})
 }

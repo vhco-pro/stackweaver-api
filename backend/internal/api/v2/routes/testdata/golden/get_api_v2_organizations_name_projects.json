@@ -1,0 +1,106 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/projects",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "default-execution-mode": "remote",
+          "description": "",
+          "is-unified": false,
+          "name": "data",
+          "setting-overwrites": {
+            "default-agent-pool": false,
+            "default-execution-mode": false
+          },
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/projects/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "default-agent-pool": {
+            "data": null
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "projects"
+      },
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "default-execution-mode": "remote",
+          "description": "",
+          "is-unified": false,
+          "name": "payments",
+          "setting-overwrites": {
+            "default-agent-pool": false,
+            "default-execution-mode": false
+          },
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/projects/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "default-agent-pool": {
+            "data": null
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "projects"
+      },
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "default-execution-mode": "remote",
+          "description": "",
+          "is-unified": false,
+          "name": "platform",
+          "setting-overwrites": {
+            "default-agent-pool": false,
+            "default-execution-mode": false
+          },
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/projects/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "default-agent-pool": {
+            "data": null
+          },
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "projects"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "page": 1,
+        "per_page": 20,
+        "total": 3
+      }
+    }
+  }
+}

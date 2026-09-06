@@ -1,0 +1,18 @@
+{
+  "method": "GET",
+  "path": "/api/v2/account/details",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "avatar-url": "",
+        "email": "avery.diaz@example.com",
+        "is-service-account": false,
+        "username": "avery.diaz@example.com",
+        "v2-only": true
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "users"
+    }
+  }
+}

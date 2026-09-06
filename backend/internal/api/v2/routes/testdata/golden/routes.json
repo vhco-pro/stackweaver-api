@@ -1,0 +1,2040 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/.well-known/jwks",
+      "excluded": "publishes an ephemeral per-process RSA key; the modulus differs every run",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/openid-configuration",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/registry/:registry/v2/gpg-keys",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/registry/:registry/v2/gpg-keys",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/registry/:registry/v2/gpg-keys/:namespace/:key_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/registry/:registry/v2/gpg-keys/:namespace/:key_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/registry/:registry/v2/gpg-keys/:namespace/:key_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/account/details",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/activities",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/activities/recent",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/admin/terraform-versions",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/admin/terraform-versions",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/admin/terraform-versions/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/admin/terraform-versions/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/admin/terraform-versions/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/agent-pools/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/agent-pools/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/agent-pools/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/agent-pools/:id/agents",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/agent-pools/:id/authentication-tokens",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/agent-pools/:id/authentication-tokens",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/agent-pools/:id/queue-depth",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/collections/pre-installed",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/collections/search",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/credentials/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/credentials/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/credentials/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/groups/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/groups/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/groups/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/hosts/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/hosts/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/hosts/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/hosts/:id/groups/:group_id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/hosts/:id/groups/:group_id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/inventories/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/inventories/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/inventories/:id/actions/run-command",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/inventories/:id/actions/sync",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id/groups",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/inventories/:id/groups",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id/hosts",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/inventories/:id/hosts",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id/ini",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id/json",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id/sources",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/inventories/:id/sources",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id/syncs",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/inventory-sources/:source_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventory-sources/:source_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/inventory-sources/:source_id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/inventory-sources/:source_id/actions/sync",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/inventory-syncs/:sync_id",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/job-templates/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/job-templates/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/job-templates/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/job-templates/:id/access",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/job-templates/:id/callback",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/job-templates/:id/credentials",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/job-templates/:id/credentials",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/job-templates/:id/credentials/:credential_id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/job-templates/:id/launch",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/job-templates/:id/notifications",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/job-templates/:id/variable-sets",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/job-templates/:id/vars",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/job-templates/:id/vars",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/job-templates/:id/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/job-templates/:id/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/jobs/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/jobs/:id",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/jobs/:id/actions/cancel",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/jobs/:id/actions/relaunch",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/jobs/:id/collections",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/jobs/:id/events",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/jobs/:id/output",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/notification-templates/:id",
+      "mutating": true
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/notification-templates/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/notification-templates/:id/test",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/playbooks/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/playbooks/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/playbooks/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/playbooks/:id/actions/sync",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/schedules/:schedule_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/schedules/:schedule_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/schedules/:schedule_id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/schedules/:schedule_id/actions/disable",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/schedules/:schedule_id/actions/enable",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/schedules/:schedule_id/actions/run-now",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/workflow-edges/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/workflow-jobs/:id",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/workflow-node-jobs/:id/approve",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/workflow-node-jobs/:id/deny",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/workflow-nodes/:id",
+      "mutating": true
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/workflow-nodes/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/ansible/workflows/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/workflows/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/ansible/workflows/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/workflows/:id/edges",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/workflows/:id/edges",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/workflows/:id/jobs",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/workflows/:id/launch",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/workflows/:id/nodes",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/workflows/:id/nodes",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/applies/:id",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/authentication-tokens/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/authentication-tokens/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/configuration-versions/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/configuration-versions/:id/download",
+      "mutating": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v2/configuration-versions/:id/upload",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/operations",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/stats",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/notification-configurations/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/notification-configurations/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/notification-configurations/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/notification-configurations/:id/actions/verify",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/oidc-configurations/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/oidc-configurations/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/oidc-configurations/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organization-memberships/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organization-memberships/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/organization-memberships/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name",
+      "excluded": "destroys the seeded organization the rest of the fixtures depend on",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/organizations/:name",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/agent-pools",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/agent-pools",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/analytics",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/analytics/executions",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/ansible-config",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible-config",
+      "mutating": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v2/organizations/:name/ansible-config",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible-config/effective",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/adhoc-modules",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/credentials",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/credentials",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/inventories",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/inventories",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/job-templates",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/job-templates",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/jobs",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/jobs",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/jobs/queue",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/notification-attachments",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/ansible/notification-attachments/:attachment_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/notification-templates",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/notification-templates",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/playbooks",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/playbooks",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/playbooks/actions/bulk-import",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/playbooks/actions/find-or-create",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/schedules",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/schedules",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/vcs-playbook-files",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/ansible/workflows",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/ansible/workflows",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/authentication-token",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/authentication-token",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/authentication-token",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/change-requests",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/effective-permissions",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/entitlement-set",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/explorer/bulk-actions",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/oidc-configurations",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/oidc-configurations",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/organization-memberships",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/organization-memberships",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/projects",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/projects",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/projects/:project_name",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/projects/:project_name",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/organizations/:name/projects/:project_name",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/registry-providers",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/registry-providers",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name/versions/:version/platforms",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/registry/modules",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/registry/modules",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/registry/modules",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions/:version",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/runners",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/runners/stats",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/runs",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/runs/queue",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/tasks",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/tasks",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/teams",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/teams",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/teams/:teamName",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/teams/:teamName",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/organizations/:name/teams/:teamName",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/varsets",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/varsets",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/varsets/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/varsets/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/organizations/:name/varsets/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/projects",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/projects",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/vars",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/vars",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/vars/:variable_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/workspaces",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/varsets/:id/relationships/workspaces",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/vcs-connections",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/vcs-connections",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/vcs-connections/azure-devops/install",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/vcs-connections/github/install",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/vcs-connections/github/installations/:installation_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/webhook-events",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/workspaces",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/workspaces",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/organizations/:name/workspaces/:workspace_name",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/workspaces/:workspace_name",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/organizations/:name/workspaces/:workspace_name",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/workspaces/:workspace_name/actions/safe-delete",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ping",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/plans/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/plans/:id/json-output",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/projects/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/projects/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/projects/:id/ansible-config",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/ansible-config",
+      "mutating": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v2/projects/:id/ansible-config",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/ansible/job-templates",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/ansible/jobs",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/ansible/playbooks",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/effective-tag-bindings",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/notification-configurations",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/projects/:id/notification-configurations",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/relationships/team-access",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/projects/:id/relationships/team-access",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/projects/:id/relationships/team-access/:access_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/relationships/team-access/:access_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/projects/:id/relationships/team-access/:access_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/projects/:id/tag-bindings",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/projects/:id/tag-bindings",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/registry-providers/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/registry-providers/:id",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/run-triggers/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/run-triggers/:id",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/deregister",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/heartbeat",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runner/jobs/:id/artifacts",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/complete",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/output",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/start",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/state",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runner/jobs/:id/status",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/register",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/runners/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runners/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/runners/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runs",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runs/:id/actions/apply",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runs/:id/actions/cancel",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runs/:id/actions/discard",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runs/:id/actions/force-cancel",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runs/:id/actions/force-execute",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/logs",
+      "excluded": "needs the Redis log buffer and object storage, which the harness does not stand up",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/logs/apply",
+      "excluded": "same log backend as /logs; recovers to a 500 with an empty body",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/logs/plan",
+      "excluded": "same log backend as /logs; recovers to a 500 with an empty body",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/outputs",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/plan",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/task-stages",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/state-versions/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/state-versions/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/state-versions/:id/download",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/state-versions/:id/outputs",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/task-result-outcomes/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/task-results/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/task-results/:id/callback",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/task-results/:id/outcomes",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/task-stages/:id",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/task-stages/:id/actions/override",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/tasks/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/tasks/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/tasks/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/team-projects",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/team-projects",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/team-projects/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/team-projects/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/team-projects/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/team-workspaces",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/team-workspaces",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/team-workspaces/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/team-workspaces/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/team-workspaces/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/teams/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/teams/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/teams/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/teams/:id/authentication-token",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/teams/:id/authentication-token",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/teams/:id/authentication-token",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/teams/:id/notification-configurations",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/teams/:id/notification-configurations",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/teams/:id/relationships/organization-memberships",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/teams/:id/relationships/organization-memberships",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/teams/:id/relationships/organization-memberships",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/teams/:id/relationships/users",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/teams/:id/relationships/users",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/terraform-versions",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/terraform/workspaces/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/tokens",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/tokens",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/tokens/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/varsets/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/varsets/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/varsets/:id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/varsets/:id/relationships/projects",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/varsets/:id/relationships/projects",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/varsets/:id/relationships/vars",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/varsets/:id/relationships/vars",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/varsets/:id/relationships/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/varsets/:id/relationships/vars/:variable_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/varsets/:id/relationships/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/varsets/:id/relationships/workspaces",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/varsets/:id/relationships/workspaces",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/vcs-connections/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/vcs-connections/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/vcs-connections/:id/projects",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/vcs-connections/:id/repositories",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/vcs-connections/:id/repositories/:owner/:repo/branches",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/vcs-connections/:id/repositories/:owner/:repo/contents/*path",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/vcs-connections/:id/repositories/:owner/:repo/inventory-files",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/vcs-connections/:id/repositories/:owner/:repo/yaml-files",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/vcs-connections/azure-devops/callback",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/vcs-connections/azure-devops/webhook",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/workspaces/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/workspaces/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/actions/force-unlock",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/actions/lock",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/actions/safe-delete",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/actions/unlock",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/change-requests",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/configuration-versions",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/configuration-versions",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/current-state-version",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/current-state-version-outputs",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/current-state-version-resources",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/effective-tag-bindings",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/notification-configurations",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/notification-configurations",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/platform-variables",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/relationships/team-access",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/relationships/team-access",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/workspaces/:id/relationships/team-access/:access_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/relationships/team-access/:access_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/workspaces/:id/relationships/team-access/:access_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/run-triggers",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/run-triggers",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/runs",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/state-versions",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/state-versions",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/state-versions/remove-resource",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/tag-bindings",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/workspaces/:id/tag-bindings",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/tasks",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/tasks",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/workspaces/:id/tasks/:tid",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/tasks/:tid",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/workspaces/:id/tasks/:tid",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/vars",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/:id/vars",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/workspaces/:id/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/vars/:variable_id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/workspaces/:id/vars/:variable_id",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/workspaces/change-requests/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/change-requests/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/workspaces/change-requests/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workspaces/change-requests/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/zitadel/actions/complement-token",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/zitadel/actions/idp-sync",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/openapi/stable.json",
+      "excluded": "serves the committed OpenAPI document, which has its own drift check",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/:namespace",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/:namespace/:name/:provider",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/:namespace/:name/:provider/:version",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/:namespace/:name/:provider/:version/download",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/:namespace/:name/:provider/download",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/:namespace/:name/:provider/versions",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/search",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name/:version",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name/:version/binary/:os/:arch",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name/:version/download/:os/:arch",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name/:version/sha256sums",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name/:version/sha256sums.sig",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name/download/:os/:arch",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/:namespace/:name/versions",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/search",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v2/modules/:namespace/:name/:provider/downloads/summary",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/v2/providers/:namespace/:name/downloads/summary",
+      "mutating": false
+    }
+  ]
+}

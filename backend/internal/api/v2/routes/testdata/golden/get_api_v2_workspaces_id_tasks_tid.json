@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/workspaces/:id/tasks/:tid",
+  "status": 404,
+  "body": {
+    "errors": [
+      {
+        "detail": "Workspace run task not found",
+        "status": "404",
+        "title": "Not Found"
+      }
+    ]
+  }
+}

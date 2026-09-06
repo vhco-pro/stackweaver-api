@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "path": "/api/v2/admin/terraform-versions",
+  "status": 422,
+  "body": {
+    "errors": [
+      {
+        "status": "422",
+        "title": "version is required"
+      }
+    ]
+  }
+}

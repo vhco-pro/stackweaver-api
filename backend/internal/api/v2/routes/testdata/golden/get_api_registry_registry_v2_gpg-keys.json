@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/registry/:registry/v2/gpg-keys",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "at least one filter[namespace] is required",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

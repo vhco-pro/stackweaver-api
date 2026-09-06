@@ -1,0 +1,19 @@
+{
+  "method": "GET",
+  "path": "/api/v2/agent-pools/:id/queue-depth",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "busy-runners": 0,
+        "idle-runners": 0,
+        "pending-ansible-jobs": 0,
+        "pending-terraform-jobs": 0,
+        "total-pending": 0,
+        "total-runners": 1
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "queue-depths"
+    }
+  }
+}

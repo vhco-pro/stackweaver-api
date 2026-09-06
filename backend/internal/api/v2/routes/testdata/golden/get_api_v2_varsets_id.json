@@ -1,0 +1,66 @@
+{
+  "method": "GET",
+  "path": "/api/v2/varsets/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "description": "Shared AWS credentials for the platform account.",
+        "global": false,
+        "name": "aws-credentials",
+        "priority": false,
+        "project-count": 0,
+        "updated-at": "\u003ctimestamp\u003e",
+        "var-count": 2,
+        "workspace-count": 0
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/varsets/\u003cid\u003e"
+      },
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "parent": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "vars": {
+          "data": [
+            {
+              "attributes": {
+                "category": "env",
+                "description": "",
+                "hcl": false,
+                "key": "AWS_REGION",
+                "sensitive": true,
+                "value": "••••••••"
+              },
+              "id": "\u003cid\u003e",
+              "type": "vars"
+            },
+            {
+              "attributes": {
+                "category": "env",
+                "description": "",
+                "hcl": false,
+                "key": "AWS_ROLE_ARN",
+                "sensitive": true,
+                "value": "••••••••"
+              },
+              "id": "\u003cid\u003e",
+              "type": "vars"
+            }
+          ]
+        }
+      },
+      "type": "varsets"
+    }
+  }
+}

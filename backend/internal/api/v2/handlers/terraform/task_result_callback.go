@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/services/runtask"
 )
@@ -149,5 +150,5 @@ func (h *RunHandlerV2) TaskResultCallback(c *gin.Context) {
 	if err != nil {
 		reloaded = tr
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatTaskResult(reloaded)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatTaskResult(reloaded))
 }

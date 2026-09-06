@@ -8,11 +8,11 @@ import (
 	"math"
 	"net/http"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/repository"
 )
@@ -209,29 +209,27 @@ func (h *AnalyticsHandler) GetOrganizationAnalytics(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"type": "analytics",
-			"id":   org.Name,
-			"attributes": gin.H{
-				"window": gin.H{
-					"since": window.Since.UTC().Format(time.RFC3339),
-					"until": window.Until.UTC().Format(time.RFC3339),
-					"days":  int(window.Until.Sub(window.Since).Hours()/24 + 0.5),
-				},
-				"runs":            outcomePayload(runTotals, runDurations, runTotalsPrev, runDurationsPrev),
-				"ansible_jobs":    outcomePayload(jobTotals, jobDurations, jobTotalsPrev, DurationStatsZero),
-				"daily":           dailyPayload(runDaily, jobDaily, activityDaily, window),
-				"top_workspaces":  topWorkspacePayload(topWorkspaces),
-				"top_templates":   topTemplatePayload(topTemplates),
-				"activity":        activityPayload(activityTotal, activityByAction, activityByResource),
-				"resources":       resources,
-				"recent_failures": failurePayload(runFailures, jobFailures, analyticsFailureLimit),
-				"running_now": gin.H{
-					"runs":  runningRuns,
-					"jobs":  runningJobs,
-					"total": runningRuns + runningJobs,
-				},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"type": "analytics",
+		"id":   org.Name,
+		"attributes": gin.H{
+			"window": gin.H{
+				"since": window.Since.UTC().Format(time.RFC3339),
+				"until": window.Until.UTC().Format(time.RFC3339),
+				"days":  int(window.Until.Sub(window.Since).Hours()/24 + 0.5),
+			},
+			"runs":            outcomePayload(runTotals, runDurations, runTotalsPrev, runDurationsPrev),
+			"ansible_jobs":    outcomePayload(jobTotals, jobDurations, jobTotalsPrev, DurationStatsZero),
+			"daily":           dailyPayload(runDaily, jobDaily, activityDaily, window),
+			"top_workspaces":  topWorkspacePayload(topWorkspaces),
+			"top_templates":   topTemplatePayload(topTemplates),
+			"activity":        activityPayload(activityTotal, activityByAction, activityByResource),
+			"resources":       resources,
+			"recent_failures": failurePayload(runFailures, jobFailures, analyticsFailureLimit),
+			"running_now": gin.H{
+				"runs":  runningRuns,
+				"jobs":  runningJobs,
+				"total": runningRuns + runningJobs,
 			},
 		},
 	})
@@ -342,18 +340,16 @@ func (h *AnalyticsHandler) GetOrganizationExecutions(c *gin.Context) {
 		data = append(data, entry)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"type": "analytics-executions",
-			"id":   org.Name,
-			"attributes": gin.H{
-				"executions": data,
-				"count":      len(data),
-				"truncated":  truncated,
-				"window": gin.H{
-					"since": window.Since.UTC().Format(time.RFC3339),
-					"until": window.Until.UTC().Format(time.RFC3339),
-				},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"type": "analytics-executions",
+		"id":   org.Name,
+		"attributes": gin.H{
+			"executions": data,
+			"count":      len(data),
+			"truncated":  truncated,
+			"window": gin.H{
+				"since": window.Since.UTC().Format(time.RFC3339),
+				"until": window.Until.UTC().Format(time.RFC3339),
 			},
 		},
 	})
@@ -581,11 +577,7 @@ func failurePayload(runs, jobs []repository.RecentFailure, limit int) []gin.H {
 }
 
 func analyticsError(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{"errors": []gin.H{{
-		"status": strconv.Itoa(status),
-		"title":  title,
-		"detail": detail,
-	}}})
+	jsonapi.WriteError(c, status, title, detail)
 }
 
 func errInvalidTime(param string) error {

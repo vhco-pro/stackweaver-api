@@ -8,11 +8,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
@@ -238,15 +240,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		logger.Debugf("auth: authorization header present: %v", authHeader != "")
 		if authHeader == "" {
 			logger.Debugf("auth: missing authorization header for path: %s", c.Request.URL.Path)
-			c.JSON(401, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "401",
-						"title":  "Unauthorized",
-						"detail": "missing authorization header",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "missing authorization header")
 			c.Abort()
 			return
 		}
@@ -254,15 +248,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		// Check for Bearer token
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(401, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "401",
-						"title":  "Unauthorized",
-						"detail": "invalid authorization header format",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid authorization header format")
 			c.Abort()
 			return
 		}
@@ -326,15 +312,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			// toward Zitadel configuration instead of the token's
 			// lifecycle.
 			logger.Warnf("auth: api token rejected: unknown or revoked (id: %s)", shortTokenID(tokenString))
-			c.JSON(401, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "401",
-						"title":  "Unauthorized",
-						"detail": "invalid or revoked API token",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid or revoked API token")
 			c.Abort()
 			return
 		}
@@ -342,15 +320,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 
 		// Try JWT token (Zitadel)
 		if s.verifier == nil {
-			c.JSON(500, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "authentication service not initialized",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "authentication service not initialized")
 			c.Abort()
 			return
 		}
@@ -360,15 +330,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		if err != nil {
 			// Log the actual error for debugging (but don't expose it to client for security)
 			logger.Warnf("auth: token verification failed: %v", err)
-			c.JSON(401, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "401",
-						"title":  "Unauthorized",
-						"detail": "invalid token",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid token")
 			c.Abort()
 			return
 		}
@@ -387,15 +349,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			userInfo.Name,
 		)
 		if err != nil {
-			c.JSON(500, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "failed to get or create user",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to get or create user")
 			c.Abort()
 			return
 		}

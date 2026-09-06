@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -31,7 +32,7 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	// Get local user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -91,7 +92,7 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 	// Read raw JSON to check which fields are present (including empty strings)
 	var jsonData map[string]interface{}
 	if err := c.ShouldBindJSON(&jsonData); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.LegacyError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -131,7 +132,7 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 	// Get local user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -157,7 +158,7 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 
 			if shouldUpdateZitadel {
 				if err := h.profileService.UpdateUserProfile(userSubject, updateReq); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile in Zitadel", "details": err.Error()})
+					response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to update profile in Zitadel", err.Error())
 					return
 				}
 			}
@@ -186,20 +187,37 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	if err := h.userRepo.Update(user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to update profile", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Profile updated successfully",
-		"profile": gin.H{
-			"id":       user.ID.String(),
-			"email":    user.Email,
-			"name":     user.Name,
-			"username": user.Username,
-			"bio":      user.Bio,
-			"company":  user.Company,
-			"location": user.Location,
+	c.JSON(http.StatusOK, ProfileUpdateResponse{
+		Message: "Profile updated successfully",
+		Profile: ProfileSummary{
+			ID:       user.ID.String(),
+			Email:    user.Email,
+			Name:     user.Name,
+			Username: user.Username,
+			Bio:      user.Bio,
+			Company:  user.Company,
+			Location: user.Location,
 		},
 	})
+}
+
+// ProfileSummary is the subset of a user returned after a profile update.
+type ProfileSummary struct {
+	ID       string `json:"id"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
+	Bio      string `json:"bio"`
+	Company  string `json:"company"`
+	Location string `json:"location"`
+}
+
+// ProfileUpdateResponse is the body of the profile update endpoint.
+type ProfileUpdateResponse struct {
+	Message string         `json:"message"`
+	Profile ProfileSummary `json:"profile"`
 }

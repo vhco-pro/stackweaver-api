@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/v2/workspaces/:id/platform-variables",
+  "status": 200,
+  "body": {
+    "data": [
+      "TF_ORGANIZATION_ID",
+      "TF_ORGANIZATION_NAME",
+      "TF_PROJECT_ID",
+      "TF_PROJECT_NAME",
+      "TF_WORKSPACE_ID",
+      "TF_WORKSPACE_NAME"
+    ]
+  }
+}

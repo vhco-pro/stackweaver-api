@@ -8,13 +8,14 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 )
 
 func InputValidationMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Validate request size
 		if c.Request.ContentLength > 10*1024*1024 { // 10MB limit
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request too large"})
+			response.LegacyError(c, http.StatusRequestEntityTooLarge, "request too large")
 			c.Abort()
 			return
 		}

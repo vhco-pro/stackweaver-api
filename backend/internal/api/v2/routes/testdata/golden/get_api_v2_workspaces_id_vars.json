@@ -1,0 +1,144 @@
+{
+  "method": "GET",
+  "path": "/api/v2/workspaces/:id/vars",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "category": "env",
+          "description": "Terraform log verbosity for this workspace.",
+          "hcl": false,
+          "key": "TF_LOG",
+          "sensitive": false,
+          "value": "INFO",
+          "version-id": ""
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/workspaces/\u003cid\u003e/vars/\u003cid\u003e"
+        },
+        "relationships": {
+          "configurable": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            },
+            "links": {
+              "related": "/api/v2/organizations/demo/workspaces/analytics-warehouse"
+            }
+          }
+        },
+        "type": "vars"
+      },
+      {
+        "attributes": {
+          "category": "terraform",
+          "description": "Default compute size.",
+          "hcl": false,
+          "key": "instance_type",
+          "sensitive": false,
+          "value": "t3.medium",
+          "version-id": ""
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/workspaces/\u003cid\u003e/vars/\u003cid\u003e"
+        },
+        "relationships": {
+          "configurable": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            },
+            "links": {
+              "related": "/api/v2/organizations/demo/workspaces/analytics-warehouse"
+            }
+          }
+        },
+        "type": "vars"
+      },
+      {
+        "attributes": {
+          "category": "terraform",
+          "description": "Environment name, used for tagging.",
+          "hcl": false,
+          "key": "environment",
+          "sensitive": false,
+          "value": "production",
+          "version-id": ""
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/workspaces/\u003cid\u003e/vars/\u003cid\u003e"
+        },
+        "relationships": {
+          "configurable": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            },
+            "links": {
+              "related": "/api/v2/organizations/demo/workspaces/analytics-warehouse"
+            }
+          }
+        },
+        "type": "vars"
+      },
+      {
+        "attributes": {
+          "category": "terraform",
+          "description": "Primary region for this workspace.",
+          "hcl": false,
+          "key": "region",
+          "sensitive": false,
+          "value": "eu-west-1",
+          "version-id": ""
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/workspaces/\u003cid\u003e/vars/\u003cid\u003e"
+        },
+        "relationships": {
+          "configurable": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            },
+            "links": {
+              "related": "/api/v2/organizations/demo/workspaces/analytics-warehouse"
+            }
+          }
+        },
+        "type": "vars"
+      },
+      {
+        "attributes": {
+          "category": "terraform",
+          "description": "Sensitive value; the UI must redact it.",
+          "hcl": false,
+          "key": "api_token",
+          "sensitive": true,
+          "value": "••••••••",
+          "version-id": ""
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/workspaces/\u003cid\u003e/vars/\u003cid\u003e"
+        },
+        "relationships": {
+          "configurable": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            },
+            "links": {
+              "related": "/api/v2/organizations/demo/workspaces/analytics-warehouse"
+            }
+          }
+        },
+        "type": "vars"
+      }
+    ]
+  }
+}

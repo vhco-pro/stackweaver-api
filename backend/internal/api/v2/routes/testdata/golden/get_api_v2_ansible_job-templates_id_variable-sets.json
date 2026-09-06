@@ -1,0 +1,34 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/job-templates/:id/variable-sets",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "description": "Tags applied to every managed resource. Attached to all workspaces.",
+          "global": true,
+          "name": "global-tags",
+          "priority": false,
+          "project-count": 0,
+          "updated-at": "\u003ctimestamp\u003e",
+          "var-count": 3,
+          "workspace-count": 0
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/varsets/\u003cid\u003e"
+        },
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "varsets"
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/v2/zitadel/actions/idp-sync",
+  "status": 401,
+  "body": {
+    "error": "invalid signature"
+  }
+}

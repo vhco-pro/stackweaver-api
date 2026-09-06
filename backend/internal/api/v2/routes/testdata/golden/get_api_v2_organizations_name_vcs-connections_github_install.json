@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/vcs-connections/github/install",
+  "status": 500,
+  "body": {
+    "errors": [
+      {
+        "detail": "The GitHub App integration is not available. Check the API pod logs for initialization errors (search for 'GitHub App Manager'). Common causes: missing GITHUB_APP_ID/GITHUB_APP_NAME env vars, or the PEM private key lost its newlines during secret provisioning.",
+        "status": "500",
+        "title": "GitHub App Not Configured"
+      }
+    ]
+  }
+}

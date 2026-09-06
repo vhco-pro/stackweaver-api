@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/v2/workspaces/:id/relationships/team-access",
+  "status": 200,
+  "body": {
+    "data": []
+  }
+}

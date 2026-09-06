@@ -1,0 +1,65 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/jobs/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "ansible-version": "",
+        "become-enabled": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "diff-mode": false,
+        "error-message": "",
+        "exit-code": null,
+        "extra-vars": {},
+        "finished-at": "\u003ctimestamp\u003e",
+        "forks": 5,
+        "has-warnings": false,
+        "hosts-changed": 7,
+        "hosts-failed": 0,
+        "hosts-ignored": 0,
+        "hosts-ok": 10,
+        "hosts-rescued": 0,
+        "hosts-skipped": 0,
+        "hosts-total": 10,
+        "hosts-unreachable": 0,
+        "job-type": "run",
+        "limit": "",
+        "name": "baseline-compliance - 2026-08-29 09:48",
+        "runner-id": null,
+        "skip-tags": "",
+        "slice-count": 0,
+        "slice-group-id": null,
+        "slice-number": 0,
+        "started-at": "\u003ctimestamp\u003e",
+        "status": "successful",
+        "tags": "",
+        "updated-at": "\u003ctimestamp\u003e",
+        "verbosity": 0,
+        "warnings-count": 0
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        },
+        "template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        }
+      },
+      "type": "ansible-jobs"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "method": "GET",
+  "path": "/.well-known/openid-configuration",
+  "status": 200,
+  "body": {
+    "claims_supported": [
+      "aud",
+      "exp",
+      "iat",
+      "iss",
+      "nbf",
+      "sub",
+      "terraform_organization_name",
+      "terraform_project_name",
+      "terraform_run_id",
+      "terraform_run_phase",
+      "terraform_workspace_name"
+    ],
+    "id_token_signing_alg_values_supported": [
+      "RS256"
+    ],
+    "issuer": "http://localhost:8022",
+    "jwks_uri": "http://localhost:8022/.well-known/jwks",
+    "response_types_supported": [
+      "id_token"
+    ],
+    "subject_types_supported": [
+      "public"
+    ]
+  }
+}

@@ -5,10 +5,10 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -44,11 +44,7 @@ func NewOrganizationTokenHandlerV2(
 
 // jsonAPIError writes a single-error JSON:API error response (status as the numeric code string).
 func jsonAPIError(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{
-		"errors": []gin.H{
-			{"status": strconv.Itoa(status), "title": title, "detail": detail},
-		},
-	})
+	jsonapi.WriteError(c, status, title, detail)
 }
 
 // auditTrailTokenType is the value of the `?token=` query param that selects the audit-trail token

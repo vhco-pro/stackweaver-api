@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -199,7 +200,7 @@ func (h *WorkspaceRunTaskHandlerV2) Create(c *gin.Context) {
 		taskError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to attach run task")
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": formatWorkspaceTask(wt)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatWorkspaceTask(wt))
 }
 
 // List handles GET /workspaces/:id/tasks.
@@ -218,7 +219,7 @@ func (h *WorkspaceRunTaskHandlerV2) List(c *gin.Context) {
 	for i := range wts {
 		data = append(data, formatWorkspaceTask(&wts[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data, "meta": fullPaginationMeta(page, pageSize, total)})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, total))
 }
 
 // Read handles GET /workspaces/:id/tasks/:tid.
@@ -227,7 +228,7 @@ func (h *WorkspaceRunTaskHandlerV2) Read(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatWorkspaceTask(wt)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatWorkspaceTask(wt))
 }
 
 // Update handles PATCH /workspaces/:id/tasks/:tid.
@@ -260,7 +261,7 @@ func (h *WorkspaceRunTaskHandlerV2) Update(c *gin.Context) {
 		taskError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update workspace run task")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatWorkspaceTask(wt)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatWorkspaceTask(wt))
 }
 
 // Delete handles DELETE /workspaces/:id/tasks/:tid.

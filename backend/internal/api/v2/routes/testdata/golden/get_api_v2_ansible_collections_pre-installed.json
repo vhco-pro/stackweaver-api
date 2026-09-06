@@ -1,0 +1,86 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/collections/pre-installed",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "description": "AWS cloud modules and dynamic inventory plugins",
+          "name": "amazon.aws",
+          "namespace": "amazon",
+          "source": "pre-installed",
+          "version": "latest"
+        },
+        "id": "amazon.aws",
+        "type": "ansible-collections"
+      },
+      {
+        "attributes": {
+          "description": "Azure cloud modules and dynamic inventory plugins",
+          "name": "azure.azcollection",
+          "namespace": "azure",
+          "source": "pre-installed",
+          "version": "latest"
+        },
+        "id": "azure.azcollection",
+        "type": "ansible-collections"
+      },
+      {
+        "attributes": {
+          "description": "GCP cloud modules and dynamic inventory plugins",
+          "name": "google.cloud",
+          "namespace": "google",
+          "source": "pre-installed",
+          "version": "latest"
+        },
+        "id": "google.cloud",
+        "type": "ansible-collections"
+      },
+      {
+        "attributes": {
+          "description": "General-purpose modules (1000+ modules)",
+          "name": "community.general",
+          "namespace": "community",
+          "source": "pre-installed",
+          "version": "latest"
+        },
+        "id": "community.general",
+        "type": "ansible-collections"
+      },
+      {
+        "attributes": {
+          "description": "Network automation base modules",
+          "name": "ansible.netcommon",
+          "namespace": "ansible",
+          "source": "pre-installed",
+          "version": "latest"
+        },
+        "id": "ansible.netcommon",
+        "type": "ansible-collections"
+      },
+      {
+        "attributes": {
+          "description": "POSIX system modules and JSONL callback",
+          "name": "ansible.posix",
+          "namespace": "ansible",
+          "source": "pre-installed",
+          "version": "latest"
+        },
+        "id": "ansible.posix",
+        "type": "ansible-collections"
+      },
+      {
+        "attributes": {
+          "description": "VMware vSphere modules",
+          "name": "community.vmware",
+          "namespace": "community",
+          "source": "pre-installed",
+          "version": "latest"
+        },
+        "id": "community.vmware",
+        "type": "ansible-collections"
+      }
+    ]
+  }
+}

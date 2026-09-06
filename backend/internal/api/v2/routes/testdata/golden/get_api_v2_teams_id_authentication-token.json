@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/teams/:id/authentication-token",
+  "status": 404,
+  "body": {
+    "errors": [
+      {
+        "detail": "Team token not found",
+        "status": "404",
+        "title": "Not Found"
+      }
+    ]
+  }
+}

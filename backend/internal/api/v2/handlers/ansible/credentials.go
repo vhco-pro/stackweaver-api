@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -116,39 +117,23 @@ func (h *CredentialHandler) List(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Organization not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to list credentials in this organization"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to list credentials in this organization")
 		return
 	}
 
@@ -173,23 +158,16 @@ func (h *CredentialHandler) List(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to list credentials"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list credentials")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatCredentialsResponse(credentials),
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": page,
-				"page-size":    perPage,
-				"total-count":  total,
-				"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatCredentialsResponse(credentials), gin.H{
+		"pagination": gin.H{
+			"current-page": page,
+			"page-size":    perPage,
+			"total-count":  total,
+			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
 		},
 	})
 }
@@ -201,49 +179,29 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Organization not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckOrgManageAnsible(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to create credentials in this organization"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to create credentials in this organization")
 		return
 	}
 
 	var req CreateCredentialRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -255,11 +213,7 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 		models.CredentialTypeAzure, models.CredentialTypeGCP, models.CredentialTypeVMware:
 		// Valid
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid credential type"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential type")
 		return
 	}
 
@@ -268,21 +222,13 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 	if req.Data.Relationships.Project.Data != nil {
 		pid, err := uuid.Parse(req.Data.Relationships.Project.Data.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{"status": "400", "title": "Bad Request", "detail": "Invalid project ID"},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project ID")
 			return
 		}
 		// Verify project belongs to organization
 		project, err := h.projectRepo.GetByID(pid)
 		if err != nil || project.OrganizationID != org.ID {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{"status": "400", "title": "Bad Request", "detail": "Project not found or does not belong to organization"},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Project not found or does not belong to organization")
 			return
 		}
 		projectID = &pid
@@ -299,11 +245,7 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 				Description:    "Default project for your organization",
 			}
 			if err := h.projectRepo.Create(defaultProject); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"errors": []gin.H{
-						{"status": "500", "title": "Internal Server Error", "detail": "Failed to get default project"},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get default project")
 				return
 			}
 			projectID = &defaultProject.ID
@@ -334,17 +276,11 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 
 	credential, err := h.credentialService.CreateCredential(input)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": formatCredentialResponse(credential),
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatCredentialResponse(credential))
 }
 
 // Get retrieves a credential by ID
@@ -353,31 +289,19 @@ func (h *CredentialHandler) Get(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid credential ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential ID")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	credential, err := h.credentialService.GetCredential(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Credential not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Credential not found")
 		return
 	}
 
@@ -396,25 +320,15 @@ func (h *CredentialHandler) Get(c *gin.Context) {
 		hasPermission, err = h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, credential.OrganizationID)
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to view this credential"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to view this credential")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatCredentialResponse(credential),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatCredentialResponse(credential))
 }
 
 // Update updates a credential
@@ -423,32 +337,20 @@ func (h *CredentialHandler) Update(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid credential ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential ID")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Fetch existing credential for RBAC check and project validation
 	existingCredential, err := h.credentialService.GetCredential(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Credential not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Credential not found")
 		return
 	}
 
@@ -467,29 +369,17 @@ func (h *CredentialHandler) Update(c *gin.Context) {
 		hasPermission, err = h.rbacService.CheckOrgManageAnsible(c.Request.Context(), user.ID, existingCredential.OrganizationID)
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to update this credential"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to update this credential")
 		return
 	}
 
 	var req UpdateCredentialRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -498,21 +388,13 @@ func (h *CredentialHandler) Update(c *gin.Context) {
 	if req.Data.Relationships.Project.Data != nil {
 		pid, err := uuid.Parse(req.Data.Relationships.Project.Data.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{"status": "400", "title": "Bad Request", "detail": "Invalid project ID"},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project ID")
 			return
 		}
 		// Verify project belongs to same organization
 		project, err := h.projectRepo.GetByID(pid)
 		if err != nil || project.OrganizationID != existingCredential.OrganizationID {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{"status": "400", "title": "Bad Request", "detail": "Project not found or does not belong to organization"},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Project not found or does not belong to organization")
 			return
 		}
 		projectID = &pid
@@ -540,17 +422,11 @@ func (h *CredentialHandler) Update(c *gin.Context) {
 
 	credential, err := h.credentialService.UpdateCredential(id, input)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatCredentialResponse(credential),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatCredentialResponse(credential))
 }
 
 // Delete deletes a credential
@@ -559,32 +435,20 @@ func (h *CredentialHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid credential ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential ID")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Fetch credential for RBAC check
 	credential, err := h.credentialService.GetCredential(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Credential not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Credential not found")
 		return
 	}
 
@@ -603,19 +467,11 @@ func (h *CredentialHandler) Delete(c *gin.Context) {
 		hasPermission, err = h.rbacService.CheckOrgManageAnsible(c.Request.Context(), user.ID, credential.OrganizationID)
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "You do not have permission to delete this credential"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to delete this credential")
 		return
 	}
 
@@ -623,18 +479,10 @@ func (h *CredentialHandler) Delete(c *gin.Context) {
 		// Check for foreign key constraint violation
 		errStr := err.Error()
 		if strings.Contains(errStr, "violates foreign key constraint") {
-			c.JSON(http.StatusConflict, gin.H{
-				"errors": []gin.H{
-					{"status": "409", "title": "Conflict", "detail": "Cannot delete credential: it is referenced by one or more job templates, jobs, or inventory sources. Remove the credential from those resources first."},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Cannot delete credential: it is referenced by one or more job templates, jobs, or inventory sources. Remove the credential from those resources first.")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 

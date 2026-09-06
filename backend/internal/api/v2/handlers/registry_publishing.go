@@ -14,6 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -69,9 +71,7 @@ func (h *RegistryPublishingHandler) requireModuleManage(c *gin.Context, orgName 
 	}
 	hasPermission, err := h.rbacService.CheckOrgManageModules(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage modules in this organization"}},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage modules in this organization")
 		return nil, nil, false
 	}
 	return user, org, true
@@ -87,9 +87,7 @@ func (h *RegistryPublishingHandler) requireModuleRead(c *gin.Context, orgName st
 	}
 	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You are not a member of this organization"}},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You are not a member of this organization")
 		return nil, nil, false
 	}
 	return user, org, true
@@ -100,16 +98,12 @@ func (h *RegistryPublishingHandler) requireModuleRead(c *gin.Context, orgName st
 func (h *RegistryPublishingHandler) resolveUserAndOrg(c *gin.Context, orgName string) (*models.User, *models.Organization, bool) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return nil, nil, false
 	}
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return nil, nil, false
 	}
 	return user, org, true
@@ -136,9 +130,7 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -146,15 +138,11 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 	if req.VCSConnectionID != nil {
 		vcsConn, err := h.vcsConnectionRepo.GetByID(*req.VCSConnectionID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "VCS connection not found"}},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "VCS connection not found")
 			return
 		}
 		if vcsConn.OrganizationID != org.ID {
-			c.JSON(http.StatusForbidden, gin.H{
-				"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "VCS connection does not belong to this organization"}},
-			})
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "VCS connection does not belong to this organization")
 			return
 		}
 	}
@@ -171,9 +159,7 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 		user.ID,
 	)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -224,17 +210,15 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 	_ = req.VCSConnectionID != nil && req.AutoPublishTags && h.githubAppManager != nil && h.githubAppManager.IsEnabled()
 
 	// Format response (TFE-compatible)
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   module.ID.String(),
-			"type": "registry-modules",
-			"attributes": gin.H{
-				"name":              module.Name,
-				"provider":          module.Provider,
-				"description":       module.Description,
-				"vcs_repository":    module.VCSRepository,
-				"auto_publish_tags": module.AutoPublishTags,
-			},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   module.ID.String(),
+		"type": "registry-modules",
+		"attributes": gin.H{
+			"name":              module.Name,
+			"provider":          module.Provider,
+			"description":       module.Description,
+			"vcs_repository":    module.VCSRepository,
+			"auto_publish_tags": module.AutoPublishTags,
 		},
 	})
 }
@@ -254,17 +238,13 @@ func (h *RegistryPublishingHandler) DeleteModule(c *gin.Context) {
 	// Get module
 	module, err := h.moduleRepo.GetByOrganizationAndName(org.ID, moduleName, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Module not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Module not found")
 		return
 	}
 
 	// Delete module (cascade will delete versions)
 	if err := h.moduleRepo.Delete(module.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -284,25 +264,19 @@ func (h *RegistryPublishingHandler) DeleteAllModules(c *gin.Context) {
 	// Get all modules for organization
 	modules, _, err := h.moduleRepo.List(&org.ID, "", nil, 1000, 0)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
 	// Delete all modules
 	for _, module := range modules {
 		if err := h.moduleRepo.Delete(module.ID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to delete module %s: %v", module.Name, err)}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to delete module %s: %v", module.Name, err))
 			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Deleted %d module(s)", len(modules)),
-	})
+	response.Message(c, http.StatusOK, fmt.Sprintf("Deleted %d module(s)", len(modules)))
 }
 
 // ListModules handles GET /api/v2/organizations/:name/registry/modules
@@ -317,9 +291,7 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 
 	modules, _, err := h.moduleRepo.List(&org.ID, "", nil, 100, 0)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -361,7 +333,7 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // GetModule handles GET /api/v2/organizations/:name/registry/modules/:name/:provider
@@ -378,9 +350,7 @@ func (h *RegistryPublishingHandler) GetModule(c *gin.Context) {
 
 	module, err := h.moduleRepo.GetByOrganizationAndName(org.ID, moduleName, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Module not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Module not found")
 		return
 	}
 
@@ -396,12 +366,10 @@ func (h *RegistryPublishingHandler) GetModule(c *gin.Context) {
 		attrs["vcs_account_name"] = module.VCSConnection.AccountName
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":         module.ID.String(),
-			"type":       "registry-modules",
-			"attributes": attrs,
-		},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":         module.ID.String(),
+		"type":       "registry-modules",
+		"attributes": attrs,
 	})
 }
 
@@ -420,9 +388,7 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 	// Get module
 	module, err := h.moduleRepo.GetByOrganizationAndName(org.ID, moduleName, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Module not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Module not found")
 		return
 	}
 
@@ -430,9 +396,7 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 	versions, err := h.moduleVersionRepo.ListByModule(module.ID)
 	if err != nil {
 		logger.Errorf("Error listing versions for module %s/%s/%s: %v", orgName, moduleName, provider, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -478,7 +442,7 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // PublishVersion handles POST /api/v2/organizations/:name/registry/modules/:name/:provider/versions
@@ -496,9 +460,7 @@ func (h *RegistryPublishingHandler) PublishVersion(c *gin.Context) {
 	// Get module
 	module, err := h.moduleRepo.GetByOrganizationAndName(org.ID, moduleName, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Module not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Module not found")
 		return
 	}
 
@@ -506,36 +468,28 @@ func (h *RegistryPublishingHandler) PublishVersion(c *gin.Context) {
 	storagePath := c.PostForm("storage_path")
 	if storagePath != "" {
 		// TODO: Implement direct storage path registration
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"errors": []gin.H{{"status": "501", "title": "Not Implemented", "detail": "Direct storage path registration not yet implemented"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", "Direct storage path registration not yet implemented")
 		return
 	}
 
 	// Get version from form
 	version := c.PostForm("version")
 	if version == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "version is required"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "version is required")
 		return
 	}
 
 	// Get tarball file
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "file is required"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "file is required")
 		return
 	}
 
 	// Open uploaded file
 	src, err := file.Open()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 	defer func() {
@@ -553,20 +507,16 @@ func (h *RegistryPublishingHandler) PublishVersion(c *gin.Context) {
 		file.Size,
 	)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   moduleVersion.ID.String(),
-			"type": "registry-module-versions",
-			"attributes": gin.H{
-				"version":      moduleVersion.Version,
-				"published_at": moduleVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
-			},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   moduleVersion.ID.String(),
+		"type": "registry-module-versions",
+		"attributes": gin.H{
+			"version":      moduleVersion.Version,
+			"published_at": moduleVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
 		},
 	})
 }
@@ -686,26 +636,20 @@ func (h *RegistryPublishingHandler) DeleteModuleVersion(c *gin.Context) {
 	// Get module
 	module, err := h.moduleRepo.GetByOrganizationAndName(org.ID, moduleName, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Module not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Module not found")
 		return
 	}
 
 	// Get version
 	version, err := h.moduleVersionRepo.GetByModuleAndVersion(module.ID, versionStr)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Version not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Version not found")
 		return
 	}
 
 	// Delete version
 	if err := h.moduleVersionRepo.Delete(version.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 

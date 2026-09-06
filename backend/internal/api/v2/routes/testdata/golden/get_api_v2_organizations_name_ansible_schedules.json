@@ -1,0 +1,71 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/ansible/schedules",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "config": {},
+          "created-at": "\u003ctimestamp\u003e",
+          "cron-expression": "0 2 * * *",
+          "description": "Applies the patch baseline across the fleet overnight.",
+          "name": "nightly-patch-baseline",
+          "schedule-type": "job_template",
+          "status": "disabled",
+          "timezone": "UTC",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "job-template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "schedules"
+      },
+      {
+        "attributes": {
+          "config": {},
+          "created-at": "\u003ctimestamp\u003e",
+          "cron-expression": "0 5 * * 1",
+          "description": "Runs the compliance playbook every Monday morning.",
+          "name": "weekly-compliance-sweep",
+          "schedule-type": "job_template",
+          "status": "disabled",
+          "timezone": "UTC",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "job-template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "schedules"
+      }
+    ],
+    "has_more": false,
+    "limit": 20,
+    "offset": 0,
+    "total": 2
+  }
+}

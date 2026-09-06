@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
 )
@@ -26,26 +27,26 @@ func NewSessionsHandler(sessionsService *sessions.Service, authService *auth.Ser
 // GET /api/v2/settings/sessions
 func (h *SessionsHandler) ListSessions(c *gin.Context) {
 	if h.sessionsService == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sessions service is not available"})
+		response.LegacyError(c, http.StatusServiceUnavailable, "sessions service is not available")
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusUnauthorized, "unauthorized", err.Error())
 		return
 	}
 
 	if userSubject == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user subject is missing"})
+		response.LegacyError(c, http.StatusBadRequest, "user subject is missing")
 		return
 	}
 
 	// List sessions
 	sessionList, err := h.sessionsService.ListUserSessions(userSubject)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list sessions", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to list sessions", err.Error())
 		return
 	}
 
@@ -54,11 +55,6 @@ func (h *SessionsHandler) ListSessions(c *gin.Context) {
 	currentIP := c.ClientIP()
 
 	// Find the session that best matches the current request
-	type SessionWithCurrent struct {
-		*sessions.Session
-		IsCurrent bool `json:"is_current"`
-	}
-
 	sessionsWithCurrent := make([]SessionWithCurrent, len(sessionList))
 
 	// First, try to match by IP address (most reliable)
@@ -83,32 +79,32 @@ func (h *SessionsHandler) ListSessions(c *gin.Context) {
 		sessionsWithCurrent[0].IsCurrent = true
 	}
 
-	c.JSON(http.StatusOK, gin.H{"sessions": sessionsWithCurrent})
+	c.JSON(http.StatusOK, SessionListResponse{Sessions: sessionsWithCurrent})
 }
 
 // RevokeSession revokes a session
 // DELETE /api/v2/settings/sessions/:sessionId
 func (h *SessionsHandler) RevokeSession(c *gin.Context) {
 	if h.sessionsService == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sessions service is not available"})
+		response.LegacyError(c, http.StatusServiceUnavailable, "sessions service is not available")
 		return
 	}
 
 	sessionID := c.Param("sessionId")
 	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session ID is required"})
+		response.LegacyError(c, http.StatusBadRequest, "session ID is required")
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusUnauthorized, "unauthorized", err.Error())
 		return
 	}
 
 	if userSubject == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user subject is missing"})
+		response.LegacyError(c, http.StatusBadRequest, "user subject is missing")
 		return
 	}
 
@@ -124,16 +120,30 @@ func (h *SessionsHandler) RevokeSession(c *gin.Context) {
 			}
 		}
 		if !sessionExists {
-			c.JSON(http.StatusForbidden, gin.H{"error": "session does not belong to user"})
+			response.LegacyError(c, http.StatusForbidden, "session does not belong to user")
 			return
 		}
 	}
 
 	// Revoke session
 	if err := h.sessionsService.RevokeSession(sessionID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to revoke session", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to revoke session", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Session revoked successfully"})
+	response.Message(c, http.StatusOK, "Session revoked successfully")
+}
+
+// SessionWithCurrent is a session annotated with whether it is the caller's own.
+//
+// Hoisted to package scope so SessionListResponse can name it. It was declared inside
+// ListSessions, which made the response body impossible to give a type.
+type SessionWithCurrent struct {
+	*sessions.Session
+	IsCurrent bool `json:"is_current"`
+}
+
+// SessionListResponse is the body of GET /api/v2/settings/sessions.
+type SessionListResponse struct {
+	Sessions []SessionWithCurrent `json:"sessions"`
 }

@@ -5,11 +5,11 @@ package terraform
 import (
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -64,7 +64,7 @@ func NewRunTaskHandlerV2(
 }
 
 func taskError(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{"errors": []gin.H{{"status": strconv.Itoa(status), "title": title, "detail": detail}}})
+	jsonapi.WriteError(c, status, title, detail)
 }
 
 // fullPaginationMeta is the complete TFE pagination meta block. go-tfe's Pagination struct reads all
@@ -316,7 +316,7 @@ func (h *RunTaskHandlerV2) Create(c *gin.Context) {
 		taskError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create run task")
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": formatRunTask(t, org.Name, nil)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatRunTask(t, org.Name, nil))
 }
 
 // List handles GET /organizations/:name/tasks.
@@ -336,7 +336,7 @@ func (h *RunTaskHandlerV2) List(c *gin.Context) {
 		wts, _ := h.wsTaskRepo.ListByTask(tasks[i].ID)
 		data = append(data, formatRunTask(&tasks[i], org.Name, wts))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data, "meta": fullPaginationMeta(page, pageSize, total)})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, total))
 }
 
 // Read handles GET /tasks/:id (?include=workspace_tasks).
@@ -453,7 +453,7 @@ func (h *RunTaskHandlerV2) Update(c *gin.Context) {
 		return
 	}
 	wts, _ := h.wsTaskRepo.ListByTask(t.ID)
-	c.JSON(http.StatusOK, gin.H{"data": formatRunTask(t, org.Name, wts)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatRunTask(t, org.Name, wts))
 }
 
 // Delete handles DELETE /tasks/:id. Workspace attachments cascade; in-flight task results keep

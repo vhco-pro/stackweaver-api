@@ -1,0 +1,80 @@
+{
+  "method": "GET",
+  "path": "/api/v2/terraform/workspaces/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "actions": {
+          "is-destroyable": true
+        },
+        "agent-pool-id": null,
+        "allow-destroy-plan": true,
+        "assessments-enabled": false,
+        "auto-apply": false,
+        "auto-apply-run-trigger": false,
+        "auto-queue-runs": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "",
+        "environment": "default",
+        "execution-mode": "remote",
+        "file-triggers-enabled": true,
+        "force-delete": false,
+        "global-remote-state": false,
+        "latest-change-at": "\u003ctimestamp\u003e",
+        "locked": false,
+        "locked-reason": null,
+        "name": "analytics-warehouse",
+        "operations": true,
+        "permissions": {
+          "can-destroy": true,
+          "can-force-delete": true,
+          "can-force-unlock": true,
+          "can-lock": true,
+          "can-queue-destroy": true,
+          "can-queue-run": true,
+          "can-read-settings": true,
+          "can-unlock": true,
+          "can-update": true,
+          "can-update-variable": true
+        },
+        "queue-all-runs": true,
+        "resource-count": 0,
+        "run-timeout": 7200,
+        "setting-overwrites": {
+          "agent-pool": false,
+          "execution-mode": false
+        },
+        "source": "tfe-api",
+        "speculative-enabled": true,
+        "structured-run-output-enabled": true,
+        "tag-names": [],
+        "terraform-version": "1.12.5",
+        "trigger-patterns": [],
+        "trigger-prefixes": [],
+        "updated-at": "\u003ctimestamp\u003e",
+        "vcs-repo": null,
+        "working-directory": ""
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "agent-pool": {
+          "data": null
+        },
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "workspaces"
+    }
+  }
+}

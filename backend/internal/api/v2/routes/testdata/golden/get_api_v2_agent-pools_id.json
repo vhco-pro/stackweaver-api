@@ -1,0 +1,28 @@
+{
+  "method": "GET",
+  "path": "/api/v2/agent-pools/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "agent-count": 1,
+        "created-at": "\u003ctimestamp\u003e",
+        "name": "build-agents",
+        "organization-scoped": true
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/agent-pools/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "agent-pools"
+    }
+  }
+}

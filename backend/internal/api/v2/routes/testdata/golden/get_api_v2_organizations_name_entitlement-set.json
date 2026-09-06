@@ -1,0 +1,28 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/entitlement-set",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "agents": false,
+        "audit-logging": true,
+        "configuration-design": true,
+        "cost-estimation": true,
+        "operations": true,
+        "policy-enforcement": false,
+        "private-module-registry": true,
+        "self-serve-billing": false,
+        "sentinel": false,
+        "sso": false,
+        "state-storage": true,
+        "teams": true,
+        "usage-reporting": true,
+        "user-limit": 0,
+        "vcs-integrations": true
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "entitlement-sets"
+    }
+  }
+}

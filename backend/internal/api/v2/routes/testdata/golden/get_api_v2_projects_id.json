@@ -1,0 +1,43 @@
+{
+  "method": "GET",
+  "path": "/api/v2/projects/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "credentials-count": 0,
+        "default-execution-mode": "remote",
+        "description": "",
+        "inventories-count": 0,
+        "is-unified": false,
+        "job-templates-count": 0,
+        "name": "data",
+        "playbooks-count": 0,
+        "setting-overwrites": {
+          "default-agent-pool": false,
+          "default-execution-mode": false
+        },
+        "updated-at": "\u003ctimestamp\u003e",
+        "workflows-count": 0,
+        "workspaces-count": 1
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/projects/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "default-agent-pool": {
+          "data": null
+        },
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "projects"
+    }
+  }
+}

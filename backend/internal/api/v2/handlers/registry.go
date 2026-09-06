@@ -20,23 +20,23 @@ import (
 // - modules.v1: Module registry service
 // - providers.v1: Provider registry service
 func HandleServiceDiscovery(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"tfe.v2":       "/api/v2/",       // Terraform Enterprise API v2 (base version)
-		"tfe.v2.1":     "/api/v2/",       // Terraform Enterprise API v2.1 (required by newer Terraform CLI)
-		"tfe.v2.2":     "/api/v2/",       // Terraform Enterprise API v2.2 (required by terraform-provider-tfe)
-		"modules.v1":   "/v1/modules/",   // Module registry service
-		"providers.v1": "/v1/providers/", // Provider registry service
+	c.JSON(http.StatusOK, ServiceDiscoveryResponse{
+		TFEV2:       "/api/v2/",       // Terraform Enterprise API v2 (base version)
+		TFEV21:      "/api/v2/",       // Terraform Enterprise API v2.1 (required by newer Terraform CLI)
+		TFEV22:      "/api/v2/",       // Terraform Enterprise API v2.2 (required by terraform-provider-tfe)
+		ModulesV1:   "/v1/modules/",   // Module registry service
+		ProvidersV1: "/v1/providers/", // Provider registry service
 		// login.v1: enables `terraform login <host>` (OAuth2 authorization-code +
 		// PKCE). `authz` is the SPA page that mints a one-time code against the
 		// authenticated browser session; `token` is the public API endpoint the
 		// CLI exchanges that code at for a TFE-style API token. `ports` is the
 		// loopback port range Terraform may bind for its redirect listener.
-		"login.v1": gin.H{ //nolint:gosec // G101: these are public endpoint paths, not credentials
-			"client":      "terraform-cli",
-			"grant_types": []string{"authz_code"},
-			"authz":       "/oauth/authorize",
-			"token":       "/api/v2/oauth/token",
-			"ports":       []int{10000, 10010},
+		LoginV1: ServiceDiscoveryLogin{ //nolint:gosec // G101: these are public endpoint paths, not credentials
+			Client:     "terraform-cli",
+			GrantTypes: []string{"authz_code"},
+			Authz:      "/oauth/authorize",
+			Token:      "/api/v2/oauth/token",
+			Ports:      []int{10000, 10010},
 		},
 	})
 }

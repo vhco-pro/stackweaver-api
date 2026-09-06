@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/runners/stats",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "offline": 3,
+        "online": 0,
+        "total": 3
+      },
+      "type": "runner-stats"
+    }
+  }
+}

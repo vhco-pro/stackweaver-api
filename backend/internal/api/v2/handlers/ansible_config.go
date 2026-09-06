@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -89,9 +90,9 @@ func (h *AnsibleConfigHandler) GetByOrganization(c *gin.Context) {
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Organization not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Organization not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -99,14 +100,14 @@ func (h *AnsibleConfigHandler) GetByOrganization(c *gin.Context) {
 	config, err := h.configRepo.GetByOrganization(org.ID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Ansible config not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Ansible config not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": buildAnsibleConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, buildAnsibleConfigResponse(config))
 }
 
 // UpsertByOrganization creates or updates the org-level ansible config
@@ -117,9 +118,9 @@ func (h *AnsibleConfigHandler) UpsertByOrganization(c *gin.Context) {
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Organization not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Organization not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -127,7 +128,7 @@ func (h *AnsibleConfigHandler) UpsertByOrganization(c *gin.Context) {
 	// Check permissions
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
@@ -136,20 +137,20 @@ func (h *AnsibleConfigHandler) UpsertByOrganization(c *gin.Context) {
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	// Require org manage-workspaces permission (ansible configs affect workspace execution)
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, org.ID)
 	if err != nil || !hasAccess {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "Organization manage-workspaces permission required"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Organization manage-workspaces permission required")
 		return
 	}
 
 	var req AnsibleConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -161,14 +162,14 @@ func (h *AnsibleConfigHandler) UpsertByOrganization(c *gin.Context) {
 	}
 
 	if err := h.configRepo.Upsert(config); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
 	// Fetch the updated config
 	config, _ = h.configRepo.GetByOrganization(org.ID)
 
-	c.JSON(http.StatusOK, gin.H{"data": buildAnsibleConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, buildAnsibleConfigResponse(config))
 }
 
 // DeleteByOrganization deletes the org-level ansible config
@@ -179,9 +180,9 @@ func (h *AnsibleConfigHandler) DeleteByOrganization(c *gin.Context) {
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Organization not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Organization not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -189,7 +190,7 @@ func (h *AnsibleConfigHandler) DeleteByOrganization(c *gin.Context) {
 	// Check permissions
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
@@ -198,29 +199,29 @@ func (h *AnsibleConfigHandler) DeleteByOrganization(c *gin.Context) {
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	// Require org manage-workspaces permission
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, org.ID)
 	if err != nil || !hasAccess {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "Organization manage-workspaces permission required"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Organization manage-workspaces permission required")
 		return
 	}
 
 	config, err := h.configRepo.GetByOrganization(org.ID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Ansible config not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Ansible config not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
 
 	if err := h.configRepo.Delete(config.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -233,21 +234,21 @@ func (h *AnsibleConfigHandler) GetByProject(c *gin.Context) {
 	projectIDStr := c.Param("id")
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid project ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid project ID")
 		return
 	}
 
 	config, err := h.configRepo.GetByProject(projectID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Ansible config not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Ansible config not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": buildAnsibleConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, buildAnsibleConfigResponse(config))
 }
 
 // UpsertByProject creates or updates the project-level ansible config
@@ -256,7 +257,7 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 	projectIDStr := c.Param("id")
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid project ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid project ID")
 		return
 	}
 
@@ -264,9 +265,9 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 	project, err := h.projectRepo.GetByID(projectID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Project not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Project not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -274,7 +275,7 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 	// Check permissions
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
@@ -283,20 +284,20 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	// Require org manage-workspaces permission (project ansible configs affect workspace execution)
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, project.OrganizationID)
 	if err != nil || !hasAccess {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "Organization manage-workspaces permission required"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Organization manage-workspaces permission required")
 		return
 	}
 
 	var req AnsibleConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -308,14 +309,14 @@ func (h *AnsibleConfigHandler) UpsertByProject(c *gin.Context) {
 	}
 
 	if err := h.configRepo.Upsert(config); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
 	// Fetch the updated config
 	config, _ = h.configRepo.GetByProject(projectID)
 
-	c.JSON(http.StatusOK, gin.H{"data": buildAnsibleConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, buildAnsibleConfigResponse(config))
 }
 
 // DeleteByProject deletes the project-level ansible config
@@ -324,7 +325,7 @@ func (h *AnsibleConfigHandler) DeleteByProject(c *gin.Context) {
 	projectIDStr := c.Param("id")
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid project ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid project ID")
 		return
 	}
 
@@ -332,9 +333,9 @@ func (h *AnsibleConfigHandler) DeleteByProject(c *gin.Context) {
 	project, err := h.projectRepo.GetByID(projectID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Project not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Project not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -342,7 +343,7 @@ func (h *AnsibleConfigHandler) DeleteByProject(c *gin.Context) {
 	// Check permissions
 	userID, exists := c.Get("user_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	// The auth middleware stores user_id as uuid.UUID (auth/service.go
@@ -351,29 +352,29 @@ func (h *AnsibleConfigHandler) DeleteByProject(c *gin.Context) {
 	// the old body shape 400'd first.
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	// Require org manage-workspaces permission
 	hasAccess, err := h.rbacService.CheckOrgManageWorkspaces(c.Request.Context(), userUUID, project.OrganizationID)
 	if err != nil || !hasAccess {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "Organization manage-workspaces permission required"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Organization manage-workspaces permission required")
 		return
 	}
 
 	config, err := h.configRepo.GetByProject(projectID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Ansible config not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Ansible config not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
 
 	if err := h.configRepo.Delete(config.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -388,9 +389,9 @@ func (h *AnsibleConfigHandler) GetEffective(c *gin.Context) {
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Organization not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Organization not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -406,12 +407,12 @@ func (h *AnsibleConfigHandler) GetEffective(c *gin.Context) {
 	config, err := h.configRepo.GetForWorkspace(workspaceID, projectID, org.ID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "No ansible config found at any scope"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "No ansible config found at any scope")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": buildAnsibleConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, buildAnsibleConfigResponse(config))
 }

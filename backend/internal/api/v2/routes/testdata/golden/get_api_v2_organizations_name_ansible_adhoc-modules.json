@@ -1,0 +1,34 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/ansible/adhoc-modules",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "modules": [
+          "apt",
+          "apt_key",
+          "apt_repository",
+          "apt_rpm",
+          "command",
+          "group",
+          "mount",
+          "ping",
+          "selinux",
+          "service",
+          "setup",
+          "shell",
+          "user",
+          "win_group",
+          "win_ping",
+          "win_service",
+          "win_updates",
+          "win_user",
+          "yum"
+        ]
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "adhoc-modules"
+    }
+  }
+}

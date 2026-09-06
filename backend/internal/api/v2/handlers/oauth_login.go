@@ -16,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/redis/go-redis/v9"
@@ -99,46 +101,34 @@ type mintCodeRequest struct {
 func (h *OAuthLoginHandler) MintCode(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "User not authenticated"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "User not authenticated")
 		return
 	}
 
 	var req mintCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid request body"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid request body")
 		return
 	}
 
 	if req.ClientID != oauthClientID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Unsupported client_id"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Unsupported client_id")
 		return
 	}
 
 	if req.CodeChallengeMethod != "S256" || req.CodeChallenge == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "code_challenge_method must be S256 with a non-empty code_challenge"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "code_challenge_method must be S256 with a non-empty code_challenge")
 		return
 	}
 
 	if !validLoopbackRedirect(req.RedirectURI) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "redirect_uri must be a loopback address on an advertised port"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "redirect_uri must be a loopback address on an advertised port")
 		return
 	}
 
 	code, err := generateAuthCode()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to generate authorization code"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to generate authorization code")
 		return
 	}
 
@@ -149,20 +139,16 @@ func (h *OAuthLoginHandler) MintCode(c *gin.Context) {
 		ClientID:      req.ClientID,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encode authorization code"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to encode authorization code")
 		return
 	}
 
 	if err := h.redis.Set(c.Request.Context(), oauthCodeKeyPrefix+code, payload, oauthCodeTTL).Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to persist authorization code"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to persist authorization code")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": code, "state": req.State})
+	c.JSON(http.StatusOK, AuthorizationCodeResponse{Code: code, State: req.State})
 }
 
 // Token handles POST /api/v2/oauth/token.
@@ -177,53 +163,50 @@ func (h *OAuthLoginHandler) Token(c *gin.Context) {
 	redirectURI := c.PostForm("redirect_uri")
 
 	if grantType != "authorization_code" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_grant_type"})
+		response.LegacyError(c, http.StatusBadRequest, "unsupported_grant_type")
 		return
 	}
 	if code == "" || verifier == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid_request")
 		return
 	}
 
 	// GetDel atomically consumes the code so it can never be replayed.
 	raw, err := h.redis.GetDel(c.Request.Context(), oauthCodeKeyPrefix+code).Result()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	var stored storedAuthCode
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	if redirectURI != stored.RedirectURI {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	if !verifyPKCE(verifier, stored.CodeChallenge) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	userID, err := uuid.Parse(stored.UserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	_, tokenString, err := h.apiKeyService.CreateUserToken(userID, oauthTokenName, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		response.LegacyError(c, http.StatusInternalServerError, "server_error")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"access_token": tokenString,
-		"token_type":   "bearer",
-	})
+	c.JSON(http.StatusOK, AccessTokenResponse{AccessToken: tokenString, TokenType: "bearer"})
 }
 
 // validLoopbackRedirect reports whether raw is an http loopback URL on an
@@ -260,4 +243,17 @@ func generateAuthCode() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// AuthorizationCodeResponse returns a one-time code to the `terraform login` flow.
+type AuthorizationCodeResponse struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+}
+
+// AccessTokenResponse is the RFC 6749 token response. The member names are fixed by the
+// specification, so this shape is not ours to normalise.
+type AccessTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
 }

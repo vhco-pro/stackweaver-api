@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -46,7 +47,7 @@ func NewChangeRequestHandlerV2(
 }
 
 func crError(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{"errors": []gin.H{{"status": strconv.Itoa(status), "title": title, "detail": detail}}})
+	jsonapi.WriteError(c, status, title, detail)
 }
 
 // bulkActionRequest is the JSON:API body of POST /organizations/:name/explorer/bulk-actions. Note the
@@ -238,7 +239,7 @@ func (h *ChangeRequestHandlerV2) BulkActions(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": gin.H{
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
 		"type": "bulk_actions",
 		"attributes": gin.H{
 			"organization_id": org.ID.String(),
@@ -246,7 +247,7 @@ func (h *ChangeRequestHandlerV2) BulkActions(c *gin.Context) {
 			"action_inputs":   gin.H{"subject": a.ActionInputs.Subject, "message": a.ActionInputs.Message},
 			"created_by":      gin.H{"id": user.ID.String(), "type": "users"},
 		},
-	}})
+	})
 }
 
 // ListByWorkspace handles GET /workspaces/:id/change-requests. Archived requests are excluded unless
@@ -268,7 +269,7 @@ func (h *ChangeRequestHandlerV2) ListByWorkspace(c *gin.Context) {
 	for i := range crs {
 		data = append(data, formatChangeRequest(&crs[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data, "meta": paginationMeta(page, pageSize, total)})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, paginationMeta(page, pageSize, total))
 }
 
 // ListByOrganization handles GET /organizations/:name/change-requests, the org-wide triage view. Not a
@@ -289,7 +290,7 @@ func (h *ChangeRequestHandlerV2) ListByOrganization(c *gin.Context) {
 	for i := range crs {
 		data = append(data, formatChangeRequest(&crs[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data, "meta": paginationMeta(page, pageSize, total)})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, paginationMeta(page, pageSize, total))
 }
 
 // loadForCaller loads a change request by id and authorizes the caller against its workspace.
@@ -311,7 +312,7 @@ func (h *ChangeRequestHandlerV2) Read(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatChangeRequest(cr)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatChangeRequest(cr))
 }
 
 // Archive handles PATCH (and POST, which TFE's docs also describe) /workspaces/change-requests/:id.
@@ -330,7 +331,7 @@ func (h *ChangeRequestHandlerV2) Archive(c *gin.Context) {
 	}
 	if cr.Archived() {
 		// Already archived: return it as-is rather than overwriting the original archiver.
-		c.JSON(http.StatusOK, gin.H{"data": formatChangeRequest(cr)})
+		jsonapi.WriteDocument(c, http.StatusOK, formatChangeRequest(cr))
 		return
 	}
 	if err := h.repo.Archive(cr.ID, user.ID); err != nil {
@@ -342,7 +343,7 @@ func (h *ChangeRequestHandlerV2) Archive(c *gin.Context) {
 		crError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to reload change request")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatChangeRequest(updated)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatChangeRequest(updated))
 }
 
 // Delete handles DELETE /workspaces/change-requests/:id. Not a TFE endpoint (TFE only archives).

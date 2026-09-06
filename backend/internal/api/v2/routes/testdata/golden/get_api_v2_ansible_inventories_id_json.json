@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/inventories/:id/json",
+  "status": 200,
+  "body": {
+    "all": {
+      "children": {}
+    }
+  }
+}

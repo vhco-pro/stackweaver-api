@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Name must be between 1 and 200 characters",
+        "status": "400",
+        "title": "Validation Error"
+      }
+    ]
+  }
+}

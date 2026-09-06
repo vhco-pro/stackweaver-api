@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 )
 
@@ -36,17 +37,15 @@ func (h *AccountHandlerV2) Details(c *gin.Context) {
 		username = user.Email
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   user.ID,
-			"type": "users",
-			"attributes": gin.H{
-				"username":           username,
-				"email":              user.Email,
-				"is-service-account": false,
-				"avatar-url":         "",
-				"v2-only":            true,
-			},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":   user.ID,
+		"type": "users",
+		"attributes": gin.H{
+			"username":           username,
+			"email":              user.Email,
+			"is-service-account": false,
+			"avatar-url":         "",
+			"v2-only":            true,
 		},
 	})
 }

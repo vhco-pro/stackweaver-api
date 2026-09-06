@@ -1,0 +1,105 @@
+{
+  "method": "GET",
+  "path": "/api/v2/projects/:id/relationships/team-access",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "access": "admin"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/team-projects/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "team": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "teams"
+            }
+          }
+        },
+        "type": "team-projects"
+      },
+      {
+        "attributes": {
+          "access": "admin"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/team-projects/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "team": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "teams"
+            }
+          }
+        },
+        "type": "team-projects"
+      },
+      {
+        "attributes": {
+          "access": "admin"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/team-projects/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "team": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "teams"
+            }
+          }
+        },
+        "type": "team-projects"
+      },
+      {
+        "attributes": {
+          "access": "admin"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/team-projects/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "team": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "teams"
+            }
+          }
+        },
+        "type": "team-projects"
+      }
+    ]
+  }
+}

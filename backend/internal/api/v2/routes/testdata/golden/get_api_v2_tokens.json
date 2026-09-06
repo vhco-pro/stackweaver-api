@@ -1,0 +1,19 @@
+{
+  "method": "GET",
+  "path": "/api/v2/tokens",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "created_at": "\u003ctimestamp\u003e",
+          "description": "golden-harness",
+          "expires_at": null,
+          "last_used_at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "tokens"
+      }
+    ]
+  }
+}

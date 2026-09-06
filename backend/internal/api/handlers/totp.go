@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
 )
@@ -28,21 +29,18 @@ func (h *TOTPHandler) StartTOTPRegistration(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// Start TOTP registration
 	resp, err := h.totpService.StartTOTPRegistration(userSubject)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start TOTP registration", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to start TOTP registration", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"secret": resp.Secret,
-		"url":    resp.URL,
-	})
+	c.JSON(http.StatusOK, TOTPEnrolmentResponse{Secret: resp.Secret, URL: resp.URL})
 }
 
 // VerifyTOTP verifies a TOTP code
@@ -54,24 +52,24 @@ type VerifyTOTPRequest struct {
 func (h *TOTPHandler) VerifyTOTP(c *gin.Context) {
 	var req VerifyTOTPRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.LegacyError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// Verify TOTP code
 	if err := h.totpService.VerifyTOTP(userSubject, req.Code); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid TOTP code", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusBadRequest, "invalid TOTP code", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "TOTP verified successfully"})
+	response.Message(c, http.StatusOK, "TOTP verified successfully")
 }
 
 // GetTOTPStatus gets the TOTP status for the current user
@@ -80,18 +78,18 @@ func (h *TOTPHandler) GetTOTPStatus(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// Check TOTP status
 	enabled, err := h.totpService.CheckTOTPStatus(userSubject)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check TOTP status", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to check TOTP status", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"enabled": enabled})
+	c.JSON(http.StatusOK, TOTPStatusResponse{Enabled: enabled})
 }
 
 // RemoveTOTP removes TOTP from the user
@@ -100,17 +98,17 @@ func (h *TOTPHandler) RemoveTOTP(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// Remove TOTP
 	if err := h.totpService.RemoveTOTP(userSubject); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove TOTP", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to remove TOTP", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "TOTP removed successfully"})
+	response.Message(c, http.StatusOK, "TOTP removed successfully")
 }
 
 // ChangePassword changes the user's password
@@ -123,24 +121,24 @@ type ChangePasswordRequest struct {
 func (h *TOTPHandler) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.LegacyError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// Change password
 	if err := h.totpService.ChangePassword(userSubject, req.CurrentPassword, req.NewPassword); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to change password", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusBadRequest, "failed to change password", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Password changed successfully"})
+	response.Message(c, http.StatusOK, "Password changed successfully")
 }
 
 // ListMFADevices lists all MFA devices for the current user
@@ -149,16 +147,32 @@ func (h *TOTPHandler) ListMFADevices(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// List MFA devices
 	devices, err := h.totpService.ListMFADevices(userSubject)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list MFA devices", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to list MFA devices", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"devices": devices})
+	c.JSON(http.StatusOK, TOTPDeviceListResponse{Devices: devices})
+}
+
+// TOTPEnrolmentResponse carries the shared secret and otpauth URL for a new TOTP device.
+type TOTPEnrolmentResponse struct {
+	Secret string `json:"secret"`
+	URL    string `json:"url"`
+}
+
+// TOTPStatusResponse reports whether TOTP is enabled for the caller.
+type TOTPStatusResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+// TOTPDeviceListResponse lists the caller's registered MFA devices.
+type TOTPDeviceListResponse struct {
+	Devices []*totp.MFADevice `json:"devices"`
 }

@@ -1,0 +1,38 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/playbooks/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "cached-at": null,
+        "cached-commit": "",
+        "cached-size-bytes": 0,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "",
+        "last-sync-at": null,
+        "last-sync-commit": "",
+        "last-sync-error": "",
+        "last-sync-status": "",
+        "name": "deploy-app",
+        "playbook-path": "deploy-app.yml",
+        "source-mode": "cached",
+        "updated-at": "\u003ctimestamp\u003e",
+        "vcs-account-name": "",
+        "vcs-branch": "main",
+        "vcs-provider": "",
+        "vcs-repository": ""
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-playbooks"
+    }
+  }
+}
