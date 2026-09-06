@@ -128,14 +128,7 @@ func (h *HostHandler) List(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatHostsResponse(hosts), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatHostsResponse(hosts), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // Create creates a new host in an inventory

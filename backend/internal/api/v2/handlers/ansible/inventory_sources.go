@@ -298,16 +298,8 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 	}
 
 	page := offset/limit + 1
-	totalPages := (total + int64(limit) - 1) / int64(limit)
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatInventorySourcesResponse(sources), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    limit,
-			"total-count":  total,
-			"total-pages":  totalPages,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatInventorySourcesResponse(sources), jsonapi.NewPaginationMeta(page, limit, total))
 }
 
 // Update updates an inventory source

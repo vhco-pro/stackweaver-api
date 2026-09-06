@@ -359,13 +359,7 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 		formattedProjects[i] = formatProjectResponse(&projects[i], org.Name)
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedProjects, gin.H{
-		"pagination": gin.H{
-			"page":     page,
-			"per_page": perPage,
-			"total":    total,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedProjects, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // Get returns a single project by organization name and project name

@@ -67,31 +67,6 @@ func taskError(c *gin.Context, status int, title, detail string) {
 	jsonapi.WriteError(c, status, title, detail)
 }
 
-// fullPaginationMeta is the complete TFE pagination meta block. go-tfe's Pagination struct reads all
-// five fields, and the tfe_organization_run_task data source pages through List with them - the
-// 3-field paginationMeta used elsewhere is not enough here (a nil next-page terminates its loop).
-func fullPaginationMeta(page, pageSize int, total int64) gin.H {
-	totalPages := int((total + int64(pageSize) - 1) / int64(pageSize))
-	if totalPages < 1 {
-		totalPages = 1
-	}
-	var prev, next interface{}
-	if page > 1 {
-		prev = page - 1
-	}
-	if page < totalPages {
-		next = page + 1
-	}
-	return gin.H{"pagination": gin.H{
-		"current-page": page,
-		"page-size":    pageSize,
-		"prev-page":    prev,
-		"next-page":    next,
-		"total-pages":  totalPages,
-		"total-count":  total,
-	}}
-}
-
 // runTaskAttributes is the JSON:API attribute set of a "tasks" document on write. Pointers
 // distinguish absent from zero-valued: go-tfe's create serializes description even when null, and
 // its update sends only changed fields.
@@ -336,7 +311,7 @@ func (h *RunTaskHandlerV2) List(c *gin.Context) {
 		wts, _ := h.wsTaskRepo.ListByTask(tasks[i].ID)
 		data = append(data, formatRunTask(&tasks[i], org.Name, wts))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, total))
 }
 
 // Read handles GET /tasks/:id (?include=workspace_tasks).

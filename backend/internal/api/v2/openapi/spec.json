@@ -103,10 +103,19 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
                   },
+                  "prev-page": {
+                    "nullable": true
+                  },
                   "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -224,10 +233,19 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
                   },
+                  "prev-page": {
+                    "nullable": true
+                  },
                   "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -246,7 +264,7 @@
                 "type": "object",
                 "properties": {
                   "count": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "executions": {
                     "type": "array",
@@ -261,7 +279,7 @@
                           "type": "string"
                         },
                         "duration_seconds": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "id": {
                           "type": "string",
@@ -331,7 +349,7 @@
                           "type": "object",
                           "properties": {
                             "count": {
-                              "type": "integer"
+                              "type": "string"
                             },
                             "label": {
                               "type": "string"
@@ -345,7 +363,7 @@
                           "type": "object",
                           "properties": {
                             "count": {
-                              "type": "integer"
+                              "type": "string"
                             },
                             "label": {
                               "type": "string"
@@ -354,7 +372,7 @@
                         }
                       },
                       "total": {
-                        "type": "integer"
+                        "type": "string"
                       }
                     }
                   },
@@ -362,54 +380,54 @@
                     "type": "object",
                     "properties": {
                       "avg_duration_seconds": {
-                        "type": "number"
+                        "type": "string"
                       },
                       "canceled": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "duration_samples": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "failed": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "p95_duration_seconds": {
-                        "type": "number"
+                        "type": "string"
                       },
                       "pending": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "previous": {
                         "type": "object",
                         "properties": {
                           "avg_duration_seconds": {
-                            "type": "integer"
+                            "type": "string"
                           },
                           "failed": {
-                            "type": "integer"
+                            "type": "string"
                           },
                           "succeeded": {
-                            "type": "integer"
+                            "type": "string"
                           },
                           "success_rate": {
                             "nullable": true
                           },
                           "total": {
-                            "type": "integer"
+                            "type": "string"
                           }
                         }
                       },
                       "running": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "succeeded": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "success_rate": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "total": {
-                        "type": "integer"
+                        "type": "string"
                       }
                     }
                   },
@@ -419,28 +437,28 @@
                       "type": "object",
                       "properties": {
                         "activity": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "date": {
                           "type": "string"
                         },
                         "jobs_failed": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "jobs_other": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "jobs_succeeded": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "runs_failed": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "runs_other": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "runs_succeeded": {
-                          "type": "integer"
+                          "type": "string"
                         }
                       }
                     }
@@ -480,19 +498,19 @@
                     "type": "object",
                     "properties": {
                       "inventories": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "job_templates": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "playbooks": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "projects": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "workspaces": {
-                        "type": "integer"
+                        "type": "string"
                       }
                     }
                   },
@@ -500,13 +518,13 @@
                     "type": "object",
                     "properties": {
                       "jobs": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "runs": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "total": {
-                        "type": "integer"
+                        "type": "string"
                       }
                     }
                   },
@@ -514,54 +532,54 @@
                     "type": "object",
                     "properties": {
                       "avg_duration_seconds": {
-                        "type": "number"
+                        "type": "string"
                       },
                       "canceled": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "duration_samples": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "failed": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "p95_duration_seconds": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "pending": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "previous": {
                         "type": "object",
                         "properties": {
                           "avg_duration_seconds": {
-                            "type": "integer"
+                            "type": "string"
                           },
                           "failed": {
-                            "type": "integer"
+                            "type": "string"
                           },
                           "succeeded": {
-                            "type": "integer"
+                            "type": "string"
                           },
                           "success_rate": {
                             "nullable": true
                           },
                           "total": {
-                            "type": "integer"
+                            "type": "string"
                           }
                         }
                       },
                       "running": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "succeeded": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "success_rate": {
-                        "type": "number"
+                        "type": "string"
                       },
                       "total": {
-                        "type": "integer"
+                        "type": "string"
                       }
                     }
                   },
@@ -571,21 +589,19 @@
                       "type": "object",
                       "properties": {
                         "avg_duration_seconds": {
-                          "type": "object",
-                          "additionalProperties": true
+                          "type": "string"
                         },
                         "failed": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "job_count": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "succeeded": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "success_rate": {
-                          "type": "object",
-                          "additionalProperties": true
+                          "type": "string"
                         },
                         "template_id": {
                           "type": "string",
@@ -603,24 +619,22 @@
                       "type": "object",
                       "properties": {
                         "avg_duration_seconds": {
-                          "type": "object",
-                          "additionalProperties": true
+                          "type": "string"
                         },
                         "failed": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "project_name": {
                           "type": "string"
                         },
                         "run_count": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "succeeded": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "success_rate": {
-                          "type": "object",
-                          "additionalProperties": true
+                          "type": "string"
                         },
                         "workspace_id": {
                           "type": "string"
@@ -635,7 +649,7 @@
                     "type": "object",
                     "properties": {
                       "days": {
-                        "type": "integer"
+                        "type": "string"
                       },
                       "since": {
                         "type": "string",
@@ -803,8 +817,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -1070,8 +1090,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -1270,34 +1296,34 @@
                       "nullable": true
                     },
                     "forks": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "has-warnings": {
                       "type": "boolean"
                     },
                     "hosts-changed": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "hosts-failed": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "hosts-ignored": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "hosts-ok": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "hosts-rescued": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "hosts-skipped": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "hosts-total": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "hosts-unreachable": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "job-type": {
                       "type": "string"
@@ -1315,13 +1341,13 @@
                       "type": "string"
                     },
                     "slice-count": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "slice-group-id": {
                       "nullable": true
                     },
                     "slice-number": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "started-at": {
                       "type": "string",
@@ -1338,10 +1364,10 @@
                       "format": "date-time"
                     },
                     "verbosity": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "warnings-count": {
-                      "type": "integer"
+                      "type": "string"
                     }
                   }
                 },
@@ -1450,34 +1476,34 @@
                     "format": "date-time"
                   },
                   "forks": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "has-warnings": {
                     "type": "boolean"
                   },
                   "hosts-changed": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "hosts-failed": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "hosts-ignored": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "hosts-ok": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "hosts-rescued": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "hosts-skipped": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "hosts-total": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "hosts-unreachable": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "job-type": {
                     "type": "string"
@@ -1495,13 +1521,13 @@
                     "type": "string"
                   },
                   "slice-count": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "slice-group-id": {
                     "nullable": true
                   },
                   "slice-number": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "started-at": {
                     "type": "string",
@@ -1518,10 +1544,10 @@
                     "format": "date-time"
                   },
                   "verbosity": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "warnings-count": {
-                    "type": "integer"
+                    "type": "string"
                   }
                 }
               },
@@ -1699,8 +1725,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -1877,31 +1909,31 @@
                 "type": "object",
                 "properties": {
                   "active_ansible_jobs": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "active_terraform_runs": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "ansible_playbooks": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "awaiting_approval": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "completed_ansible_jobs_this_month": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "completed_terraform_runs_this_month": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "errored_job_templates": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "errored_workspaces": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "failed_inventory_syncs": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "organizations": {
                     "type": "array",
@@ -1909,34 +1941,34 @@
                       "type": "object",
                       "properties": {
                         "active_ansible_jobs": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "active_terraform_runs": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "ansible_playbooks": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "awaiting_approval": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "completed_ansible_jobs_this_month": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "completed_terraform_runs_this_month": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "description": {
                           "type": "string"
                         },
                         "errored_job_templates": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "errored_workspaces": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "failed_inventory_syncs": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "id": {
                           "type": "string",
@@ -1946,55 +1978,55 @@
                           "type": "string"
                         },
                         "open_change_requests": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "pending_terraform_runs": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "pending_workflow_approvals": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "projects": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "recent_job_failures": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "recent_run_failures": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "runners_offline": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "runners_total": {
-                          "type": "integer"
+                          "type": "string"
                         },
                         "terraform_workspaces": {
-                          "type": "integer"
+                          "type": "string"
                         }
                       }
                     }
                   },
                   "pending_terraform_runs": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "pending_workflow_approvals": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "projects": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "recent_failure_window_days": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "recent_job_failures": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "recent_run_failures": {
-                    "type": "integer"
+                    "type": "string"
                   },
                   "terraform_workspaces": {
-                    "type": "integer"
+                    "type": "string"
                   }
                 }
               },
@@ -2377,8 +2409,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -2413,6 +2451,9 @@
                   },
                   "next-page": {
                     "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
                   },
                   "prev-page": {
                     "nullable": true
@@ -2468,8 +2509,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -2502,8 +2549,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -2553,8 +2606,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -2581,8 +2640,28 @@
           "meta": {
             "type": "object",
             "properties": {
-              "total": {
-                "type": "integer"
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
               }
             }
           }
@@ -2651,8 +2730,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -3189,8 +3274,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -3229,8 +3320,28 @@
           "meta": {
             "type": "object",
             "properties": {
-              "total": {
-                "type": "integer"
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
               }
             }
           }
@@ -3331,10 +3442,19 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
                   },
+                  "prev-page": {
+                    "nullable": true
+                  },
                   "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -3365,8 +3485,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -3399,8 +3525,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -3433,8 +3565,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -3567,10 +3705,19 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
                   },
+                  "prev-page": {
+                    "nullable": true
+                  },
                   "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -3666,13 +3813,22 @@
               "pagination": {
                 "type": "object",
                 "properties": {
-                  "page": {
+                  "current-page": {
                     "type": "integer"
                   },
-                  "per_page": {
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
                     "type": "integer"
                   },
-                  "total": {
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -4706,13 +4862,22 @@
               "pagination": {
                 "type": "object",
                 "properties": {
-                  "page": {
+                  "current-page": {
                     "type": "integer"
                   },
-                  "per_page": {
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
                     "type": "integer"
                   },
-                  "total": {
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -5193,8 +5358,14 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
                   },
                   "total-count": {
                     "type": "integer"
@@ -5435,10 +5606,6 @@
                           "type": "string",
                           "format": "date-time"
                         },
-                        "planned-at": {
-                          "type": "string",
-                          "format": "date-time"
-                        },
                         "planning-at": {
                           "type": "string",
                           "format": "date-time"
@@ -5503,14 +5670,23 @@
               "pagination": {
                 "type": "object",
                 "properties": {
-                  "page": {
-                    "type": "integer"
+                  "current-page": {
+                    "type": "string"
                   },
-                  "per_page": {
-                    "type": "integer"
+                  "next-page": {
+                    "nullable": true
                   },
-                  "total": {
-                    "type": "integer"
+                  "page-size": {
+                    "type": "string"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "string"
+                  },
+                  "total-pages": {
+                    "type": "string"
                   }
                 }
               }
@@ -6855,10 +7031,19 @@
                   "current-page": {
                     "type": "integer"
                   },
+                  "next-page": {
+                    "nullable": true
+                  },
                   "page-size": {
                     "type": "integer"
                   },
+                  "prev-page": {
+                    "nullable": true
+                  },
                   "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -7047,10 +7232,10 @@
                       "type": "boolean"
                     },
                     "resource-count": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "run-timeout": {
-                      "type": "integer"
+                      "type": "string"
                     },
                     "setting-overwrites": {
                       "type": "object",
@@ -7260,14 +7445,23 @@
               "pagination": {
                 "type": "object",
                 "properties": {
-                  "page": {
-                    "type": "integer"
+                  "current-page": {
+                    "type": "string"
                   },
-                  "per_page": {
-                    "type": "integer"
+                  "next-page": {
+                    "nullable": true
                   },
-                  "total": {
-                    "type": "integer"
+                  "page-size": {
+                    "type": "string"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "string"
+                  },
+                  "total-pages": {
+                    "type": "string"
                   }
                 }
               }

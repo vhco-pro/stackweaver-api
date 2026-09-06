@@ -219,7 +219,7 @@ func (h *WorkspaceRunTaskHandlerV2) List(c *gin.Context) {
 	for i := range wts {
 		data = append(data, formatWorkspaceTask(&wts[i]))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, total))
 }
 
 // Read handles GET /workspaces/:id/tasks/:tid.

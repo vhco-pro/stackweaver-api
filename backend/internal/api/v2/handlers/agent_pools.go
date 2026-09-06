@@ -194,13 +194,7 @@ func (h *AgentPoolHandlerV2) List(c *gin.Context) {
 		data = append(data, formatAgentPoolResponse(&pools[i], org.Name, agentCount))
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    pageSize,
-			"total-count":  total,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, total))
 }
 
 // Create creates an agent pool.
@@ -484,7 +478,7 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 		}
 		data = append(data, agent)
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{"pagination": gin.H{"current-page": 1, "page-size": 20, "total-count": len(data)}})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(1, 20, int64(len(data))))
 }
 
 func extractWorkspaceIDs(refs []jsonAPIRef) []string {

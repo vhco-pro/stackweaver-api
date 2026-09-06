@@ -183,7 +183,8 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 		data[i] = formatWorkflowResponse(&w)
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{"total": total})
+	// offset was derived from a page number above, so convert it back rather than inventing one.
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(offset/max(limit, 1)+1, limit, total))
 }
 
 // Create creates a new workflow

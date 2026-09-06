@@ -164,15 +164,10 @@ func (h *AgentTokenHandlerV2) List(c *gin.Context) {
 	for _, k := range keys {
 		data = append(data, agentTokenResource(k, ""))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
-		"pagination": gin.H{
-			"current-page": 1,
-			"prev-page":    nil,
-			"next-page":    nil,
-			"total-pages":  1,
-			"total-count":  len(keys),
-		},
-	})
+	// Not paginated: agent tokens are few and returned whole, so this reports a single page
+	// rather than omitting the block, which would leave a client unable to tell "one page" from
+	// "this endpoint does not page".
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(1, len(keys), int64(len(keys))))
 }
 
 // ReadByID returns a single agent token's metadata.

@@ -133,13 +133,7 @@ func (h *StateVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, versions, gin.H{
-		"pagination": gin.H{
-			"page":     page,
-			"per_page": perPage,
-			"total":    total,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, versions, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // CurrentStateVersion returns the latest state version for a workspace (TFE-compatible).

@@ -122,16 +122,7 @@ func (h *RunnerHandlerV2) List(c *gin.Context) {
 		data = append(data, buildRunnerResponse(&r))
 	}
 
-	totalPages := (int(total) + pageSize - 1) / pageSize
-
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
-		"pagination": gin.H{
-			"current-page": pageNum,
-			"page-size":    pageSize,
-			"total-count":  total,
-			"total-pages":  totalPages,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(pageNum, pageSize, total))
 }
 
 // GetByID returns a runner by ID

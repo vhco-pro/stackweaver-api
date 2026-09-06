@@ -421,14 +421,7 @@ func (h *PlaybookHandler) ListPlaybooks(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatPlaybooksResponse(playbooks), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatPlaybooksResponse(playbooks), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // ListPlaybooksByOrganization lists all playbooks for an organization
@@ -470,14 +463,7 @@ func (h *PlaybookHandler) ListPlaybooksByOrganization(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatPlaybooksResponse(playbooks), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatPlaybooksResponse(playbooks), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetPlaybook retrieves a playbook by ID
@@ -1012,14 +998,7 @@ func (h *PlaybookHandler) ListTemplates(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobTemplatesResponse(templates), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobTemplatesResponse(templates), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // ListTemplatesByOrganization lists all job templates for an organization
@@ -1061,14 +1040,7 @@ func (h *PlaybookHandler) ListTemplatesByOrganization(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobTemplatesResponse(templates), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobTemplatesResponse(templates), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetTemplate retrieves a job template by ID

@@ -498,16 +498,7 @@ func (h *TeamHandlerV2) List(c *gin.Context) {
 		data[i] = teamResp
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"prev-page":    nil,
-			"next-page":    nil,
-			"total-count":  total,
-			"total-pages":  (int(total) + perPage - 1) / perPage,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // Get returns a single team by name within an organization

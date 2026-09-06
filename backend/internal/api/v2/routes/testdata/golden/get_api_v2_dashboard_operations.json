@@ -9,7 +9,7 @@
           {
             "detail": "Ansible job",
             "id": "\u003cuuid\u003e",
-            "name": "deploy-web-tier - 2026-09-05 17:43",
+            "name": "patch-linux-fleet - 2026-09-05 14:44",
             "organization_id": "\u003cuuid\u003e",
             "organization_name": "demo",
             "platform": "ansible",
@@ -19,7 +19,7 @@
           {
             "detail": "Ansible job",
             "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-09-05 15:02",
+            "name": "rotate-certificates - 2026-09-05 07:49",
             "organization_id": "\u003cuuid\u003e",
             "organization_name": "demo",
             "platform": "ansible",
@@ -29,17 +29,7 @@
           {
             "detail": "plan-and-apply",
             "id": "\u003cid\u003e",
-            "name": "payments-staging",
-            "organization_id": "\u003cuuid\u003e",
-            "organization_name": "demo",
-            "platform": "terraform",
-            "started_at": "\u003ctimestamp\u003e",
-            "status": "applying"
-          },
-          {
-            "detail": "plan-and-apply",
-            "id": "\u003cid\u003e",
-            "name": "staging-cluster",
+            "name": "prod-cluster",
             "organization_id": "\u003cuuid\u003e",
             "organization_name": "demo",
             "platform": "terraform",

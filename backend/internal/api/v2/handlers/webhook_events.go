@@ -102,11 +102,5 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
-		"pagination": gin.H{
-			"current-page": (offset / limit) + 1,
-			"page-size":    limit,
-			"total-count":  total,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta((offset/limit)+1, limit, total))
 }

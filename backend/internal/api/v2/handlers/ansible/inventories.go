@@ -245,14 +245,7 @@ func (h *InventoryHandler) List(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatInventoriesResponse(inventories), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatInventoriesResponse(inventories), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // getOrCreateDefaultProject gets or creates the default project for an organization
