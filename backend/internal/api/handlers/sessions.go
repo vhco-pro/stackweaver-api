@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
@@ -27,26 +28,26 @@ func NewSessionsHandler(sessionsService *sessions.Service, authService *auth.Ser
 // GET /api/v2/settings/sessions
 func (h *SessionsHandler) ListSessions(c *gin.Context) {
 	if h.sessionsService == nil {
-		response.LegacyError(c, http.StatusServiceUnavailable, "sessions service is not available")
+		jsonapi.WriteError(c, http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable), "sessions service is not available")
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusUnauthorized, "unauthorized", err.Error())
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized"+": "+err.Error())
 		return
 	}
 
 	if userSubject == "" {
-		response.LegacyError(c, http.StatusBadRequest, "user subject is missing")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "user subject is missing")
 		return
 	}
 
 	// List sessions
 	sessionList, err := h.sessionsService.ListUserSessions(userSubject)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to list sessions", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to list sessions"+": "+err.Error())
 		return
 	}
 
@@ -86,25 +87,25 @@ func (h *SessionsHandler) ListSessions(c *gin.Context) {
 // DELETE /api/v2/settings/sessions/:sessionId
 func (h *SessionsHandler) RevokeSession(c *gin.Context) {
 	if h.sessionsService == nil {
-		response.LegacyError(c, http.StatusServiceUnavailable, "sessions service is not available")
+		jsonapi.WriteError(c, http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable), "sessions service is not available")
 		return
 	}
 
 	sessionID := c.Param("sessionId")
 	if sessionID == "" {
-		response.LegacyError(c, http.StatusBadRequest, "session ID is required")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "session ID is required")
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusUnauthorized, "unauthorized", err.Error())
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized"+": "+err.Error())
 		return
 	}
 
 	if userSubject == "" {
-		response.LegacyError(c, http.StatusBadRequest, "user subject is missing")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "user subject is missing")
 		return
 	}
 
@@ -120,14 +121,14 @@ func (h *SessionsHandler) RevokeSession(c *gin.Context) {
 			}
 		}
 		if !sessionExists {
-			response.LegacyError(c, http.StatusForbidden, "session does not belong to user")
+			jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "session does not belong to user")
 			return
 		}
 	}
 
 	// Revoke session
 	if err := h.sessionsService.RevokeSession(sessionID); err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to revoke session", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to revoke session"+": "+err.Error())
 		return
 	}
 

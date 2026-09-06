@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -32,7 +32,7 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	// Get local user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 	// Read raw JSON to check which fields are present (including empty strings)
 	var jsonData map[string]interface{}
 	if err := c.ShouldBindJSON(&jsonData); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
@@ -132,7 +132,7 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 	// Get local user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
@@ -158,7 +158,7 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 
 			if shouldUpdateZitadel {
 				if err := h.profileService.UpdateUserProfile(userSubject, updateReq); err != nil {
-					response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to update profile in Zitadel", err.Error())
+					jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to update profile in Zitadel"+": "+err.Error())
 					return
 				}
 			}
@@ -187,7 +187,7 @@ func (h *ProfileHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	if err := h.userRepo.Update(user); err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to update profile", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to update profile"+": "+err.Error())
 		return
 	}
 

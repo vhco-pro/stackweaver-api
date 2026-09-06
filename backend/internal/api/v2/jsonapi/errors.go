@@ -17,10 +17,12 @@
 package jsonapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // Error is a single JSON:API error object, matching the shape the API already emits.
@@ -62,28 +64,6 @@ func WriteErrorNoDetail(c *gin.Context, code int, title string) {
 	}}})
 }
 
-// WriteErrorDetailOnly sends an error carrying neither a status nor a title member.
-//
-// This shape exists in the Ansible workflow handlers and is very likely a mistake: a client
-// reading errors[0].title gets undefined there, where every other endpoint gives it a value.
-// It is reproduced faithfully rather than corrected, because this change is representational
-// by definition and must not alter a byte on the wire. Normalising it is tracked separately.
-func WriteErrorDetailOnly(c *gin.Context, code int, detail string) {
-	c.JSON(code, ErrorDocument{Errors: []Error{{Detail: &detail}}})
-}
-
-// WriteErrorStatusDetail sends an error with a status and a detail but no title.
-//
-// Another shape found in the Ansible handlers, where the payload was built from
-// []map[string]string rather than gin.H. Like WriteErrorDetailOnly it is reproduced rather
-// than normalised, so this change stays byte-for-byte on the wire.
-func WriteErrorStatusDetail(c *gin.Context, code int, detail string) {
-	c.JSON(code, ErrorDocument{Errors: []Error{{
-		Status: strconv.Itoa(code),
-		Detail: &detail,
-	}}})
-}
-
 // RegistryErrorDocument is the Terraform Registry Protocol error shape: an array of plain
 // strings rather than JSON:API objects.
 //
@@ -100,6 +80,21 @@ type RegistryErrorDocument struct {
 // WriteRegistryError sends a Terraform Registry Protocol error.
 func WriteRegistryError(c *gin.Context, code int, messages ...string) {
 	c.JSON(code, RegistryErrorDocument{Errors: messages})
+}
+
+// WriteRegistryLookupError maps a lookup failure onto the registry protocol (#757).
+//
+// Two rules, both learned from fixtures that recorded the violation. Not-found is 404 - the
+// golden harness caught /v1/modules/:namespace answering 500 for a namespace that simply had no
+// modules. And err.Error() never reaches the body: the same fixture carried the raw GORM string
+// "record not found" verbatim, which tells an external caller about our persistence layer and
+// nothing about their request.
+func WriteRegistryLookupError(c *gin.Context, err error, notFoundMsg, failureMsg string) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		WriteRegistryError(c, http.StatusNotFound, notFoundMsg)
+		return
+	}
+	WriteRegistryError(c, http.StatusInternalServerError, failureMsg)
 }
 
 // AbortError writes the error and stops the handler chain, for use from middleware.

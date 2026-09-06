@@ -3,6 +3,12 @@
   "path": "/api/v2/zitadel/actions/complement-token",
   "status": 401,
   "body": {
-    "error": "invalid signature"
+    "errors": [
+      {
+        "detail": "invalid signature",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
   }
 }

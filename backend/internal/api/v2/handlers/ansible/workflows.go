@@ -146,7 +146,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Organization not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Organization not found")
 		return
 	}
 
@@ -174,7 +174,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 
 	workflows, total, err := h.workflowRepo.ListByOrganization(org.ID, limit, offset)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to list workflows")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to list workflows")
 		return
 	}
 
@@ -193,7 +193,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Organization not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Organization not found")
 		return
 	}
 
@@ -215,7 +215,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 
 	var req CreateWorkflowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
@@ -238,7 +238,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	if req.Data.Relationships.Project.Data != nil {
 		projectID, err := uuid.Parse(req.Data.Relationships.Project.Data.ID)
 		if err != nil {
-			jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid project ID")
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid project ID")
 			return
 		}
 		workflow.ProjectID = projectID
@@ -248,7 +248,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 		// project foreign key.
 		defaultProject, err := h.projectRepo.GetByOrganizationAndName(org.ID, "default")
 		if err != nil {
-			jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "A project relationship is required (no default project exists)")
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "A project relationship is required (no default project exists)")
 			return
 		}
 		workflow.ProjectID = defaultProject.ID
@@ -262,7 +262,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	workflow.CreatedBy = &user.ID
 
 	if err := h.workflowRepo.Create(workflow); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to create workflow")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to create workflow")
 		return
 	}
 
@@ -275,13 +275,13 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, edges, err := h.workflowRepo.GetByIDWithEdges(id)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -332,13 +332,13 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(id)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -367,7 +367,7 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 
 	var req CreateWorkflowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
@@ -385,7 +385,7 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.Update(workflow); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to update workflow")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to update workflow")
 		return
 	}
 
@@ -398,13 +398,13 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(id)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -432,7 +432,7 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.Delete(id); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to delete workflow")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to delete workflow")
 		return
 	}
 
@@ -449,13 +449,13 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -484,7 +484,7 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 
 	var req CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
@@ -523,7 +523,7 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.CreateNode(node); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to create node")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to create node")
 		return
 	}
 
@@ -536,13 +536,13 @@ func (h *WorkflowHandler) ListNodes(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -571,7 +571,7 @@ func (h *WorkflowHandler) ListNodes(c *gin.Context) {
 
 	nodes, err := h.workflowRepo.ListNodesByWorkflow(workflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to list nodes")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to list nodes")
 		return
 	}
 
@@ -589,19 +589,19 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid node ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid node ID")
 		return
 	}
 
 	node, err := h.workflowRepo.GetNodeByID(id)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Node not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Node not found")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(node.WorkflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -630,7 +630,7 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 
 	var req CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
@@ -647,7 +647,7 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.UpdateNode(node); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to update node")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to update node")
 		return
 	}
 
@@ -660,19 +660,19 @@ func (h *WorkflowHandler) DeleteNode(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid node ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid node ID")
 		return
 	}
 
 	node, err := h.workflowRepo.GetNodeByID(id)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Node not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Node not found")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(node.WorkflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -700,7 +700,7 @@ func (h *WorkflowHandler) DeleteNode(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.DeleteNode(id); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to delete node")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to delete node")
 		return
 	}
 
@@ -717,13 +717,13 @@ func (h *WorkflowHandler) CreateEdge(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -752,7 +752,7 @@ func (h *WorkflowHandler) CreateEdge(c *gin.Context) {
 
 	var req CreateEdgeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
@@ -767,7 +767,7 @@ func (h *WorkflowHandler) CreateEdge(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.CreateEdge(edge); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to create edge")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to create edge")
 		return
 	}
 
@@ -780,13 +780,13 @@ func (h *WorkflowHandler) ListEdges(c *gin.Context) {
 	workflowIDStr := c.Param("id")
 	workflowID, err := uuid.Parse(workflowIDStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid workflow ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid workflow ID")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(workflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -815,7 +815,7 @@ func (h *WorkflowHandler) ListEdges(c *gin.Context) {
 
 	edges, err := h.workflowRepo.ListEdgesByWorkflow(workflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to list edges")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to list edges")
 		return
 	}
 
@@ -833,19 +833,19 @@ func (h *WorkflowHandler) DeleteEdge(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusBadRequest, "Invalid edge ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid edge ID")
 		return
 	}
 
 	edge, err := h.workflowRepo.GetEdgeByID(id)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Edge not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Edge not found")
 		return
 	}
 
 	workflow, err := h.workflowRepo.GetByID(edge.WorkflowID)
 	if err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusNotFound, "Workflow not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Workflow not found")
 		return
 	}
 
@@ -873,7 +873,7 @@ func (h *WorkflowHandler) DeleteEdge(c *gin.Context) {
 	}
 
 	if err := h.workflowRepo.DeleteEdge(id); err != nil {
-		jsonapi.WriteErrorDetailOnly(c, http.StatusInternalServerError, "Failed to delete edge")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to delete edge")
 		return
 	}
 

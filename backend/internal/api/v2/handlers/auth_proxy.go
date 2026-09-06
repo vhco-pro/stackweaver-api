@@ -24,7 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 )
 
 // NotificationMode controls how verification/OTP codes are delivered.
@@ -718,7 +718,7 @@ func (p *AuthProxy) getFrontendBaseURL(c *gin.Context) string {
 
 // respondError sends a JSON error response matching Zitadel's error shape.
 func respondError(c *gin.Context, status int, message string) {
-	c.JSON(status, response.CodeMessageResponse{Code: status, Message: message})
+	jsonapi.WriteError(c, status, http.StatusText(status), message)
 }
 
 // --- Session cookie management (D6) ---
@@ -2141,7 +2141,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 			// is embedded in the key with the `decoy:` / bare
 			// namespace already prefixed by the caller.
 			logger.Warnf("event=loginname_lockout_denied key=%q reason=too_many_failed_password_attempts", limiterKey)
-			c.JSON(http.StatusTooManyRequests, response.CodeMessageResponse{Code: http.StatusTooManyRequests, Message: "too many failed password attempts - try again later"})
+			jsonapi.WriteError(c, http.StatusTooManyRequests, http.StatusText(http.StatusTooManyRequests), "too many failed password attempts - try again later")
 			return
 		}
 	}

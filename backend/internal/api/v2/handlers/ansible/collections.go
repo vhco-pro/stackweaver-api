@@ -118,7 +118,7 @@ func (h *CollectionsHandler) ListPreInstalledCollections(c *gin.Context) {
 func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		jsonapi.WriteErrorStatusDetail(c, http.StatusBadRequest, "Invalid job ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid job ID")
 		return
 	}
 
@@ -128,23 +128,23 @@ func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
 	// is wired in.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		jsonapi.WriteErrorStatusDetail(c, http.StatusUnauthorized, "Authentication required")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "Authentication required")
 		return
 	}
 	job, err := h.jobService.GetJob(id)
 	if err != nil {
-		jsonapi.WriteErrorStatusDetail(c, http.StatusNotFound, "Job not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Job not found")
 		return
 	}
 	hasPermission, err := h.rbacService.CheckAnsibleResourcePermission(
 		c.Request.Context(), user.ID, rbac.ResourceTypeAnsibleJob, job.ID.String(), rbac.PermissionAnsibleJobRead, &job.ProjectID,
 	)
 	if err != nil {
-		jsonapi.WriteErrorStatusDetail(c, http.StatusInternalServerError, "Failed to check permissions")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		jsonapi.WriteErrorStatusDetail(c, http.StatusForbidden, "You don't have permission to view this job")
+		jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "You don't have permission to view this job")
 		return
 	}
 

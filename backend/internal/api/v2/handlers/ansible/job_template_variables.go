@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -156,7 +155,7 @@ func (h *JobTemplateVariableHandlerV2) ListByJobTemplate(c *gin.Context) {
 	templateIDStr := c.Param("id")
 	templateID, err := uuid.Parse(templateIDStr)
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid job template ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid job template ID")
 		return
 	}
 
@@ -168,7 +167,7 @@ func (h *JobTemplateVariableHandlerV2) ListByJobTemplate(c *gin.Context) {
 	// List variables
 	variables, err := h.templateVariableRepo.ListByJobTemplate(templateID)
 	if err != nil {
-		response.LegacyError(c, http.StatusInternalServerError, "Failed to list variables")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to list variables")
 		return
 	}
 
@@ -189,7 +188,7 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 	templateIDStr := c.Param("id")
 	templateID, err := uuid.Parse(templateIDStr)
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid job template ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid job template ID")
 		return
 	}
 
@@ -201,12 +200,12 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 	// Parse request
 	var req CreateVariableRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
 	if req.Data.Type != "vars" {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid type: must be 'vars'")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid type: must be 'vars'")
 		return
 	}
 
@@ -222,7 +221,7 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 	if req.Data.Attributes.Sensitive {
 		encryptedValue, err := h.variableService.Encrypt(req.Data.Attributes.Value)
 		if err != nil {
-			response.LegacyError(c, http.StatusInternalServerError, "Failed to encrypt variable")
+			jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to encrypt variable")
 			return
 		}
 		finalValue = encryptedValue
@@ -247,10 +246,10 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 	if err := h.templateVariableRepo.Create(variable); err != nil {
 		// Check for duplicate key error
 		if err.Error() == "pq: duplicate key value violates unique constraint \"idx_job_template_key\"" {
-			response.LegacyError(c, http.StatusConflict, "Variable with this key already exists")
+			jsonapi.WriteError(c, http.StatusConflict, jsonapi.TitleConflict, "Variable with this key already exists")
 			return
 		}
-		response.LegacyError(c, http.StatusInternalServerError, "Failed to create variable")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to create variable")
 		return
 	}
 
@@ -263,13 +262,13 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 	templateIDStr := c.Param("id")
 	templateID, err := uuid.Parse(templateIDStr)
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid job template ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid job template ID")
 		return
 	}
 
 	variableID := c.Param("variable_id")
 	if variableID == "" {
-		response.LegacyError(c, http.StatusBadRequest, "Variable ID is required")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Variable ID is required")
 		return
 	}
 
@@ -281,25 +280,25 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 	// Get existing variable
 	variable, err := h.templateVariableRepo.GetByID(variableID)
 	if err != nil {
-		response.LegacyError(c, http.StatusNotFound, "Variable not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Variable not found")
 		return
 	}
 
 	// Verify variable belongs to this template
 	if variable.JobTemplateID != templateID {
-		response.LegacyError(c, http.StatusBadRequest, "Variable does not belong to this job template")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Variable does not belong to this job template")
 		return
 	}
 
 	// Parse request
 	var req UpdateVariableRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
 	if req.Data.Type != "vars" {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid type: must be 'vars'")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid type: must be 'vars'")
 		return
 	}
 
@@ -312,7 +311,7 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 		if variable.Sensitive {
 			encryptedValue, err := h.variableService.Encrypt(req.Data.Attributes.Value)
 			if err != nil {
-				response.LegacyError(c, http.StatusInternalServerError, "Failed to encrypt variable")
+				jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to encrypt variable")
 				return
 			}
 			variable.Value = encryptedValue
@@ -334,7 +333,7 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 		if *req.Data.Attributes.Sensitive && !variable.Sensitive {
 			encryptedValue, err := h.variableService.Encrypt(variable.Value)
 			if err != nil {
-				response.LegacyError(c, http.StatusInternalServerError, "Failed to encrypt variable")
+				jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to encrypt variable")
 				return
 			}
 			variable.Value = encryptedValue
@@ -343,7 +342,7 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 			// If changing from sensitive to non-sensitive, decrypt the value
 			decryptedValue, err := h.variableService.GetDecryptedTemplateVariableValue(variable)
 			if err != nil {
-				response.LegacyError(c, http.StatusInternalServerError, "Failed to decrypt variable")
+				jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to decrypt variable")
 				return
 			}
 			variable.Value = decryptedValue
@@ -354,7 +353,7 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 
 	// Save updated variable
 	if err := h.templateVariableRepo.Update(variable); err != nil {
-		response.LegacyError(c, http.StatusInternalServerError, "Failed to update variable")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to update variable")
 		return
 	}
 
@@ -367,13 +366,13 @@ func (h *JobTemplateVariableHandlerV2) Delete(c *gin.Context) {
 	templateIDStr := c.Param("id")
 	templateID, err := uuid.Parse(templateIDStr)
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid job template ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid job template ID")
 		return
 	}
 
 	variableID := c.Param("variable_id")
 	if variableID == "" {
-		response.LegacyError(c, http.StatusBadRequest, "Variable ID is required")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Variable ID is required")
 		return
 	}
 
@@ -385,17 +384,17 @@ func (h *JobTemplateVariableHandlerV2) Delete(c *gin.Context) {
 	// Verify variable belongs to this template
 	variable, err := h.templateVariableRepo.GetByID(variableID)
 	if err != nil {
-		response.LegacyError(c, http.StatusNotFound, "Variable not found")
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Variable not found")
 		return
 	}
 	if variable.JobTemplateID != templateID {
-		response.LegacyError(c, http.StatusBadRequest, "Variable does not belong to this job template")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Variable does not belong to this job template")
 		return
 	}
 
 	// Delete variable
 	if err := h.templateVariableRepo.Delete(variableID); err != nil {
-		response.LegacyError(c, http.StatusInternalServerError, "Failed to delete variable")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to delete variable")
 		return
 	}
 

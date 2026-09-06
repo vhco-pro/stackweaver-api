@@ -16,9 +16,10 @@ import (
 // the JSON:API convention.
 //
 // They are typed for the same reason everything else here is - a map has no definition, so
-// nothing describes the shape to a client or to the OpenAPI generator - but typing them does
-// not endorse them. Converging the `{"error": ...}` responses onto the JSON:API envelope
-// changes bytes on the wire and is tracked separately.
+// nothing describes the shape to a client or to the OpenAPI generator. The legacy
+// `{"error": ...}` body and the `{"code", "message"}` pair that used to live here were
+// converged onto the JSON:API envelope in #757 and their helpers deleted, so those shapes
+// cannot quietly return; what remains is the non-error acknowledgements.
 
 // MessageResponse is a bare acknowledgement: {"message": "..."}.
 type MessageResponse struct {
@@ -28,16 +29,6 @@ type MessageResponse struct {
 // StatusResponse is a bare status body: {"status": "..."}.
 type StatusResponse struct {
 	Status string `json:"status"`
-}
-
-// CodeMessageResponse pairs a numeric code with a human message.
-//
-// Code is an int because every call site emits the HTTP status as a JSON number, not a string.
-// That differs from the JSON:API error object, where `status` is a string - a real divergence
-// in the API, preserved here rather than quietly unified.
-type CodeMessageResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
 }
 
 // Message sends a MessageResponse.
@@ -53,18 +44,4 @@ func OKMessage(c *gin.Context, message string) {
 // Status sends a StatusResponse.
 func Status(c *gin.Context, code int, status string) {
 	c.JSON(code, StatusResponse{Status: status})
-}
-
-// LegacyError sends the pre-JSON:API error body, {"error": "..."}.
-//
-// Named "legacy" deliberately: new endpoints should use jsonapi.WriteError. This exists so the
-// roughly 85 call sites still emitting this shape have a type rather than a map, without
-// silently changing what they return.
-func LegacyError(c *gin.Context, code int, message string) {
-	c.JSON(code, ErrorResponse{Error: message})
-}
-
-// LegacyErrorDetails sends {"error": "...", "details": "..."}.
-func LegacyErrorDetails(c *gin.Context, code int, message, details string) {
-	c.JSON(code, ErrorResponse{Error: message, Details: details})
 }

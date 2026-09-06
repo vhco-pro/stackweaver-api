@@ -3505,7 +3505,18 @@
           "errors": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "object",
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              }
             }
           }
         }
@@ -6421,22 +6432,6 @@
                 "type": "string"
               }
             }
-          }
-        }
-      },
-      "post-api-v2-zitadel-actions-complement-token-55ebdc": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
-          }
-        }
-      },
-      "post-api-v2-zitadel-actions-idp-sync-2976f5": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
           }
         }
       },
@@ -22247,7 +22242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-zitadel-actions-complement-token-55ebdc"
+                  "$ref": "#/components/schemas/error-401"
                 }
               }
             },
@@ -22268,7 +22263,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-zitadel-actions-idp-sync-2976f5"
+                  "$ref": "#/components/schemas/error-401"
                 }
               }
             },
@@ -22362,15 +22357,15 @@
           }
         ],
         "responses": {
-          "500": {
+          "404": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-500"
+                  "$ref": "#/components/schemas/error-404"
                 }
               }
             },
-            "description": "Server Error"
+            "description": "Not Found"
           }
         },
         "summary": "GET /v1/modules/:namespace",
