@@ -112,11 +112,6 @@ func (h *AdminTofuVersionsHandler) List(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	query.Offset(offset).Limit(pageSize).Find(&versions)
 
-	totalPages := int(totalCount) / pageSize
-	if int(totalCount)%pageSize > 0 {
-		totalPages++
-	}
-
 	// Compute live workspace usage counts for the fetched page.
 	type usageRow struct {
 		TofuVersion string
@@ -146,14 +141,7 @@ func (h *AdminTofuVersionsHandler) List(c *gin.Context) {
 		data = append(data, formatTerraformVersion(&v))
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    pageSize,
-			"total-pages":  totalPages,
-			"total-count":  totalCount,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, totalCount))
 }
 
 // Read a single terraform version by ID.

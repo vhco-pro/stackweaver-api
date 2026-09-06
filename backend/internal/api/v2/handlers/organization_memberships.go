@@ -183,16 +183,7 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 
 	response := gin.H{
 		"data": data,
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": page,
-				"page-size":    perPage,
-				"prev-page":    nil,
-				"next-page":    nil,
-				"total-pages":  (int(total) + perPage - 1) / perPage,
-				"total-count":  total,
-			},
-		},
+		"meta": jsonapi.NewPaginationMeta(page, perPage, total),
 	}
 
 	if len(included) > 0 {

@@ -392,24 +392,7 @@ func (h *OrganizationHandlerV2) List(c *gin.Context) {
 
 	// Full TFE pagination meta: go-tfe's multi-page loops advance via next-page, so it must be
 	// present (a missing key decodes to 0 and would wedge a >1-page listing on page[number]=0).
-	totalPages := int((total + int64(perPage) - 1) / int64(perPage))
-	var prevPage, nextPage any
-	if page > 1 {
-		prevPage = page - 1
-	}
-	if page < totalPages {
-		nextPage = page + 1
-	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"prev-page":    prevPage,
-			"next-page":    nextPage,
-			"page-size":    perPage,
-			"total-pages":  totalPages,
-			"total-count":  total,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // Get returns a single organization by name

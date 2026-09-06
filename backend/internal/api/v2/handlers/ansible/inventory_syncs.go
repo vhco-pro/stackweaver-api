@@ -92,7 +92,10 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 	for i := range syncs {
 		data = append(data, formatInventorySyncResponse(&syncs[i], false))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{"total": total})
+	// limit/offset paging, reported as pages so this collection reads like every other one.
+	// It previously emitted a bare {"total": n} with no page information at all, so a client
+	// could not tell which page it had received.
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(offset/max(limit, 1)+1, limit, total))
 }
 
 // Get returns one sync run including its captured output.

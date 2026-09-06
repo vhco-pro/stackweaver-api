@@ -176,7 +176,7 @@ func (h *RunHandlerV2) ListTaskStages(c *gin.Context) {
 	for i := range stages {
 		data = append(data, formatTaskStage(&stages[i], canOverride))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, int64(len(stages))))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, int64(len(stages))))
 }
 
 // GetTaskStage handles GET /task-stages/:id (?include=task_results).
@@ -278,7 +278,7 @@ func (h *RunHandlerV2) ListTaskResultOutcomes(c *gin.Context) {
 	for i := range outcomes {
 		data = append(data, formatTaskResultOutcome(&outcomes[i]))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, int64(len(outcomes))))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, int64(len(outcomes))))
 }
 
 // GetTaskResultOutcome handles GET /task-result-outcomes/:id.

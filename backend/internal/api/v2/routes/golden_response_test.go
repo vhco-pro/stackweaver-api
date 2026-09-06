@@ -97,6 +97,59 @@ var goldenExclusions = map[string]string{
 	"DELETE /api/v2/organizations/:name": "destroys the seeded organization the rest of the fixtures depend on",
 }
 
+// timeSensitiveRoutes aggregate over calendar windows or live status, so their numbers move
+// with the wall clock even though the seed is fixed: demoseed anchors its history to time.Now,
+// so a run that was "completed this month" when a fixture was recorded is not next month.
+//
+// This was found the hard way. The fixtures were first recorded and re-verified within a few
+// hours, which hid it entirely; a day later ten endpoints reported spurious diffs
+// (completed_terraform_runs_this_month 5 -> 3, errored_workspaces 2 -> 0) with no code change
+// behind them. Left alone the suite would have failed in CI for a reason no one could act on,
+// which is the flaky-test failure mode the harness exists to avoid.
+//
+// For these routes the numbers are normalised away and the SHAPE is still pinned: every key,
+// every nesting level, every type and null still has to match. That is the property a
+// representational refactor can break, so little is lost. The counts themselves are covered by
+// the handlers' own tests.
+//
+// The real fix is to anchor demoseed's history to a fixed instant so the aggregates stop
+// moving; until then this list is the honest boundary rather than a silent flake.
+var timeSensitiveRoutes = map[string]string{
+	"GET /api/v2/dashboard/stats":                          "counts runs and jobs per calendar month",
+	"GET /api/v2/dashboard/operations":                     "counts live operations by status",
+	"GET /api/v2/organizations/:name/analytics":            "aggregates over a rolling window",
+	"GET /api/v2/organizations/:name/analytics/executions": "aggregates over a rolling window",
+	"GET /api/v2/organizations/:name/ansible/jobs":         "job status depends on elapsed time",
+	"GET /api/v2/organizations/:name/ansible/jobs/queue":   "queue contents depend on elapsed time",
+	"GET /api/v2/ansible/jobs/:id":                         "job status depends on elapsed time",
+	"GET /api/v2/organizations/:name/runs":                 "run status depends on elapsed time",
+	"GET /api/v2/organizations/:name/workspaces":           "carries each workspace's latest-run status",
+	"GET /api/v2/workspaces/:id/runs":                      "run status depends on elapsed time",
+}
+
+// blankNumbers replaces every number in a parsed value with a placeholder, leaving keys,
+// nesting, types and nulls intact.
+func blankNumbers(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = blankNumbers(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = blankNumbers(val)
+		}
+		return out
+	case float64:
+		return "<number>"
+	default:
+		return v
+	}
+}
+
 // --- throwaway database -----------------------------------------------------
 //
 // Modelled on cmd/demoseed/freshdb_test.go: the name is prefixed and UUID-suffixed so the
@@ -629,11 +682,15 @@ func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFi
 			body = string(raw)
 		}
 	}
+	normalised := normalise(body)
+	if _, timeSensitive := timeSensitiveRoutes[method+" "+routePath]; timeSensitive {
+		normalised = blankNumbers(normalised)
+	}
 	return goldenFixture{
 		Method: method,
 		Path:   routePath,
 		Status: rec.Code,
-		Body:   normalise(body),
+		Body:   normalised,
 	}
 }
 
@@ -770,6 +827,13 @@ func TestGoldenExclusionsAreLive(t *testing.T) {
 	for key := range goldenExclusions {
 		if !registered[key] {
 			stale = append(stale, key)
+		}
+	}
+	// Same standard for the time-sensitive list: an entry naming no real route silently
+	// normalises nothing while reading as a deliberate decision.
+	for key := range timeSensitiveRoutes {
+		if !registered[key] {
+			stale = append(stale, key+"  (timeSensitiveRoutes)")
 		}
 	}
 	sort.Strings(stale)

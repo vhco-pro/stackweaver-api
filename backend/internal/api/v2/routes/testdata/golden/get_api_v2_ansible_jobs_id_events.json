@@ -7,9 +7,11 @@
     "meta": {
       "pagination": {
         "current-page": 1,
+        "next-page": null,
         "page-size": 100,
+        "prev-page": null,
         "total-count": 0,
-        "total-pages": 0
+        "total-pages": 1
       }
     }
   }

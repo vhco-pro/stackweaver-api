@@ -1926,13 +1926,7 @@ func (h *RunHandlerV2) ListByWorkspace(c *gin.Context) {
 		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, gin.H{
-		"pagination": gin.H{
-			"page":     page,
-			"per_page": perPage,
-			"total":    total,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // Cancel cancels a run (TFE-compatible)
@@ -2167,13 +2161,7 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, gin.H{
-		"pagination": gin.H{
-			"page":     page,
-			"per_page": perPage,
-			"total":    total,
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetQueue returns the run queue for an organization (TFE-compatible)

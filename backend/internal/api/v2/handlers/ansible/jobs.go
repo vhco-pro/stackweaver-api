@@ -154,12 +154,7 @@ func (h *JobHandler) ListByProject(c *gin.Context) {
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list jobs")
 			return
 		}
-		jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobsResponse(siblings), gin.H{"pagination": gin.H{
-			"current-page": 1,
-			"page-size":    len(siblings),
-			"total-count":  len(siblings),
-			"total-pages":  1,
-		}})
+		jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobsResponse(siblings), jsonapi.NewPaginationMeta(1, len(siblings), int64(len(siblings))))
 		return
 	}
 
@@ -176,14 +171,7 @@ func (h *JobHandler) ListByProject(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobsResponse(jobs), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobsResponse(jobs), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // ListByOrganization lists all jobs for an organization
@@ -227,14 +215,7 @@ func (h *JobHandler) ListByOrganization(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobsResponse(jobs), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatJobsResponse(jobs), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetQueue gets the job queue for an organization
@@ -839,14 +820,7 @@ func (h *JobHandler) GetEvents(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatEventsResponse(events, summary), gin.H{
-		"pagination": gin.H{
-			"current-page": page,
-			"page-size":    perPage,
-			"total-count":  total,
-			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-		},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatEventsResponse(events, summary), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetOutput retrieves the combined output for a job

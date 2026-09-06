@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -62,26 +61,9 @@ func TestFormatWorkspaceTaskEmitsBothStageAndStages(t *testing.T) {
 	}
 }
 
-// TestFullPaginationMeta: go-tfe's Pagination consumes all five fields and the run-task data
-// sources page on next-page being null at the end.
-func TestFullPaginationMeta(t *testing.T) {
-	meta := fullPaginationMeta(2, 20, 45)
-	p := meta["pagination"].(gin.H)
-	if p["current-page"] != 2 || p["total-count"] != int64(45) || p["total-pages"] != 3 {
-		t.Fatalf("unexpected meta: %+v", p)
-	}
-	if p["prev-page"] != 1 || p["next-page"] != 3 {
-		t.Fatalf("prev/next wrong: %+v", p)
-	}
-	last := fullPaginationMeta(3, 20, 45)["pagination"].(gin.H)
-	if last["next-page"] != nil {
-		t.Fatalf("next-page must be null on the last page: %+v", last)
-	}
-	empty := fullPaginationMeta(1, 20, 0)["pagination"].(gin.H)
-	if empty["total-pages"] != 1 || empty["prev-page"] != nil || empty["next-page"] != nil {
-		t.Fatalf("empty list meta wrong: %+v", empty)
-	}
-}
+// The pagination boundary cases this file used to test now live in
+// internal/api/v2/jsonapi/pagination_test.go, alongside the single implementation those nine
+// per-handler variants were converged onto (#756). They are not lost, they moved.
 
 func TestRunTaskValidators(t *testing.T) {
 	if !validTaskStages([]string{"pre_plan", "post_apply"}) {

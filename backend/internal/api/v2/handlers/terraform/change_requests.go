@@ -169,10 +169,6 @@ func paginate(c *gin.Context) (page, pageSize, offset int) {
 	return page, pageSize, (page - 1) * pageSize
 }
 
-func paginationMeta(page, pageSize int, total int64) gin.H {
-	return gin.H{"pagination": gin.H{"current-page": page, "page-size": pageSize, "total-count": total}}
-}
-
 // BulkActions handles POST /organizations/:name/explorer/bulk-actions. This is TFE's only documented
 // way to create change requests: one subject/message filed against many target workspaces at once.
 func (h *ChangeRequestHandlerV2) BulkActions(c *gin.Context) {
@@ -269,7 +265,7 @@ func (h *ChangeRequestHandlerV2) ListByWorkspace(c *gin.Context) {
 	for i := range crs {
 		data = append(data, formatChangeRequest(&crs[i]))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, paginationMeta(page, pageSize, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, total))
 }
 
 // ListByOrganization handles GET /organizations/:name/change-requests, the org-wide triage view. Not a
@@ -290,7 +286,7 @@ func (h *ChangeRequestHandlerV2) ListByOrganization(c *gin.Context) {
 	for i := range crs {
 		data = append(data, formatChangeRequest(&crs[i]))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, paginationMeta(page, pageSize, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, total))
 }
 
 // loadForCaller loads a change request by id and authorizes the caller against its workspace.

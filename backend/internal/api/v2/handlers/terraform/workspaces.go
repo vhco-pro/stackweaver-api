@@ -716,13 +716,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 	// TFE-compatible response format with sideloaded run data
 	response := gin.H{
 		"data": workspacesData,
-		"meta": gin.H{
-			"pagination": gin.H{
-				"page":     pageNumber,
-				"per_page": pageSize,
-				"total":    total,
-			},
-		},
+		"meta": jsonapi.NewPaginationMeta(pageNumber, pageSize, total),
 	}
 	if len(included) > 0 {
 		response["included"] = included
