@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -111,44 +112,44 @@ func (h *AzureOIDCConfigurationHandlerV2) Create(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	// RBAC: user must be in the organization
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	ok, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage OIDC configurations"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage OIDC configurations")
 		return
 	}
 
 	var req CreateAzureOIDCConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if req.Data.Type != azureOIDCConfigType {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'azure-oidc-configurations'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'azure-oidc-configurations'")
 		return
 	}
 
 	// Validate required fields
 	if req.Data.Attributes.ClientID == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": "client-id is required"}}})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "client-id is required")
 		return
 	}
 	if req.Data.Attributes.SubscriptionID == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": "subscription-id is required"}}})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "subscription-id is required")
 		return
 	}
 	if req.Data.Attributes.TenantID == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": "tenant-id is required"}}})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "tenant-id is required")
 		return
 	}
 
@@ -160,18 +161,18 @@ func (h *AzureOIDCConfigurationHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.configRepo.Create(config); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create Azure OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create Azure OIDC configuration")
 		return
 	}
 
 	// Reload with organization preloaded
 	config, err = h.configRepo.GetByID(config.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to reload Azure OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to reload Azure OIDC configuration")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatAzureOIDCConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatAzureOIDCConfigResponse(config))
 }
 
 // Read returns an Azure OIDC configuration by ID.
@@ -182,26 +183,26 @@ func (h *AzureOIDCConfigurationHandlerV2) Read(c *gin.Context) {
 	config, err := h.configRepo.GetByID(configID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "OIDC configuration not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "OIDC configuration not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get OIDC configuration")
 		return
 	}
 
 	// RBAC: user must be in the organization
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	ok, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, config.OrganizationID)
 	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to read OIDC configurations"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read OIDC configurations")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatAzureOIDCConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatAzureOIDCConfigResponse(config))
 }
 
 // Update updates an Azure OIDC configuration (partial update).
@@ -212,33 +213,33 @@ func (h *AzureOIDCConfigurationHandlerV2) Update(c *gin.Context) {
 	config, err := h.configRepo.GetByID(configID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "OIDC configuration not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "OIDC configuration not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get OIDC configuration")
 		return
 	}
 
 	// RBAC: user must be in the organization
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	ok, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, config.OrganizationID)
 	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage OIDC configurations"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage OIDC configurations")
 		return
 	}
 
 	var req UpdateAzureOIDCConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if req.Data.Type != azureOIDCConfigType {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'azure-oidc-configurations'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'azure-oidc-configurations'")
 		return
 	}
 
@@ -257,12 +258,12 @@ func (h *AzureOIDCConfigurationHandlerV2) Update(c *gin.Context) {
 	if len(updates) > 0 {
 		config, err = h.configRepo.Update(configID, updates)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update OIDC configuration"}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update OIDC configuration")
 			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatAzureOIDCConfigResponse(config)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatAzureOIDCConfigResponse(config))
 }
 
 // Delete deletes an Azure OIDC configuration.
@@ -273,27 +274,27 @@ func (h *AzureOIDCConfigurationHandlerV2) Delete(c *gin.Context) {
 	config, err := h.configRepo.GetByID(configID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "OIDC configuration not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "OIDC configuration not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get OIDC configuration")
 		return
 	}
 
 	// RBAC: user must be in the organization
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	ok, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, config.OrganizationID)
 	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage OIDC configurations"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage OIDC configurations")
 		return
 	}
 
 	if err := h.configRepo.Delete(configID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to delete OIDC configuration"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete OIDC configuration")
 		return
 	}
 

@@ -5,11 +5,11 @@ package terraform
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -58,7 +58,7 @@ func NewNotificationConfigurationHandlerV2(
 }
 
 func ncError(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{"errors": []gin.H{{"status": strconv.Itoa(status), "title": title, "detail": detail}}})
+	jsonapi.WriteError(c, status, title, detail)
 }
 
 // ncRequest is the JSON:API create/update body (type: notification-configurations).
@@ -248,7 +248,7 @@ func (h *NotificationConfigurationHandlerV2) createAndRespond(c *gin.Context, nc
 		ncError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create notification configuration")
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": formatNotificationConfig(nc)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatNotificationConfig(nc))
 }
 
 // List handles GET /workspaces/:id/notification-configurations
@@ -290,7 +290,7 @@ func (h *NotificationConfigurationHandlerV2) respondList(c *gin.Context, configs
 	for i := range configs {
 		data = append(data, formatNotificationConfig(&configs[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // authProject loads the project named by :id and checks the caller's permission (org-manage-projects for
@@ -404,7 +404,7 @@ func (h *NotificationConfigurationHandlerV2) Read(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatNotificationConfig(nc)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatNotificationConfig(nc))
 }
 
 // Update handles PATCH /notification-configurations/:id
@@ -426,7 +426,7 @@ func (h *NotificationConfigurationHandlerV2) Update(c *gin.Context) {
 		ncError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update notification configuration")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatNotificationConfig(nc)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatNotificationConfig(nc))
 }
 
 // Delete handles DELETE /notification-configurations/:id
@@ -484,5 +484,5 @@ func (h *NotificationConfigurationHandlerV2) Verify(c *gin.Context) {
 		ncError(c, http.StatusBadGateway, "Delivery Failed", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatNotificationConfig(nc)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatNotificationConfig(nc))
 }

@@ -592,9 +592,9 @@ func (p *AuthProxy) handleBackchannelLogout(c *gin.Context, token string) {
 	if err != nil {
 		logger.Warnf("backchannel logout rejected: %v", err)
 		c.Header("Cache-Control", "no-store")
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":             "invalid_request",
-			"error_description": err.Error(),
+		c.JSON(http.StatusBadRequest, OAuthErrorResponse{
+			Error:            "invalid_request",
+			ErrorDescription: err.Error(),
 		})
 		return
 	}
@@ -612,4 +612,11 @@ func (p *AuthProxy) handleBackchannelLogout(c *gin.Context, token string) {
 
 	c.Header("Cache-Control", "no-store")
 	c.Status(http.StatusOK)
+}
+
+// OAuthErrorResponse is the RFC 6749 error body, which is not JSON:API and must not be
+// converted to it: OIDC clients parse `error` and `error_description` by name.
+type OAuthErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
 }

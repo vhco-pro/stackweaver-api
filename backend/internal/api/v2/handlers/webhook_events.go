@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/repository"
 )
 
@@ -31,9 +32,7 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 	// Get organization
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
@@ -49,9 +48,7 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 
 	events, total, err := h.eventRepo.ListByOrganization(org.ID, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list webhook events"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list webhook events")
 		return
 	}
 
@@ -76,13 +73,10 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 				"processed_at":  event.ProcessedAt,
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"data": data,
-			"meta": gin.H{
-				"total":       total,
-				"page_size":   limit,
-				"page_number": (offset / limit) + 1,
-			},
+		jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
+			"total":       total,
+			"page_size":   limit,
+			"page_number": (offset / limit) + 1,
 		})
 		return
 	}
@@ -108,14 +102,11 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": data,
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": (offset / limit) + 1,
-				"page-size":    limit,
-				"total-count":  total,
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
+		"pagination": gin.H{
+			"current-page": (offset / limit) + 1,
+			"page-size":    limit,
+			"total-count":  total,
 		},
 	})
 }

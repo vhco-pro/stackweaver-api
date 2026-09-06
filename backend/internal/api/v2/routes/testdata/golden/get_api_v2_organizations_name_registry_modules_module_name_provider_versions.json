@@ -1,0 +1,60 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "dependencies": null,
+          "downloads": 138,
+          "inputs": null,
+          "outputs": null,
+          "published_at": "\u003ctimestamp\u003e",
+          "readme": "",
+          "resources": null,
+          "source": "",
+          "submodules": null,
+          "tarball_size": 0,
+          "version": "1.0.0"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "module-versions"
+      },
+      {
+        "attributes": {
+          "dependencies": null,
+          "downloads": 201,
+          "inputs": null,
+          "outputs": null,
+          "published_at": "\u003ctimestamp\u003e",
+          "readme": "",
+          "resources": null,
+          "source": "",
+          "submodules": null,
+          "tarball_size": 0,
+          "version": "1.1.0"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "module-versions"
+      },
+      {
+        "attributes": {
+          "dependencies": null,
+          "downloads": 300,
+          "inputs": null,
+          "outputs": null,
+          "published_at": "\u003ctimestamp\u003e",
+          "readme": "",
+          "resources": null,
+          "source": "",
+          "submodules": null,
+          "tarball_size": 0,
+          "version": "0.9.0"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "module-versions"
+      }
+    ]
+  }
+}

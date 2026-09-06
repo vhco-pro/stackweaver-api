@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/team-workspaces",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Key: 'CreateTeamWorkspaceAccessRequestV2.Data.Type' Error:Field validation for 'Type' failed on the 'required' tag",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

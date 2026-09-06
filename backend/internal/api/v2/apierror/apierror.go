@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 )
 
 // Internal logs err with the given context and replies with a JSON:API 500 whose `detail` is the
@@ -18,13 +19,5 @@ import (
 // (DB, storage, upstream) where the cause is not safe to expose.
 func Internal(c *gin.Context, publicMessage string, err error) {
 	logger.Errorf("%s: %v", publicMessage, err)
-	c.JSON(http.StatusInternalServerError, gin.H{
-		"errors": []gin.H{
-			{
-				"status": "500",
-				"title":  "Internal Server Error",
-				"detail": publicMessage,
-			},
-		},
-	})
+	jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", publicMessage)
 }

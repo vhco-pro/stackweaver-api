@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -44,16 +45,12 @@ func NewGroupHandler(
 func (h *GroupHandler) authorizeGroup(c *gin.Context, groupID uuid.UUID, write bool) (*models.AnsibleInventoryGroup, bool) {
 	group, err := h.inventoryService.GetGroup(groupID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Group not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Group not found")
 		return nil, false
 	}
 	inventory, err := h.inventoryService.GetInventory(group.InventoryID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return nil, false
 	}
 	if !authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write) {
@@ -67,9 +64,7 @@ func (h *GroupHandler) authorizeGroup(c *gin.Context, groupID uuid.UUID, write b
 func (h *GroupHandler) authorizeInventoryByID(c *gin.Context, inventoryID uuid.UUID, write bool) bool {
 	inventory, err := h.inventoryService.GetInventory(inventoryID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return false
 	}
 	return authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write)
@@ -121,11 +116,7 @@ func (h *GroupHandler) List(c *gin.Context) {
 	inventoryIDStr := c.Param("id")
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid inventory ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory ID")
 		return
 	}
 
@@ -142,23 +133,16 @@ func (h *GroupHandler) List(c *gin.Context) {
 
 	groups, total, err := h.inventoryService.ListGroups(inventoryID, perPage, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to list groups"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list groups")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatGroupsResponse(groups),
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": page,
-				"page-size":    perPage,
-				"total-count":  total,
-				"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatGroupsResponse(groups), gin.H{
+		"pagination": gin.H{
+			"current-page": page,
+			"page-size":    perPage,
+			"total-count":  total,
+			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
 		},
 	})
 }
@@ -169,11 +153,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	inventoryIDStr := c.Param("id")
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid inventory ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory ID")
 		return
 	}
 
@@ -183,11 +163,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 
 	var req CreateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -195,11 +171,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 	if req.Data.Relationships.Parent.Data != nil {
 		pid, err := uuid.Parse(req.Data.Relationships.Parent.Data.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{"status": "400", "title": "Bad Request", "detail": "Invalid parent group ID"},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid parent group ID")
 			return
 		}
 		parentID = &pid
@@ -213,17 +185,11 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		parentID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": formatGroupResponse(group),
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatGroupResponse(group))
 }
 
 // Get retrieves a group by ID
@@ -232,11 +198,7 @@ func (h *GroupHandler) Get(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid group ID")
 		return
 	}
 
@@ -245,9 +207,7 @@ func (h *GroupHandler) Get(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatGroupResponse(group),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatGroupResponse(group))
 }
 
 // Update updates a group
@@ -256,11 +216,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid group ID")
 		return
 	}
 
@@ -270,11 +226,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 
 	var req UpdateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -282,11 +234,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 	if req.Data.Relationships.Parent.Data != nil {
 		pid, err := uuid.Parse(req.Data.Relationships.Parent.Data.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{"status": "400", "title": "Bad Request", "detail": "Invalid parent group ID"},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid parent group ID")
 			return
 		}
 		parentID = &pid
@@ -301,17 +249,11 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		false, // Don't clear parent unless explicitly requested
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatGroupResponse(group),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatGroupResponse(group))
 }
 
 // Delete deletes a group
@@ -320,11 +262,7 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid group ID")
 		return
 	}
 
@@ -333,11 +271,7 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.inventoryService.DeleteGroup(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 

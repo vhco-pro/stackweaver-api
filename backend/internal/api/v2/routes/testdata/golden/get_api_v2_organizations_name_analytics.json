@@ -1,0 +1,579 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/analytics",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "activity": {
+          "by_action": [
+            {
+              "count": 17,
+              "label": "update"
+            },
+            {
+              "count": 19,
+              "label": "create"
+            },
+            {
+              "count": 6,
+              "label": "delete"
+            }
+          ],
+          "by_resource_type": [
+            {
+              "count": 14,
+              "label": "workspace"
+            },
+            {
+              "count": 4,
+              "label": "variable"
+            },
+            {
+              "count": 5,
+              "label": "ansible_job"
+            },
+            {
+              "count": 6,
+              "label": "api_key"
+            },
+            {
+              "count": 6,
+              "label": "team"
+            },
+            {
+              "count": 7,
+              "label": "run"
+            }
+          ],
+          "total": 42
+        },
+        "ansible_jobs": {
+          "avg_duration_seconds": 244.8,
+          "canceled": 2,
+          "duration_samples": 12,
+          "failed": 4,
+          "p95_duration_seconds": 741.9,
+          "pending": 0,
+          "previous": {
+            "avg_duration_seconds": 0,
+            "failed": 0,
+            "succeeded": 0,
+            "success_rate": null,
+            "total": 0
+          },
+          "running": 2,
+          "succeeded": 12,
+          "success_rate": 75,
+          "total": 20
+        },
+        "daily": [
+          {
+            "activity": 0,
+            "date": "2026-08-06",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-07",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-08",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-09",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-10",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-11",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-12",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-13",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-14",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-15",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-16",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-17",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-18",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-19",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-20",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-21",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-22",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-23",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-24",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-25",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-28",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 1,
+            "runs_other": 1,
+            "runs_succeeded": 2
+          },
+          {
+            "activity": 0,
+            "date": "2026-08-30",
+            "jobs_failed": 2,
+            "jobs_other": 1,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 3
+          },
+          {
+            "activity": 2,
+            "date": "2026-08-31",
+            "jobs_failed": 0,
+            "jobs_other": 1,
+            "jobs_succeeded": 1,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 2,
+            "date": "2026-09-02",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 2,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 3,
+            "date": "2026-08-29",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 3,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 1
+          },
+          {
+            "activity": 4,
+            "date": "2026-09-03",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 2,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 2
+          },
+          {
+            "activity": 5,
+            "date": "2026-08-26",
+            "jobs_failed": 1,
+            "jobs_other": 0,
+            "jobs_succeeded": 0,
+            "runs_failed": 0,
+            "runs_other": 1,
+            "runs_succeeded": 0
+          },
+          {
+            "activity": 5,
+            "date": "2026-09-01",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 1,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 2
+          },
+          {
+            "activity": 7,
+            "date": "2026-08-27",
+            "jobs_failed": 1,
+            "jobs_other": 0,
+            "jobs_succeeded": 1,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 4
+          },
+          {
+            "activity": 7,
+            "date": "2026-09-04",
+            "jobs_failed": 0,
+            "jobs_other": 0,
+            "jobs_succeeded": 2,
+            "runs_failed": 0,
+            "runs_other": 0,
+            "runs_succeeded": 1
+          },
+          {
+            "activity": 7,
+            "date": "2026-09-05",
+            "jobs_failed": 0,
+            "jobs_other": 2,
+            "jobs_succeeded": 0,
+            "runs_failed": 3,
+            "runs_other": 3,
+            "runs_succeeded": 0
+          }
+        ],
+        "recent_failures": [
+          {
+            "detail": "baseline-compliance",
+            "error_message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "baseline-compliance - 2026-08-30 10:24",
+            "platform": "ansible",
+            "workspace_name": ""
+          },
+          {
+            "detail": "deploy-web-tier",
+            "error_message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-08-30 09:05",
+            "platform": "ansible",
+            "workspace_name": ""
+          },
+          {
+            "detail": "plan-and-apply",
+            "error_message": "Error: creating resource: timeout while waiting for state to become 'available'",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cid\u003e",
+            "name": "analytics-warehouse",
+            "platform": "terraform",
+            "workspace_name": "analytics-warehouse"
+          },
+          {
+            "detail": "plan-and-apply",
+            "error_message": "Error: creating resource: timeout while waiting for state to become 'available'",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cid\u003e",
+            "name": "prod-network",
+            "platform": "terraform",
+            "workspace_name": "prod-network"
+          },
+          {
+            "detail": "plan-only",
+            "error_message": "Error: creating resource: timeout while waiting for state to become 'available'",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cid\u003e",
+            "name": "payments-prod",
+            "platform": "terraform",
+            "workspace_name": "payments-prod"
+          },
+          {
+            "detail": "plan-only",
+            "error_message": "Error: creating resource: timeout while waiting for state to become 'available'",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cid\u003e",
+            "name": "staging-cluster",
+            "platform": "terraform",
+            "workspace_name": "staging-cluster"
+          }
+        ],
+        "resources": {
+          "inventories": 2,
+          "job_templates": 4,
+          "playbooks": 3,
+          "projects": 3,
+          "workspaces": 6
+        },
+        "running_now": {
+          "jobs": 2,
+          "runs": 2,
+          "total": 4
+        },
+        "runs": {
+          "avg_duration_seconds": 131.3,
+          "canceled": 3,
+          "duration_samples": 15,
+          "failed": 4,
+          "p95_duration_seconds": 193,
+          "pending": 0,
+          "previous": {
+            "avg_duration_seconds": 0,
+            "failed": 0,
+            "succeeded": 0,
+            "success_rate": null,
+            "total": 0
+          },
+          "running": 2,
+          "succeeded": 15,
+          "success_rate": 78.9,
+          "total": 24
+        },
+        "top_templates": [
+          {
+            "avg_duration_seconds": 128.5,
+            "failed": 0,
+            "job_count": 4,
+            "succeeded": 4,
+            "success_rate": 100,
+            "template_id": "\u003cuuid\u003e",
+            "template_name": "patch-linux-fleet"
+          },
+          {
+            "avg_duration_seconds": 131,
+            "failed": 1,
+            "job_count": 3,
+            "succeeded": 2,
+            "success_rate": 66.7,
+            "template_id": "\u003cuuid\u003e",
+            "template_name": "baseline-compliance"
+          },
+          {
+            "avg_duration_seconds": 133,
+            "failed": 2,
+            "job_count": 6,
+            "succeeded": 2,
+            "success_rate": 50,
+            "template_id": "\u003cuuid\u003e",
+            "template_name": "rotate-certificates"
+          },
+          {
+            "avg_duration_seconds": 474,
+            "failed": 1,
+            "job_count": 7,
+            "succeeded": 4,
+            "success_rate": 80,
+            "template_id": "\u003cuuid\u003e",
+            "template_name": "deploy-web-tier"
+          }
+        ],
+        "top_workspaces": [
+          {
+            "avg_duration_seconds": 100.7,
+            "failed": 0,
+            "project_name": "payments",
+            "run_count": 4,
+            "succeeded": 3,
+            "success_rate": 100,
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "payments-staging"
+          },
+          {
+            "avg_duration_seconds": 126,
+            "failed": 1,
+            "project_name": "platform",
+            "run_count": 3,
+            "succeeded": 2,
+            "success_rate": 66.7,
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "prod-network"
+          },
+          {
+            "avg_duration_seconds": 129.7,
+            "failed": 0,
+            "project_name": "platform",
+            "run_count": 3,
+            "succeeded": 3,
+            "success_rate": 100,
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "prod-cluster"
+          },
+          {
+            "avg_duration_seconds": 140.5,
+            "failed": 1,
+            "project_name": "data",
+            "run_count": 5,
+            "succeeded": 2,
+            "success_rate": 66.7,
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "analytics-warehouse"
+          },
+          {
+            "avg_duration_seconds": 141,
+            "failed": 1,
+            "project_name": "platform",
+            "run_count": 5,
+            "succeeded": 3,
+            "success_rate": 75,
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "staging-cluster"
+          },
+          {
+            "avg_duration_seconds": 161.5,
+            "failed": 1,
+            "project_name": "payments",
+            "run_count": 4,
+            "succeeded": 2,
+            "success_rate": 66.7,
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "payments-prod"
+          }
+        ],
+        "window": {
+          "days": 30,
+          "since": "\u003ctimestamp\u003e",
+          "until": "\u003ctimestamp\u003e"
+        }
+      },
+      "id": "demo",
+      "type": "analytics"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/v2/workspaces/:id/change-requests",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "page-size": 20,
+        "total-count": 0
+      }
+    }
+  }
+}

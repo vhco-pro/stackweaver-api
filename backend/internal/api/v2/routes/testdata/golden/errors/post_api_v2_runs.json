@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runs",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Workspace ID is required",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "method": "GET",
+  "path": "/api/v2/workspaces/change-requests/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "archived-at": null,
+        "archived-by": null,
+        "created-at": "\u003ctimestamp\u003e",
+        "created-by": "\u003cuuid\u003e",
+        "message": "Credentials are past the 90 day rotation window. Coordinate with the application team before applying.",
+        "subject": "Rotate the database credentials",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "workspace_change_requests"
+    }
+  }
+}

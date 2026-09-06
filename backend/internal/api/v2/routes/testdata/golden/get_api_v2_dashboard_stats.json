@@ -1,0 +1,53 @@
+{
+  "method": "GET",
+  "path": "/api/v2/dashboard/stats",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "active_ansible_jobs": 2,
+        "active_terraform_runs": 2,
+        "ansible_playbooks": 3,
+        "awaiting_approval": 0,
+        "completed_ansible_jobs_this_month": 7,
+        "completed_terraform_runs_this_month": 5,
+        "errored_job_templates": 1,
+        "errored_workspaces": 2,
+        "failed_inventory_syncs": 0,
+        "organizations": [
+          {
+            "active_ansible_jobs": 2,
+            "active_terraform_runs": 2,
+            "ansible_playbooks": 3,
+            "awaiting_approval": 0,
+            "completed_ansible_jobs_this_month": 7,
+            "completed_terraform_runs_this_month": 5,
+            "description": "[demoseed] Generated demo data - safe to delete.",
+            "errored_job_templates": 1,
+            "errored_workspaces": 2,
+            "failed_inventory_syncs": 0,
+            "id": "\u003cuuid\u003e",
+            "name": "demo",
+            "open_change_requests": 3,
+            "pending_terraform_runs": 0,
+            "pending_workflow_approvals": 0,
+            "projects": 3,
+            "recent_job_failures": 4,
+            "recent_run_failures": 4,
+            "runners_offline": 3,
+            "runners_total": 3,
+            "terraform_workspaces": 6
+          }
+        ],
+        "pending_terraform_runs": 0,
+        "pending_workflow_approvals": 0,
+        "projects": 3,
+        "recent_failure_window_days": 14,
+        "recent_job_failures": 4,
+        "recent_run_failures": 4,
+        "terraform_workspaces": 6
+      },
+      "type": "dashboard-stats"
+    }
+  }
+}

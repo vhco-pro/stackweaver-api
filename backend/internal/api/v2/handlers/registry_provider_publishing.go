@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -277,17 +278,15 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   platform.ID.String(),
-			"type": "registry-provider-platforms",
-			"attributes": gin.H{
-				"os":                       platform.OS,
-				"arch":                     platform.Arch,
-				"filename":                 platform.Filename,
-				"shasum":                   platform.Shasum,
-				"provider-binary-uploaded": true,
-			},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   platform.ID.String(),
+		"type": "registry-provider-platforms",
+		"attributes": gin.H{
+			"os":                       platform.OS,
+			"arch":                     platform.Arch,
+			"filename":                 platform.Filename,
+			"shasum":                   platform.Shasum,
+			"provider-binary-uploaded": true,
 		},
 	})
 }

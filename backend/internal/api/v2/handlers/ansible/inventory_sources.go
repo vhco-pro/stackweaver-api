@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -230,7 +231,7 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatInventorySourceResponse(source)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatInventorySourceResponse(source))
 }
 
 // Get retrieves an inventory source by ID
@@ -255,7 +256,7 @@ func (h *InventorySourceHandler) Get(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatInventorySourceResponse(source)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatInventorySourceResponse(source))
 }
 
 // List lists inventory sources for an inventory
@@ -299,15 +300,12 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 	page := offset/limit + 1
 	totalPages := (total + int64(limit) - 1) / int64(limit)
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatInventorySourcesResponse(sources),
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": page,
-				"page-size":    limit,
-				"total-count":  total,
-				"total-pages":  totalPages,
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatInventorySourcesResponse(sources), gin.H{
+		"pagination": gin.H{
+			"current-page": page,
+			"page-size":    limit,
+			"total-count":  total,
+			"total-pages":  totalPages,
 		},
 	})
 }
@@ -382,7 +380,7 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatInventorySourceResponse(source)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatInventorySourceResponse(source))
 }
 
 // Delete deletes an inventory source
@@ -467,7 +465,7 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{"data": formatInventorySourceResponse(source)})
+	jsonapi.WriteDocument(c, http.StatusAccepted, formatInventorySourceResponse(source))
 }
 
 // formatInventorySourceResponse formats a source for JSON:API response

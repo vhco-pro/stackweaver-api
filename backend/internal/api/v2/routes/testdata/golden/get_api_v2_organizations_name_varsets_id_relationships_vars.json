@@ -1,0 +1,63 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/varsets/:id/relationships/vars",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "category": "env",
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "hcl": false,
+          "key": "AWS_REGION",
+          "sensitive": true,
+          "value": "••••••••"
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/vars/\u003cid\u003e"
+        },
+        "relationships": {
+          "varset": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "varsets"
+            },
+            "links": {
+              "related": "/api/v2/varsets/\u003cid\u003e"
+            }
+          }
+        },
+        "type": "vars"
+      },
+      {
+        "attributes": {
+          "category": "env",
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "hcl": false,
+          "key": "AWS_ROLE_ARN",
+          "sensitive": true,
+          "value": "••••••••"
+        },
+        "id": "\u003cid\u003e",
+        "links": {
+          "self": "/api/v2/vars/\u003cid\u003e"
+        },
+        "relationships": {
+          "varset": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "varsets"
+            },
+            "links": {
+              "related": "/api/v2/varsets/\u003cid\u003e"
+            }
+          }
+        },
+        "type": "vars"
+      }
+    ]
+  }
+}

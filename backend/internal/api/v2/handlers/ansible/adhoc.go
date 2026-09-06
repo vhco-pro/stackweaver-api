@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -123,7 +124,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 	// template execute.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	hasPermission, err := h.rbacService.CheckAnsibleResourcePermission(
@@ -139,7 +140,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You don't have permission to run ad hoc commands in this project"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You don't have permission to run ad hoc commands in this project")
 		return
 	}
 
@@ -217,7 +218,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatJobResponse(job)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatJobResponse(job))
 }
 
 // ListModules returns the effective ad hoc module allowlist of an organization.
@@ -230,7 +231,7 @@ func (h *AdHocHandler) ListModules(c *gin.Context) {
 	}
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	hasPermission, err := h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, org.ID)
@@ -239,14 +240,14 @@ func (h *AdHocHandler) ListModules(c *gin.Context) {
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You don't have permission to view this organization's ad hoc modules"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You don't have permission to view this organization's ad hoc modules")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
 		"type": "adhoc-modules",
 		"id":   org.ID.String(),
 		"attributes": gin.H{
 			"modules": AdHocModules(org),
 		},
-	}})
+	})
 }

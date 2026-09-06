@@ -1,0 +1,43 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/effective-permissions",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "ansible:adhoc:execute": true,
+        "ansible:credential:read": true,
+        "ansible:credential:write": true,
+        "ansible:inventory:read": true,
+        "ansible:inventory:write": true,
+        "ansible:job-template:read": true,
+        "ansible:job-template:write": true,
+        "ansible:job:execute": true,
+        "ansible:job:read": true,
+        "ansible:playbook:read": true,
+        "ansible:playbook:write": true,
+        "ansible:schedule:read": true,
+        "ansible:schedule:write": true,
+        "org:access-secret-teams": true,
+        "org:manage-agent-pools": true,
+        "org:manage-ansible": true,
+        "org:manage-membership": true,
+        "org:manage-modules": true,
+        "org:manage-organization-access": true,
+        "org:manage-policies": true,
+        "org:manage-policy-overrides": true,
+        "org:manage-projects": true,
+        "org:manage-providers": true,
+        "org:manage-run-tasks": true,
+        "org:manage-teams": true,
+        "org:manage-vcs-settings": true,
+        "org:manage-workspaces": true,
+        "org:read-ansible": true,
+        "org:read-projects": true,
+        "org:read-workspaces": true
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "effective-permissions"
+    }
+  }
+}

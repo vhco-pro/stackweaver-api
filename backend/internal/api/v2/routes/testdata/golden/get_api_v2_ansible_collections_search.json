@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/collections/search",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "message": "Galaxy search not yet implemented. Browse collections at https://galaxy.ansible.com"
+    }
+  }
+}

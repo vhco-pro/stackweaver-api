@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -132,16 +133,16 @@ func formatAgentPoolResponse(p *models.AgentPool, orgName string, agentCount int
 func (h *AgentPoolHandlerV2) requireManageAgentPools(c *gin.Context, orgID uuid.UUID) bool {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
 	ok, err := h.rbacService.CheckOrgManageAgentPools(c.Request.Context(), user.ID, orgID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return false
 	}
 	if !ok {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage agent pools"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage agent pools")
 		return false
 	}
 	return true
@@ -153,7 +154,7 @@ func (h *AgentPoolHandlerV2) List(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 	if !h.requireManageAgentPools(c, org.ID) {
@@ -178,7 +179,7 @@ func (h *AgentPoolHandlerV2) List(c *gin.Context) {
 
 	pools, total, err := h.poolRepo.ListByOrganization(org.ID, opts)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list agent pools"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list agent pools")
 		return
 	}
 
@@ -193,14 +194,11 @@ func (h *AgentPoolHandlerV2) List(c *gin.Context) {
 		data = append(data, formatAgentPoolResponse(&pools[i], org.Name, agentCount))
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": data,
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": page,
-				"page-size":    pageSize,
-				"total-count":  total,
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{
+		"pagination": gin.H{
+			"current-page": page,
+			"page-size":    pageSize,
+			"total-count":  total,
 		},
 	})
 }
@@ -211,7 +209,7 @@ func (h *AgentPoolHandlerV2) Create(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 	if !h.requireManageAgentPools(c, org.ID) {
@@ -220,17 +218,17 @@ func (h *AgentPoolHandlerV2) Create(c *gin.Context) {
 
 	var req CreateAgentPoolRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 	if req.Data.Type != "agent-pools" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'agent-pools'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'agent-pools'")
 		return
 	}
 
 	name := req.Data.Attributes.Name
 	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "name is required"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "name is required")
 		return
 	}
 	orgScoped := true
@@ -240,7 +238,7 @@ func (h *AgentPoolHandlerV2) Create(c *gin.Context) {
 
 	existing, _ := h.poolRepo.GetByOrganizationAndName(org.ID, name)
 	if existing != nil {
-		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": "Agent pool with this name already exists"}}})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Agent pool with this name already exists")
 		return
 	}
 
@@ -250,7 +248,7 @@ func (h *AgentPoolHandlerV2) Create(c *gin.Context) {
 		OrganizationScoped: orgScoped,
 	}
 	if err := h.poolRepo.Create(pool); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create agent pool"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create agent pool")
 		return
 	}
 
@@ -281,7 +279,7 @@ func (h *AgentPoolHandlerV2) Create(c *gin.Context) {
 			agentCount = int(n)
 		}
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": formatAgentPoolResponse(pool, org.Name, agentCount)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatAgentPoolResponse(pool, org.Name, agentCount))
 }
 
 // GetByID returns a single agent pool by ID.
@@ -290,17 +288,17 @@ func (h *AgentPoolHandlerV2) GetByID(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid agent pool id"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid agent pool id")
 		return
 	}
 
 	pool, err := h.poolRepo.GetByID(id, true)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Agent pool not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get agent pool"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get agent pool")
 		return
 	}
 
@@ -319,7 +317,7 @@ func (h *AgentPoolHandlerV2) GetByID(c *gin.Context) {
 			agentCount = int(n)
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatAgentPoolResponse(pool, orgName, agentCount)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatAgentPoolResponse(pool, orgName, agentCount))
 }
 
 // Update updates an agent pool (name, organization-scoped) or relation-only updates (allowed/excluded).
@@ -328,17 +326,17 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid agent pool id"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid agent pool id")
 		return
 	}
 
 	pool, err := h.poolRepo.GetByID(id, true)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Agent pool not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get agent pool"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get agent pool")
 		return
 	}
 	org, _ := h.orgRepo.GetByID(pool.OrganizationID)
@@ -352,11 +350,11 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 
 	var req UpdateAgentPoolRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 	if req.Data.Type != "agent-pools" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'agent-pools'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'agent-pools'")
 		return
 	}
 
@@ -365,21 +363,21 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 		if req.Data.Relationships.AllowedWorkspaces != nil {
 			ids := extractWorkspaceIDs(req.Data.Relationships.AllowedWorkspaces.Data)
 			if err := h.poolRepo.ReplaceAllowedWorkspaces(id, ids); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update allowed workspaces"}}})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update allowed workspaces")
 				return
 			}
 		}
 		if req.Data.Relationships.AllowedProjects != nil {
 			ids := extractProjectIDs(req.Data.Relationships.AllowedProjects.Data)
 			if err := h.poolRepo.ReplaceAllowedProjects(id, ids); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update allowed projects"}}})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update allowed projects")
 				return
 			}
 		}
 		if req.Data.Relationships.ExcludedWorkspaces != nil {
 			ids := extractWorkspaceIDs(req.Data.Relationships.ExcludedWorkspaces.Data)
 			if err := h.poolRepo.ReplaceExcludedWorkspaces(id, ids); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update excluded workspaces"}}})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update excluded workspaces")
 				return
 			}
 		}
@@ -394,7 +392,7 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 			pool.OrganizationScoped = *req.Data.Attributes.OrganizationScoped
 		}
 		if err := h.poolRepo.Update(pool); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update agent pool"}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update agent pool")
 			return
 		}
 	}
@@ -409,7 +407,7 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 			agentCount = int(n)
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatAgentPoolResponse(pool, orgName, agentCount)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatAgentPoolResponse(pool, orgName, agentCount))
 }
 
 // Delete deletes an agent pool.
@@ -418,17 +416,17 @@ func (h *AgentPoolHandlerV2) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid agent pool id"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid agent pool id")
 		return
 	}
 
 	pool, err := h.poolRepo.GetByID(id, false)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Agent pool not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get agent pool"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get agent pool")
 		return
 	}
 	if !h.requireManageAgentPools(c, pool.OrganizationID) {
@@ -436,7 +434,7 @@ func (h *AgentPoolHandlerV2) Delete(c *gin.Context) {
 	}
 
 	if err := h.poolRepo.Delete(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to delete agent pool"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete agent pool")
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -448,17 +446,17 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid agent pool id"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid agent pool id")
 		return
 	}
 
 	pool, err := h.poolRepo.GetByID(id, false)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Agent pool not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get agent pool"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get agent pool")
 		return
 	}
 	if !h.requireManageAgentPools(c, pool.OrganizationID) {
@@ -467,7 +465,7 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 
 	runners, err := h.runnerRepo.ListByAgentPool(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list agents"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list agents")
 		return
 	}
 
@@ -486,10 +484,7 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 		}
 		data = append(data, agent)
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"data": data,
-		"meta": gin.H{"pagination": gin.H{"current-page": 1, "page-size": 20, "total-count": len(data)}},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{"pagination": gin.H{"current-page": 1, "page-size": 20, "total-count": len(data)}})
 }
 
 func extractWorkspaceIDs(refs []jsonAPIRef) []string {
@@ -547,17 +542,17 @@ func (h *AgentPoolHandlerV2) SetAPIKeyService(s *apikey.Service) {
 func (h *AgentPoolHandlerV2) QueueDepth(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid agent pool id"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid agent pool id")
 		return
 	}
 
 	pool, err := h.poolRepo.GetByID(id, false)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Agent pool not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to get agent pool"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get agent pool")
 		return
 	}
 
@@ -567,22 +562,20 @@ func (h *AgentPoolHandlerV2) QueueDepth(c *gin.Context) {
 
 	depth, err := h.poolRepo.QueueDepth(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to compute queue depth"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to compute queue depth")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"type": "queue-depths",
-			"id":   id.String(),
-			"attributes": gin.H{
-				"pending-terraform-jobs": depth.PendingTerraformJobs,
-				"pending-ansible-jobs":   depth.PendingAnsibleJobs,
-				"total-pending":          depth.TotalPending,
-				"busy-runners":           depth.BusyRunners,
-				"total-runners":          depth.TotalRunners,
-				"idle-runners":           depth.IdleRunners,
-			},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"type": "queue-depths",
+		"id":   id.String(),
+		"attributes": gin.H{
+			"pending-terraform-jobs": depth.PendingTerraformJobs,
+			"pending-ansible-jobs":   depth.PendingAnsibleJobs,
+			"total-pending":          depth.TotalPending,
+			"busy-runners":           depth.BusyRunners,
+			"total-runners":          depth.TotalRunners,
+			"idle-runners":           depth.IdleRunners,
 		},
 	})
 }
@@ -595,12 +588,12 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 		scopes, _ := c.Get("api_key_scopes")
 		scopeStrs, ok := scopes.([]string)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "invalid API key scopes"}}})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid API key scopes")
 			return false
 		}
 		checker, cerr := apikey.NewScopeChecker(scopeStrs)
 		if cerr != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "invalid API key scopes"}}})
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid API key scopes")
 			return false
 		}
 		if !checker.HasOrgPermission(pool.OrganizationID, "runner:register") && !checker.IsUnrestricted() {
@@ -613,10 +606,7 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 			// happened to hold manage-agent-pools on B - a token-scope escalation.
 			// Confirmed live before the fix: a main-scoped key returned 200 for an
 			// acme-corp pool.
-			c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{
-				"status": "403", "title": "Forbidden",
-				"detail": "API key does not have runner:register scope for this organization",
-			}}})
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have runner:register scope for this organization")
 			return false
 		}
 		// Pool-binding enforcement, matching runner registration: an agent token
@@ -627,7 +617,7 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 			if raw, exists := c.Get("api_key_id"); exists {
 				if keyID, perr := uuid.Parse(fmt.Sprintf("%v", raw)); perr == nil {
 					if bound, berr := h.apiKeyService.AgentPoolBindingForKey(keyID); berr == nil && bound != nil && *bound != poolID {
-						c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "this agent token is bound to a different agent pool"}}})
+						jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this agent token is bound to a different agent pool")
 						return false
 					}
 				}

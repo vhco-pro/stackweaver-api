@@ -1,0 +1,1177 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/ansible/jobs",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 12,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 12,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 12,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "patch-linux-fleet - 2026-09-04 17:41",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 12,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 27,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 27,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "baseline-compliance - 2026-08-29 12:12",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 13,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 13,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 13,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "patch-linux-fleet - 2026-09-02 07:49",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 13,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 20,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 20,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "rotate-certificates - 2026-08-27 14:51",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 13,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 21,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 21,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-09-03 17:24",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 14,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 17,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 17,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "patch-linux-fleet - 2026-09-01 10:40",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 16,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 21,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 21,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "patch-linux-fleet - 2026-09-03 07:46",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 19,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 19,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 19,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-08-31 07:14",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "canceled",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 2,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 31,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 31,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-08-29 16:42",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 21,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 21,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 21,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "rotate-certificates - 2026-09-04 11:01",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 3,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 17,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 17,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "rotate-certificates - 2026-08-30 09:37",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "canceled",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 5,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 9,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 9,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-09-02 14:44",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 7,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 10,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 10,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "baseline-compliance - 2026-08-29 09:48",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 7,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 22,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 22,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-08-31 09:13",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": null,
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 5,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 21,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 21,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "rotate-certificates - 2026-09-05 15:02",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "running",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": null,
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 9,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 11,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 11,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-09-05 17:43",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "running",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 10,
+          "hosts-failed": 1,
+          "hosts-ignored": 0,
+          "hosts-ok": 19,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 20,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "rotate-certificates - 2026-08-27 15:50",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "failed",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 2,
+          "hosts-failed": 1,
+          "hosts-ignored": 0,
+          "hosts-ok": 28,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 29,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "baseline-compliance - 2026-08-30 10:24",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "failed",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 5,
+          "hosts-failed": 3,
+          "hosts-ignored": 0,
+          "hosts-ok": 26,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 29,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-08-30 09:05",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "error",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": "\u003ctimestamp\u003e",
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 8,
+          "hosts-failed": 1,
+          "hosts-ignored": 0,
+          "hosts-ok": 15,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 16,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "rotate-certificates - 2026-08-26 07:43",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "failed",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "page-size": 20,
+        "total-count": 20,
+        "total-pages": 1
+      }
+    }
+  }
+}

@@ -4,11 +4,11 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -159,28 +159,26 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		orgStats = append(orgStats, entry)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"type": "dashboard-stats",
-			"attributes": gin.H{
-				"projects":                            totals.Projects,
-				"terraform_workspaces":                totals.Workspaces,
-				"ansible_playbooks":                   totals.Playbooks,
-				"active_terraform_runs":               totals.ActiveRuns,
-				"pending_terraform_runs":              totals.PendingRuns,
-				"awaiting_approval":                   totals.AwaitingApproval,
-				"pending_workflow_approvals":          totals.PendingWorkflowApprovals,
-				"errored_workspaces":                  totals.ErroredWorkspaces,
-				"errored_job_templates":               totals.ErroredJobTemplates,
-				"failed_inventory_syncs":              totals.FailedInventorySyncs,
-				"recent_run_failures":                 totals.RecentRunFailures,
-				"recent_job_failures":                 totals.RecentJobFailures,
-				"active_ansible_jobs":                 totals.ActiveJobs,
-				"completed_terraform_runs_this_month": totals.SucceededRunsSince,
-				"completed_ansible_jobs_this_month":   totals.SucceededJobsSince,
-				"recent_failure_window_days":          int(recentFailureWindow / (24 * time.Hour)),
-				"organizations":                       orgStats,
-			},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"type": "dashboard-stats",
+		"attributes": gin.H{
+			"projects":                            totals.Projects,
+			"terraform_workspaces":                totals.Workspaces,
+			"ansible_playbooks":                   totals.Playbooks,
+			"active_terraform_runs":               totals.ActiveRuns,
+			"pending_terraform_runs":              totals.PendingRuns,
+			"awaiting_approval":                   totals.AwaitingApproval,
+			"pending_workflow_approvals":          totals.PendingWorkflowApprovals,
+			"errored_workspaces":                  totals.ErroredWorkspaces,
+			"errored_job_templates":               totals.ErroredJobTemplates,
+			"failed_inventory_syncs":              totals.FailedInventorySyncs,
+			"recent_run_failures":                 totals.RecentRunFailures,
+			"recent_job_failures":                 totals.RecentJobFailures,
+			"active_ansible_jobs":                 totals.ActiveJobs,
+			"completed_terraform_runs_this_month": totals.SucceededRunsSince,
+			"completed_ansible_jobs_this_month":   totals.SucceededJobsSince,
+			"recent_failure_window_days":          int(recentFailureWindow / (24 * time.Hour)),
+			"organizations":                       orgStats,
 		},
 	})
 }
@@ -228,15 +226,13 @@ func (h *DashboardHandler) GetOperations(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"type": "dashboard-operations",
-			"attributes": gin.H{
-				"executions": formatted,
-				// True when more work is in flight than the list returns, so the UI can say so
-				// rather than implying the list is everything.
-				"truncated": len(executions) == liveExecutionLimit,
-			},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"type": "dashboard-operations",
+		"attributes": gin.H{
+			"executions": formatted,
+			// True when more work is in flight than the list returns, so the UI can say so
+			// rather than implying the list is everything.
+			"truncated": len(executions) == liveExecutionLimit,
 		},
 	})
 }
@@ -284,9 +280,5 @@ func addCounts(into *repository.OrgCounts, from *repository.OrgCounts) {
 }
 
 func dashboardError(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{
-		"errors": []gin.H{
-			{"status": strconv.Itoa(status), "title": title, "detail": detail},
-		},
-	})
+	jsonapi.WriteError(c, status, title, detail)
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 )
 
 // webhookTolerance is the maximum allowed skew between the signed timestamp and now
@@ -137,14 +138,14 @@ func (h *ZitadelWebhookHandler) HandleIDPSync(c *gin.Context) {
 	rawBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		logger.Errorf("Zitadel IDP sync webhook: failed to read body: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+		response.LegacyError(c, http.StatusBadRequest, "failed to read body")
 		return
 	}
 
 	// Verify signature
 	sigHeader := c.GetHeader("zitadel-signature")
 	if !verifySignature(sigHeader, string(rawBody), h.idpSyncSigningKey, h.isProduction) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+		response.LegacyError(c, http.StatusUnauthorized, "invalid signature")
 		return
 	}
 
@@ -152,7 +153,7 @@ func (h *ZitadelWebhookHandler) HandleIDPSync(c *gin.Context) {
 	var payload map[string]interface{}
 	if err := json.Unmarshal(rawBody, &payload); err != nil {
 		logger.Errorf("Zitadel IDP sync webhook: failed to parse body: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
@@ -494,20 +495,20 @@ func (h *ZitadelWebhookHandler) HandleComplementToken(c *gin.Context) {
 	rawBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		logger.Errorf("Zitadel complement token webhook: failed to read body: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+		response.LegacyError(c, http.StatusBadRequest, "failed to read body")
 		return
 	}
 
 	sigHeader := c.GetHeader("zitadel-signature")
 	if !verifySignature(sigHeader, string(rawBody), h.complementTokenSigningKey, h.isProduction) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+		response.LegacyError(c, http.StatusUnauthorized, "invalid signature")
 		return
 	}
 
 	var payload map[string]interface{}
 	if err := json.Unmarshal(rawBody, &payload); err != nil {
 		logger.Errorf("Zitadel complement token webhook: failed to parse body: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 

@@ -1,0 +1,26 @@
+{
+  "method": "GET",
+  "path": "/api/v2/agent-pools/:id/agents",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "ip-address": "",
+          "last-ping-at": "\u003ctimestamp\u003e",
+          "name": "build-agent-01",
+          "status": "offline"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "agents"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "page-size": 20,
+        "total-count": 1
+      }
+    }
+  }
+}

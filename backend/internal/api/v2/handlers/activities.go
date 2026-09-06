@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -43,7 +44,7 @@ func NewActivityHandlerV2(
 func (h *ActivityHandlerV2) requireOrgMembership(c *gin.Context, userID, orgID uuid.UUID) bool {
 	inOrg, err := h.orgRepo.UserInOrg(userID, orgID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
 		return false
 	}
 	return true
@@ -53,7 +54,7 @@ func (h *ActivityHandlerV2) requireOrgMembership(c *gin.Context, userID, orgID u
 func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -100,12 +101,12 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 	if workspaceID != nil {
 		workspace, err := h.workspaceRepo.GetByID(*workspaceID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Workspace not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 			return
 		}
 		project, err := h.projectRepo.GetByID(workspace.ProjectID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to resolve workspace organization"}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve workspace organization")
 			return
 		}
 		if !h.requireOrgMembership(c, user.ID, project.OrganizationID) {
@@ -134,7 +135,7 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 
 	activities, total, err := h.activityService.GetActivities(filters, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -172,14 +173,11 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": activitiesData,
-		"meta": gin.H{
-			"pagination": gin.H{
-				"total":  total,
-				"limit":  limit,
-				"offset": offset,
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, activitiesData, gin.H{
+		"pagination": gin.H{
+			"total":  total,
+			"limit":  limit,
+			"offset": offset,
 		},
 	})
 }
@@ -188,7 +186,7 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 func (h *ActivityHandlerV2) GetRecentActivities(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -210,7 +208,7 @@ func (h *ActivityHandlerV2) GetRecentActivities(c *gin.Context) {
 
 	activities, err := h.activityService.GetRecentActivities(&user.ID, orgID, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -247,7 +245,5 @@ func (h *ActivityHandlerV2) GetRecentActivities(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": activitiesData,
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, activitiesData)
 }

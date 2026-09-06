@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -57,30 +58,14 @@ type CreateConfigurationVersionRequestV2 struct {
 func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid workspace ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 
 	// Verify workspace exists
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Workspace not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
 
@@ -129,15 +114,7 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.configVersionRepo.Create(configVersion); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create configuration version",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create configuration version")
 		return
 	}
 
@@ -161,29 +138,27 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 	logger.Infof("Request Host: %s, Scheme: %s", host, scheme)
 
 	// Format in TFE-compatible JSON:API format
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   configVersion.ID,
-			"type": "configuration-versions",
-			"attributes": gin.H{
-				"status":          configVersion.Status,
-				"upload-url":      uploadURL,
-				"source":          configVersion.Source,
-				"auto-queue-runs": configVersion.AutoQueueRuns,
-				"speculative":     configVersion.Speculative,
-				"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			},
-			"relationships": gin.H{
-				"workspace": gin.H{
-					"data": gin.H{
-						"id":   workspace.ID,
-						"type": "workspaces",
-					},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   configVersion.ID,
+		"type": "configuration-versions",
+		"attributes": gin.H{
+			"status":          configVersion.Status,
+			"upload-url":      uploadURL,
+			"source":          configVersion.Source,
+			"auto-queue-runs": configVersion.AutoQueueRuns,
+			"speculative":     configVersion.Speculative,
+			"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		},
+		"relationships": gin.H{
+			"workspace": gin.H{
+				"data": gin.H{
+					"id":   workspace.ID,
+					"type": "workspaces",
 				},
 			},
-			"links": gin.H{
-				"upload": uploadURL,
-			},
+		},
+		"links": gin.H{
+			"upload": uploadURL,
 		},
 	})
 }
@@ -193,29 +168,13 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 func (h *ConfigurationVersionHandlerV2) Get(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid configuration version ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid configuration version ID")
 		return
 	}
 
 	configVersion, err := h.configVersionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Configuration version not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Configuration version not found")
 		return
 	}
 
@@ -230,30 +189,28 @@ func (h *ConfigurationVersionHandlerV2) Get(c *gin.Context) {
 	}
 	uploadURL := fmt.Sprintf("%s://%s/api/v2/configuration-versions/%s/upload", scheme, host, configVersion.ID)
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   configVersion.ID,
-			"type": "configuration-versions",
-			"attributes": gin.H{
-				"status":          configVersion.Status,
-				"upload-url":      uploadURL,
-				"source":          configVersion.Source,
-				"auto-queue-runs": configVersion.AutoQueueRuns,
-				"speculative":     configVersion.Speculative,
-				"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-				"updated-at":      configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			},
-			"relationships": gin.H{
-				"workspace": gin.H{
-					"data": gin.H{
-						"id":   configVersion.WorkspaceID,
-						"type": "workspaces",
-					},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":   configVersion.ID,
+		"type": "configuration-versions",
+		"attributes": gin.H{
+			"status":          configVersion.Status,
+			"upload-url":      uploadURL,
+			"source":          configVersion.Source,
+			"auto-queue-runs": configVersion.AutoQueueRuns,
+			"speculative":     configVersion.Speculative,
+			"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			"updated-at":      configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		},
+		"relationships": gin.H{
+			"workspace": gin.H{
+				"data": gin.H{
+					"id":   configVersion.WorkspaceID,
+					"type": "workspaces",
 				},
 			},
-			"links": gin.H{
-				"upload": uploadURL,
-			},
+		},
+		"links": gin.H{
+			"upload": uploadURL,
 		},
 	})
 }
@@ -270,72 +227,32 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid configuration version ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid configuration version ID")
 		return
 	}
 
 	// Validate upload token from query parameter
 	uploadToken := c.Query("token")
 	if uploadToken == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Upload token required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Upload token required")
 		return
 	}
 
 	configVersion, err := h.configVersionRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Configuration version not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Configuration version not found")
 		return
 	}
 
 	// Verify upload token matches. AUD-072: constant-time compare so a timing side channel can't
 	// be used to recover the token byte-by-byte (ConstantTimeCompare is also length-safe).
 	if subtle.ConstantTimeCompare([]byte(configVersion.UploadToken), []byte(uploadToken)) != 1 {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Invalid upload token",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Invalid upload token")
 		return
 	}
 
 	if configVersion.Status != models.ConfigurationVersionStatusPending {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": fmt.Sprintf("Configuration version is not in pending status (current: %s)", configVersion.Status),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Configuration version is not in pending status (current: %s)", configVersion.Status))
 		return
 	}
 
@@ -344,28 +261,12 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 	// TFE expects raw binary data in PUT request body
 	uploadData, err := c.GetRawData()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": fmt.Sprintf("Failed to read upload data: %v", err),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Failed to read upload data: %v", err))
 		return
 	}
 
 	if len(uploadData) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "No upload data provided",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "No upload data provided")
 		return
 	}
 
@@ -373,28 +274,12 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 	// Path: configuration-versions/{config_version_id}/config.tar.gz
 	storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
 	if h.storageClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Storage client not initialized",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Storage client not initialized")
 		return
 	}
 
 	if err := h.storageClient.Put(c.Request.Context(), storageKey, uploadData); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": fmt.Sprintf("Failed to store configuration files: %v", err),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to store configuration files: %v", err))
 		return
 	}
 
@@ -410,15 +295,7 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 		if delErr := h.storageClient.Delete(c.Request.Context(), storageKey); delErr != nil {
 			logger.Warnf("Failed to clean up stored config after status update failure for %s: %v", configVersion.ID, delErr)
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to update configuration version",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update configuration version")
 		return
 	}
 
@@ -435,30 +312,28 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 		scheme = "http"
 	}
 	uploadURL := fmt.Sprintf("%s://%s/api/v2/configuration-versions/%s/upload", scheme, host, configVersion.ID)
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   configVersion.ID,
-			"type": "configuration-versions",
-			"attributes": gin.H{
-				"status":          configVersion.Status,
-				"upload-url":      uploadURL,
-				"source":          configVersion.Source,
-				"auto-queue-runs": configVersion.AutoQueueRuns,
-				"speculative":     configVersion.Speculative,
-				"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-				"updated-at":      configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			},
-			"relationships": gin.H{
-				"workspace": gin.H{
-					"data": gin.H{
-						"id":   configVersion.WorkspaceID,
-						"type": "workspaces",
-					},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":   configVersion.ID,
+		"type": "configuration-versions",
+		"attributes": gin.H{
+			"status":          configVersion.Status,
+			"upload-url":      uploadURL,
+			"source":          configVersion.Source,
+			"auto-queue-runs": configVersion.AutoQueueRuns,
+			"speculative":     configVersion.Speculative,
+			"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			"updated-at":      configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		},
+		"relationships": gin.H{
+			"workspace": gin.H{
+				"data": gin.H{
+					"id":   configVersion.WorkspaceID,
+					"type": "workspaces",
 				},
 			},
-			"links": gin.H{
-				"upload": uploadURL,
-			},
+		},
+		"links": gin.H{
+			"upload": uploadURL,
 		},
 	})
 }
@@ -468,29 +343,13 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 func (h *ConfigurationVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid workspace ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 
 	configVersions, err := h.configVersionRepo.GetByWorkspaceID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to list configuration versions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list configuration versions")
 		return
 	}
 
@@ -523,7 +382,5 @@ func (h *ConfigurationVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": data,
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }

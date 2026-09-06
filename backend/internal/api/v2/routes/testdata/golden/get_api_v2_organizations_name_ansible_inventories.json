@@ -1,0 +1,77 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/ansible/inventories",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "constructed-cache-timeout": 0,
+          "constructed-limit": "",
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "inventory-type": "static",
+          "last-sync-at": null,
+          "last-sync-error": "",
+          "last-sync-hosts-discovered": 0,
+          "last-sync-log": "",
+          "last-sync-status": "",
+          "name": "production",
+          "source": "",
+          "source-vars": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "variables": {},
+          "vcs_branch": "main"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "ansible-inventories"
+      },
+      {
+        "attributes": {
+          "constructed-cache-timeout": 0,
+          "constructed-limit": "",
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "",
+          "inventory-type": "static",
+          "last-sync-at": null,
+          "last-sync-error": "",
+          "last-sync-hosts-discovered": 0,
+          "last-sync-log": "",
+          "last-sync-status": "",
+          "name": "staging",
+          "source": "",
+          "source-vars": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "variables": {},
+          "vcs_branch": "main"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "ansible-inventories"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "page-size": 20,
+        "total-count": 2,
+        "total-pages": 1
+      }
+    }
+  }
+}

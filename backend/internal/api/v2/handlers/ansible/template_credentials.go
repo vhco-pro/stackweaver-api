@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -23,28 +24,28 @@ func (h *PlaybookHandler) SetCredentialRepo(repo *repository.AnsibleCredentialRe
 func (h *PlaybookHandler) resolveTemplateForCredentialOp(c *gin.Context, permission rbac.Permission) *models.AnsibleJobTemplate {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid job template ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid job template ID")
 		return nil
 	}
 	template, err := h.templateRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Job template not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Job template not found")
 		return nil
 	}
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return nil
 	}
 	hasPermission, err := h.rbacService.CheckAnsibleResourcePermission(
 		c.Request.Context(), user.ID, rbac.ResourceTypeAnsibleJobTemplate, template.ID.String(), permission, &template.ProjectID,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return nil
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to manage this job template"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage this job template")
 		return nil
 	}
 	return template
@@ -73,7 +74,7 @@ func (h *PlaybookHandler) GetTemplateAccess(c *gin.Context) {
 	}
 	access, err := h.rbacService.GetTeamAccessForAnsibleTemplate(template.Project.OrganizationID, template.ProjectID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to compute team access"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to compute team access")
 		return
 	}
 	data := make([]gin.H, 0, len(access))
@@ -89,7 +90,7 @@ func (h *PlaybookHandler) GetTemplateAccess(c *gin.Context) {
 			},
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // ListTemplateCredentials lists the template's attached credentials.
@@ -101,14 +102,14 @@ func (h *PlaybookHandler) ListTemplateCredentials(c *gin.Context) {
 	}
 	creds, err := h.templateRepo.ListCredentials(template.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list credentials"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list credentials")
 		return
 	}
 	data := make([]gin.H, 0, len(creds))
 	for i := range creds {
 		data = append(data, formatTemplateCredential(&creds[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // AttachTemplateCredential attaches a credential to the template's set,
@@ -124,34 +125,34 @@ func (h *PlaybookHandler) AttachTemplateCredential(c *gin.Context) {
 		CredentialID string `json:"credential_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.CredentialID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "credential_id is required"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "credential_id is required")
 		return
 	}
 	credID, err := uuid.Parse(req.CredentialID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid credential ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential ID")
 		return
 	}
 	if h.credentialRepo == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Credential repository not configured"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Credential repository not configured")
 		return
 	}
 	cred, err := h.credentialRepo.GetByID(credID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Credential not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Credential not found")
 		return
 	}
 	// The org is the tenant boundary (credentials are org-scoped; the template's
 	// org comes via its project).
 	if template.Project.OrganizationID != cred.OrganizationID {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Credential does not belong to this template's organization"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Credential does not belong to this template's organization")
 		return
 	}
 	if err := h.templateRepo.AttachCredential(template.ID, cred); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", err.Error())
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": formatTemplateCredential(cred)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatTemplateCredential(cred))
 }
 
 // DetachTemplateCredential removes a credential from the template's set.
@@ -163,11 +164,11 @@ func (h *PlaybookHandler) DetachTemplateCredential(c *gin.Context) {
 	}
 	credID, err := uuid.Parse(c.Param("credential_id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid credential ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential ID")
 		return
 	}
 	if err := h.templateRepo.DetachCredential(template.ID, credID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to detach credential"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to detach credential")
 		return
 	}
 	c.Status(http.StatusNoContent)

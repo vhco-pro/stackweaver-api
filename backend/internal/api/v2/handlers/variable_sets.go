@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -89,11 +90,11 @@ func (h *VariableSetHandlerV2) encryptVarsetValue(v *models.VariableSetVariable)
 func (h *VariableSetHandlerV2) authorizeVarset(c *gin.Context, userID uuid.UUID, variableSet *models.VariableSet, level string) bool {
 	allowed, err := h.rbacService.CheckVariableSetPermission(c.Request.Context(), userID, variableSet, level)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return false
 	}
 	if !allowed {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to access this variable set"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to access this variable set")
 		return false
 	}
 	return true
@@ -161,13 +162,13 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
@@ -178,7 +179,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 
 	variableSets, err := h.variableSetRepo.ListByOrganization(org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list variable sets"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list variable sets")
 		return
 	}
 
@@ -298,7 +299,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // GetVariableSet handles GET /api/v2/varsets/:id or GET /api/v2/organizations/:name/varsets/:id
@@ -310,18 +311,18 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -330,11 +331,11 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	if orgName != "" {
 		org, err = h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	}
@@ -346,7 +347,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	// Get variables for this set
 	variables, err := h.variableSetVariableRepo.ListByVariableSet(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to load variables"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load variables")
 		return
 	}
 
@@ -400,7 +401,7 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 	if org == nil {
 		org, err = h.orgRepo.GetByID(variableSet.OrganizationID)
 		if err != nil || org == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to load organization for variable set"}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load organization for variable set")
 			return
 		}
 	}
@@ -451,24 +452,22 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 
 	// TFE uses "global" and "priority" instead of "scope"
 	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   variableSet.ID,
-			"type": "varsets", // TFE uses "varsets" not "variable-sets"
-			"attributes": gin.H{
-				"name":            variableSet.Name,
-				"description":     variableSet.Description,
-				"global":          global,               // TFE-compatible
-				"priority":        variableSet.Priority, // TFE-compatible
-				"updated-at":      variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				"var-count":       len(variables),
-				"workspace-count": len(workspacesData),
-				"project-count":   len(projectsData),
-			},
-			"relationships": relationships,
-			"links": gin.H{
-				"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-			},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":   variableSet.ID,
+		"type": "varsets", // TFE uses "varsets" not "variable-sets"
+		"attributes": gin.H{
+			"name":            variableSet.Name,
+			"description":     variableSet.Description,
+			"global":          global,               // TFE-compatible
+			"priority":        variableSet.Priority, // TFE-compatible
+			"updated-at":      variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			"var-count":       len(variables),
+			"workspace-count": len(workspacesData),
+			"project-count":   len(projectsData),
+		},
+		"relationships": relationships,
+		"links": gin.H{
+			"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
 		},
 	})
 }
@@ -481,25 +480,25 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	var req CreateVariableSetRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "varsets" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'varsets'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'varsets'")
 		return
 	}
 
@@ -520,7 +519,7 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 					projectID = &projectUUID
 					// If parent is project, global must be false (TFE requirement)
 					if attrs.Global {
-						c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Project-owned variable sets cannot be global"}}})
+						jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Project-owned variable sets cannot be global")
 						return
 					}
 				}
@@ -528,7 +527,7 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 		}
 		// If parent is organization, it must match the org in the URL
 		if parentType == "organizations" && parentID != org.Name {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Parent organization must match URL organization"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Parent organization must match URL organization")
 			return
 		}
 	}
@@ -612,7 +611,7 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 			// the whole create (AUD-119) rather than silently drop the variable or store cleartext.
 			if err := h.encryptVarsetValue(variable); err != nil {
 				logger.Warnf("Failed to encrypt varset variable %q: %v", key, err)
-				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt sensitive variable"}}})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to encrypt sensitive variable")
 				return
 			}
 			variables = append(variables, variable)
@@ -641,47 +640,45 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 	}
 
 	if err := h.variableSetRepo.CreateWithRelations(variableSet, variables, workspaceIDs, projectIDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create variable set"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create variable set")
 		return
 	}
 
 	// TFE uses "global" instead of "scope"
 	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   variableSet.ID,
-			"type": "varsets", // TFE uses "varsets" not "variable-sets"
-			"attributes": gin.H{
-				"name":        variableSet.Name,
-				"description": variableSet.Description,
-				"global":      global,               // TFE-compatible
-				"priority":    variableSet.Priority, // TFE-compatible
-				"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				// AUD-129: report real counts from what was just created instead of hardcoded 0.
-				"var-count":       len(variables),
-				"workspace-count": len(workspaceIDs),
-				"project-count":   len(projectIDs),
-			},
-			"relationships": gin.H{
-				"organization": gin.H{
-					"data": gin.H{
-						"id":   org.Name,
-						"type": "organizations",
-					},
-				},
-				"parent": gin.H{
-					"data": gin.H{
-						"id":   org.Name,
-						"type": "organizations",
-					},
-				},
-				"vars": gin.H{
-					"data": []gin.H{},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   variableSet.ID,
+		"type": "varsets", // TFE uses "varsets" not "variable-sets"
+		"attributes": gin.H{
+			"name":        variableSet.Name,
+			"description": variableSet.Description,
+			"global":      global,               // TFE-compatible
+			"priority":    variableSet.Priority, // TFE-compatible
+			"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			// AUD-129: report real counts from what was just created instead of hardcoded 0.
+			"var-count":       len(variables),
+			"workspace-count": len(workspaceIDs),
+			"project-count":   len(projectIDs),
+		},
+		"relationships": gin.H{
+			"organization": gin.H{
+				"data": gin.H{
+					"id":   org.Name,
+					"type": "organizations",
 				},
 			},
-			"links": gin.H{
-				"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
+			"parent": gin.H{
+				"data": gin.H{
+					"id":   org.Name,
+					"type": "organizations",
+				},
 			},
+			"vars": gin.H{
+				"data": []gin.H{},
+			},
+		},
+		"links": gin.H{
+			"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
 		},
 	})
 }
@@ -695,18 +692,18 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -715,11 +712,11 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 	if orgName != "" {
 		org, err = h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	}
@@ -732,13 +729,13 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 
 	var req UpdateVariableSetRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "varsets" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'varsets'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'varsets'")
 		return
 	}
 
@@ -771,7 +768,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 				if err == nil && project.OrganizationID == variableSet.OrganizationID {
 					// If parent is project, global must be false (TFE requirement)
 					if variableSet.Global {
-						c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Project-owned variable sets cannot be global"}}})
+						jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Project-owned variable sets cannot be global")
 						return
 					}
 					variableSet.ProjectID = &projectUUID
@@ -786,7 +783,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 	}
 
 	if err := h.variableSetRepo.Update(variableSet); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update variable set"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update variable set")
 		return
 	}
 
@@ -795,7 +792,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 	if org == nil {
 		org, err = h.orgRepo.GetByID(variableSet.OrganizationID)
 		if err != nil || org == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to load organization for variable set"}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load organization for variable set")
 			return
 		}
 	}
@@ -817,36 +814,34 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 
 	// TFE uses "global" instead of "scope"
 	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   variableSet.ID,
-			"type": "varsets", // TFE uses "varsets" not "variable-sets"
-			"attributes": gin.H{
-				"name":        variableSet.Name,
-				"description": variableSet.Description,
-				"global":      global,               // TFE-compatible
-				"priority":    variableSet.Priority, // TFE-compatible
-				"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				// AUD-129: report the real counts from the preloaded set rather than
-				// hardcoding 0 (GetByID preloads Variables/Workspaces/Projects).
-				"var-count":       len(variableSet.Variables),
-				"workspace-count": len(variableSet.Workspaces),
-				"project-count":   len(variableSet.Projects),
-			},
-			"relationships": gin.H{
-				"organization": gin.H{
-					"data": gin.H{
-						"id":   org.Name,
-						"type": "organizations",
-					},
-				},
-				"parent": gin.H{
-					"data": parentData,
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":   variableSet.ID,
+		"type": "varsets", // TFE uses "varsets" not "variable-sets"
+		"attributes": gin.H{
+			"name":        variableSet.Name,
+			"description": variableSet.Description,
+			"global":      global,               // TFE-compatible
+			"priority":    variableSet.Priority, // TFE-compatible
+			"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			// AUD-129: report the real counts from the preloaded set rather than
+			// hardcoding 0 (GetByID preloads Variables/Workspaces/Projects).
+			"var-count":       len(variableSet.Variables),
+			"workspace-count": len(variableSet.Workspaces),
+			"project-count":   len(variableSet.Projects),
+		},
+		"relationships": gin.H{
+			"organization": gin.H{
+				"data": gin.H{
+					"id":   org.Name,
+					"type": "organizations",
 				},
 			},
-			"links": gin.H{
-				"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
+			"parent": gin.H{
+				"data": parentData,
 			},
+		},
+		"links": gin.H{
+			"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
 		},
 	})
 }
@@ -860,18 +855,18 @@ func (h *VariableSetHandlerV2) DeleteVariableSet(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -880,11 +875,11 @@ func (h *VariableSetHandlerV2) DeleteVariableSet(c *gin.Context) {
 	if orgName != "" {
 		org, err = h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	}
@@ -896,7 +891,7 @@ func (h *VariableSetHandlerV2) DeleteVariableSet(c *gin.Context) {
 	}
 
 	if err := h.variableSetRepo.Delete(variableSetID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to delete variable set"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete variable set")
 		return
 	}
 
@@ -917,36 +912,36 @@ func (h *VariableSetHandlerV2) AssignWorkspace(c *gin.Context) {
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if len(req.Data) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data array cannot be empty"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
 	// AUD-150: only organization-owned variable sets can be attached to workspaces. Project-owned sets
 	// (ProjectID set) apply to their whole project and are not individually workspace-attachable.
 	if variableSet.ProjectID != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only organization-owned variable sets can be assigned to workspaces"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Only organization-owned variable sets can be assigned to workspaces")
 		return
 	}
 
@@ -957,31 +952,31 @@ func (h *VariableSetHandlerV2) AssignWorkspace(c *gin.Context) {
 	// Process each workspace in the request
 	for _, workspaceRef := range req.Data {
 		if workspaceRef.Type != "workspaces" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data[].type must be 'workspaces'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'workspaces'")
 			return
 		}
 
 		workspaceID := workspaceRef.ID
 		if workspaceID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Invalid workspace ID: %s", workspaceRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid workspace ID: %s", workspaceRef.ID))
 			return
 		}
 
 		workspace, err := h.workspaceRepo.GetByID(workspaceID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("Workspace not found: %s", workspaceRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Workspace not found: %s", workspaceRef.ID))
 			return
 		}
 
 		// Verify workspace belongs to same organization as variable set
 		project, err := h.projectRepo.GetByID(workspace.ProjectID)
 		if err != nil || project.OrganizationID != variableSet.OrganizationID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("Workspace not found: %s", workspaceRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Workspace not found: %s", workspaceRef.ID))
 			return
 		}
 
 		if err := h.variableSetRepo.AddWorkspace(variableSetID, workspaceID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to assign variable set to workspace: %v", err)}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to assign variable set to workspace: %v", err))
 			return
 		}
 	}
@@ -1003,30 +998,30 @@ func (h *VariableSetHandlerV2) UnassignWorkspace(c *gin.Context) {
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if len(req.Data) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data array cannot be empty"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	// Verify variable set exists
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -1037,18 +1032,18 @@ func (h *VariableSetHandlerV2) UnassignWorkspace(c *gin.Context) {
 	// Process each workspace in the request
 	for _, workspaceRef := range req.Data {
 		if workspaceRef.Type != "workspaces" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data[].type must be 'workspaces'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'workspaces'")
 			return
 		}
 
 		workspaceID := workspaceRef.ID
 		if workspaceID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Invalid workspace ID: %s", workspaceRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid workspace ID: %s", workspaceRef.ID))
 			return
 		}
 
 		if err := h.variableSetRepo.RemoveWorkspace(variableSetID, workspaceID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to unassign variable set from workspace: %v", err)}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to unassign variable set from workspace: %v", err))
 			return
 		}
 	}
@@ -1070,36 +1065,36 @@ func (h *VariableSetHandlerV2) AssignProject(c *gin.Context) {
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if len(req.Data) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data array cannot be empty"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
 	// AUD-150: only organization-owned variable sets can be attached to projects. Project-owned sets
 	// (ProjectID set) belong to a single project and are not attachable to others.
 	if variableSet.ProjectID != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Only organization-owned variable sets can be assigned to projects"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Only organization-owned variable sets can be assigned to projects")
 		return
 	}
 
@@ -1110,30 +1105,30 @@ func (h *VariableSetHandlerV2) AssignProject(c *gin.Context) {
 	// Process each project in the request
 	for _, projectRef := range req.Data {
 		if projectRef.Type != "projects" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data[].type must be 'projects'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'projects'")
 			return
 		}
 
 		projectUUID, err := uuid.Parse(projectRef.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Invalid project ID: %s", projectRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid project ID: %s", projectRef.ID))
 			return
 		}
 
 		project, err := h.projectRepo.GetByID(projectUUID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("Project not found: %s", projectRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Project not found: %s", projectRef.ID))
 			return
 		}
 
 		// Verify project belongs to same organization as variable set
 		if project.OrganizationID != variableSet.OrganizationID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("Project not found: %s", projectRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Project not found: %s", projectRef.ID))
 			return
 		}
 
 		if err := h.variableSetRepo.AddProject(variableSetID, projectUUID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to assign variable set to project: %v", err)}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to assign variable set to project: %v", err))
 			return
 		}
 	}
@@ -1155,30 +1150,30 @@ func (h *VariableSetHandlerV2) UnassignProject(c *gin.Context) {
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if len(req.Data) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data array cannot be empty"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	// Verify variable set exists
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -1189,18 +1184,18 @@ func (h *VariableSetHandlerV2) UnassignProject(c *gin.Context) {
 	// Process each project in the request
 	for _, projectRef := range req.Data {
 		if projectRef.Type != "projects" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data[].type must be 'projects'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'projects'")
 			return
 		}
 
 		projectUUID, err := uuid.Parse(projectRef.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Invalid project ID: %s", projectRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid project ID: %s", projectRef.ID))
 			return
 		}
 
 		if err := h.variableSetRepo.RemoveProject(variableSetID, projectUUID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to unassign variable set from project: %v", err)}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to unassign variable set from project: %v", err))
 			return
 		}
 	}
@@ -1219,29 +1214,29 @@ func (h *VariableSetHandlerV2) AssignJobTemplate(c *gin.Context) {
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if len(req.Data) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data array cannot be empty"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -1252,31 +1247,31 @@ func (h *VariableSetHandlerV2) AssignJobTemplate(c *gin.Context) {
 	// Process each job template in the request
 	for _, templateRef := range req.Data {
 		if templateRef.Type != "job-templates" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data[].type must be 'job-templates'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'job-templates'")
 			return
 		}
 
 		templateUUID, err := uuid.Parse(templateRef.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Invalid job template ID: %s", templateRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid job template ID: %s", templateRef.ID))
 			return
 		}
 
 		template, err := h.jobTemplateRepo.GetByID(templateUUID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("Job template not found: %s", templateRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Job template not found: %s", templateRef.ID))
 			return
 		}
 
 		// Verify job template belongs to same organization as variable set
 		project, err := h.projectRepo.GetByID(template.ProjectID)
 		if err != nil || project.OrganizationID != variableSet.OrganizationID {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Job template does not belong to the same organization as variable set: %s", templateRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Job template does not belong to the same organization as variable set: %s", templateRef.ID))
 			return
 		}
 
 		if err := h.variableSetRepo.AddJobTemplate(variableSetID, templateUUID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to assign variable set to job template: %v", err)}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to assign variable set to job template: %v", err))
 			return
 		}
 	}
@@ -1295,30 +1290,30 @@ func (h *VariableSetHandlerV2) UnassignJobTemplate(c *gin.Context) {
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if len(req.Data) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data array cannot be empty"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	// Verify variable set exists
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -1329,18 +1324,18 @@ func (h *VariableSetHandlerV2) UnassignJobTemplate(c *gin.Context) {
 	// Process each job template in the request
 	for _, templateRef := range req.Data {
 		if templateRef.Type != "job-templates" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data[].type must be 'job-templates'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'job-templates'")
 			return
 		}
 
 		templateUUID, err := uuid.Parse(templateRef.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Invalid job template ID: %s", templateRef.ID)}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid job template ID: %s", templateRef.ID))
 			return
 		}
 
 		if err := h.variableSetRepo.RemoveJobTemplate(variableSetID, templateUUID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to unassign variable set from job template: %v", err)}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to unassign variable set from job template: %v", err))
 			return
 		}
 	}
@@ -1354,26 +1349,26 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 	jobTemplateIDStr := c.Param("id")
 	jobTemplateID, err := uuid.Parse(jobTemplateIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid job template ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid job template ID")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Verify job template exists and get its project
 	template, err := h.jobTemplateRepo.GetByID(jobTemplateID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Job template not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Job template not found")
 		return
 	}
 
 	// Reading a job template's variable sets requires varset read in its project (AUD-101).
 	if proj, perr := h.projectRepo.GetByID(template.ProjectID); perr != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Project not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	} else if !h.authorizeVarset(c, user.ID, &models.VariableSet{OrganizationID: proj.OrganizationID, ProjectID: &template.ProjectID}, "read") {
 		return
@@ -1382,7 +1377,7 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 	// Get variable sets that apply to this job template's project (TFE-compatible: automatic inheritance)
 	variableSets, err := h.variableSetRepo.ListByProject(template.ProjectID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list variable sets"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list variable sets")
 		return
 	}
 
@@ -1446,7 +1441,7 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // CreateVariableSetVariableRequestV2 uses JSON:API format (TFE-compatible)
@@ -1490,18 +1485,18 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -1510,11 +1505,11 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 	if orgName != "" {
 		org, err = h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	}
@@ -1527,7 +1522,7 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 
 	variables, err := h.variableSetVariableRepo.ListByVariableSet(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to list variables"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list variables")
 		return
 	}
 
@@ -1566,7 +1561,7 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // GetVariableSetVariable handles GET /api/v2/varsets/:id/relationships/vars/:variable_id
@@ -1578,40 +1573,40 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" || variableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set or variable ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set or variable ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
 	if orgName != "" {
 		org, err := h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	}
 
 	variable, err := h.variableSetVariableRepo.GetByID(variableID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 	if variable.VariableSetID != variableSetID {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
@@ -1644,7 +1639,7 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 		"links": gin.H{"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID)},
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // CreateVariableSetVariable handles POST /api/v2/varsets/:id/relationships/vars
@@ -1656,18 +1651,18 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -1676,18 +1671,18 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 	if orgName != "" {
 		org, err = h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	} else {
 		// Get organization from variable set to validate it exists
 		_, err = h.orgRepo.GetByID(variableSet.OrganizationID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 	}
@@ -1698,13 +1693,13 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 
 	var req CreateVariableSetVariableRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "vars" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'vars'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'vars'")
 		return
 	}
 
@@ -1716,7 +1711,7 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		category = "terraform" // TFE default
 	}
 	if category != "terraform" && category != "env" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "category must be 'terraform' or 'env'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "category must be 'terraform' or 'env'")
 		return
 	}
 
@@ -1731,7 +1726,7 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 	}
 	// AUD-104: encrypt the value at rest when the variable is sensitive.
 	if err := h.encryptVarsetValue(variable); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to encrypt variable value")
 		return
 	}
 
@@ -1744,37 +1739,19 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 			strings.Contains(errStr, "unique constraint") ||
 			strings.Contains(errStr, "idx_variable_set_key") ||
 			err == gorm.ErrDuplicatedKey {
-			c.JSON(http.StatusConflict, gin.H{
-				"errors": []gin.H{{
-					"status": "409",
-					"title":  "Conflict",
-					"detail": fmt.Sprintf("A variable with the key '%s' already exists in this variable set. Variable keys must be unique within a variable set.", req.Data.Attributes.Key),
-				}},
-			})
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("A variable with the key '%s' already exists in this variable set. Variable keys must be unique within a variable set.", req.Data.Attributes.Key))
 			return
 		}
 
 		// Check for foreign key constraint (variable set doesn't exist)
 		if strings.Contains(errStr, "foreign key") ||
 			strings.Contains(errStr, "violates foreign key constraint") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Variable set not found",
-				}},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 
 		// Generic error
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{
-				"status": "500",
-				"title":  "Internal Server Error",
-				"detail": fmt.Sprintf("Failed to create variable: %v", err),
-			}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to create variable: %v", err))
 		return
 	}
 
@@ -1783,32 +1760,30 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		value = maskedValue
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   variable.ID,
-			"type": "vars", // TFE uses "vars" not "variable-set-variables"
-			"attributes": gin.H{
-				"key":         variable.Key,
-				"value":       value,
-				"description": variable.Description,
-				"sensitive":   variable.Sensitive,
-				"category":    variable.Category,
-				"hcl":         variable.HCL,
-			},
-			"relationships": gin.H{
-				"varset": gin.H{
-					"data": gin.H{
-						"id":   variableSet.ID,
-						"type": "varsets",
-					},
-					"links": gin.H{
-						"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-					},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   variable.ID,
+		"type": "vars", // TFE uses "vars" not "variable-set-variables"
+		"attributes": gin.H{
+			"key":         variable.Key,
+			"value":       value,
+			"description": variable.Description,
+			"sensitive":   variable.Sensitive,
+			"category":    variable.Category,
+			"hcl":         variable.HCL,
+		},
+		"relationships": gin.H{
+			"varset": gin.H{
+				"data": gin.H{
+					"id":   variableSet.ID,
+					"type": "varsets",
+				},
+				"links": gin.H{
+					"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
 				},
 			},
-			"links": gin.H{
-				"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID),
-			},
+		},
+		"links": gin.H{
+			"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID),
 		},
 	})
 }
@@ -1823,23 +1798,23 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	if variableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -1848,30 +1823,30 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if orgName != "" {
 		org, err = h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	} else {
 		// Get organization from variable set to validate it exists
 		_, err = h.orgRepo.GetByID(variableSet.OrganizationID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 	}
 
 	variable, err := h.variableSetVariableRepo.GetByID(variableID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
 	if variable.VariableSetID != variableSetID {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
@@ -1881,13 +1856,13 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 
 	var req UpdateVariableSetVariableRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "vars" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'vars'"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'vars'")
 		return
 	}
 
@@ -1901,7 +1876,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	}
 	if attrs.Category != nil {
 		if *attrs.Category != "terraform" && *attrs.Category != "env" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "category must be 'terraform' or 'env'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "category must be 'terraform' or 'env'")
 			return
 		}
 		variable.Category = *attrs.Category
@@ -1922,13 +1897,13 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	if attrs.Value != nil && *attrs.Value != maskedValue {
 		variable.Value = *attrs.Value
 		if err := h.encryptVarsetValue(variable); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt variable value"}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to encrypt variable value")
 			return
 		}
 	}
 
 	if err := h.variableSetVariableRepo.Update(variable); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update variable"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update variable")
 		return
 	}
 
@@ -1937,32 +1912,30 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 		value = maskedValue
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"id":   variable.ID,
-			"type": "vars", // TFE uses "vars" not "variable-set-variables"
-			"attributes": gin.H{
-				"key":         variable.Key,
-				"value":       value,
-				"description": variable.Description,
-				"sensitive":   variable.Sensitive,
-				"category":    variable.Category,
-				"hcl":         variable.HCL,
-			},
-			"relationships": gin.H{
-				"varset": gin.H{
-					"data": gin.H{
-						"id":   variableSet.ID,
-						"type": "varsets",
-					},
-					"links": gin.H{
-						"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-					},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"id":   variable.ID,
+		"type": "vars", // TFE uses "vars" not "variable-set-variables"
+		"attributes": gin.H{
+			"key":         variable.Key,
+			"value":       value,
+			"description": variable.Description,
+			"sensitive":   variable.Sensitive,
+			"category":    variable.Category,
+			"hcl":         variable.HCL,
+		},
+		"relationships": gin.H{
+			"varset": gin.H{
+				"data": gin.H{
+					"id":   variableSet.ID,
+					"type": "varsets",
+				},
+				"links": gin.H{
+					"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
 				},
 			},
-			"links": gin.H{
-				"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID),
-			},
+		},
+		"links": gin.H{
+			"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID),
 		},
 	})
 }
@@ -1977,23 +1950,23 @@ func (h *VariableSetHandlerV2) DeleteVariableSetVariable(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	if variableSetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable set ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
 		return
 	}
 
 	if variableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid variable ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable ID")
 		return
 	}
 
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
 
@@ -2002,30 +1975,30 @@ func (h *VariableSetHandlerV2) DeleteVariableSetVariable(c *gin.Context) {
 	if orgName != "" {
 		org, err = h.orgRepo.GetByName(orgName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 		if variableSet.OrganizationID != org.ID {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable set not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 			return
 		}
 	} else {
 		// Get organization from variable set to validate it exists
 		_, err = h.orgRepo.GetByID(variableSet.OrganizationID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 			return
 		}
 	}
 
 	variable, err := h.variableSetVariableRepo.GetByID(variableID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
 	if variable.VariableSetID != variableSetID {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Variable not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
@@ -2034,7 +2007,7 @@ func (h *VariableSetHandlerV2) DeleteVariableSetVariable(c *gin.Context) {
 	}
 
 	if err := h.variableSetVariableRepo.Delete(variableID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to delete variable"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete variable")
 		return
 	}
 

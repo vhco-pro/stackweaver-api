@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/job-templates/:id/callback",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "host_config_key is required",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

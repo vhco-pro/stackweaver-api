@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
@@ -121,7 +122,7 @@ func (h *GitHubWebhookHandler) HandleWebhook(c *gin.Context) {
 	// Read the request body
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		response.LegacyError(c, http.StatusBadRequest, "Failed to read request body")
 		return
 	}
 
@@ -129,11 +130,11 @@ func (h *GitHubWebhookHandler) HandleWebhook(c *gin.Context) {
 	if h.webhookSecret != "" {
 		signature := c.GetHeader("X-Hub-Signature-256")
 		if signature == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing signature header"})
+			response.LegacyError(c, http.StatusUnauthorized, "Missing signature header")
 			return
 		}
 		if !h.validateSignature(body, signature) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid signature"})
+			response.LegacyError(c, http.StatusUnauthorized, "Invalid signature")
 			return
 		}
 	}
@@ -153,7 +154,7 @@ func (h *GitHubWebhookHandler) HandleWebhook(c *gin.Context) {
 		h.handleInstallationEvent(c, eventType, body)
 	default:
 		logger.Infof("Ignoring GitHub webhook event: %s", eventType)
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Event type %s ignored", eventType)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("Event type %s ignored", eventType))
 	}
 }
 
@@ -177,7 +178,7 @@ func (h *GitHubWebhookHandler) validateSignature(body []byte, signature string) 
 func (h *GitHubWebhookHandler) handlePushEvent(c *gin.Context, body []byte) {
 	var payload GitHubPushPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid push payload"})
+		response.LegacyError(c, http.StatusBadRequest, "Invalid push payload")
 		return
 	}
 
@@ -190,7 +191,7 @@ func (h *GitHubWebhookHandler) handlePushEvent(c *gin.Context, body []byte) {
 	// Skip if this is a delete event
 	if payload.Deleted {
 		logger.Infof("Ignoring branch delete event for %s", branch)
-		c.JSON(http.StatusOK, gin.H{"message": "Branch delete event ignored"})
+		response.Message(c, http.StatusOK, "Branch delete event ignored")
 		return
 	}
 
@@ -198,13 +199,13 @@ func (h *GitHubWebhookHandler) handlePushEvent(c *gin.Context, body []byte) {
 	playbooks, err := h.findAffectedPlaybooks(payload.Repository.FullName, branch)
 	if err != nil {
 		logger.Infof("Error finding affected playbooks: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find affected playbooks"})
+		response.LegacyError(c, http.StatusInternalServerError, "Failed to find affected playbooks")
 		return
 	}
 
 	if len(playbooks) == 0 {
 		logger.Infof("No playbooks found for repo %s branch %s", payload.Repository.FullName, branch)
-		c.JSON(http.StatusOK, gin.H{"message": "No playbooks affected"})
+		response.Message(c, http.StatusOK, "No playbooks affected")
 		return
 	}
 
@@ -227,10 +228,10 @@ func (h *GitHubWebhookHandler) handlePushEvent(c *gin.Context, body []byte) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":      fmt.Sprintf("Push event processed, %d playbooks queued for sync", syncCount),
-		"synced_count": syncCount,
-		"commit":       payload.After,
+	c.JSON(http.StatusOK, PushEventResponse{
+		Message:     fmt.Sprintf("Push event processed, %d playbooks queued for sync", syncCount),
+		SyncedCount: syncCount,
+		Commit:      payload.After,
 	})
 }
 
@@ -247,15 +248,12 @@ func (h *GitHubWebhookHandler) handlePingEvent(c *gin.Context, body []byte) {
 	}
 
 	if err := json.Unmarshal(body, &payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ping payload"})
+		response.LegacyError(c, http.StatusBadRequest, "Invalid ping payload")
 		return
 	}
 
 	logger.Infof("Webhook ping received: zen='%s', hook_id=%d", payload.Zen, payload.HookID)
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Pong!",
-		"zen":     payload.Zen,
-	})
+	c.JSON(http.StatusOK, PingEventResponse{Message: "Pong!", Zen: payload.Zen})
 }
 
 // handleInstallationEvent handles GitHub App installation events
@@ -280,7 +278,7 @@ func (h *GitHubWebhookHandler) handleInstallationEvent(c *gin.Context, eventType
 	}
 
 	if err := json.Unmarshal(body, &payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid installation payload"})
+		response.LegacyError(c, http.StatusBadRequest, "Invalid installation payload")
 		return
 	}
 
@@ -302,9 +300,7 @@ func (h *GitHubWebhookHandler) handleInstallationEvent(c *gin.Context, eventType
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Installation event '%s' processed", payload.Action),
-	})
+	response.Message(c, http.StatusOK, fmt.Sprintf("Installation event '%s' processed", payload.Action))
 }
 
 // findAffectedPlaybooks finds all playbooks that use a specific repository and branch
@@ -361,4 +357,17 @@ type WebhookResult struct {
 	PlaybookIDs []string `json:"playbook_ids,omitempty"`
 	SyncCount   int      `json:"sync_count"`
 	Message     string   `json:"message"`
+}
+
+// PushEventResponse acknowledges a GitHub push webhook.
+type PushEventResponse struct {
+	Message     string `json:"message"`
+	SyncedCount int    `json:"synced_count"`
+	Commit      string `json:"commit"`
+}
+
+// PingEventResponse acknowledges a GitHub ping webhook, echoing its zen string.
+type PingEventResponse struct {
+	Message string `json:"message"`
+	Zen     string `json:"zen"`
 }

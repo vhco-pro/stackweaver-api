@@ -1,0 +1,14 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/task-results/:id/callback",
+  "status": 401,
+  "body": {
+    "errors": [
+      {
+        "detail": "A run task access token is required",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
+  }
+}

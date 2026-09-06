@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -50,7 +51,7 @@ func (h *InventorySyncHandler) authorizeInventoryRead(c *gin.Context, inventoryI
 	}
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
 	hasPermission, err := h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, inventory.OrganizationID)
@@ -59,7 +60,7 @@ func (h *InventorySyncHandler) authorizeInventoryRead(c *gin.Context, inventoryI
 		return false
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You don't have permission to view this inventory's sync history"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You don't have permission to view this inventory's sync history")
 		return false
 	}
 	return true
@@ -91,7 +92,7 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 	for i := range syncs {
 		data = append(data, formatInventorySyncResponse(&syncs[i], false))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data, "meta": gin.H{"total": total}})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{"total": total})
 }
 
 // Get returns one sync run including its captured output.
@@ -112,7 +113,7 @@ func (h *InventorySyncHandler) Get(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatInventorySyncResponse(sync, true)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatInventorySyncResponse(sync, true))
 }
 
 // formatInventorySyncResponse formats a sync run for JSON:API responses.

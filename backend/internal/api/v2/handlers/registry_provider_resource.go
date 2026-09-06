@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -83,9 +84,7 @@ func (h *RegistryProviderResourceHandler) requireMember(c *gin.Context, orgID uu
 const registryProviderType = "registry-providers"
 
 func regProvErr(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{
-		"errors": []gin.H{{"status": fmt.Sprintf("%d", status), "title": title, "detail": detail}},
-	})
+	jsonapi.WriteError(c, status, title, detail)
 }
 
 // formatRegistryProviderResponse renders a provider as a go-tfe-compatible JSON:API resource.
@@ -195,7 +194,7 @@ func (h *RegistryProviderResourceHandler) CreateProvider(c *gin.Context) {
 	}
 	provider.Organization = *org
 
-	c.JSON(http.StatusCreated, gin.H{"data": formatRegistryProviderResponse(provider)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatRegistryProviderResponse(provider))
 }
 
 // ListProviders handles GET /api/v2/organizations/:name/registry-providers?filter[registry_name]=private.
@@ -221,7 +220,7 @@ func (h *RegistryProviderResourceHandler) ListProviders(c *gin.Context) {
 	for i := range providers {
 		data = append(data, formatRegistryProviderResponse(&providers[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // GetProvider handles GET /api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name.
@@ -233,7 +232,7 @@ func (h *RegistryProviderResourceHandler) GetProvider(c *gin.Context) {
 	if !h.requireMember(c, provider.OrganizationID) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatRegistryProviderResponse(provider)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatRegistryProviderResponse(provider))
 }
 
 // DeleteProvider handles DELETE /api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name.
@@ -262,7 +261,7 @@ func (h *RegistryProviderResourceHandler) GetProviderByID(c *gin.Context) {
 	if !h.requireMember(c, provider.OrganizationID) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatRegistryProviderResponse(provider)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatRegistryProviderResponse(provider))
 }
 
 // DeleteProviderByID handles DELETE /api/v2/registry-providers/:id.

@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "path": "/api/v2/admin/terraform-versions/:id",
+  "status": 404,
+  "body": {
+    "errors": [
+      {
+        "status": "404",
+        "title": "Terraform version not found"
+      }
+    ]
+  }
+}

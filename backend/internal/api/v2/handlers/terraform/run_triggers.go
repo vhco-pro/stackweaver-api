@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -39,24 +40,7 @@ func NewRunTriggerHandlerV2(
 }
 
 func rtError(c *gin.Context, status int, title, detail string) {
-	c.JSON(status, gin.H{"errors": []gin.H{{"status": itoa(status), "title": title, "detail": detail}}})
-}
-
-func itoa(n int) string {
-	switch n {
-	case http.StatusBadRequest:
-		return "400"
-	case http.StatusUnauthorized:
-		return "401"
-	case http.StatusForbidden:
-		return "403"
-	case http.StatusNotFound:
-		return "404"
-	case http.StatusUnprocessableEntity:
-		return "422"
-	default:
-		return "500"
-	}
+	jsonapi.WriteError(c, status, title, detail)
 }
 
 // checkWorkspacePermission returns true if the caller holds `perm` on the workspace.
@@ -172,7 +156,7 @@ func (h *RunTriggerHandlerV2) Create(c *gin.Context) {
 		rtError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load created run trigger")
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": formatRunTriggerResponse(created)})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatRunTriggerResponse(created))
 }
 
 // GetByID handles GET /api/v2/run-triggers/:id.
@@ -195,7 +179,7 @@ func (h *RunTriggerHandlerV2) GetByID(c *gin.Context) {
 	if !h.checkWorkspacePermission(c, target, rbac.PermissionWorkspaceRead) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatRunTriggerResponse(rt)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatRunTriggerResponse(rt))
 }
 
 // Delete handles DELETE /api/v2/run-triggers/:id.
@@ -257,5 +241,5 @@ func (h *RunTriggerHandlerV2) ListByWorkspace(c *gin.Context) {
 	for i := range triggers {
 		data = append(data, formatRunTriggerResponse(&triggers[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }

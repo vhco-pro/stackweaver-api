@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -48,15 +49,7 @@ func NewTeamMemberHandlerV2(
 func (h *TeamMemberHandlerV2) requireTeamMembershipManagement(c *gin.Context, team *models.Team) bool {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
 
@@ -66,15 +59,7 @@ func (h *TeamMemberHandlerV2) requireTeamMembershipManagement(c *gin.Context, te
 		if err == nil && isOwner {
 			return true
 		}
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only organization owners can manage the owners team",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization owners can manage the owners team")
 		return false
 	}
 
@@ -84,15 +69,7 @@ func (h *TeamMemberHandlerV2) requireTeamMembershipManagement(c *gin.Context, te
 	if hasPermission, err := h.rbacService.CheckOrgManageMembership(ctx, user.ID, team.OrganizationID); err == nil && hasPermission {
 		return true
 	}
-	c.JSON(http.StatusForbidden, gin.H{
-		"errors": []gin.H{
-			{
-				"status": "403",
-				"title":  "Forbidden",
-				"detail": "Only organization admins can manage team membership",
-			},
-		},
-	})
+	jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization admins can manage team membership")
 	return false
 }
 
@@ -102,15 +79,7 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 	teamIDStr := c.Param("id")
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid team ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid team ID format")
 		return
 	}
 
@@ -118,26 +87,10 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 	team, err := h.teamRepo.GetByID(teamID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "404",
-						"title":  "Not Found",
-						"detail": "Team not found",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve team",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve team")
 		return
 	}
 
@@ -145,43 +98,19 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 	// Require the caller to be a member of the team's organization.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	inOrg, err := h.orgRepo.UserInOrg(user.ID, team.OrganizationID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You are not a member of this team's organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You are not a member of this team's organization")
 		return
 	}
 
 	// Get organization name for response formatting
 	org, err := h.orgRepo.GetByID(team.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
@@ -196,15 +125,7 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 		orgMemberships, err = h.orgRepo.GetMembersByUserIDs(team.OrganizationID, userIDs)
 		if err != nil {
 			logger.Errorf("TeamMember ListOrganizationMemberships - Failed to get organization memberships for team %s: %v", teamIDStr, err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to retrieve organization memberships",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization memberships")
 			return
 		}
 	}
@@ -249,15 +170,7 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 	teamIDStr := c.Param("id")
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid team ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid team ID format")
 		return
 	}
 
@@ -265,26 +178,10 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 	team, err := h.teamRepo.GetByID(teamID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "404",
-						"title":  "Not Found",
-						"detail": "Team not found",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve team",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve team")
 		return
 	}
 
@@ -305,15 +202,7 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Debugf("TeamMember AddOrganizationMemberships - JSON parse error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -322,30 +211,14 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 	// Process each organization membership
 	for _, membershipRef := range req.Data {
 		if membershipRef.Type != "organization-memberships" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "Invalid type, expected 'organization-memberships'",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid type, expected 'organization-memberships'")
 			return
 		}
 
 		// Parse membership ID
 		membershipID, err := uuid.Parse(membershipRef.ID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": fmt.Sprintf("Invalid organization membership ID: %s", membershipRef.ID),
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid organization membership ID: %s", membershipRef.ID))
 			return
 		}
 
@@ -354,41 +227,17 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 		if err != nil {
 			if err == gorm.ErrRecordNotFound {
 				logger.Errorf("TeamMember AddOrganizationMemberships - Membership %s not found. This may indicate Terraform state is out of sync.", membershipRef.ID)
-				c.JSON(http.StatusNotFound, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "404",
-							"title":  "Not Found",
-							"detail": fmt.Sprintf("Organization membership not found: %s. This may indicate the membership was deleted or recreated with a different ID.", membershipRef.ID),
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Organization membership not found: %s. This may indicate the membership was deleted or recreated with a different ID.", membershipRef.ID))
 				return
 			}
 			logger.Errorf("TeamMember AddOrganizationMemberships - Error getting membership %s: %v", membershipRef.ID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to retrieve organization membership",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization membership")
 			return
 		}
 
 		// Verify membership belongs to same organization as team
 		if membership.OrganizationID != team.OrganizationID {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "Organization membership must belong to the same organization as the team",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Organization membership must belong to the same organization as the team")
 			return
 		}
 
@@ -406,15 +255,7 @@ func (h *TeamMemberHandlerV2) AddOrganizationMemberships(c *gin.Context) {
 		if !alreadyMember {
 			if err := h.teamRepo.AddMember(teamID, membership.UserID); err != nil {
 				logger.Debugf("TeamMember AddOrganizationMemberships - Failed to add member: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "500",
-							"title":  "Internal Server Error",
-							"detail": fmt.Sprintf("Failed to add user to team: %v", err),
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to add user to team: %v", err))
 				return
 			}
 			logger.Debugf("TeamMember AddOrganizationMemberships - Added user %s to team %s", membership.UserID.String(), teamIDStr)
@@ -431,15 +272,7 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 	teamIDStr := c.Param("id")
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid team ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid team ID format")
 		return
 	}
 
@@ -447,26 +280,10 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 	team, err := h.teamRepo.GetByID(teamID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "404",
-						"title":  "Not Found",
-						"detail": "Team not found",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve team",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve team")
 		return
 	}
 
@@ -485,15 +302,7 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -545,13 +354,13 @@ func (h *TeamMemberHandlerV2) RemoveOrganizationMemberships(c *gin.Context) {
 func (h *TeamMemberHandlerV2) resolveTeamMemberIdentifier(c *gin.Context, team *models.Team, identifier string) (*models.User, bool) {
 	user, err := h.userRepo.GetByEmailCaseInsensitive(identifier)
 	if err != nil || user == nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": fmt.Sprintf("No user found for %q - Stackweaver identifies team members by email; ensure the user exists and is a member of the organization", identifier)}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("No user found for %q - Stackweaver identifies team members by email; ensure the user exists and is a member of the organization", identifier))
 		return nil, false
 	}
 	// Tenant safety: the user must be a member of the team's organization. This both matches TFE
 	// (team members are drawn from org members) and prevents adding/probing users from other orgs.
 	if _, err := h.orgRepo.GetMember(team.OrganizationID, user.ID); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": []gin.H{{"status": "422", "title": "Unprocessable Entity", "detail": fmt.Sprintf("User %q is not a member of this organization - add them to the organization before adding them to a team", identifier)}}})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", fmt.Sprintf("User %q is not a member of this organization - add them to the organization before adding them to a team", identifier))
 		return nil, false
 	}
 	return user, true
@@ -566,17 +375,17 @@ func (h *TeamMemberHandlerV2) AddUsers(c *gin.Context) {
 	teamIDStr := c.Param("id")
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid team ID format"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid team ID format")
 		return
 	}
 
 	team, err := h.teamRepo.GetByID(teamID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Team not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to retrieve team"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve team")
 		return
 	}
 
@@ -592,13 +401,13 @@ func (h *TeamMemberHandlerV2) AddUsers(c *gin.Context) {
 		} `json:"data" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	for _, userRef := range req.Data {
 		if userRef.Type != "users" {
-			c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid type, expected 'users'"}}})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid type, expected 'users'")
 			return
 		}
 		user, ok := h.resolveTeamMemberIdentifier(c, team, userRef.ID)
@@ -610,7 +419,7 @@ func (h *TeamMemberHandlerV2) AddUsers(c *gin.Context) {
 			continue
 		}
 		if err := h.teamRepo.AddMember(teamID, user.ID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to add user to team: %v", err)}}})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to add user to team: %v", err))
 			return
 		}
 		logger.Debugf("TeamMember AddUsers - Added user %s to team %s", user.ID.String(), teamIDStr)
@@ -627,17 +436,17 @@ func (h *TeamMemberHandlerV2) RemoveUsers(c *gin.Context) {
 	teamIDStr := c.Param("id")
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid team ID format"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid team ID format")
 		return
 	}
 
 	team, err := h.teamRepo.GetByID(teamID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Team not found"}}})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to retrieve team"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve team")
 		return
 	}
 
@@ -652,7 +461,7 @@ func (h *TeamMemberHandlerV2) RemoveUsers(c *gin.Context) {
 		} `json:"data" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 

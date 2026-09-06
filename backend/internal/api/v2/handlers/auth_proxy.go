@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 )
 
 // NotificationMode controls how verification/OTP codes are delivered.
@@ -494,9 +495,9 @@ func (p *AuthProxy) IsBackchannelRevoked(sid string) bool {
 // uptime probes don't get confused; the consumer reads the JSON to make
 // a verdict.
 func (p *AuthProxy) HealthAuthProxy(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"backchannel_binding_active": p.config.ClientID != "",
-		"production_mode":            p.config.IsProduction,
+	c.JSON(http.StatusOK, BackchannelStatusResponse{
+		BackchannelBindingActive: p.config.ClientID != "",
+		ProductionMode:           p.config.IsProduction,
 	})
 }
 
@@ -717,10 +718,7 @@ func (p *AuthProxy) getFrontendBaseURL(c *gin.Context) string {
 
 // respondError sends a JSON error response matching Zitadel's error shape.
 func respondError(c *gin.Context, status int, message string) {
-	c.JSON(status, gin.H{
-		"code":    status,
-		"message": message,
-	})
+	c.JSON(status, response.CodeMessageResponse{Code: status, Message: message})
 }
 
 // --- Session cookie management (D6) ---
@@ -1155,7 +1153,7 @@ func (p *AuthProxy) EndSession(c *gin.Context) {
 			// Refuse the redirect - return a benign success body so
 			// the SPA can render its own logout-done page.
 			logger.Warnf("EndSession: refusing post-logout redirect to disallowed host (%q)", location)
-			c.JSON(http.StatusOK, gin.H{"loggedOut": true})
+			c.JSON(http.StatusOK, LoggedOutResponse{LoggedOut: true})
 			return
 		}
 	}
@@ -2143,10 +2141,7 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 			// is embedded in the key with the `decoy:` / bare
 			// namespace already prefixed by the caller.
 			logger.Warnf("event=loginname_lockout_denied key=%q reason=too_many_failed_password_attempts", limiterKey)
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code":    http.StatusTooManyRequests,
-				"message": "too many failed password attempts - try again later",
-			})
+			c.JSON(http.StatusTooManyRequests, response.CodeMessageResponse{Code: http.StatusTooManyRequests, Message: "too many failed password attempts - try again later"})
 			return
 		}
 	}
@@ -2378,7 +2373,7 @@ func (p *AuthProxy) SearchSessions(c *gin.Context) {
 
 	entries := p.readSessionCookie(c)
 	if len(entries) == 0 {
-		c.JSON(http.StatusOK, gin.H{"sessions": []any{}})
+		c.JSON(http.StatusOK, SessionsPassthroughResponse{Sessions: []any{}})
 		return
 	}
 
@@ -2636,7 +2631,7 @@ func (p *AuthProxy) ListIdpProviders(c *gin.Context) {
 		return
 	}
 	if len(wrapper.IdentityProviders) == 0 {
-		c.JSON(http.StatusOK, gin.H{"result": []any{}})
+		c.JSON(http.StatusOK, ResultPassthroughResponse{Result: []any{}})
 		return
 	}
 	c.Data(http.StatusOK, "application/json",
@@ -3430,7 +3425,7 @@ func (p *AuthProxy) LookupOrgByDomain(c *gin.Context) {
 	if err != nil {
 		// Marshal failure on a fully-typed map should never happen.
 		// Fall through to direct response without caching.
-		c.JSON(http.StatusOK, gin.H{"result": out})
+		c.JSON(http.StatusOK, ResultPassthroughResponse{Result: out})
 		return
 	}
 	p.settingsCache.set(cacheKey, respBytes, lookupOrgByDomainTTL)
@@ -3555,4 +3550,28 @@ func (p *AuthProxy) fetchSessionUserID(ctx context.Context, sessionID string) st
 		return ""
 	}
 	return parsed.Session.Factors.User.ID
+}
+
+// BackchannelStatusResponse reports the back-channel logout binding state.
+type BackchannelStatusResponse struct {
+	BackchannelBindingActive bool `json:"backchannel_binding_active"`
+	ProductionMode           bool `json:"production_mode"`
+}
+
+// LoggedOutResponse acknowledges a logout.
+type LoggedOutResponse struct {
+	LoggedOut bool `json:"loggedOut"`
+}
+
+// SessionsPassthroughResponse wraps sessions proxied from Zitadel.
+//
+// Sessions is `any` because this endpoint forwards Zitadel's own payload unaltered; giving it
+// a concrete type here would be inventing a contract Stackweaver does not own.
+type SessionsPassthroughResponse struct {
+	Sessions any `json:"sessions"`
+}
+
+// ResultPassthroughResponse wraps a proxied Zitadel result, for the same reason.
+type ResultPassthroughResponse struct {
+	Result any `json:"result"`
 }

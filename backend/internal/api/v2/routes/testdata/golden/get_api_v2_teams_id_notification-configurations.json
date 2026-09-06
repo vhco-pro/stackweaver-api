@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/v2/teams/:id/notification-configurations",
+  "status": 200,
+  "body": {
+    "data": []
+  }
+}

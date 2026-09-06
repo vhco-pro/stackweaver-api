@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/v1/modules/search",
+  "status": 400,
+  "body": {
+    "errors": [
+      "query parameter 'q' is required"
+    ]
+  }
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -70,15 +71,7 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 	// Get organization
 	org, err := h.orgRepo.GetByName(organizationName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
@@ -110,29 +103,13 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 	// Check if user has permission to list organization memberships (requires manage-membership permission)
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You do not have permission to list organization memberships. This requires manage-membership permission via team membership (e.g., being in the 'owners' team).",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to list organization memberships. This requires manage-membership permission via team membership (e.g., being in the 'owners' team).")
 		return
 	}
 
@@ -141,15 +118,7 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 	members, total, err := h.orgRepo.ListMembers(org.ID, perPage, offset, emails, status, query)
 	if err != nil {
 		logger.Errorf("OrganizationMembershipHandlerV2.List - Failed to list members: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to list organization memberships",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list organization memberships")
 		return
 	}
 	logger.Debugf("OrganizationMembershipHandlerV2.List - Found %d members (total: %d)", len(members), total)
@@ -252,45 +221,21 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 	// Get organization
 	org, err := h.orgRepo.GetByName(organizationName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	// Get current user
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Check if user has permission to manage organization memberships
 	hasPermission, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only organization admins can create organization memberships",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization admins can create organization memberships")
 		return
 	}
 
@@ -302,15 +247,7 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 	var req CreateOrganizationMembershipRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Debugf("OrganizationMembership Create - JSON binding error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -318,30 +255,14 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 
 	// Validate type
 	if req.Data.Type != "organization-memberships" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid type, expected 'organization-memberships'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid type, expected 'organization-memberships'")
 		return
 	}
 
 	// Validate email
 	email := req.Data.Attributes.Email
 	if email == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Email is required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Email is required")
 		return
 	}
 
@@ -352,15 +273,7 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 		for _, member := range allMembers {
 			if member.User.Email != "" && strings.EqualFold(member.User.Email, email) {
 				// Found existing membership with this email (case-insensitive match)
-				c.JSON(http.StatusConflict, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "409",
-							"title":  "Conflict",
-							"detail": fmt.Sprintf("User with email '%s' is already a member of this organization", member.User.Email),
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("User with email '%s' is already a member of this organization", member.User.Email))
 				return
 			}
 		}
@@ -400,28 +313,12 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 					// Email already exists (race condition), try to find it again with case-insensitive lookup
 					targetUser, err = h.userRepo.GetByEmailCaseInsensitive(email)
 					if err != nil {
-						c.JSON(http.StatusConflict, gin.H{
-							"errors": []gin.H{
-								{
-									"status": "409",
-									"title":  "Conflict",
-									"detail": fmt.Sprintf("User with email '%s' already exists. Please try again.", email),
-								},
-							},
-						})
+						jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("User with email '%s' already exists. Please try again.", email))
 						return
 					}
 					logger.Debugf("OrganizationMembership Create - Found existing user after duplicate error (race condition): %s", email)
 				} else {
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"errors": []gin.H{
-							{
-								"status": "500",
-								"title":  "Internal Server Error",
-								"detail": fmt.Sprintf("Failed to create user for email '%s'", email),
-							},
-						},
-					})
+					jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to create user for email '%s'", email))
 					return
 				}
 			} else {
@@ -429,71 +326,31 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 				logger.Debugf("OrganizationMembership Create - Created placeholder user with ID: %s", targetUser.ID.String())
 			}
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to find or create user",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to find or create user")
 			return
 		}
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to find or create user",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to find or create user")
 		return
 	}
 
 	// Check if membership already exists
 	existingMember, _ := h.orgRepo.GetMember(org.ID, targetUser.ID)
 	if existingMember != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "409",
-					"title":  "Conflict",
-					"detail": "User is already a member of this organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "User is already a member of this organization")
 		return
 	}
 
 	// Create membership (no role - roles are deprecated, permissions come from team memberships)
 	if err := h.orgRepo.AddMember(org.ID, targetUser.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create organization membership",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create organization membership")
 		return
 	}
 
 	// Get the created membership
 	createdMember, err := h.orgRepo.GetMember(org.ID, targetUser.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve created membership",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve created membership")
 		return
 	}
 
@@ -506,9 +363,7 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 	// but we'll handle the request gracefully. Teams can be managed separately via team members API.
 	_ = len(req.Data.Relationships.Teams.Data) // Explicitly ignore for now
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": formatOrganizationMembershipResponse(createdMember, org.Name),
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatOrganizationMembershipResponse(createdMember, org.Name))
 }
 
 // GetByID retrieves an organization membership by ID
@@ -518,15 +373,7 @@ func (h *OrganizationMembershipHandlerV2) GetByID(c *gin.Context) {
 
 	memberID, err := uuid.Parse(memberIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid membership ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid membership ID format")
 		return
 	}
 
@@ -535,41 +382,17 @@ func (h *OrganizationMembershipHandlerV2) GetByID(c *gin.Context) {
 	member, err := h.orgRepo.GetMemberByID(memberID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "404",
-						"title":  "Not Found",
-						"detail": "Organization membership not found",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization membership not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization membership",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization membership")
 		return
 	}
 
 	// Get organization name for response formatting
 	org, err := h.orgRepo.GetByID(member.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
@@ -579,23 +402,17 @@ func (h *OrganizationMembershipHandlerV2) GetByID(c *gin.Context) {
 	// (mirroring the List/Create/Update/Delete siblings).
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	if member.UserID != user.ID {
 		canManage, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), user.ID, member.OrganizationID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 			return
 		}
 		if !canManage {
-			c.JSON(http.StatusForbidden, gin.H{
-				"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to view this organization membership"}},
-			})
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to view this organization membership")
 			return
 		}
 	}
@@ -665,15 +482,7 @@ func (h *OrganizationMembershipHandlerV2) Update(c *gin.Context) {
 
 	memberID, err := uuid.Parse(memberIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid membership ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid membership ID format")
 		return
 	}
 
@@ -689,43 +498,19 @@ func (h *OrganizationMembershipHandlerV2) Update(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate type
 	if req.Data.Type != "organization-memberships" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid type, expected 'organization-memberships'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid type, expected 'organization-memberships'")
 		return
 	}
 
 	// Validate ID matches
 	if req.Data.ID != memberIDStr {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "ID in request body does not match URL parameter",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "ID in request body does not match URL parameter")
 		return
 	}
 
@@ -733,71 +518,31 @@ func (h *OrganizationMembershipHandlerV2) Update(c *gin.Context) {
 	membershipToUpdate, err := h.orgRepo.GetMemberByID(memberID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "404",
-						"title":  "Not Found",
-						"detail": "Organization membership not found",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization membership not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization membership",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization membership")
 		return
 	}
 
 	// Get current user
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Get organization to check permissions
 	org, err := h.orgRepo.GetByID(membershipToUpdate.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Check if user has permission to manage organization memberships (must be in "owners" team)
 	hasPermission, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only members of the 'owners' team can manage organization memberships",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only members of the 'owners' team can manage organization memberships")
 		return
 	}
 
@@ -816,30 +561,14 @@ func (h *OrganizationMembershipHandlerV2) Update(c *gin.Context) {
 	// Get organization name for response formatting
 	org, err = h.orgRepo.GetByID(membershipToUpdate.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Reload membership with user data for response
 	updatedMember, err := h.orgRepo.GetMemberByID(memberID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization membership",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization membership")
 		return
 	}
 
@@ -870,15 +599,7 @@ func (h *OrganizationMembershipHandlerV2) Delete(c *gin.Context) {
 
 	memberID, err := uuid.Parse(memberIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid membership ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid membership ID format")
 		return
 	}
 
@@ -886,85 +607,37 @@ func (h *OrganizationMembershipHandlerV2) Delete(c *gin.Context) {
 	membershipToDelete, err := h.orgRepo.GetMemberByID(memberID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "404",
-						"title":  "Not Found",
-						"detail": "Organization membership not found",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization membership not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization membership",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization membership")
 		return
 	}
 
 	// Get current user
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Get organization to check permissions
 	org, err := h.orgRepo.GetByID(membershipToDelete.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Check if user has permission to manage organization memberships
 	hasPermission, err := h.rbacService.CheckOrgManageMembership(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only organization admins can delete organization memberships",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization admins can delete organization memberships")
 		return
 	}
 
 	// Delete membership
 	if err := h.orgRepo.DeleteMemberByID(memberID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to delete organization membership",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete organization membership")
 		return
 	}
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
@@ -53,9 +54,7 @@ func (h *RegistryModuleHandler) ListModules(c *gin.Context) {
 
 	modules, total, err := h.moduleService.ListModules(namespace, provider, verified, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []string{err.Error()},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	modules = h.filterAccessibleModules(c, modules)
@@ -81,9 +80,7 @@ func (h *RegistryModuleHandler) ListModules(c *gin.Context) {
 func (h *RegistryModuleHandler) SearchModules(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []string{"query parameter 'q' is required"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusBadRequest, "query parameter 'q' is required")
 		return
 	}
 
@@ -108,9 +105,7 @@ func (h *RegistryModuleHandler) SearchModules(c *gin.Context) {
 
 	modules, total, err := h.moduleService.SearchModules(query, namespace, provider, verified, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []string{err.Error()},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	modules = h.filterAccessibleModules(c, modules)
@@ -139,9 +134,7 @@ func (h *RegistryModuleHandler) GetModuleVersions(c *gin.Context) {
 
 	module, err := h.moduleService.GetModule(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module not found"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
 	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
@@ -150,14 +143,12 @@ func (h *RegistryModuleHandler) GetModuleVersions(c *gin.Context) {
 
 	versions, err := h.moduleService.GetModuleVersions(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module not found"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
 
 	// Format according to Terraform Registry API spec
-	versionList := make([]gin.H, 0, len(versions))
+	versionList := make([]ModuleVersionEntry, 0, len(versions))
 	for _, v := range versions {
 		submodules := []string{}
 		if v.Submodules != nil {
@@ -170,19 +161,17 @@ func (h *RegistryModuleHandler) GetModuleVersions(c *gin.Context) {
 			}
 		}
 
-		versionList = append(versionList, gin.H{
-			"version":    v.Version,
-			"submodules": submodules,
+		versionList = append(versionList, ModuleVersionEntry{
+			Version:    v.Version,
+			Submodules: submodules,
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"modules": []gin.H{
-			{
-				"source":   "", // Will be populated from module source
-				"versions": versionList,
-			},
-		},
+	c.JSON(http.StatusOK, ModuleVersionsResponse{
+		Modules: []ModuleVersionsEntry{{
+			Source:   "", // Will be populated from module source
+			Versions: versionList,
+		}},
 	})
 }
 
@@ -194,9 +183,7 @@ func (h *RegistryModuleHandler) GetModule(c *gin.Context) {
 
 	module, err := h.moduleService.GetModule(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module not found"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
 	// AUD-123: every module belongs to an org's private registry - gate on membership.
@@ -206,9 +193,7 @@ func (h *RegistryModuleHandler) GetModule(c *gin.Context) {
 
 	latestVersion, err := h.moduleService.GetLatestVersion(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"No versions found for this module"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "No versions found for this module")
 		return
 	}
 
@@ -225,9 +210,7 @@ func (h *RegistryModuleHandler) GetModuleVersion(c *gin.Context) {
 
 	module, err := h.moduleService.GetModule(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module not found"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
 	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
@@ -236,9 +219,7 @@ func (h *RegistryModuleHandler) GetModuleVersion(c *gin.Context) {
 
 	moduleVersion, err := h.moduleService.GetModuleVersion(namespace, name, provider, version)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module version not found"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module version not found")
 		return
 	}
 
@@ -256,9 +237,7 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 
 	module, err := h.moduleService.GetModule(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module not found"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
 	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
@@ -269,9 +248,7 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 	if version == "" {
 		latestVersion, err := h.moduleService.GetLatestVersion(namespace, name, provider)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"errors": []string{"Module or version not found"},
-			})
+			jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module or version not found")
 			return
 		}
 		version = latestVersion.Version
@@ -280,9 +257,7 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 	// Get download URL (presigned)
 	downloadURL, err := h.moduleService.GetDownloadURL(c.Request.Context(), namespace, name, provider, version)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module version not available for download"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module version not available for download")
 		return
 	}
 
@@ -310,9 +285,7 @@ func (h *RegistryModuleHandler) GetModuleDownloadsSummary(c *gin.Context) {
 
 	module, err := h.moduleService.GetModule(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"Module not found"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
 	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
@@ -321,31 +294,25 @@ func (h *RegistryModuleHandler) GetModuleDownloadsSummary(c *gin.Context) {
 
 	latestVersion, err := h.moduleService.GetLatestVersion(namespace, name, provider)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []string{"No versions found for this module"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "No versions found for this module")
 		return
 	}
 
 	stats, err := h.moduleService.GetDownloadStats(latestVersion.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []string{"Failed to get download statistics"},
-		})
+		jsonapi.WriteRegistryError(c, http.StatusInternalServerError, "Failed to get download statistics")
 		return
 	}
 
 	// Format according to Terraform Registry v2 API spec
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"type": "module-downloads-summary",
-			"id":   latestVersion.ID.String(),
-			"attributes": gin.H{
-				"week":  stats["week"],
-				"month": stats["month"],
-				"year":  stats["year"],
-				"total": stats["total"],
-			},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"type": "module-downloads-summary",
+		"id":   latestVersion.ID.String(),
+		"attributes": gin.H{
+			"week":  stats["week"],
+			"month": stats["month"],
+			"year":  stats["year"],
+			"total": stats["total"],
 		},
 	})
 }

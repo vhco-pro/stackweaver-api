@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -60,12 +61,12 @@ func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *r
 	}
 	user := registryCaller(c, authService)
 	if user == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []string{"authentication required for private registry"}})
+		jsonapi.WriteRegistryError(c, http.StatusUnauthorized, "authentication required for private registry")
 		return false
 	}
 	inOrg, err := orgRepo.UserInOrg(user.ID, orgID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []string{"Not found"}})
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Not found")
 		return false
 	}
 	return true

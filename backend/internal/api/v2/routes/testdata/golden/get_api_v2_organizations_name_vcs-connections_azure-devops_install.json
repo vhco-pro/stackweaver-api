@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/vcs-connections/azure-devops/install",
+  "status": 500,
+  "body": {
+    "errors": [
+      {
+        "detail": "Azure DevOps OAuth is not configured. Please set AZURE_DEVOPS_CLIENT_ID, AZURE_DEVOPS_CLIENT_SECRET, and AZURE_DEVOPS_REDIRECT_URI.",
+        "status": "500",
+        "title": "Configuration Error"
+      }
+    ]
+  }
+}

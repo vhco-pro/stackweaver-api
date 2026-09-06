@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/deregister",
+  "status": 403,
+  "body": {
+    "errors": [
+      {
+        "detail": "this API key is not a runner token",
+        "status": "403",
+        "title": "Forbidden"
+      }
+    ]
+  }
+}

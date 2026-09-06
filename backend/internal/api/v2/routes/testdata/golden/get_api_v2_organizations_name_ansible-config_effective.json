@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/ansible-config/effective",
+  "status": 404,
+  "body": {
+    "errors": [
+      {
+        "status": "404",
+        "title": "No ansible config found at any scope"
+      }
+    ]
+  }
+}

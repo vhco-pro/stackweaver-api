@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -45,16 +46,12 @@ func NewHostHandler(
 func (h *HostHandler) authorizeHost(c *gin.Context, hostID uuid.UUID, write bool) (*models.AnsibleInventoryHost, bool) {
 	host, err := h.inventoryService.GetHost(hostID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Host not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Host not found")
 		return nil, false
 	}
 	inventory, err := h.inventoryService.GetInventory(host.InventoryID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return nil, false
 	}
 	if !authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write) {
@@ -68,9 +65,7 @@ func (h *HostHandler) authorizeHost(c *gin.Context, hostID uuid.UUID, write bool
 func (h *HostHandler) authorizeInventoryByID(c *gin.Context, inventoryID uuid.UUID, write bool) bool {
 	inventory, err := h.inventoryService.GetInventory(inventoryID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Inventory not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return false
 	}
 	return authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write)
@@ -112,11 +107,7 @@ func (h *HostHandler) List(c *gin.Context) {
 	inventoryIDStr := c.Param("id")
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid inventory ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory ID")
 		return
 	}
 
@@ -133,23 +124,16 @@ func (h *HostHandler) List(c *gin.Context) {
 
 	hosts, total, err := h.inventoryService.ListHosts(inventoryID, perPage, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": "Failed to list hosts"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list hosts")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatHostsResponse(hosts),
-		"meta": gin.H{
-			"pagination": gin.H{
-				"current-page": page,
-				"page-size":    perPage,
-				"total-count":  total,
-				"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatHostsResponse(hosts), gin.H{
+		"pagination": gin.H{
+			"current-page": page,
+			"page-size":    perPage,
+			"total-count":  total,
+			"total-pages":  (total + int64(perPage) - 1) / int64(perPage),
 		},
 	})
 }
@@ -160,11 +144,7 @@ func (h *HostHandler) Create(c *gin.Context) {
 	inventoryIDStr := c.Param("id")
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid inventory ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory ID")
 		return
 	}
 
@@ -174,11 +154,7 @@ func (h *HostHandler) Create(c *gin.Context) {
 
 	var req CreateHostRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -202,17 +178,11 @@ func (h *HostHandler) Create(c *gin.Context) {
 		enabled,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": formatHostResponse(host),
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatHostResponse(host))
 }
 
 // Get retrieves a host by ID
@@ -221,11 +191,7 @@ func (h *HostHandler) Get(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid host ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid host ID")
 		return
 	}
 
@@ -234,9 +200,7 @@ func (h *HostHandler) Get(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatHostResponse(host),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatHostResponse(host))
 }
 
 // Update updates a host
@@ -245,11 +209,7 @@ func (h *HostHandler) Update(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid host ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid host ID")
 		return
 	}
 
@@ -259,11 +219,7 @@ func (h *HostHandler) Update(c *gin.Context) {
 
 	var req UpdateHostRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -277,17 +233,11 @@ func (h *HostHandler) Update(c *gin.Context) {
 		req.Data.Attributes.Enabled,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatHostResponse(host),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatHostResponse(host))
 }
 
 // Delete deletes a host
@@ -296,11 +246,7 @@ func (h *HostHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid host ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid host ID")
 		return
 	}
 
@@ -309,11 +255,7 @@ func (h *HostHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.inventoryService.DeleteHost(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -326,22 +268,14 @@ func (h *HostHandler) AddToGroup(c *gin.Context) {
 	hostIDStr := c.Param("id")
 	hostID, err := uuid.Parse(hostIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid host ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid host ID")
 		return
 	}
 
 	groupIDStr := c.Param("group_id")
 	groupID, err := uuid.Parse(groupIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid group ID")
 		return
 	}
 
@@ -350,11 +284,7 @@ func (h *HostHandler) AddToGroup(c *gin.Context) {
 	}
 
 	if err := h.inventoryService.AddHostToGroup(hostID, groupID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
@@ -367,22 +297,14 @@ func (h *HostHandler) RemoveFromGroup(c *gin.Context) {
 	hostIDStr := c.Param("id")
 	hostID, err := uuid.Parse(hostIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid host ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid host ID")
 		return
 	}
 
 	groupIDStr := c.Param("group_id")
 	groupID, err := uuid.Parse(groupIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid group ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid group ID")
 		return
 	}
 
@@ -391,11 +313,7 @@ func (h *HostHandler) RemoveFromGroup(c *gin.Context) {
 	}
 
 	if err := h.inventoryService.RemoveHostFromGroup(hostID, groupID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{"status": "500", "title": "Internal Server Error", "detail": err.Error()},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 

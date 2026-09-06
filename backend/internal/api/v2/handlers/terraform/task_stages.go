@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/services/runtask"
 )
@@ -175,7 +176,7 @@ func (h *RunHandlerV2) ListTaskStages(c *gin.Context) {
 	for i := range stages {
 		data = append(data, formatTaskStage(&stages[i], canOverride))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data, "meta": fullPaginationMeta(page, pageSize, int64(len(stages)))})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, int64(len(stages))))
 }
 
 // GetTaskStage handles GET /task-stages/:id (?include=task_results).
@@ -241,7 +242,7 @@ func (h *RunHandlerV2) OverrideTaskStage(c *gin.Context) {
 	if err != nil {
 		reloaded = ts
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatTaskStage(reloaded, true)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatTaskStage(reloaded, true))
 }
 
 // GetTaskResult handles GET /task-results/:id.
@@ -254,7 +255,7 @@ func (h *RunHandlerV2) GetTaskResult(c *gin.Context) {
 	if _, ok := h.authorizeRun(c, tr.TaskStage.RunID, "read"); !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatTaskResult(tr)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatTaskResult(tr))
 }
 
 // ListTaskResultOutcomes handles GET /task-results/:id/outcomes.
@@ -277,7 +278,7 @@ func (h *RunHandlerV2) ListTaskResultOutcomes(c *gin.Context) {
 	for i := range outcomes {
 		data = append(data, formatTaskResultOutcome(&outcomes[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"data": data, "meta": fullPaginationMeta(page, pageSize, int64(len(outcomes)))})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, fullPaginationMeta(page, pageSize, int64(len(outcomes))))
 }
 
 // GetTaskResultOutcome handles GET /task-result-outcomes/:id.
@@ -295,5 +296,5 @@ func (h *RunHandlerV2) GetTaskResultOutcome(c *gin.Context) {
 	if _, ok := h.authorizeRun(c, tr.TaskStage.RunID, "read"); !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": formatTaskResultOutcome(o)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatTaskResultOutcome(o))
 }

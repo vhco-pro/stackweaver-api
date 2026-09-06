@@ -1,0 +1,87 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "aggregated-commit-status-enabled": false,
+          "allow-force-delete-workspaces": false,
+          "ansible-adhoc-modules": "",
+          "ansible-job-retention-days": 90,
+          "assessments-enforced": false,
+          "collaborator-auth-policy": "password",
+          "cost-estimation-enabled": true,
+          "created-at": "\u003ctimestamp\u003e",
+          "default-execution-mode": "remote",
+          "default-terraform-version": "",
+          "email": "demo@example.invalid",
+          "enforce-hyok": false,
+          "external-id": "\u003cuuid\u003e",
+          "max-ttl-enabled": false,
+          "name": "demo",
+          "owners-team-saml-role-id": "",
+          "permissions": {
+            "can-access-via-teams": true,
+            "can-create-module": true,
+            "can-create-project": true,
+            "can-create-provider": true,
+            "can-create-team": true,
+            "can-create-workspace": true,
+            "can-deploy-no-code-modules": false,
+            "can-destroy": true,
+            "can-manage-assessments": true,
+            "can-manage-policies": true,
+            "can-manage-policy-overrides": true,
+            "can-manage-projects": true,
+            "can-manage-public-modules": true,
+            "can-manage-public-providers": false,
+            "can-manage-run-tasks": true,
+            "can-manage-sso": false,
+            "can-manage-subscription": false,
+            "can-manage-tags": true,
+            "can-manage-users": true,
+            "can-manage-varsets": true,
+            "can-read-assessments": true,
+            "can-read-run-tasks": true,
+            "can-read-varsets": true,
+            "can-start-trial": false,
+            "can-traverse": true,
+            "can-update": true,
+            "can-update-agent-pools": true,
+            "can-update-api-token": true,
+            "can-update-oauth": true,
+            "can-update-sentinel": false,
+            "can-update-ssh-keys": true,
+            "can-view-explorer": true
+          },
+          "send-passing-statuses-for-untriggered-speculative-plans": false,
+          "session-remember": null,
+          "session-timeout": null,
+          "speculative-plan-management-enabled": true,
+          "stacks-enabled": false,
+          "two-factor-conformant": false,
+          "updated-at": "\u003ctimestamp\u003e",
+          "user-tokens-enabled": true
+        },
+        "id": "demo",
+        "links": {
+          "self": "/api/v2/organizations/demo"
+        },
+        "relationships": {},
+        "type": "organizations"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 20,
+        "prev-page": null,
+        "total-count": 1,
+        "total-pages": 1
+      }
+    }
+  }
+}

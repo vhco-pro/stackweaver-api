@@ -25,6 +25,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	terraform "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/queue"
@@ -221,28 +223,12 @@ func (h *VCSAppInstallationHandlerV2) InitiateInstallation(c *gin.Context) {
 	// Verify organization exists
 	_, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	if h.githubAppManager == nil || !h.githubAppManager.IsEnabled() {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "GitHub App Not Configured",
-					"detail": "The GitHub App integration is not available. Check the API pod logs for initialization errors (search for 'GitHub App Manager'). Common causes: missing GITHUB_APP_ID/GITHUB_APP_NAME env vars, or the PEM private key lost its newlines during secret provisioning.",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "GitHub App Not Configured", "The GitHub App integration is not available. Check the API pod logs for initialization errors (search for 'GitHub App Manager'). Common causes: missing GITHUB_APP_ID/GITHUB_APP_NAME env vars, or the PEM private key lost its newlines during secret provisioning.")
 		return
 	}
 
@@ -260,10 +246,8 @@ func (h *VCSAppInstallationHandlerV2) InitiateInstallation(c *gin.Context) {
 	}
 
 	// Return the installation URL as JSON (frontend will handle redirect)
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"install_url": installURL,
-		},
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+		"install_url": installURL,
 	})
 }
 
@@ -277,20 +261,12 @@ func (h *VCSAppInstallationHandlerV2) InitiateAzureDevOpsInstallation(c *gin.Con
 
 	_, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	if h.azureDevOpsManager == nil || !h.azureDevOpsManager.IsEnabled() {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{
-				"status": "500",
-				"title":  "Configuration Error",
-				"detail": "Azure DevOps OAuth is not configured. Please set AZURE_DEVOPS_CLIENT_ID, AZURE_DEVOPS_CLIENT_SECRET, and AZURE_DEVOPS_REDIRECT_URI.",
-			}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Configuration Error", "Azure DevOps OAuth is not configured. Please set AZURE_DEVOPS_CLIENT_ID, AZURE_DEVOPS_CLIENT_SECRET, and AZURE_DEVOPS_REDIRECT_URI.")
 		return
 	}
 
@@ -300,16 +276,12 @@ func (h *VCSAppInstallationHandlerV2) InitiateAzureDevOpsInstallation(c *gin.Con
 	payload := fmt.Sprintf("%s|%s|%s|%s", orgName, adoOrg, escapedReturn, uuid.New().String())
 	state := mintOAuthState(payload)
 	if state == "" {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Configuration Error", "detail": "OAuth state signing is not configured (ENCRYPTION_KEY unset)"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Configuration Error", "OAuth state signing is not configured (ENCRYPTION_KEY unset)")
 		return
 	}
 
 	authURL := h.azureDevOpsManager.GetAuthorizationURL(state)
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{"auth_url": authURL},
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, gin.H{"auth_url": authURL})
 }
 
 // CompleteAzureDevOpsInstallation handles the Azure DevOps OAuth2 callback
@@ -319,16 +291,12 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 	state := c.Query("state")
 
 	if code == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Missing code parameter"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Missing code parameter")
 		return
 	}
 
 	if h.azureDevOpsManager == nil || !h.azureDevOpsManager.IsEnabled() {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Configuration Error", "detail": "Azure DevOps OAuth is not configured"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Configuration Error", "Azure DevOps OAuth is not configured")
 		return
 	}
 
@@ -336,44 +304,34 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 	// state (e.g. an attacker-crafted state pointing at a victim org) fails signature verification.
 	payload, ok := verifyOAuthState(state)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid or expired state parameter"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid or expired state parameter")
 		return
 	}
 
 	// Decode state payload: "stackweaverOrg|adoOrg|returnPath|uuid"
 	stateParts := strings.SplitN(payload, "|", 4)
 	if len(stateParts) < 2 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid state parameter"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid state parameter")
 		return
 	}
 	orgName := stateParts[0]
 	adoOrgName := stateParts[1]
 
 	if orgName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid state: missing org name"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid state: missing org name")
 		return
 	}
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Organization not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	ctx := c.Request.Context()
 	tokenResult, err := h.azureDevOpsManager.ExchangeCode(ctx, code)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": fmt.Sprintf("Failed to exchange authorization code: %v", err)}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Failed to exchange authorization code: %v", err))
 		return
 	}
 
@@ -382,9 +340,7 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 	// materialization), then verifies access to the specified organization.
 	adoProvider := vcs.NewAzureDevOpsProvider(h.azureDevOpsManager)
 	if validationErr := adoProvider.ValidateTokenAndOrg(ctx, tokenResult.AccessToken, adoOrgName); validationErr != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"errors": []gin.H{{"status": "422", "title": "Azure DevOps Access Error", "detail": fmt.Sprintf("Token validated but org access failed: %v", validationErr)}},
-		})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Azure DevOps Access Error", fmt.Sprintf("Token validated but org access failed: %v", validationErr))
 		return
 	}
 
@@ -409,24 +365,18 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		// unlike every other VCS connection write path.
 		if h.vcsRegistry != nil {
 			if err := h.vcsRegistry.EncryptTokens(existing); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt VCS tokens"}},
-				})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to encrypt VCS tokens")
 				return
 			}
 		}
 		if err := h.vcsConnectionRepo.Update(existing); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update VCS connection"}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update VCS connection")
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"data": gin.H{
-				"id":         existing.ID,
-				"type":       "vcs-connections",
-				"attributes": gin.H{"provider": existing.Provider, "account_name": existing.AccountName},
-			},
+		jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+			"id":         existing.ID,
+			"type":       "vcs-connections",
+			"attributes": gin.H{"provider": existing.Provider, "account_name": existing.AccountName},
 		})
 		return
 	}
@@ -444,24 +394,18 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 	// in vcs_connections.go. No-op when encryption is disabled.
 	if h.vcsRegistry != nil {
 		if err := h.vcsRegistry.EncryptTokens(connection); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to encrypt VCS tokens"}},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to encrypt VCS tokens")
 			return
 		}
 	}
 	if err := h.vcsConnectionRepo.Create(connection); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create VCS connection"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create VCS connection")
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":         connection.ID,
-			"type":       "vcs-connections",
-			"attributes": gin.H{"provider": connection.Provider, "account_name": connection.AccountName},
-		},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":         connection.ID,
+		"type":       "vcs-connections",
+		"attributes": gin.H{"provider": connection.Provider, "account_name": connection.AccountName},
 	})
 }
 
@@ -501,9 +445,7 @@ func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
 
 	payload, err := c.GetRawData()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Failed to read webhook payload"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to read webhook payload")
 		return
 	}
 
@@ -511,9 +453,7 @@ func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
 	wp, err := adoProvider.ParseWebhookPayload(payload)
 	if err != nil {
 		logger.Errorf("Failed to parse Azure DevOps webhook payload: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Failed to parse webhook payload"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to parse webhook payload")
 		return
 	}
 
@@ -528,7 +468,7 @@ func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
 	default:
 		h.recordWebhookEvent(nil, wp.EventType, "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
 			fmt.Sprintf("Event type %q not handled", wp.EventType), http.StatusOK, string(payload))
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Event type %q ignored", wp.EventType)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("Event type %q ignored", wp.EventType))
 	}
 }
 
@@ -537,7 +477,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(wp.Repository, wp.Branch)
 	if err != nil {
 		logger.Errorf("Error finding workspaces for %s/%s: %v", wp.Repository, wp.Branch, err)
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("No workspaces found: %v", err)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces found: %v", err))
 		return
 	}
 	// AUD-102 (ADO residual): only trigger workspaces connected through THIS delivery's ADO org.
@@ -546,7 +486,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	if len(workspaces) == 0 {
 		h.recordWebhookEvent(nil, "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
 			"No workspaces with AutoQueueRuns enabled", http.StatusOK, string(payload))
-		c.JSON(http.StatusOK, gin.H{"message": "No workspaces found for this repository and branch"})
+		response.Message(c, http.StatusOK, "No workspaces found for this repository and branch")
 		return
 	}
 
@@ -562,7 +502,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	if len(filteredWorkspaces) == 0 {
 		h.recordWebhookEvent(nil, "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
 			fmt.Sprintf("No workspaces match changed files (%d exist)", len(workspaces)), http.StatusOK, string(payload))
-		c.JSON(http.StatusOK, gin.H{"message": "No workspaces match the changed files"})
+		response.Message(c, http.StatusOK, "No workspaces match the changed files")
 		return
 	}
 
@@ -766,16 +706,14 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 		fmt.Sprintf("%d workspace(s) triggered: %s", len(filteredWorkspaces), strings.Join(triggeredNames, ", ")),
 		http.StatusOK, string(payload))
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Azure DevOps push event processed: %d workspace(s) queued", len(filteredWorkspaces)),
-	})
+	response.Message(c, http.StatusOK, fmt.Sprintf("Azure DevOps push event processed: %d workspace(s) queued", len(filteredWorkspaces)))
 }
 
 // handleAzureDevOpsPullRequestEvent handles Azure DevOps git.pullrequest.* events - triggers speculative plan runs.
 func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.Context, wp *vcs.WebhookPayload, payload []byte) {
 	if wp.BaseBranch == "" || wp.HeadBranch == "" {
 		logger.Infof("Azure DevOps PR event missing base/head branch, ignoring")
-		c.JSON(http.StatusOK, gin.H{"message": "PR event missing branch info, ignored"})
+		response.Message(c, http.StatusOK, "PR event missing branch info, ignored")
 		return
 	}
 
@@ -786,7 +724,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(wp.Repository, wp.BaseBranch)
 	if err != nil {
 		logger.Errorf("Error finding workspaces for %s/%s: %v", wp.Repository, wp.BaseBranch, err)
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("No workspaces found: %v", err)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces found: %v", err))
 		return
 	}
 	// AUD-102 (ADO residual): only trigger workspaces connected through THIS delivery's ADO org.
@@ -803,7 +741,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 	if len(filteredWorkspaces) == 0 {
 		h.recordWebhookEvent(nil, "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
 			"No workspaces with speculative plans enabled", http.StatusOK, string(payload))
-		c.JSON(http.StatusOK, gin.H{"message": "No workspaces with speculative plans enabled"})
+		response.Message(c, http.StatusOK, "No workspaces with speculative plans enabled")
 		return
 	}
 
@@ -823,7 +761,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 			h.recordWebhookEvent(nil, "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
 				fmt.Sprintf("No workspaces match changed files (%d with speculative enabled)", len(filteredWorkspaces)),
 				http.StatusOK, string(payload))
-			c.JSON(http.StatusOK, gin.H{"message": "No workspaces match the changed files"})
+			response.Message(c, http.StatusOK, "No workspaces match the changed files")
 			return
 		}
 		filteredWorkspaces = pathFiltered
@@ -1053,9 +991,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 		fmt.Sprintf("PR #%d: %d workspace(s) triggered: %s", wp.PRNumber, len(filteredWorkspaces), strings.Join(triggeredNames, ", ")),
 		http.StatusOK, string(payload))
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Azure DevOps PR event processed: %d workspace(s) queued for speculative plans", len(filteredWorkspaces)),
-	})
+	response.Message(c, http.StatusOK, fmt.Sprintf("Azure DevOps PR event processed: %d workspace(s) queued for speculative plans", len(filteredWorkspaces)))
 }
 
 // orgFromInstallation resolves the organization that owns the GitHub App installation a
@@ -1135,7 +1071,7 @@ func (h *VCSAppInstallationHandlerV2) recordWebhookEvent(trustedOrgID *uuid.UUID
 
 // webhookUnauthorized writes a JSON:API 401 for a rejected webhook delivery.
 func webhookUnauthorized(c *gin.Context, detail string) {
-	c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": detail}}})
+	jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", detail)
 }
 
 // verifyGitHubWebhook authenticates an incoming GitHub webhook via HMAC-SHA256 of the raw
@@ -1278,15 +1214,7 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 	payload, err := c.GetRawData()
 	if err != nil {
 		logger.Errorf("Failed to read webhook payload: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Failed to read webhook payload",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to read webhook payload")
 		return
 	}
 
@@ -1335,7 +1263,7 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 
 	if eventType != "installation" && eventType != "installation_repositories" {
 		// Ignore other event types
-		c.JSON(http.StatusOK, gin.H{"message": "Event ignored"})
+		response.Message(c, http.StatusOK, "Event ignored")
 		return
 	}
 
@@ -1367,15 +1295,7 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 	}
 
 	if err := json.Unmarshal(payload, &installationEvent); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Failed to parse webhook payload",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to parse webhook payload")
 		return
 	}
 
@@ -1439,7 +1359,7 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 				break
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "Installation deleted"})
+		response.Message(c, http.StatusOK, "Installation deleted")
 
 	case "suspend":
 		// Installation suspended - mark as inactive
@@ -1450,7 +1370,7 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 				break
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "Installation suspended"})
+		response.Message(c, http.StatusOK, "Installation suspended")
 
 	case "unsuspend":
 		// Installation unsuspended - mark as active
@@ -1461,10 +1381,10 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 				break
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "Installation unsuspended"})
+		response.Message(c, http.StatusOK, "Installation unsuspended")
 
 	default:
-		c.JSON(http.StatusOK, gin.H{"message": "Event processed"})
+		response.Message(c, http.StatusOK, "Event processed")
 	}
 }
 
@@ -1478,28 +1398,12 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 	// Get organization
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	if h.githubAppManager == nil || !h.githubAppManager.IsEnabled() {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Configuration Error",
-					"detail": "GitHub App is not configured.",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Configuration Error", "GitHub App is not configured.")
 		return
 	}
 
@@ -1508,15 +1412,7 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 	githubService := h.githubAppManager.GetService()
 	installation, err := githubService.GetInstallation(ctx, installationID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": fmt.Sprintf("Failed to get installation info: %v", err),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Failed to get installation info: %v", err))
 		return
 	}
 
@@ -1528,27 +1424,17 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 		existing.AccountName = installation.AccountName
 		existing.AccountType = installation.AccountType
 		if err := h.vcsConnectionRepo.Update(existing); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to update VCS connection",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update VCS connection")
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"data": gin.H{
-				"id":   existing.ID,
-				"type": "vcs-connections",
-				"attributes": gin.H{
-					"provider":     existing.Provider,
-					"account_name": existing.AccountName,
-					"account_type": existing.AccountType,
-				},
+		jsonapi.WriteDocument(c, http.StatusOK, gin.H{
+			"id":   existing.ID,
+			"type": "vcs-connections",
+			"attributes": gin.H{
+				"provider":     existing.Provider,
+				"account_name": existing.AccountName,
+				"account_type": existing.AccountType,
 			},
 		})
 		return
@@ -1564,27 +1450,17 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 	}
 
 	if err := h.vcsConnectionRepo.Create(connection); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create VCS connection",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create VCS connection")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": gin.H{
-			"id":   connection.ID,
-			"type": "vcs-connections",
-			"attributes": gin.H{
-				"provider":     connection.Provider,
-				"account_name": connection.AccountName,
-				"account_type": connection.AccountType,
-			},
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
+		"id":   connection.ID,
+		"type": "vcs-connections",
+		"attributes": gin.H{
+			"provider":     connection.Provider,
+			"account_name": connection.AccountName,
+			"account_type": connection.AccountType,
 		},
 	})
 }
@@ -1593,7 +1469,7 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []byte) {
 	if h.registryPublisher == nil || h.moduleRepo == nil {
 		logger.Infof("Registry publishing not configured (registryPublisher=%v, moduleRepo=%v)", h.registryPublisher != nil, h.moduleRepo != nil)
-		c.JSON(http.StatusOK, gin.H{"message": "Registry publishing not configured"})
+		response.Message(c, http.StatusOK, "Registry publishing not configured")
 		return
 	}
 
@@ -1611,9 +1487,7 @@ func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []
 
 	if err := json.Unmarshal(payload, &pushEvent); err != nil {
 		logger.Errorf("Failed to parse push event: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Failed to parse push event"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to parse push event")
 		return
 	}
 
@@ -1622,7 +1496,7 @@ func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []
 	// Only process tag push events
 	if !strings.HasPrefix(pushEvent.Ref, "refs/tags/") {
 		logger.Infof("Not a tag push event (ref=%s)", pushEvent.Ref)
-		c.JSON(http.StatusOK, gin.H{"message": "Not a tag push event"})
+		response.Message(c, http.StatusOK, "Not a tag push event")
 		return
 	}
 
@@ -1636,13 +1510,13 @@ func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []
 	modules, err := h.moduleRepo.FindByVCSRepository(repositoryFullName)
 	if err != nil {
 		logger.Errorf("Error finding modules for repository %s: %v", repositoryFullName, err)
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("No modules found for repository: %v", err)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("No modules found for repository: %v", err))
 		return
 	}
 
 	if len(modules) == 0 {
 		logger.Infof("No modules found for repository %s (auto-publish enabled)", repositoryFullName)
-		c.JSON(http.StatusOK, gin.H{"message": "No modules found for repository"})
+		response.Message(c, http.StatusOK, "No modules found for repository")
 		return
 	}
 
@@ -1674,9 +1548,7 @@ func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []
 		logger.Infof("Successfully published module %s/%s/%s version from tag %s", module.Organization.Name, module.Name, module.Provider, tagName)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Tag push event processed: %d module(s) published", successCount),
-	})
+	response.Message(c, http.StatusOK, fmt.Sprintf("Tag push event processed: %d module(s) published", successCount))
 }
 
 // handleBranchPushEvent handles GitHub branch push events for workspace runs
@@ -1711,15 +1583,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 
 	if err := json.Unmarshal(payload, &pushEvent); err != nil {
 		logger.Errorf("Failed to parse branch push event: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Failed to parse push event",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to parse push event")
 		return
 	}
 
@@ -1742,7 +1606,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(repositoryFullName, branchName)
 	if err != nil {
 		logger.Errorf("Error finding workspaces for repository %s, branch %s: %v", repositoryFullName, branchName, err)
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("No workspaces found or error: %v", err)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces found or error: %v", err))
 		return
 	}
 	// AUD-102: only trigger workspaces connected through THIS delivery's installation.
@@ -1752,7 +1616,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 		logger.Infof("No workspaces found for repository %s, branch %s with AutoQueueRuns enabled", repositoryFullName, branchName)
 		h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(pushEvent.Installation.ID, 10)), "push", "github", repositoryFullName, branchName, commitHash, "ignored",
 			"No workspaces with AutoQueueRuns enabled", http.StatusOK, string(payload))
-		c.JSON(http.StatusOK, gin.H{"message": "No workspaces found for this repository and branch"})
+		response.Message(c, http.StatusOK, "No workspaces found for this repository and branch")
 		return
 	}
 
@@ -1800,9 +1664,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 		logger.Infof("No workspaces match the changed files for repository %s, branch %s", repositoryFullName, branchName)
 		h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(pushEvent.Installation.ID, 10)), "push", "github", repositoryFullName, branchName, commitHash, "ignored",
 			fmt.Sprintf("No workspaces match changed files (%d workspace(s) exist but none match path)", len(workspaces)), http.StatusOK, string(payload))
-		c.JSON(http.StatusOK, gin.H{
-			"message": fmt.Sprintf("No workspaces match the changed files (found %d workspace(s) but none match path filters)", len(workspaces)),
-		})
+		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces match the changed files (found %d workspace(s) but none match path filters)", len(workspaces)))
 		return
 	}
 
@@ -2186,9 +2048,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 	h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(pushEvent.Installation.ID, 10)), "push", "github", repositoryFullName, branchName, commitHash, "success",
 		eventMessage, http.StatusOK, string(payload))
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Branch push event processed: %d workspace(s) queued (filtered from %d total)", len(filteredWorkspaces), len(workspaces)),
-	})
+	response.Message(c, http.StatusOK, fmt.Sprintf("Branch push event processed: %d workspace(s) queued (filtered from %d total)", len(filteredWorkspaces), len(workspaces)))
 }
 
 // handlePullRequestEvent handles GitHub pull request events for speculative plans
@@ -2220,22 +2080,14 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 	if err := json.Unmarshal(payload, &prEvent); err != nil {
 		logger.Errorf("Failed to parse pull request event: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Failed to parse pull request event",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to parse pull request event")
 		return
 	}
 
 	// Only process opened, synchronize (new commits), and reopened PRs
 	if prEvent.Action != "opened" && prEvent.Action != "synchronize" && prEvent.Action != "reopened" {
 		logger.Infof("Ignoring PR event action: %s", prEvent.Action)
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("PR action %s ignored", prEvent.Action)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("PR action %s ignored", prEvent.Action))
 		return
 	}
 
@@ -2253,7 +2105,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(repositoryFullName, baseBranch)
 	if err != nil {
 		logger.Errorf("Error finding workspaces for repository %s, branch %s: %v", repositoryFullName, baseBranch, err)
-		c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("No workspaces found or error: %v", err)})
+		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces found or error: %v", err))
 		return
 	}
 	// AUD-102: only workspaces connected through THIS delivery's installation.
@@ -2261,7 +2113,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 	if len(workspaces) == 0 {
 		logger.Infof("No workspaces found for repository %s, branch %s", repositoryFullName, baseBranch)
-		c.JSON(http.StatusOK, gin.H{"message": "No workspaces found for this repository and branch"})
+		response.Message(c, http.StatusOK, "No workspaces found for this repository and branch")
 		return
 	}
 
@@ -2275,7 +2127,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 	if len(filteredWorkspaces) == 0 {
 		logger.Infof("No workspaces with speculative plans enabled for repository %s, branch %s", repositoryFullName, baseBranch)
-		c.JSON(http.StatusOK, gin.H{"message": "No workspaces with speculative plans enabled"})
+		response.Message(c, http.StatusOK, "No workspaces with speculative plans enabled")
 		return
 	}
 
@@ -2304,9 +2156,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			splitUntriggeredWorkspaces(filteredWorkspaces, finalFilteredWorkspaces), headSHA)
 		if len(finalFilteredWorkspaces) == 0 {
 			logger.Infof("No workspaces match the changed files for PR #%d (found %d workspace(s) but none match path filters)", prNumber, len(filteredWorkspaces))
-			c.JSON(http.StatusOK, gin.H{
-				"message": fmt.Sprintf("No workspaces match the changed files (found %d workspace(s) but none match path filters)", len(filteredWorkspaces)),
-			})
+			response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces match the changed files (found %d workspace(s) but none match path filters)", len(filteredWorkspaces)))
 			return
 		}
 		logger.Infof("Filtered to %d workspace(s) that match changed files (from %d total with speculative enabled)", len(finalFilteredWorkspaces), len(filteredWorkspaces))
@@ -2648,9 +2498,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 	h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(prEvent.Installation.ID, 10)), "pull_request", "github", repositoryFullName, headBranch, headSHA, "success",
 		prEventMessage, http.StatusOK, string(payload))
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Pull request event processed: %d workspace(s) queued for speculative plans", len(filteredWorkspaces)),
-	})
+	response.Message(c, http.StatusOK, fmt.Sprintf("Pull request event processed: %d workspace(s) queued for speculative plans", len(filteredWorkspaces)))
 }
 
 // getPRChangedFiles uses git diff to get the list of files changed between base and head branches

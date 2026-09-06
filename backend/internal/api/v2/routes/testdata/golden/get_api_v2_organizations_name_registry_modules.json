@@ -1,0 +1,65 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/registry/modules",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "auto_publish_tags": true,
+          "description": "Autopilot cluster wired to a shared VPC with workload identity enabled.",
+          "downloads": 13,
+          "latest_version": "0.5.0",
+          "name": "gke-autopilot",
+          "provider": "google",
+          "published_at": "\u003ctimestamp\u003e",
+          "vcs_repository": ""
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "registry-modules"
+      },
+      {
+        "attributes": {
+          "auto_publish_tags": true,
+          "description": "Flexible-server Postgres with private networking and automated backups.",
+          "downloads": 329,
+          "latest_version": "1.4.2",
+          "name": "postgres",
+          "provider": "azurerm",
+          "published_at": "\u003ctimestamp\u003e",
+          "vcs_repository": ""
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "registry-modules"
+      },
+      {
+        "attributes": {
+          "auto_publish_tags": true,
+          "description": "Managed Kubernetes cluster with IRSA, addons and a default node group.",
+          "downloads": 201,
+          "latest_version": "1.1.0",
+          "name": "eks-cluster",
+          "provider": "aws",
+          "published_at": "\u003ctimestamp\u003e",
+          "vcs_repository": ""
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "registry-modules"
+      },
+      {
+        "attributes": {
+          "auto_publish_tags": true,
+          "description": "Opinionated VPC with public and private subnets across three availability zones.",
+          "downloads": 186,
+          "latest_version": "2.0.0",
+          "name": "vpc",
+          "provider": "aws",
+          "published_at": "\u003ctimestamp\u003e",
+          "vcs_repository": ""
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "registry-modules"
+      }
+    ]
+  }
+}

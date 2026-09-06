@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/vcs-connections/azure-devops/callback",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Missing code parameter",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

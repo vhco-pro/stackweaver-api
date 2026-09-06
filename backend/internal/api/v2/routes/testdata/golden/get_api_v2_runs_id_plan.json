@@ -1,0 +1,37 @@
+{
+  "method": "GET",
+  "path": "/api/v2/runs/:id/plan",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "execution-details": {
+          "mode": "remote"
+        },
+        "generated-configuration": false,
+        "has-changes": false,
+        "log-read-url": "http://example.com/api/v2/runs/\u003cid\u003e/logs?token=\u003csigned\u003e",
+        "resource-additions": 0,
+        "resource-changes": 0,
+        "resource-destructions": 0,
+        "resource-imports": 0,
+        "status": "canceled",
+        "status-timestamps": {
+          "pending-at": "\u003ctimestamp\u003e",
+          "queued-at": "\u003ctimestamp\u003e"
+        }
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "json-output": "http://example.com/api/v2/plans/\u003cid\u003e/json-output",
+        "self": "http://example.com/api/v2/plans/\u003cid\u003e"
+      },
+      "relationships": {
+        "state-versions": {
+          "data": []
+        }
+      },
+      "type": "plans"
+    }
+  }
+}

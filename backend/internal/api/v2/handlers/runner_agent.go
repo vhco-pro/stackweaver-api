@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
@@ -196,14 +198,14 @@ func deriveRunnerType(tofuVersion, ansibleVersion string) models.RunnerType {
 func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Parse agent pool ID
 	poolID, err := uuid.Parse(req.AgentPoolID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid agent_pool_id"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid agent_pool_id")
 		return
 	}
 
@@ -211,9 +213,9 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	pool, err := h.poolRepo.GetByID(poolID, false)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Agent pool not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Agent pool not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -221,7 +223,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	// Get the API key from context (set by auth middleware)
 	apiKeyID, exists := c.Get("api_key_id")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "API key required for runner registration"}}})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "API key required for runner registration")
 		return
 	}
 
@@ -229,19 +231,19 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	scopes, _ := c.Get("api_key_scopes")
 	scopeStrs, ok := scopes.([]string)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	scopeChecker, err := apikey.NewScopeChecker(scopeStrs)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": []gin.H{{"status": "401", "title": "Unauthorized"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	// Check for runner:register permission on the organization
 	if !scopeChecker.HasOrgPermission(pool.OrganizationID, "runner:register") && !scopeChecker.IsUnrestricted() {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "API key does not have runner:register scope for this organization"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have runner:register scope for this organization")
 		return
 	}
 
@@ -251,7 +253,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	if apiKeyUUID, perr := uuid.Parse(fmt.Sprintf("%v", apiKeyID)); perr == nil {
 		boundPool, berr := h.apiKeyService.AgentPoolBindingForKey(apiKeyUUID)
 		if berr == nil && boundPool != nil && *boundPool != poolID {
-			c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "this agent token is bound to a different agent pool"}}})
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this agent token is bound to a different agent pool")
 			return
 		}
 	}
@@ -283,7 +285,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
 		existing.RegisteredWithAPIKeyID = &apiKeyUUID
 		if err := h.runnerRepo.Update(existing); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to re-register runner"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to re-register runner")
 			return
 		}
 		logger.Infof("Runner re-registered: %s (ID: %s, pool: %s)", existing.Name, existing.ID, existing.AgentPoolID)
@@ -293,7 +295,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		// key. Old tokens for this runner id are revoked inside generateRunnerAPIKey.
 		reRegKey, keyErr := h.generateRunnerAPIKey(existing, registeringUserUUID)
 		if keyErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to mint runner token"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to mint runner token")
 			return
 		}
 
@@ -304,11 +306,11 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 			pendingJobs = jobs
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"runner_id":      existing.ID.String(),
-			"runner_api_key": reRegKey,
-			"status":         "re-registered",
-			"pending_jobs":   pendingJobs,
+		c.JSON(http.StatusOK, RunnerReRegisterResponse{
+			RunnerID:     existing.ID.String(),
+			RunnerAPIKey: reRegKey,
+			Status:       "re-registered",
+			PendingJobs:  pendingJobs,
 		})
 		return
 	}
@@ -350,7 +352,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	}
 
 	if err := h.runnerRepo.Create(runner); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to create runner"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create runner")
 		return
 	}
 
@@ -363,16 +365,14 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		// agent retries rather than silently falling back to the org key.
 		logger.Errorf("Runner registration: failed to mint runner token for %s: %v", runner.ID, err)
 		_ = h.runnerRepo.Delete(runner.ID)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "failed to mint runner token"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to mint runner token")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"runner_id":             runner.ID.String(),
-		"runner_api_key":        runnerAPIKey,
-		"poll_interval_seconds": 10,
+	c.JSON(http.StatusCreated, RunnerRegisterResponse{
+		RunnerID:            runner.ID.String(),
+		RunnerAPIKey:        runnerAPIKey,
+		PollIntervalSeconds: 10,
 	})
 }
 
@@ -422,7 +422,7 @@ type PendingJob struct {
 func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 	var req HeartbeatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -447,7 +447,7 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 		status = models.RunnerStatusBusy
 	}
 	if err := h.runnerRepo.UpdateHeartbeat(runnerID, status, req.CurrentJobs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -477,9 +477,7 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"pending_jobs": pendingJobs,
-	})
+	c.JSON(http.StatusOK, PendingJobsResponse{PendingJobs: pendingJobs})
 }
 
 // JobStartRequest is the request body for starting a job
@@ -494,7 +492,7 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 
 	var req JobStartRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -508,12 +506,12 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 	// Ansible job (UUID)
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid job ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
 		return
 	}
 
 	if h.ansibleJobRepo == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -528,7 +526,7 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 	// Authorize the runner for this job (same org + agent pool) before claiming.
 	job, err := h.ansibleJobRepo.GetByID(jobID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 		return
 	}
 	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
@@ -541,16 +539,16 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 	// job/slice.
 	claimed, err := h.ansibleJobRepo.ClaimForRunner(jobID, runnerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 	if !claimed {
 		// Either the job no longer exists, or another runner already claimed it.
 		if _, getErr := h.ansibleJobRepo.GetByID(jobID); getErr != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 			return
 		}
-		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": "Job already claimed by another runner"}}})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job already claimed by another runner")
 		return
 	}
 
@@ -559,7 +557,7 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 	// completion tracking reflect the runner that actually owns the job.
 	h.upsertJobExecution(jobID, runnerID)
 
-	c.JSON(http.StatusOK, gin.H{"status": "started"})
+	response.Status(c, http.StatusOK, "started")
 }
 
 // upsertJobExecution ensures a running RunnerJobExecution record exists for the
@@ -590,9 +588,9 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	var run models.Run
 	if err := h.db.First(&run, "id = ?", runID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Run not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -617,11 +615,11 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	// canceled in the meantime is no longer pending/applying, so the claim also fails → 409.
 	claimed, err := repository.NewRunRepository(h.db).ClaimForDispatch(runID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to claim run"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to claim run")
 		return
 	}
 	if !claimed {
-		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Run already claimed by another runner or no longer dispatchable"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusConflict, "Run already claimed by another runner or no longer dispatchable")
 		return
 	}
 
@@ -641,7 +639,7 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	run.RunnerID = &runnerID
 	_ = h.db.Save(&run).Error
 
-	c.JSON(http.StatusOK, gin.H{"status": "started"})
+	response.Status(c, http.StatusOK, "started")
 }
 
 // JobOutputRequest is the request body for streaming job output
@@ -658,7 +656,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 
 	var req JobOutputRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -668,7 +666,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 		// any runner could poison another tenant's plan/apply output.
 		var run models.Run
 		if err := h.db.First(&run, "id = ?", jobIDStr).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Run not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 			return
 		}
 		if !h.authorizeRunnerForRun(c, &run, true) {
@@ -696,25 +694,25 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 				logger.Warnf("Failed to append agent output to storage for %s phase %s: %v", jobIDStr, phase, err)
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "received"})
+		response.Status(c, http.StatusOK, "received")
 		return
 	}
 
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid job ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
 		return
 	}
 
 	if h.ansibleJobRepo == nil {
-		c.JSON(http.StatusOK, gin.H{"status": "received"})
+		response.Status(c, http.StatusOK, "received")
 		return
 	}
 
 	// AUD-001: only the runner that owns the job may write its output/events.
 	outputJob, err := h.ansibleJobRepo.GetByID(jobID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 		return
 	}
 	if !h.authorizeRunnerForAnsibleJob(c, outputJob, true) {
@@ -723,7 +721,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 
 	line := strings.TrimSpace(req.Output)
 	if line == "" {
-		c.JSON(http.StatusOK, gin.H{"status": "received"})
+		response.Status(c, http.StatusOK, "received")
 		return
 	}
 
@@ -738,7 +736,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 			Stderr:    line,
 		}
 		_ = h.ansibleJobRepo.CreateEventNextCounter(event)
-		c.JSON(http.StatusOK, gin.H{"status": "received"})
+		response.Status(c, http.StatusOK, "received")
 		return
 	}
 
@@ -752,14 +750,14 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 			Stdout: line,
 		}
 		_ = h.ansibleJobRepo.CreateEventNextCounter(event)
-		c.JSON(http.StatusOK, gin.H{"status": "received"})
+		response.Status(c, http.StatusOK, "received")
 		return
 	}
 
 	// Parse JSONL event and store as structured event
 	h.parseAndStoreAgentEvent(jobID, eventData, line)
 
-	c.JSON(http.StatusOK, gin.H{"status": "received"})
+	response.Status(c, http.StatusOK, "received")
 }
 
 // parseAndStoreAgentEvent parses a JSONL event from a self-hosted runner and stores it
@@ -979,7 +977,7 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 
 	var req JobCompleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -991,7 +989,7 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid job ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
 		return
 	}
 
@@ -999,9 +997,9 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 	exec, err := h.jobExecRepo.GetByJobID(jobID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -1029,13 +1027,13 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 	case "canceled":
 		status = models.JobExecutionStatusCanceled
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid status"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid status")
 		return
 	}
 
 	// Update execution record status
 	if err := h.jobExecRepo.UpdateStatus(exec.ID, status, req.ErrorMessage); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -1088,7 +1086,7 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "completed"})
+	response.Status(c, http.StatusOK, "completed")
 }
 
 // jobCompleteTerraformRun handles job completion for Terraform runs
@@ -1096,9 +1094,9 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 	var run models.Run
 	if err := h.db.First(&run, "id = ?", runID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Run not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -1205,7 +1203,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			hasPostPlanStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostPlan)
 			if tsErr != nil {
 				// Fail closed: skipping the gate on a DB error would let a run bypass a mandatory task.
-				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to check task stages"}}})
+				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to check task stages")
 				return
 			}
 			switch {
@@ -1238,7 +1236,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			// platform runner's post-apply gate.
 			hasPostApplyStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostApply)
 			if tsErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to check task stages"}}})
+				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to check task stages")
 				return
 			}
 			terminalUpdates := map[string]interface{}{
@@ -1255,14 +1253,14 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			}
 			res := h.db.Model(&models.Run{}).Where("id = ? AND status != ?", runID, models.RunStatusCancelled).Updates(terminalUpdates)
 			if res.RowsAffected == 0 {
-				c.JSON(http.StatusOK, gin.H{"status": "completed"})
+				response.Status(c, http.StatusOK, "completed")
 				return
 			}
 			// Persist plan metadata if provided (run struct was updated above the switch)
 			if req.PlanJSON != "" || req.HasChanges {
 				_ = h.db.Model(&models.Run{}).Where("id = ?", runID).Update("plan_output", run.PlanOutput)
 			}
-			c.JSON(http.StatusOK, gin.H{"status": "completed"})
+			response.Status(c, http.StatusOK, "completed")
 			return
 		}
 	case "failed":
@@ -1278,12 +1276,12 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		run.Status = models.RunStatusCancelled
 		run.CompletedAt = &now
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid status"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid status")
 		return
 	}
 
 	if err := h.db.Save(&run).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
 
@@ -1296,7 +1294,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "completed"})
+	response.Status(c, http.StatusOK, "completed")
 }
 
 // Deregister removes a runner
@@ -1326,14 +1324,14 @@ func (h *RunnerAgentHandler) Deregister(c *gin.Context) {
 	// Admins can delete through the management API
 	if err := h.runnerRepo.UpdateStatus(runnerID, models.RunnerStatusOffline); err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Runner not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "deregistered"})
+	response.Status(c, http.StatusOK, "deregistered")
 }
 
 // JobArtifactsResponse contains all files needed to execute an ansible job
@@ -1398,7 +1396,7 @@ type AnsibleJobConfig struct {
 func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 	jobIDStr := c.Param("id")
 	if jobIDStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "job id required"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "job id required")
 		return
 	}
 	// Terraform jobs use run ID (run-xxx)
@@ -1407,37 +1405,37 @@ func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 		var run models.Run
 		if err := h.db.Select("status", "workspace_id", "agent_pool_id", "runner_id").First(&run, "id = ?", jobIDStr).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found"}}})
+				jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 			return
 		}
 		if !h.authorizeRunnerForRun(c, &run, false) {
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": string(run.Status)})
+		response.Status(c, http.StatusOK, string(run.Status))
 		return
 	}
 	// Ansible jobs use UUID
 	if h.ansibleJobRepo == nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
 		return
 	}
 	jobID, parseErr := uuid.Parse(jobIDStr)
 	if parseErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid job ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
 		return
 	}
 	job, getErr := h.ansibleJobRepo.GetByID(jobID)
 	if getErr != nil || job == nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
 		return
 	}
 	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": string(job.Status)})
+	response.Status(c, http.StatusOK, string(job.Status))
 }
 
 // GetJobArtifacts returns all artifacts needed to execute a job
@@ -1453,13 +1451,13 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 
 	jobID, err := uuid.Parse(jobIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Invalid job ID"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
 		return
 	}
 
 	// Check if repos are available
 	if h.ansibleJobRepo == nil {
-		c.JSON(http.StatusNotImplemented, gin.H{"errors": []gin.H{{"status": "501", "title": "Job artifacts not configured"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotImplemented, "Job artifacts not configured")
 		return
 	}
 
@@ -1467,9 +1465,9 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	job, err := h.ansibleJobRepo.GetByID(jobID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Job not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -1640,7 +1638,7 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 				if updateErr := h.ansibleJobRepo.Update(job); updateErr != nil {
 					logger.Warnf("Failed to mark sliced job %s failed: %v", job.ID, updateErr)
 				}
-				c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "failed to slice inventory: " + err.Error()}}})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to slice inventory: "+err.Error())
 				return
 			}
 		}
@@ -1757,9 +1755,9 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	var run models.Run
 	if err := h.db.Preload("Workspace").First(&run, "id = ?", runID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Run not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -2328,7 +2326,7 @@ func injectUserIntoInventory(inventoryJSON, username string) (string, error) {
 func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 	jobIDStr := c.Param("id")
 	if jobIDStr == "" || !strings.HasPrefix(jobIDStr, "run-") {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "valid run ID required"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "valid run ID required")
 		return
 	}
 
@@ -2337,26 +2335,26 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		State    string `json:"state"` // base64-encoded terraform.tfstate
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if req.State == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "state field required"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "state field required")
 		return
 	}
 
 	// Decode base64 state
 	stateData, err := base64.StdEncoding.DecodeString(req.State)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid base64 state data"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid base64 state data")
 		return
 	}
 
 	// Parse state JSON
 	var stateJSON map[string]interface{}
 	if err := json.Unmarshal(stateData, &stateJSON); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "invalid state JSON"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid state JSON")
 		return
 	}
 
@@ -2364,9 +2362,9 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 	var run models.Run
 	if err := h.db.First(&run, "id = ?", jobIDStr).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Run not found"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
@@ -2417,11 +2415,11 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 	nextVersion, err := stateVersionRepo.CreateNextVersion(&stateVersion)
 	if err != nil {
 		if errors.Is(err, repository.ErrStateSerialRegression) {
-			c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Stale state", "detail": "incoming state serial is older than the current state version"}}})
+			jsonapi.WriteError(c, http.StatusConflict, "Stale state", "incoming state serial is older than the current state version")
 			return
 		}
 		logger.Warnf("Failed to reserve state version for run %s: %v", jobIDStr, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to save state version"}}})
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to save state version")
 		return
 	}
 
@@ -2430,7 +2428,7 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		if err := h.stateService.PutStateObject(c.Request.Context(), run.WorkspaceID, nextVersion, stateData); err != nil {
 			_ = stateVersionRepo.Delete(stateVersion.ID)
 			logger.Errorf("Failed to save state to object storage for run %s: %v", jobIDStr, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Failed to persist state to object storage"}}})
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to persist state to object storage")
 			return
 		}
 	}
@@ -2442,5 +2440,31 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 	}
 
 	logger.Infof("State version %d saved for run %s (workspace %s, serial=%v)", nextVersion, jobIDStr, run.WorkspaceID, serial)
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "version": nextVersion})
+	c.JSON(http.StatusOK, StateVersionSavedResponse{Status: "ok", Version: nextVersion})
+}
+
+// RunnerReRegisterResponse answers a runner re-registering with an existing identity.
+type RunnerReRegisterResponse struct {
+	RunnerID     string       `json:"runner_id"`
+	RunnerAPIKey string       `json:"runner_api_key"`
+	Status       string       `json:"status"`
+	PendingJobs  []PendingJob `json:"pending_jobs"`
+}
+
+// RunnerRegisterResponse answers a first-time runner registration.
+type RunnerRegisterResponse struct {
+	RunnerID            string `json:"runner_id"`
+	RunnerAPIKey        string `json:"runner_api_key"`
+	PollIntervalSeconds int    `json:"poll_interval_seconds"`
+}
+
+// PendingJobsResponse is the runner poll response.
+type PendingJobsResponse struct {
+	PendingJobs []PendingJob `json:"pending_jobs"`
+}
+
+// StateVersionSavedResponse acknowledges a state version upload.
+type StateVersionSavedResponse struct {
+	Status  string `json:"status"`
+	Version int    `json:"version"`
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
@@ -43,28 +44,28 @@ func NewProvisioningCallbackHandler(
 func (h *ProvisioningCallbackHandler) Handle(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid job template ID"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid job template ID")
 		return
 	}
 	var req struct {
 		HostConfigKey string `json:"host_config_key"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.HostConfigKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "host_config_key is required"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "host_config_key is required")
 		return
 	}
 	template, err := h.templateRepo.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Job template not found"}}})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Job template not found")
 		return
 	}
 	if !template.AllowCallbacks || template.HostConfigKey == "" ||
 		subtle.ConstantTimeCompare([]byte(template.HostConfigKey), []byte(req.HostConfigKey)) != 1 {
-		c.JSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "Provisioning callbacks are not enabled for this template or the key is wrong"}}})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Provisioning callbacks are not enabled for this template or the key is wrong")
 		return
 	}
 	if template.Disabled {
-		c.JSON(http.StatusConflict, gin.H{"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": "Job template is disabled"}}})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
 		return
 	}
 
@@ -73,7 +74,7 @@ func (h *ProvisioningCallbackHandler) Handle(c *gin.Context) {
 	clientIP := c.ClientIP()
 	hostName := h.findRequestingHost(template.InventoryID, clientIP)
 	if hostName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Requesting host " + clientIP + " was not found in the template's inventory"}}})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Requesting host "+clientIP+" was not found in the template's inventory")
 		return
 	}
 
@@ -81,7 +82,7 @@ func (h *ProvisioningCallbackHandler) Handle(c *gin.Context) {
 	// template launch does.
 	templateCredentialIDs, err := h.templateRepo.ListCredentialIDs(template.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to read template credentials"}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to read template credentials")
 		return
 	}
 
@@ -105,11 +106,11 @@ func (h *ProvisioningCallbackHandler) Handle(c *gin.Context) {
 	}
 	job, err := h.jobService.LaunchJob(c.Request.Context(), input)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": err.Error()}}})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 	logger.Infof("Provisioning callback: launched job %s for host %s (template %s)", job.ID, hostName, template.Name)
-	c.JSON(http.StatusCreated, gin.H{"data": gin.H{"id": job.ID.String(), "type": "ansible-jobs", "attributes": gin.H{"status": job.Status, "limit": hostName}}})
+	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{"id": job.ID.String(), "type": "ansible-jobs", "attributes": gin.H{"status": job.Status, "limit": hostName}})
 }
 
 // findRequestingHost matches a client IP against the inventory's hosts (name,

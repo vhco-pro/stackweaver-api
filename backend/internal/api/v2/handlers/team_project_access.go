@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -243,72 +244,32 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 	}
 
 	if projectIDStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Project ID is required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Project ID is required")
 		return
 	}
 
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid project ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project ID format")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Verify project exists and user has access
 	project, err := h.projectRepo.GetByID(projectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
@@ -317,15 +278,7 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 	// this implements. Writes below remain admin-only.
 	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You must be a member of this organization (via team membership)",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return
 	}
 
@@ -339,15 +292,7 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 	if !isTeamAdmin {
 		memberOf, err = callerTeamIDs(h.teamRepo, user.ID, org.ID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to resolve team memberships",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve team memberships")
 			return
 		}
 	}
@@ -355,15 +300,7 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 	// Get all team project accesses for this project
 	accesses, err := h.teamRepo.GetProjectAccess(projectID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve team project accesses",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve team project accesses")
 		return
 	}
 
@@ -376,9 +313,7 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 		data = append(data, formatTeamProjectAccessResponse(&accesses[i]))
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": data,
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
 // Create creates a new team project access
@@ -392,15 +327,7 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// Log the actual error for debugging
 		logger.Debugf("TeamProjectAccess Create: JSON binding error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -410,59 +337,27 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Validate JSON:API format
 	// TFE uses "team-projects" as the type
 	if req.Data.Type != "team-projects" && req.Data.Type != "team-project-accesses" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "data.type must be 'team-projects' or 'team-project-accesses'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'team-projects' or 'team-project-accesses'")
 		return
 	}
 
 	// Get team ID from relationships
 	teamIDStr := req.Data.Relationships.Team.Data.ID
 	if teamIDStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Team ID is required in relationships.team.data.id",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Team ID is required in relationships.team.data.id")
 		return
 	}
 
 	teamID, err := uuid.Parse(teamIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid team ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid team ID format")
 		return
 	}
 
@@ -473,102 +368,46 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 	}
 
 	if projectIDStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Project ID is required (either in URL or relationships.project.data.id)",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Project ID is required (either in URL or relationships.project.data.id)")
 		return
 	}
 
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid project ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project ID format")
 		return
 	}
 
 	// Verify team exists
 	team, err := h.teamRepo.GetByID(teamID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Team not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team not found")
 		return
 	}
 
 	// Verify project exists
 	project, err := h.projectRepo.GetByID(projectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	// Verify team and project belong to the same organization
 	if team.OrganizationID != project.OrganizationID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Team and project must belong to the same organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Team and project must belong to the same organization")
 		return
 	}
 
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Check if user has permission to manage teams (team project access requires team management permission)
 	hasPermission, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only organization admins can manage team project access",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization admins can manage team project access")
 		return
 	}
 
@@ -592,28 +431,12 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 		hasAccess, attrs.Access, hasProjectAccessBlock, hasWorkspaceAccessBlock, hasCustomPermissions, isCustomAccess)
 
 	if !hasAccess {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "access is required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "access is required")
 		return
 	}
 
 	if hasAccess && hasCustomPermissions && !isCustomAccess {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Cannot provide both 'access' and custom permission attributes unless access is 'custom'. Use either 'access' OR custom permission attributes",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Cannot provide both 'access' and custom permission attributes unless access is 'custom'. Use either 'access' OR custom permission attributes")
 		return
 	}
 
@@ -633,15 +456,7 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 			}
 			missingStr += m
 		}
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "When using access='custom', both 'project-access' and 'workspace-access' blocks are required. Missing: " + missingStr,
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "When using access='custom', both 'project-access' and 'workspace-access' blocks are required. Missing: "+missingStr)
 		return
 	}
 
@@ -659,15 +474,7 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 		case "admin", "maintain", "write", "read":
 			accessEntry.Access = &access
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "access must be one of: admin, maintain, write, read, custom",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "access must be one of: admin, maintain, write, read, custom")
 			return
 		}
 	} else if hasCustomPermissions || isCustomAccess {
@@ -680,191 +487,79 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 
 		// Parse custom project access permissions (all fields are required when using custom permissions)
 		if attrs.ProjectAccess.Settings == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "project-access.settings is required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.settings is required when using custom permissions")
 			return
 		}
 		settingsVal := *attrs.ProjectAccess.Settings
 		if settingsVal != "read" && settingsVal != "update" && settingsVal != "delete" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "project-access.settings must be one of: read, update, delete",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.settings must be one of: read, update, delete")
 			return
 		}
 		accessEntry.ProjectSettings = &settingsVal
 
 		if attrs.ProjectAccess.Teams == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "project-access.teams is required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.teams is required when using custom permissions")
 			return
 		}
 		teamsVal := *attrs.ProjectAccess.Teams
 		if teamsVal != "none" && teamsVal != "read" && teamsVal != "manage" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "project-access.teams must be one of: none, read, manage",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.teams must be one of: none, read, manage")
 			return
 		}
 		accessEntry.ProjectTeams = &teamsVal
 
 		if attrs.ProjectAccess.VariableSets == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "project-access.variable-sets is required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.variable-sets is required when using custom permissions")
 			return
 		}
 		variableSetsVal := *attrs.ProjectAccess.VariableSets
 		if variableSetsVal != "none" && variableSetsVal != "read" && variableSetsVal != "write" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "project-access.variable-sets must be one of: none, read, write",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.variable-sets must be one of: none, read, write")
 			return
 		}
 		accessEntry.ProjectVariableSets = &variableSetsVal
 
 		// Parse custom workspace access permissions (all fields are required when using custom permissions)
 		if attrs.WorkspaceAccess.Runs == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.runs is required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.runs is required when using custom permissions")
 			return
 		}
 		runsVal := *attrs.WorkspaceAccess.Runs
 		if runsVal != "read" && runsVal != "plan" && runsVal != "apply" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.runs must be one of: read, plan, apply",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.runs must be one of: read, plan, apply")
 			return
 		}
 		accessEntry.WorkspaceRuns = &runsVal
 
 		if attrs.WorkspaceAccess.SentinelMocks == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.sentinel-mocks is required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.sentinel-mocks is required when using custom permissions")
 			return
 		}
 		sentinelMocksVal := *attrs.WorkspaceAccess.SentinelMocks
 		if sentinelMocksVal != "none" && sentinelMocksVal != "read" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.sentinel-mocks must be one of: none, read",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.sentinel-mocks must be one of: none, read")
 			return
 		}
 		accessEntry.WorkspaceSentinelMocks = &sentinelMocksVal
 
 		if attrs.WorkspaceAccess.StateVersions == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.state-versions is required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.state-versions is required when using custom permissions")
 			return
 		}
 		stateVersionsVal := *attrs.WorkspaceAccess.StateVersions
 		if stateVersionsVal != "none" && stateVersionsVal != "read" && stateVersionsVal != "read-outputs" && stateVersionsVal != "write" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.state-versions must be one of: none, read-outputs, read, write",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.state-versions must be one of: none, read-outputs, read, write")
 			return
 		}
 		accessEntry.WorkspaceStateVersions = &stateVersionsVal
 
 		if attrs.WorkspaceAccess.Variables == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.variables is required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.variables is required when using custom permissions")
 			return
 		}
 		variablesVal := *attrs.WorkspaceAccess.Variables
 		if variablesVal != "none" && variablesVal != "read" && variablesVal != "write" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "workspace-access.variables must be one of: none, read, write",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.variables must be one of: none, read, write")
 			return
 		}
 		accessEntry.WorkspaceVariables = &variablesVal
@@ -911,36 +606,18 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 	existingAccesses, _ := h.teamRepo.GetProjectAccess(projectID)
 	for _, existing := range existingAccesses {
 		if existing.TeamID == teamID {
-			c.JSON(http.StatusConflict, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "409",
-						"title":  "Conflict",
-						"detail": "Team already has access to this project",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Team already has access to this project")
 			return
 		}
 	}
 
 	// Create access entry
 	if err := h.teamRepo.CreateProjectAccess(accessEntry); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create team project access",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create team project access")
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": formatTeamProjectAccessResponse(accessEntry),
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatTeamProjectAccessResponse(accessEntry))
 }
 
 // Get retrieves a team project access by ID
@@ -957,94 +634,44 @@ func (h *TeamProjectAccessHandlerV2) GetByID(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	accessID, err := uuid.Parse(accessIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid access ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
 		return
 	}
 
 	// Get access entry
 	access, err := h.teamRepo.GetProjectAccessByID(accessID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Team project access not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
 		return
 	}
 
 	// Verify project exists and user has access
 	project, err := h.projectRepo.GetByID(access.ProjectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Check if user has permission to manage teams (team project access requires team management permission)
 	hasPermission, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only organization admins can manage team project access",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization admins can manage team project access")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatTeamProjectAccessResponse(access),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatTeamProjectAccessResponse(access))
 }
 
 // Update updates team project access
@@ -1062,116 +689,52 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	accessID, err := uuid.Parse(accessIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid access ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
 		return
 	}
 
 	// Get existing access
 	access, err := h.teamRepo.GetProjectAccessByID(accessID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Team project access not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
 		return
 	}
 
 	// Verify project exists and user has access
 	project, err := h.projectRepo.GetByID(access.ProjectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Check if user has permission to manage teams (team project access requires team management permission)
 	hasPermission, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only organization admins can manage team project access",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization admins can manage team project access")
 		return
 	}
 
 	var req UpdateTeamProjectAccessRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "team-projects" && req.Data.Type != "team-project-accesses" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "data.type must be 'team-projects' or 'team-project-accesses'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'team-projects' or 'team-project-accesses'")
 		return
 	}
 
@@ -1191,15 +754,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 	isCustomAccess := hasAccess && *attrs.Access == "custom"
 
 	if hasAccess && hasCustomPermissions && !isCustomAccess {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Cannot provide both 'access' and custom permission attributes unless access is 'custom'. Use either 'access' OR custom permission attributes",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Cannot provide both 'access' and custom permission attributes unless access is 'custom'. Use either 'access' OR custom permission attributes")
 		return
 	}
 
@@ -1212,15 +767,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			// Clear custom permissions and set access
 			access.Access = &accessVal
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "access must be one of: admin, maintain, write, read, custom",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "access must be one of: admin, maintain, write, read, custom")
 			return
 		}
 		access.ProjectSettings = nil
@@ -1242,15 +789,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 
 		// Validate that both project-access and workspace-access blocks are provided when using custom permissions
 		if !hasProjectAccessBlock || !hasWorkspaceAccessBlock {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "Both 'project-access' and 'workspace-access' blocks are required when using custom permissions",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Both 'project-access' and 'workspace-access' blocks are required when using custom permissions")
 			return
 		}
 
@@ -1261,15 +800,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			case "read", "update", "delete":
 				access.ProjectSettings = &settingsVal
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "400",
-							"title":  "Bad Request",
-							"detail": "project-access.settings must be one of: read, update, delete",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.settings must be one of: read, update, delete")
 				return
 			}
 		}
@@ -1280,15 +811,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			case "none", "read", "manage":
 				access.ProjectTeams = &teamsVal
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "400",
-							"title":  "Bad Request",
-							"detail": "project-access.teams must be one of: none, read, manage",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.teams must be one of: none, read, manage")
 				return
 			}
 		}
@@ -1299,15 +822,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			case "none", "read", "write":
 				access.ProjectVariableSets = &variableSetsVal
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "400",
-							"title":  "Bad Request",
-							"detail": "project-access.variable-sets must be one of: none, read, write",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-access.variable-sets must be one of: none, read, write")
 				return
 			}
 		}
@@ -1319,15 +834,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			case "read", "plan", "apply":
 				access.WorkspaceRuns = &runsVal
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "400",
-							"title":  "Bad Request",
-							"detail": "workspace-access.runs must be one of: read, plan, apply",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.runs must be one of: read, plan, apply")
 				return
 			}
 		}
@@ -1338,15 +845,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			case "none", "read":
 				access.WorkspaceSentinelMocks = &sentinelMocksVal
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "400",
-							"title":  "Bad Request",
-							"detail": "workspace-access.sentinel-mocks must be one of: none, read",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.sentinel-mocks must be one of: none, read")
 				return
 			}
 		}
@@ -1357,15 +856,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			case "none", "read", "read-outputs", "write":
 				access.WorkspaceStateVersions = &stateVersionsVal
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "400",
-							"title":  "Bad Request",
-							"detail": "workspace-access.state-versions must be one of: none, read-outputs, read, write",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.state-versions must be one of: none, read-outputs, read, write")
 				return
 			}
 		}
@@ -1376,15 +867,7 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 			case "none", "read", "write":
 				access.WorkspaceVariables = &variablesVal
 			default:
-				c.JSON(http.StatusBadRequest, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "400",
-							"title":  "Bad Request",
-							"detail": "workspace-access.variables must be one of: none, read, write",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workspace-access.variables must be one of: none, read, write")
 				return
 			}
 		}
@@ -1412,21 +895,11 @@ func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
 
 	// Update access entry
 	if err := h.teamRepo.UpdateProjectAccess(access); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to update team project access",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update team project access")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatTeamProjectAccessResponse(access),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatTeamProjectAccessResponse(access))
 }
 
 // Delete removes team project access
@@ -1444,102 +917,46 @@ func (h *TeamProjectAccessHandlerV2) DeleteByID(c *gin.Context) {
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	accessID, err := uuid.Parse(accessIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid access ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
 		return
 	}
 
 	// Get existing access
 	access, err := h.teamRepo.GetProjectAccessByID(accessID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Team project access not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
 		return
 	}
 
 	// Verify project exists and user has access
 	project, err := h.projectRepo.GetByID(access.ProjectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Check if user has permission to manage teams (team project access requires team management permission)
 	hasPermission, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Only organization admins can manage team project access",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Only organization admins can manage team project access")
 		return
 	}
 
 	// Delete access entry
 	if err := h.teamRepo.DeleteProjectAccess(accessID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to delete team project access",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete team project access")
 		return
 	}
 

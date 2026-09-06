@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -255,45 +256,21 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	// Get user for permission checking
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Check if user has organization-level read-projects permission
 	hasOrgReadProjects, err := h.rbacService.CheckOrgReadProjects(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 
@@ -310,15 +287,7 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 		// User has organization-level read-projects permission - show all projects
 		projects, total, err = h.projectRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, perPage, offset)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to list projects",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list projects")
 			return
 		}
 	} else {
@@ -327,15 +296,7 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 		// Get all teams user is member of
 		teams, err := h.teamRepo.GetTeamsByUserID(user.ID, org.ID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": "Failed to get user teams",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get user teams")
 			return
 		}
 
@@ -362,15 +323,7 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 			// Get all projects first to count total
 			allProjects, _, err := h.projectRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, 10000, 0)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "500",
-							"title":  "Internal Server Error",
-							"detail": "Failed to list projects",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list projects")
 				return
 			}
 
@@ -406,14 +359,11 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 		formattedProjects[i] = formatProjectResponse(&projects[i], org.Name)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formattedProjects,
-		"meta": gin.H{
-			"pagination": gin.H{
-				"page":     page,
-				"per_page": perPage,
-				"total":    total,
-			},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedProjects, gin.H{
+		"pagination": gin.H{
+			"page":     page,
+			"per_page": perPage,
+			"total":    total,
 		},
 	})
 }
@@ -426,29 +376,13 @@ func (h *ProjectHandlerV2) Get(c *gin.Context) {
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	project, err := h.projectRepo.GetByOrganizationAndName(org.ID, projectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
@@ -456,16 +390,12 @@ func (h *ProjectHandlerV2) Get(c *gin.Context) {
 	// by-name read leaked project configuration cross-tenant to any authenticated user.
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You must be a member of this organization (via team membership)"}},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return
 	}
 
@@ -476,9 +406,7 @@ func (h *ProjectHandlerV2) Get(c *gin.Context) {
 		projectWithResources = project
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatProjectResponseWithCounts(projectWithResources, org.Name),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatProjectResponseWithCounts(projectWithResources, org.Name))
 }
 
 // GetByID returns a single project by ID (TFE-compatible)
@@ -488,72 +416,32 @@ func (h *ProjectHandlerV2) GetByID(c *gin.Context) {
 
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid project ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project ID format")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	project, err := h.projectRepo.GetByIDWithResources(projectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	// Verify user has access to the organization
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
 	if err != nil || !inOrg {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You must be a member of this organization (via team membership)",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return
 	}
 
@@ -587,29 +475,13 @@ func (h *ProjectHandlerV2) Create(c *gin.Context) {
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
@@ -617,56 +489,24 @@ func (h *ProjectHandlerV2) Create(c *gin.Context) {
 	// Project creation requires org-level manage-projects permission via team membership
 	hasManageProjects, err := h.rbacService.CheckOrgManageProjects(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 
 	if !hasManageProjects {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You do not have permission to create projects. Project creation requires organization-level manage-projects permission via team membership.",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to create projects. Project creation requires organization-level manage-projects permission via team membership.")
 		return
 	}
 
 	var req CreateProjectRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "projects" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "data.type must be 'projects'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'projects'")
 		return
 	}
 
@@ -674,30 +514,14 @@ func (h *ProjectHandlerV2) Create(c *gin.Context) {
 
 	// Validate name length
 	if len(attrs.Name) == 0 || len(attrs.Name) > 200 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Validation Error",
-					"detail": "Name must be between 1 and 200 characters",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Validation Error", "Name must be between 1 and 200 characters")
 		return
 	}
 
 	// Check for duplicate name in organization (race condition protection)
 	existing, _ := h.projectRepo.GetByOrganizationAndName(org.ID, attrs.Name)
 	if existing != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "409",
-					"title":  "Conflict",
-					"detail": "Project with this name already exists in this organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Project with this name already exists in this organization")
 		return
 	}
 
@@ -710,26 +534,10 @@ func (h *ProjectHandlerV2) Create(c *gin.Context) {
 	if err := h.projectRepo.Create(project); err != nil {
 		// Handle duplicate key constraint violation (race condition)
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "23505") {
-			c.JSON(http.StatusConflict, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "409",
-						"title":  "Conflict",
-						"detail": "Project with this name already exists in this organization",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Project with this name already exists in this organization")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create project",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create project")
 		return
 	}
 
@@ -771,9 +579,7 @@ func (h *ProjectHandlerV2) Create(c *gin.Context) {
 		_ = h.activityService.LogCreate(c.Request.Context(), "project", project.ID.String(), project.Name, activityCtx)
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": formatProjectResponse(project, org.Name),
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, formatProjectResponse(project, org.Name))
 }
 
 // Update updates a project by organization name and project name
@@ -784,100 +590,44 @@ func (h *ProjectHandlerV2) Update(c *gin.Context) {
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	project, err := h.projectRepo.GetByOrganizationAndName(org.ID, projectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	// Check if user has permission to update project
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Check org-level permission (team-based) - project management is org-level
 	hasOrgManage, err := h.rbacService.CheckOrgManageProjects(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 
 	if !hasOrgManage {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You do not have permission to update projects. Project management requires organization-level manage-projects permission via team membership.",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to update projects. Project management requires organization-level manage-projects permission via team membership.")
 		return
 	}
 
 	var req UpdateProjectRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "projects" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "data.type must be 'projects'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'projects'")
 		return
 	}
 
@@ -888,15 +638,7 @@ func (h *ProjectHandlerV2) Update(c *gin.Context) {
 		if *attrs.Name != project.Name {
 			existing, _ := h.projectRepo.GetByOrganizationAndName(org.ID, *attrs.Name)
 			if existing != nil {
-				c.JSON(http.StatusConflict, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "409",
-							"title":  "Conflict",
-							"detail": "Project with this name already exists in this organization",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Project with this name already exists in this organization")
 				return
 			}
 		}
@@ -910,22 +652,12 @@ func (h *ProjectHandlerV2) Update(c *gin.Context) {
 		DefaultAgentPoolID:   attrs.DefaultAgentPoolID,
 		SettingOverwrites:    attrs.SettingOverwrites,
 	}); !ok {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"errors": []gin.H{{"status": "422", "title": "Invalid Project Settings", "detail": msg}},
-		})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Project Settings", msg)
 		return
 	}
 
 	if err := h.projectRepo.Update(project); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to update project",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update project")
 		return
 	}
 
@@ -944,9 +676,7 @@ func (h *ProjectHandlerV2) Update(c *gin.Context) {
 		_ = h.activityService.LogUpdate(c.Request.Context(), "project", project.ID.String(), project.Name, changes, activityCtx)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": formatProjectResponse(project, org.Name),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, formatProjectResponse(project, org.Name))
 }
 
 // Delete deletes a project by organization name and project name
@@ -957,72 +687,32 @@ func (h *ProjectHandlerV2) Delete(c *gin.Context) {
 
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Organization not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 
 	project, err := h.projectRepo.GetByOrganizationAndName(org.ID, projectName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	// Check if user has permission to delete project
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Check org-level permission (team-based: CheckOrgManageProjects checks for "owners" team and manage-projects permission)
 	hasOrgManage, err := h.rbacService.CheckOrgManageProjects(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 
 	if !hasOrgManage {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You do not have permission to delete projects. Project deletion requires organization-level manage-projects permission via team membership (e.g., being in the 'owners' team).",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to delete projects. Project deletion requires organization-level manage-projects permission via team membership (e.g., being in the 'owners' team).")
 		return
 	}
 
@@ -1035,15 +725,7 @@ func (h *ProjectHandlerV2) Delete(c *gin.Context) {
 	}
 
 	if err := h.projectRepo.Delete(project.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to delete project",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete project")
 		return
 	}
 
@@ -1057,71 +739,53 @@ func (h *ProjectHandlerV2) Delete(c *gin.Context) {
 func (h *ProjectHandlerV2) UpdateByID(c *gin.Context) {
 	projectID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "Invalid project ID format"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project ID format")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{{"status": "401", "title": "Unauthorized", "detail": "Authentication required"}},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	project, err := h.projectRepo.GetByID(projectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{{"status": "404", "title": "Not Found", "detail": "Project not found"}},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to retrieve organization"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Project management is an org-level permission (team-based), same as the by-name Update.
 	hasOrgManage, err := h.rbacService.CheckOrgManageProjects(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to check permissions"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasOrgManage {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{{"status": "403", "title": "Forbidden", "detail": "You do not have permission to update projects in this organization"}},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to update projects in this organization")
 		return
 	}
 
 	var req UpdateProjectRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": err.Error()}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 	if req.Data.Type != "projects" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{{"status": "400", "title": "Bad Request", "detail": "data.type must be 'projects'"}},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'projects'")
 		return
 	}
 
 	attrs := req.Data.Attributes
 	if attrs.Name != nil && *attrs.Name != "" && *attrs.Name != project.Name {
 		if existing, _ := h.projectRepo.GetByOrganizationAndName(org.ID, *attrs.Name); existing != nil {
-			c.JSON(http.StatusConflict, gin.H{
-				"errors": []gin.H{{"status": "409", "title": "Conflict", "detail": "Project with this name already exists in this organization"}},
-			})
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Project with this name already exists in this organization")
 			return
 		}
 		project.Name = *attrs.Name
@@ -1134,16 +798,12 @@ func (h *ProjectHandlerV2) UpdateByID(c *gin.Context) {
 		DefaultAgentPoolID:   attrs.DefaultAgentPoolID,
 		SettingOverwrites:    attrs.SettingOverwrites,
 	}); !ok {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"errors": []gin.H{{"status": "422", "title": "Invalid Project Settings", "detail": msg}},
-		})
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Project Settings", msg)
 		return
 	}
 
 	if err := h.projectRepo.Update(project); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": "Failed to update project"}},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update project")
 		return
 	}
 
@@ -1161,7 +821,7 @@ func (h *ProjectHandlerV2) UpdateByID(c *gin.Context) {
 		_ = h.activityService.LogUpdate(c.Request.Context(), "project", project.ID.String(), project.Name, map[string]interface{}{}, activityCtx)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": formatProjectResponse(project, org.Name)})
+	jsonapi.WriteDocument(c, http.StatusOK, formatProjectResponse(project, org.Name))
 }
 
 // DeleteByID deletes a project by ID (TFE-compatible)
@@ -1170,87 +830,39 @@ func (h *ProjectHandlerV2) DeleteByID(c *gin.Context) {
 	projectIDStr := c.Param("id")
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid project ID format",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project ID format")
 		return
 	}
 
 	project, err := h.projectRepo.GetByID(projectID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Project not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Project not found")
 		return
 	}
 
 	// Get organization for validation and activity logging
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to retrieve organization",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
 		return
 	}
 
 	// Check if user has permission to delete project
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	// Check org-level permission (team-based: CheckOrgManageProjects checks for "owners" team and manage-projects permission)
 	hasOrgManage, err := h.rbacService.CheckOrgManageProjects(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 
 	if !hasOrgManage {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "You do not have permission to delete projects. Project deletion requires organization-level manage-projects permission via team membership (e.g., being in the 'owners' team).",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to delete projects. Project deletion requires organization-level manage-projects permission via team membership (e.g., being in the 'owners' team).")
 		return
 	}
 
@@ -1263,15 +875,7 @@ func (h *ProjectHandlerV2) DeleteByID(c *gin.Context) {
 	}
 
 	if err := h.projectRepo.Delete(project.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to delete project",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete project")
 		return
 	}
 

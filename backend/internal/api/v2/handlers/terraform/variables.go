@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -150,85 +151,37 @@ type UpdateVariableRequestV2 struct {
 func (h *VariableHandlerV2) ListByWorkspace(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid workspace ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 
 	// Verify workspace exists and get project ID
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Workspace not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
 
 	// Check permission: variables read
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckVariablePermission(c.Request.Context(), user.ID, workspaceID, workspace.ProjectID, "read")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Insufficient permissions to view variables",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Insufficient permissions to view variables")
 		return
 	}
 
 	variables, err := h.variableRepo.ListByWorkspace(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to list variables",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list variables")
 		return
 	}
 
@@ -239,9 +192,7 @@ func (h *VariableHandlerV2) ListByWorkspace(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	c.JSON(http.StatusOK, gin.H{
-		"data": variablesData,
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, variablesData)
 }
 
 // Get returns a single workspace variable by ID (TFE-compatible).
@@ -250,73 +201,43 @@ func (h *VariableHandlerV2) ListByWorkspace(c *gin.Context) {
 func (h *VariableHandlerV2) Get(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid workspace ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 	variableID := c.Param("variable_id")
 	if variableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{"status": "400", "title": "Bad Request", "detail": "Invalid variable ID"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable ID")
 		return
 	}
 
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Workspace not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
 
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{"status": "401", "title": "Unauthorized", "detail": "Authentication required"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 	hasPermission, err := h.rbacService.CheckVariablePermission(c.Request.Context(), user.ID, workspaceID, workspace.ProjectID, "read")
 	if err != nil || !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{"status": "403", "title": "Forbidden", "detail": "Insufficient permissions to view variables"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Insufficient permissions to view variables")
 		return
 	}
 
 	variable, err := h.variableRepo.GetByID(variableID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Variable not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 	if variable.WorkspaceID != workspaceID {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{"status": "404", "title": "Not Found", "detail": "Variable not found"},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": h.formatVariableResponse(variable, workspaceID),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, h.formatVariableResponse(variable, workspaceID))
 }
 
 // Create creates a new variable for a workspace (TFE-compatible)
@@ -324,99 +245,43 @@ func (h *VariableHandlerV2) Get(c *gin.Context) {
 func (h *VariableHandlerV2) Create(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid workspace ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 
 	// Verify workspace exists and get project ID
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Workspace not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
 
 	// Check permission: variables write
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckVariablePermission(c.Request.Context(), user.ID, workspaceID, workspace.ProjectID, "write")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Insufficient permissions to create variables",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Insufficient permissions to create variables")
 		return
 	}
 
 	var req CreateVariableRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "vars" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "data.type must be 'vars'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'vars'")
 		return
 	}
 
@@ -428,30 +293,14 @@ func (h *VariableHandlerV2) Create(c *gin.Context) {
 		category = "terraform" // TFE default
 	}
 	if category != "terraform" && category != "env" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "category must be 'terraform' or 'env'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "category must be 'terraform' or 'env'")
 		return
 	}
 
 	// Check if variable with same key already exists
 	existing, _ := h.variableRepo.GetByWorkspaceAndKey(workspaceID, attrs.Key)
 	if existing != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "409",
-					"title":  "Conflict",
-					"detail": "Variable with this key already exists in this workspace",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Variable with this key already exists in this workspace")
 		return
 	}
 
@@ -461,15 +310,7 @@ func (h *VariableHandlerV2) Create(c *gin.Context) {
 	if attrs.Sensitive && h.variableService != nil {
 		encryptedValue, err := h.variableService.Encrypt(attrs.Value)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "500",
-						"title":  "Internal Server Error",
-						"detail": fmt.Sprintf("Failed to encrypt variable: %v", err),
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to encrypt variable: %v", err))
 			return
 		}
 		finalValue = encryptedValue
@@ -491,22 +332,12 @@ func (h *VariableHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.variableRepo.Create(variable); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to create variable",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create variable")
 		return
 	}
 
 	// TFE-compatible response format
-	c.JSON(http.StatusCreated, gin.H{
-		"data": h.formatVariableResponse(variable, workspaceID),
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, h.formatVariableResponse(variable, workspaceID))
 }
 
 // Update updates a variable by ID (TFE-compatible)
@@ -514,155 +345,67 @@ func (h *VariableHandlerV2) Create(c *gin.Context) {
 func (h *VariableHandlerV2) Update(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid workspace ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 
 	variableID := c.Param("variable_id")
 	if variableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid variable ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable ID")
 		return
 	}
 
 	// Get workspace for permission check
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Workspace not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
 
 	// Check permission: variables write
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckVariablePermission(c.Request.Context(), user.ID, workspaceID, workspace.ProjectID, "write")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Insufficient permissions to update variables",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Insufficient permissions to update variables")
 		return
 	}
 
 	variable, err := h.variableRepo.GetByID(variableID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Variable not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
 	// Verify variable belongs to workspace
 	if variable.WorkspaceID != workspaceID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Variable does not belong to this workspace",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Variable does not belong to this workspace")
 		return
 	}
 
 	var req UpdateVariableRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": err.Error(),
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	// Validate JSON:API format
 	if req.Data.Type != "vars" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "data.type must be 'vars'",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'vars'")
 		return
 	}
 
 	// Validate ID matches
 	if req.Data.ID != "" && req.Data.ID != variableID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "data.id must match the variable ID in the URL",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.id must match the variable ID in the URL")
 		return
 	}
 
@@ -680,15 +423,7 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 		if attrs.Key != variable.Key {
 			existing, _ := h.variableRepo.GetByWorkspaceAndKey(workspaceID, attrs.Key)
 			if existing != nil {
-				c.JSON(http.StatusConflict, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "409",
-							"title":  "Conflict",
-							"detail": "Variable with this key already exists in this workspace",
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Variable with this key already exists in this workspace")
 				return
 			}
 		}
@@ -699,15 +434,7 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 		if willBeSensitive && h.variableService != nil {
 			encryptedValue, err := h.variableService.Encrypt(attrs.Value)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"errors": []gin.H{
-						{
-							"status": "500",
-							"title":  "Internal Server Error",
-							"detail": fmt.Sprintf("Failed to encrypt variable: %v", err),
-						},
-					},
-				})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to encrypt variable: %v", err))
 				return
 			}
 			variable.Value = encryptedValue
@@ -725,15 +452,7 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 	}
 	if attrs.Category != "" {
 		if attrs.Category != "terraform" && attrs.Category != "env" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"errors": []gin.H{
-					{
-						"status": "400",
-						"title":  "Bad Request",
-						"detail": "category must be 'terraform' or 'env'",
-					},
-				},
-			})
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "category must be 'terraform' or 'env'")
 			return
 		}
 		variable.Category = attrs.Category
@@ -753,9 +472,7 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 			// non-sensitive → sensitive: encrypt the existing plaintext at rest.
 			encryptedValue, err := h.variableService.Encrypt(variable.Value)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to encrypt variable on sensitivity change: %v", err)}},
-				})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to encrypt variable on sensitivity change: %v", err))
 				return
 			}
 			variable.Value = encryptedValue
@@ -764,9 +481,7 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 			// sensitive → non-sensitive: decrypt so we don't keep serving/storing stale ciphertext.
 			plaintext, err := h.variableService.Decrypt(variable.Value)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"errors": []gin.H{{"status": "500", "title": "Internal Server Error", "detail": fmt.Sprintf("Failed to decrypt variable on sensitivity change: %v", err)}},
-				})
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to decrypt variable on sensitivity change: %v", err))
 				return
 			}
 			variable.Value = plaintext
@@ -778,22 +493,12 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 	}
 
 	if err := h.variableRepo.Update(variable); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to update variable",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update variable")
 		return
 	}
 
 	// TFE-compatible response format
-	c.JSON(http.StatusOK, gin.H{
-		"data": h.formatVariableResponse(variable, workspaceID),
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, h.formatVariableResponse(variable, workspaceID))
 }
 
 // Delete deletes a variable by ID (TFE-compatible)
@@ -801,126 +506,54 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 func (h *VariableHandlerV2) Delete(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid workspace ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 
 	variableID := c.Param("variable_id")
 	if variableID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid variable ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable ID")
 		return
 	}
 
 	// Get workspace for permission check
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Workspace not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
 
 	// Check permission: variables write
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckVariablePermission(c.Request.Context(), user.ID, workspaceID, workspace.ProjectID, "write")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Insufficient permissions to delete variables",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Insufficient permissions to delete variables")
 		return
 	}
 
 	variable, err := h.variableRepo.GetByID(variableID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Variable not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable not found")
 		return
 	}
 
 	// Verify variable belongs to workspace
 	if variable.WorkspaceID != workspaceID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Variable does not belong to this workspace",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Variable does not belong to this workspace")
 		return
 	}
 
 	if err := h.variableRepo.Delete(variableID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to delete variable",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete variable")
 		return
 	}
 
@@ -933,91 +566,41 @@ func (h *VariableHandlerV2) Delete(c *gin.Context) {
 func (h *VariableHandlerV2) GetPlatformVariableKeys(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "400",
-					"title":  "Bad Request",
-					"detail": "Invalid workspace ID",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
 		return
 	}
 
 	// Verify workspace exists
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "404",
-					"title":  "Not Found",
-					"detail": "Workspace not found",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
 
 	// Check permission: variables read (same permission as listing variables)
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "401",
-					"title":  "Unauthorized",
-					"detail": "Authentication required",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
 	hasPermission, err := h.rbacService.CheckVariablePermission(c.Request.Context(), user.ID, workspaceID, workspace.ProjectID, "read")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to check permissions",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
-		c.JSON(http.StatusForbidden, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "403",
-					"title":  "Forbidden",
-					"detail": "Insufficient permissions to view platform variables",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Insufficient permissions to view platform variables")
 		return
 	}
 
 	// Get platform variable keys
 	keys, err := h.variableService.GetPlatformVariableKeys(c.Request.Context(), workspaceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"errors": []gin.H{
-				{
-					"status": "500",
-					"title":  "Internal Server Error",
-					"detail": "Failed to get platform variable keys",
-				},
-			},
-		})
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get platform variable keys")
 		return
 	}
 
 	// Return simple JSON array of keys
-	c.JSON(http.StatusOK, gin.H{
-		"data": keys,
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, keys)
 }

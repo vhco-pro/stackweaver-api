@@ -1,0 +1,125 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/ansible/jobs/queue",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": null,
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 5,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 21,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 21,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "rotate-certificates - 2026-09-05 15:02",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "running",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      },
+      {
+        "attributes": {
+          "ansible-version": "",
+          "become-enabled": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "diff-mode": false,
+          "error-message": "",
+          "exit-code": null,
+          "extra-vars": {},
+          "finished-at": null,
+          "forks": 5,
+          "has-warnings": false,
+          "hosts-changed": 9,
+          "hosts-failed": 0,
+          "hosts-ignored": 0,
+          "hosts-ok": 11,
+          "hosts-rescued": 0,
+          "hosts-skipped": 0,
+          "hosts-total": 11,
+          "hosts-unreachable": 0,
+          "job-type": "run",
+          "limit": "",
+          "name": "deploy-web-tier - 2026-09-05 17:43",
+          "runner-id": null,
+          "skip-tags": "",
+          "slice-count": 0,
+          "slice-group-id": null,
+          "slice-number": 0,
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "running",
+          "tags": "",
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0,
+          "warnings-count": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          },
+          "template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      }
+    ]
+  }
+}

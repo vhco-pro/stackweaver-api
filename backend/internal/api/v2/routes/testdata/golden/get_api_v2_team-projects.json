@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/team-projects",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Project ID is required",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

@@ -1,0 +1,315 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/teams",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "allow-member-token-management": true,
+          "name": "application-developers",
+          "organization-access": {
+            "access-secret-teams": false,
+            "manage-agent-pools": false,
+            "manage-ansible": false,
+            "manage-ansible-credentials": false,
+            "manage-ansible-inventories": false,
+            "manage-ansible-job-templates": false,
+            "manage-ansible-jobs": false,
+            "manage-ansible-playbooks": false,
+            "manage-ansible-schedules": false,
+            "manage-membership": false,
+            "manage-modules": false,
+            "manage-organization-access": false,
+            "manage-policies": false,
+            "manage-policy-overrides": false,
+            "manage-projects": false,
+            "manage-providers": false,
+            "manage-run-tasks": false,
+            "manage-teams": false,
+            "manage-vcs-settings": false,
+            "manage-workspaces": false,
+            "read-ansible": false,
+            "read-ansible-credentials": false,
+            "read-ansible-inventories": false,
+            "read-ansible-job-templates": false,
+            "read-ansible-jobs": false,
+            "read-ansible-playbooks": false,
+            "read-ansible-schedules": false,
+            "read-projects": false,
+            "read-workspaces": false
+          },
+          "permissions": {
+            "can-destroy": true,
+            "can-update-api-token": true,
+            "can-update-membership": true,
+            "can-update-organization-access": true,
+            "can-update-visibility": true
+          },
+          "sso-team-id": null,
+          "users-count": 3,
+          "visibility": "secret"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/teams/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "authentication-token": {
+            "meta": {}
+          },
+          "organization-memberships": {
+            "data": []
+          },
+          "users": {
+            "data": [
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              },
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              },
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              }
+            ]
+          }
+        },
+        "type": "teams"
+      },
+      {
+        "attributes": {
+          "allow-member-token-management": true,
+          "name": "owners",
+          "organization-access": {
+            "access-secret-teams": true,
+            "manage-agent-pools": true,
+            "manage-ansible": true,
+            "manage-ansible-credentials": true,
+            "manage-ansible-inventories": true,
+            "manage-ansible-job-templates": true,
+            "manage-ansible-jobs": true,
+            "manage-ansible-playbooks": true,
+            "manage-ansible-schedules": true,
+            "manage-membership": true,
+            "manage-modules": true,
+            "manage-organization-access": true,
+            "manage-policies": true,
+            "manage-policy-overrides": true,
+            "manage-projects": true,
+            "manage-providers": true,
+            "manage-run-tasks": true,
+            "manage-teams": true,
+            "manage-vcs-settings": true,
+            "manage-workspaces": true,
+            "read-ansible": true,
+            "read-ansible-credentials": true,
+            "read-ansible-inventories": true,
+            "read-ansible-job-templates": true,
+            "read-ansible-jobs": true,
+            "read-ansible-playbooks": true,
+            "read-ansible-schedules": true,
+            "read-projects": true,
+            "read-workspaces": true
+          },
+          "permissions": {
+            "can-destroy": true,
+            "can-update-api-token": true,
+            "can-update-membership": true,
+            "can-update-organization-access": true,
+            "can-update-visibility": true
+          },
+          "sso-team-id": null,
+          "users-count": 4,
+          "visibility": "secret"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/teams/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "authentication-token": {
+            "meta": {}
+          },
+          "organization-memberships": {
+            "data": []
+          },
+          "users": {
+            "data": [
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              },
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              },
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              },
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              }
+            ]
+          }
+        },
+        "type": "teams"
+      },
+      {
+        "attributes": {
+          "allow-member-token-management": true,
+          "name": "platform-engineering",
+          "organization-access": {
+            "access-secret-teams": false,
+            "manage-agent-pools": false,
+            "manage-ansible": false,
+            "manage-ansible-credentials": false,
+            "manage-ansible-inventories": false,
+            "manage-ansible-job-templates": false,
+            "manage-ansible-jobs": false,
+            "manage-ansible-playbooks": false,
+            "manage-ansible-schedules": false,
+            "manage-membership": false,
+            "manage-modules": false,
+            "manage-organization-access": false,
+            "manage-policies": false,
+            "manage-policy-overrides": false,
+            "manage-projects": false,
+            "manage-providers": false,
+            "manage-run-tasks": false,
+            "manage-teams": false,
+            "manage-vcs-settings": false,
+            "manage-workspaces": false,
+            "read-ansible": false,
+            "read-ansible-credentials": false,
+            "read-ansible-inventories": false,
+            "read-ansible-job-templates": false,
+            "read-ansible-jobs": false,
+            "read-ansible-playbooks": false,
+            "read-ansible-schedules": false,
+            "read-projects": false,
+            "read-workspaces": false
+          },
+          "permissions": {
+            "can-destroy": true,
+            "can-update-api-token": true,
+            "can-update-membership": true,
+            "can-update-organization-access": true,
+            "can-update-visibility": true
+          },
+          "sso-team-id": null,
+          "users-count": 2,
+          "visibility": "secret"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/teams/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "authentication-token": {
+            "meta": {}
+          },
+          "organization-memberships": {
+            "data": []
+          },
+          "users": {
+            "data": [
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              },
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              }
+            ]
+          }
+        },
+        "type": "teams"
+      },
+      {
+        "attributes": {
+          "allow-member-token-management": true,
+          "name": "security",
+          "organization-access": {
+            "access-secret-teams": false,
+            "manage-agent-pools": false,
+            "manage-ansible": false,
+            "manage-ansible-credentials": false,
+            "manage-ansible-inventories": false,
+            "manage-ansible-job-templates": false,
+            "manage-ansible-jobs": false,
+            "manage-ansible-playbooks": false,
+            "manage-ansible-schedules": false,
+            "manage-membership": false,
+            "manage-modules": false,
+            "manage-organization-access": false,
+            "manage-policies": false,
+            "manage-policy-overrides": false,
+            "manage-projects": false,
+            "manage-providers": false,
+            "manage-run-tasks": false,
+            "manage-teams": false,
+            "manage-vcs-settings": false,
+            "manage-workspaces": false,
+            "read-ansible": false,
+            "read-ansible-credentials": false,
+            "read-ansible-inventories": false,
+            "read-ansible-job-templates": false,
+            "read-ansible-jobs": false,
+            "read-ansible-playbooks": false,
+            "read-ansible-schedules": false,
+            "read-projects": false,
+            "read-workspaces": false
+          },
+          "permissions": {
+            "can-destroy": true,
+            "can-update-api-token": true,
+            "can-update-membership": true,
+            "can-update-organization-access": true,
+            "can-update-visibility": true
+          },
+          "sso-team-id": null,
+          "users-count": 1,
+          "visibility": "secret"
+        },
+        "id": "\u003cuuid\u003e",
+        "links": {
+          "self": "/api/v2/teams/\u003cuuid\u003e"
+        },
+        "relationships": {
+          "authentication-token": {
+            "meta": {}
+          },
+          "organization-memberships": {
+            "data": []
+          },
+          "users": {
+            "data": [
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "users"
+              }
+            ]
+          }
+        },
+        "type": "teams"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 20,
+        "prev-page": null,
+        "total-count": 4,
+        "total-pages": 1
+      }
+    }
+  }
+}

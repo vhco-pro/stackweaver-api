@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
@@ -66,14 +67,14 @@ type APIKeyResponse struct {
 func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	var req CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.LegacyError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Get user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -82,7 +83,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
 		parsed, err := time.Parse(time.RFC3339, *req.ExpiresAt)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid expires_at format, use ISO 8601 (RFC3339)"})
+			response.LegacyError(c, http.StatusBadRequest, "invalid expires_at format, use ISO 8601 (RFC3339)")
 			return
 		}
 		expiresAt = &parsed
@@ -91,7 +92,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	// Create the API key with scopes
 	apiKey, plainKey, err := h.apiKeyService.CreateAPIKey(user.ID, req.Name, req.Scopes, expiresAt)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create API key", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to create API key", err.Error())
 		return
 	}
 
@@ -144,14 +145,14 @@ func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 	// Get user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	// List API keys
 	apiKeys, err := h.apiKeyService.ListAPIKeys(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list API keys", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to list API keys", err.Error())
 		return
 	}
 
@@ -183,7 +184,7 @@ func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"api_keys": responses})
+	c.JSON(http.StatusOK, APIKeyListResponse{APIKeys: responses})
 }
 
 // DeleteAPIKey deletes an API key
@@ -192,14 +193,14 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid API key ID"})
+		response.LegacyError(c, http.StatusBadRequest, "invalid API key ID")
 		return
 	}
 
 	// Get user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -208,7 +209,7 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 
 	// Delete the API key
 	if err := h.apiKeyService.DeleteAPIKey(id, user.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete API key", "details": err.Error()})
+		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to delete API key", err.Error())
 		return
 	}
 
@@ -224,5 +225,10 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 		_ = h.activityService.LogAPIKeyDelete(c.Request.Context(), apiKey.ID, apiKey.Name, activityCtx)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "API key deleted successfully"})
+	response.Message(c, http.StatusOK, "API key deleted successfully")
+}
+
+// APIKeyListResponse is the body of GET /api/v2/settings/api-keys.
+type APIKeyListResponse struct {
+	APIKeys []APIKeyResponse `json:"api_keys"`
 }

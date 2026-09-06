@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/job-templates/:id/vars",
+  "status": 200,
+  "body": {
+    "data": [],
+    "links": {
+      "self": "/api/v2/ansible/job-templates/\u003cuuid\u003e/vars"
+    }
+  }
+}

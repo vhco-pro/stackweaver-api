@@ -1,0 +1,18 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/tasks",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 20,
+        "prev-page": null,
+        "total-count": 0,
+        "total-pages": 1
+      }
+    }
+  }
+}

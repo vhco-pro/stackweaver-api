@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/v2/activities",
+  "status": 200,
+  "body": {
+    "data": [],
+    "meta": {
+      "pagination": {
+        "limit": 50,
+        "offset": 0,
+        "total": 0
+      }
+    }
+  }
+}
