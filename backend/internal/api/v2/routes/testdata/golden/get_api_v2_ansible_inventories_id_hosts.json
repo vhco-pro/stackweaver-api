@@ -3,14 +3,40 @@
   "path": "/api/v2/ansible/inventories/:id/hosts",
   "status": 200,
   "body": {
-    "data": [],
+    "data": [
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "Demo host.",
+          "enabled": true,
+          "hostname": "10.0.1.11",
+          "name": "web-01.demo.internal",
+          "port": 22,
+          "updated-at": "\u003ctimestamp\u003e",
+          "variables": {}
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "groups": {
+            "data": []
+          },
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          }
+        },
+        "type": "ansible-hosts"
+      }
+    ],
     "meta": {
       "pagination": {
         "current-page": 1,
         "next-page": null,
         "page-size": 20,
         "prev-page": null,
-        "total-count": 0,
+        "total-count": 1,
         "total-pages": 1
       }
     }

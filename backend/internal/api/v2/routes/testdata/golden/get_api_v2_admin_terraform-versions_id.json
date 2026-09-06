@@ -1,13 +1,23 @@
 {
   "method": "GET",
   "path": "/api/v2/admin/terraform-versions/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "status": "404",
-        "title": "Terraform version not found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "archs": [],
+        "beta": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "deprecated": false,
+        "enabled": true,
+        "official": true,
+        "sha": "",
+        "url": "",
+        "usage": 0,
+        "version": "1.12.5"
+      },
+      "id": "\u003cid\u003e",
+      "type": "terraform-versions"
+    }
   }
 }

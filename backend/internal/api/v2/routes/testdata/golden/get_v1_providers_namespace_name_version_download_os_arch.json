@@ -4,7 +4,7 @@
   "status": 404,
   "body": {
     "errors": [
-      "Provider not found"
+      "Provider binary not available for this platform"
     ]
   }
 }

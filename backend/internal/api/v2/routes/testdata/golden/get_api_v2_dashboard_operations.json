@@ -9,7 +9,7 @@
           {
             "detail": "Ansible job",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-09-05 14:44",
+            "name": "patch-linux-fleet - 2026-08-31 17:41",
             "organization_id": "\u003cuuid\u003e",
             "organization_name": "demo",
             "platform": "ansible",
@@ -19,7 +19,7 @@
           {
             "detail": "Ansible job",
             "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-09-05 07:49",
+            "name": "rotate-certificates - 2026-08-31 11:01",
             "organization_id": "\u003cuuid\u003e",
             "organization_name": "demo",
             "platform": "ansible",
@@ -27,9 +27,9 @@
             "status": "running"
           },
           {
-            "detail": "plan-and-apply",
+            "detail": "plan-only",
             "id": "\u003cid\u003e",
-            "name": "prod-cluster",
+            "name": "staging-cluster",
             "organization_id": "\u003cuuid\u003e",
             "organization_name": "demo",
             "platform": "terraform",

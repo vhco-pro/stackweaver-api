@@ -1,14 +1,27 @@
 {
   "method": "GET",
   "path": "/api/v2/ansible/workflow-jobs/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "finished-at": "\u003ctimestamp\u003e",
+        "name": "patch-and-verify #1",
+        "started-at": "\u003ctimestamp\u003e",
+        "status": "successful"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "workflow": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-workflows"
+          }
+        }
+      },
+      "type": "ansible-workflow-jobs"
+    },
+    "included": []
   }
 }

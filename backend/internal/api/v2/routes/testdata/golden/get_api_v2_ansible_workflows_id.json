@@ -1,14 +1,79 @@
 {
   "method": "GET",
   "path": "/api/v2/ansible/workflows/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "allow-simultaneous": false,
+        "ask-inventory-on-launch": false,
+        "ask-limit-on-launch": false,
+        "ask-variables-on-launch": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Demo workflow chaining the first job template.",
+        "extra-vars": "{}",
+        "limit": "",
+        "name": "patch-and-verify",
+        "survey-enabled": false,
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "edges": {
+          "data": []
+        },
+        "nodes": {
+          "data": [
+            {
+              "attributes": {
+                "all-parents-must-converge": false,
+                "approval-message": "",
+                "approval-timeout": 0,
+                "created-at": "\u003ctimestamp\u003e",
+                "extra-vars": "{}",
+                "identifier": "patch",
+                "job-template-name": "patch-linux-fleet",
+                "limit": "",
+                "node-type": "job_template",
+                "position-x": 0,
+                "position-y": 0,
+                "skip-tags": "",
+                "tags": "",
+                "verbosity": 0
+              },
+              "id": "\u003cuuid\u003e",
+              "relationships": {
+                "job-template": {
+                  "data": {
+                    "id": "\u003cuuid\u003e",
+                    "type": "ansible-job-templates"
+                  }
+                },
+                "workflow": {
+                  "data": {
+                    "id": "\u003cuuid\u003e",
+                    "type": "ansible-workflows"
+                  }
+                }
+              },
+              "type": "ansible-workflow-nodes"
+            }
+          ]
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-workflows"
+    }
   }
 }

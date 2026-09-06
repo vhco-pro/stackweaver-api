@@ -1,14 +1,34 @@
 {
   "method": "GET",
   "path": "/api/v2/varsets/:id/relationships/vars/:variable_id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "category": "env",
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "",
+        "hcl": false,
+        "key": "AWS_REGION",
+        "sensitive": true,
+        "value": "••••••••"
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/vars/\u003cid\u003e"
+      },
+      "relationships": {
+        "varset": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "varsets"
+          },
+          "links": {
+            "related": "/api/v2/varsets/\u003cid\u003e"
+          }
+        }
+      },
+      "type": "vars"
+    }
   }
 }

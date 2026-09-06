@@ -4,7 +4,20 @@
   "status": 200,
   "body": {
     "all": {
-      "children": {}
+      "children": {
+        "ungrouped": null,
+        "webservers": null
+      }
+    },
+    "ungrouped": {
+      "hosts": {
+        "web-01.demo.internal": {
+          "ansible_host": "10.0.1.11"
+        }
+      }
+    },
+    "webservers": {
+      "hosts": {}
     }
   }
 }

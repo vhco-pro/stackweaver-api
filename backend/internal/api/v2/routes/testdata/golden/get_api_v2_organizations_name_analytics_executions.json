@@ -12,7 +12,17 @@
             "detail": "baseline-compliance",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "baseline-compliance - 2026-09-03 09:13",
+            "name": "baseline-compliance - 2026-08-23 11:01",
+            "outcome": "failed",
+            "platform": "ansible",
+            "status": "error"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "baseline-compliance",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "baseline-compliance - 2026-08-23 08:10",
             "outcome": "succeeded",
             "platform": "ansible",
             "status": "successful"
@@ -22,7 +32,7 @@
             "detail": "baseline-compliance",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "baseline-compliance - 2026-08-31 16:50",
+            "name": "baseline-compliance - 2026-08-23 17:43",
             "outcome": "succeeded",
             "platform": "ansible",
             "status": "successful"
@@ -32,90 +42,91 @@
             "detail": "baseline-compliance",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "baseline-compliance - 2026-09-04 10:40",
-            "outcome": "succeeded",
+            "name": "baseline-compliance - 2026-08-30 17:24",
+            "outcome": "failed",
             "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "baseline-compliance",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "baseline-compliance - 2026-08-30 08:10",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "baseline-compliance",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "baseline-compliance - 2026-08-29 14:47",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "baseline-compliance",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "baseline-compliance - 2026-09-02 09:37",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
+            "status": "failed"
           },
           {
             "created_at": "\u003ctimestamp\u003e",
             "detail": "deploy-web-tier",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "deploy-web-tier - 2026-09-01 12:12",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "deploy-web-tier",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "deploy-web-tier - 2026-08-27 11:40",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "deploy-web-tier",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "deploy-web-tier - 2026-08-31 12:05",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "deploy-web-tier",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "deploy-web-tier - 2026-08-30 11:01",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "deploy-web-tier",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "deploy-web-tier - 2026-09-01 16:42",
+            "name": "deploy-web-tier - 2026-08-25 12:12",
             "outcome": "other",
             "platform": "ansible",
             "status": "canceled"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "deploy-web-tier",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-08-25 16:42",
+            "outcome": "succeeded",
+            "platform": "ansible",
+            "status": "successful"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "deploy-web-tier",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-08-27 09:13",
+            "outcome": "succeeded",
+            "platform": "ansible",
+            "status": "successful"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "deploy-web-tier",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-08-26 10:24",
+            "outcome": "succeeded",
+            "platform": "ansible",
+            "status": "successful"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "deploy-web-tier",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-08-24 16:50",
+            "outcome": "succeeded",
+            "platform": "ansible",
+            "status": "successful"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "deploy-web-tier",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-08-25 09:48",
+            "outcome": "other",
+            "platform": "ansible",
+            "status": "canceled"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "deploy-web-tier",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "deploy-web-tier - 2026-08-30 07:46",
+            "outcome": "succeeded",
+            "platform": "ansible",
+            "status": "successful"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "destroy",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "payments-prod",
+            "outcome": "succeeded",
+            "platform": "terraform",
+            "status": "applied",
+            "workspace_name": "payments-prod"
           },
           {
             "created_at": "\u003ctimestamp\u003e",
@@ -133,17 +144,6 @@
             "detail": "destroy",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cid\u003e",
-            "name": "payments-staging",
-            "outcome": "succeeded",
-            "platform": "terraform",
-            "status": "applied",
-            "workspace_name": "payments-staging"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "destroy",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cid\u003e",
             "name": "payments-prod",
             "outcome": "other",
             "platform": "terraform",
@@ -155,28 +155,18 @@
             "detail": "destroy",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cid\u003e",
-            "name": "payments-prod",
+            "name": "payments-staging",
             "outcome": "succeeded",
             "platform": "terraform",
             "status": "applied",
-            "workspace_name": "payments-prod"
+            "workspace_name": "payments-staging"
           },
           {
             "created_at": "\u003ctimestamp\u003e",
             "detail": "patch-linux-fleet",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-08-30 17:43",
-            "outcome": "failed",
-            "platform": "ansible",
-            "status": "failed"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "patch-linux-fleet",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-08-28 08:48",
+            "name": "patch-linux-fleet - 2026-08-28 10:40",
             "outcome": "succeeded",
             "platform": "ansible",
             "status": "successful"
@@ -186,7 +176,7 @@
             "detail": "patch-linux-fleet",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-08-29 09:35",
+            "name": "patch-linux-fleet - 2026-08-27 07:14",
             "outcome": "succeeded",
             "platform": "ansible",
             "status": "successful"
@@ -196,7 +186,7 @@
             "detail": "patch-linux-fleet",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-09-02 10:24",
+            "name": "patch-linux-fleet - 2026-08-22 14:47",
             "outcome": "succeeded",
             "platform": "ansible",
             "status": "successful"
@@ -206,17 +196,17 @@
             "detail": "patch-linux-fleet",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-08-28 08:10",
-            "outcome": "failed",
+            "name": "patch-linux-fleet - 2026-08-26 09:37",
+            "outcome": "succeeded",
             "platform": "ansible",
-            "status": "failed"
+            "status": "successful"
           },
           {
             "created_at": "\u003ctimestamp\u003e",
             "detail": "patch-linux-fleet",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-09-03 07:14",
+            "name": "patch-linux-fleet - 2026-08-26 09:05",
             "outcome": "succeeded",
             "platform": "ansible",
             "status": "successful"
@@ -225,7 +215,7 @@
             "created_at": "\u003ctimestamp\u003e",
             "detail": "patch-linux-fleet",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-09-05 14:44",
+            "name": "patch-linux-fleet - 2026-08-31 17:41",
             "outcome": "other",
             "platform": "ansible",
             "status": "running"
@@ -235,11 +225,55 @@
             "detail": "plan-and-apply",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cid\u003e",
+            "name": "payments-staging",
+            "outcome": "succeeded",
+            "platform": "terraform",
+            "status": "applied",
+            "workspace_name": "payments-staging"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "prod-network",
+            "outcome": "succeeded",
+            "platform": "terraform",
+            "status": "applied",
+            "workspace_name": "prod-network"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
             "name": "analytics-warehouse",
             "outcome": "succeeded",
             "platform": "terraform",
             "status": "applied",
             "workspace_name": "analytics-warehouse"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "prod-network",
+            "outcome": "failed",
+            "platform": "terraform",
+            "status": "failed",
+            "workspace_name": "prod-network"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "prod-network",
+            "outcome": "succeeded",
+            "platform": "terraform",
+            "status": "applied",
+            "workspace_name": "prod-network"
           },
           {
             "created_at": "\u003ctimestamp\u003e",
@@ -257,10 +291,76 @@
             "detail": "plan-and-apply",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cid\u003e",
-            "name": "payments-staging",
+            "name": "prod-cluster",
             "outcome": "succeeded",
             "platform": "terraform",
             "status": "applied",
+            "workspace_name": "prod-cluster"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "staging-cluster",
+            "outcome": "succeeded",
+            "platform": "terraform",
+            "status": "applied",
+            "workspace_name": "staging-cluster"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "prod-cluster",
+            "outcome": "succeeded",
+            "platform": "terraform",
+            "status": "applied",
+            "workspace_name": "prod-cluster"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "staging-cluster",
+            "outcome": "other",
+            "platform": "terraform",
+            "status": "canceled",
+            "workspace_name": "staging-cluster"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "staging-cluster",
+            "outcome": "succeeded",
+            "platform": "terraform",
+            "status": "applied",
+            "workspace_name": "staging-cluster"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "analytics-warehouse",
+            "outcome": "other",
+            "platform": "terraform",
+            "status": "canceled",
+            "workspace_name": "analytics-warehouse"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "plan-and-apply",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cid\u003e",
+            "name": "payments-staging",
+            "outcome": "failed",
+            "platform": "terraform",
+            "status": "failed",
             "workspace_name": "payments-staging"
           },
           {
@@ -287,71 +387,6 @@
           },
           {
             "created_at": "\u003ctimestamp\u003e",
-            "detail": "plan-and-apply",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cid\u003e",
-            "name": "prod-cluster",
-            "outcome": "succeeded",
-            "platform": "terraform",
-            "status": "applied",
-            "workspace_name": "prod-cluster"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "plan-and-apply",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cid\u003e",
-            "name": "prod-network",
-            "outcome": "succeeded",
-            "platform": "terraform",
-            "status": "applied",
-            "workspace_name": "prod-network"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "plan-and-apply",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cid\u003e",
-            "name": "prod-network",
-            "outcome": "succeeded",
-            "platform": "terraform",
-            "status": "applied",
-            "workspace_name": "prod-network"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "plan-and-apply",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cid\u003e",
-            "name": "payments-staging",
-            "outcome": "other",
-            "platform": "terraform",
-            "status": "canceled",
-            "workspace_name": "payments-staging"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "plan-and-apply",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cid\u003e",
-            "name": "prod-network",
-            "outcome": "succeeded",
-            "platform": "terraform",
-            "status": "applied",
-            "workspace_name": "prod-network"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "plan-and-apply",
-            "id": "\u003cid\u003e",
-            "name": "prod-cluster",
-            "outcome": "other",
-            "platform": "terraform",
-            "status": "applying",
-            "workspace_name": "prod-cluster"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
             "detail": "plan-only",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cid\u003e",
@@ -367,38 +402,47 @@
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cid\u003e",
             "name": "analytics-warehouse",
-            "outcome": "failed",
+            "outcome": "succeeded",
             "platform": "terraform",
-            "status": "failed",
+            "status": "planned",
             "workspace_name": "analytics-warehouse"
           },
           {
             "created_at": "\u003ctimestamp\u003e",
             "detail": "plan-only",
-            "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cid\u003e",
-            "name": "payments-staging",
-            "outcome": "succeeded",
-            "platform": "terraform",
-            "status": "planned",
-            "workspace_name": "payments-staging"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "rotate-certificates",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-09-02 09:05",
+            "name": "staging-cluster",
             "outcome": "other",
-            "platform": "ansible",
-            "status": "canceled"
+            "platform": "terraform",
+            "status": "applying",
+            "workspace_name": "staging-cluster"
           },
           {
             "created_at": "\u003ctimestamp\u003e",
             "detail": "rotate-certificates",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-09-01 09:48",
+            "name": "rotate-certificates - 2026-08-29 07:49",
+            "outcome": "succeeded",
+            "platform": "ansible",
+            "status": "successful"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "rotate-certificates",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "rotate-certificates - 2026-08-22 09:35",
+            "outcome": "failed",
+            "platform": "ansible",
+            "status": "failed"
+          },
+          {
+            "created_at": "\u003ctimestamp\u003e",
+            "detail": "rotate-certificates",
+            "duration_seconds": "\u003cnumber\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "rotate-certificates - 2026-08-24 12:05",
             "outcome": "failed",
             "platform": "ansible",
             "status": "error"
@@ -408,17 +452,7 @@
             "detail": "rotate-certificates",
             "duration_seconds": "\u003cnumber\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-08-28 08:08",
-            "outcome": "succeeded",
-            "platform": "ansible",
-            "status": "successful"
-          },
-          {
-            "created_at": "\u003ctimestamp\u003e",
-            "detail": "rotate-certificates",
-            "duration_seconds": "\u003cnumber\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-08-27 15:14",
+            "name": "rotate-certificates - 2026-08-29 14:44",
             "outcome": "succeeded",
             "platform": "ansible",
             "status": "successful"
@@ -427,7 +461,7 @@
             "created_at": "\u003ctimestamp\u003e",
             "detail": "rotate-certificates",
             "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-09-05 07:49",
+            "name": "rotate-certificates - 2026-08-31 11:01",
             "outcome": "other",
             "platform": "ansible",
             "status": "running"

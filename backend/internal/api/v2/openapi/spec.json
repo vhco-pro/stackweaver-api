@@ -712,6 +712,613 @@
           }
         }
       },
+      "ansible-credentials-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "azure-client-id": {
+                      "type": "string"
+                    },
+                    "azure-tenant-id": {
+                      "type": "string"
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "credential-type": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "has-become-password": {
+                      "type": "boolean"
+                    },
+                    "has-password": {
+                      "type": "boolean"
+                    },
+                    "has-ssh-private-key": {
+                      "type": "boolean"
+                    },
+                    "has-vault-password": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "ssh-become-user": {
+                      "type": "string"
+                    },
+                    "ssh-port": {
+                      "type": "integer"
+                    },
+                    "updated-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "username": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "organization": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ansible-credentials-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "azure-client-id": {
+                    "type": "string"
+                  },
+                  "azure-tenant-id": {
+                    "type": "string"
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "credential-type": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "has-become-password": {
+                    "type": "boolean"
+                  },
+                  "has-password": {
+                    "type": "boolean"
+                  },
+                  "has-ssh-private-key": {
+                    "type": "boolean"
+                  },
+                  "has-vault-password": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "ssh-become-user": {
+                    "type": "string"
+                  },
+                  "ssh-port": {
+                    "type": "integer"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "username": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ansible-groups-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "updated-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "variables": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "children": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "hosts": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "inventory": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ansible-groups-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "children": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  },
+                  "hosts": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  },
+                  "inventory": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ansible-hosts-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hostname": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "integer"
+                    },
+                    "updated-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "variables": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "inventory": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ansible-hosts-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "hostname": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "groups": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  },
+                  "inventory": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "ansible-inventories-collection": {
         "type": "object",
         "properties": {
@@ -1843,6 +2450,597 @@
           }
         }
       },
+      "ansible-workflow-jobs-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "finished-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "started-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "workflow": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "total-count": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "ansible-workflow-jobs-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "finished-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "started-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "workflow": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          },
+          "included": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "ansible-workflow-nodes-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "all-parents-must-converge": {
+                      "type": "boolean"
+                    },
+                    "approval-message": {
+                      "type": "string"
+                    },
+                    "approval-timeout": {
+                      "type": "integer"
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "extra-vars": {
+                      "type": "string"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "job-template-name": {
+                      "type": "string"
+                    },
+                    "limit": {
+                      "type": "string"
+                    },
+                    "node-type": {
+                      "type": "string"
+                    },
+                    "position-x": {
+                      "type": "integer"
+                    },
+                    "position-y": {
+                      "type": "integer"
+                    },
+                    "skip-tags": {
+                      "type": "string"
+                    },
+                    "tags": {
+                      "type": "string"
+                    },
+                    "verbosity": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "job-template": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "workflow": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ansible-workflows-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "allow-simultaneous": {
+                      "type": "boolean"
+                    },
+                    "ask-inventory-on-launch": {
+                      "type": "boolean"
+                    },
+                    "ask-limit-on-launch": {
+                      "type": "boolean"
+                    },
+                    "ask-variables-on-launch": {
+                      "type": "boolean"
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "extra-vars": {
+                      "type": "string"
+                    },
+                    "limit": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "survey-enabled": {
+                      "type": "boolean"
+                    },
+                    "updated-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "organization": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "project": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ansible-workflows-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "allow-simultaneous": {
+                    "type": "boolean"
+                  },
+                  "ask-inventory-on-launch": {
+                    "type": "boolean"
+                  },
+                  "ask-limit-on-launch": {
+                    "type": "boolean"
+                  },
+                  "ask-variables-on-launch": {
+                    "type": "boolean"
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "extra-vars": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "survey-enabled": {
+                    "type": "boolean"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "edges": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  },
+                  "nodes": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "attributes": {
+                              "type": "object",
+                              "properties": {
+                                "all-parents-must-converge": {
+                                  "type": "boolean"
+                                },
+                                "approval-message": {
+                                  "type": "string"
+                                },
+                                "approval-timeout": {
+                                  "type": "integer"
+                                },
+                                "created-at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "extra-vars": {
+                                  "type": "string"
+                                },
+                                "identifier": {
+                                  "type": "string"
+                                },
+                                "job-template-name": {
+                                  "type": "string"
+                                },
+                                "limit": {
+                                  "type": "string"
+                                },
+                                "node-type": {
+                                  "type": "string"
+                                },
+                                "position-x": {
+                                  "type": "integer"
+                                },
+                                "position-y": {
+                                  "type": "integer"
+                                },
+                                "skip-tags": {
+                                  "type": "string"
+                                },
+                                "tags": {
+                                  "type": "string"
+                                },
+                                "verbosity": {
+                                  "type": "integer"
+                                }
+                              }
+                            },
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "relationships": {
+                              "type": "object",
+                              "properties": {
+                                "job-template": {
+                                  "type": "object",
+                                  "properties": {
+                                    "data": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "workflow": {
+                                  "type": "object",
+                                  "properties": {
+                                    "data": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "project": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "dashboard-operations-response": {
         "type": "object",
         "properties": {
@@ -2390,46 +3588,6 @@
           }
         }
       },
-      "get-api-v2-admin-terraform-versions-f9f0e9": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
       "get-api-v2-agent-pools-id-authentication-tokens-9c3bbd": {
         "type": "object",
         "properties": {
@@ -2490,88 +3648,8 @@
           }
         }
       },
-      "get-api-v2-ansible-inventories-id-groups-82818b": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "get-api-v2-ansible-inventories-id-hosts-a43abf": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
       "get-api-v2-ansible-inventories-id-ini-854a37": {
-        "nullable": true
+        "type": "string"
       },
       "get-api-v2-ansible-inventories-id-json-710cec": {
         "type": "object",
@@ -2581,87 +3659,41 @@
             "properties": {
               "children": {
                 "type": "object",
+                "properties": {
+                  "ungrouped": {
+                    "nullable": true
+                  },
+                  "webservers": {
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          },
+          "ungrouped": {
+            "type": "object",
+            "properties": {
+              "hosts": {
+                "type": "object",
+                "properties": {
+                  "web-01.demo.internal": {
+                    "type": "object",
+                    "properties": {
+                      "ansible_host": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "webservers": {
+            "type": "object",
+            "properties": {
+              "hosts": {
+                "type": "object",
                 "additionalProperties": true
-              }
-            }
-          }
-        }
-      },
-      "get-api-v2-ansible-inventories-id-sources-23f561": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "get-api-v2-ansible-inventories-id-syncs-459cc9": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
               }
             }
           }
@@ -3255,7 +4287,7 @@
           }
         }
       },
-      "get-api-v2-organizations-name-ansible-credentials-59121b": {
+      "get-api-v2-ansible-workflows-id-edges-555fc9": {
         "type": "object",
         "properties": {
           "data": {
@@ -3263,34 +4295,6 @@
             "items": {
               "type": "object",
               "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
             }
           }
         }
@@ -3303,46 +4307,6 @@
             "items": {
               "type": "object",
               "additionalProperties": true
-            }
-          }
-        }
-      },
-      "get-api-v2-organizations-name-ansible-workflows-dc46cc": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
             }
           }
         }
@@ -3367,46 +4331,6 @@
             "items": {
               "type": "object",
               "additionalProperties": true
-            }
-          }
-        }
-      },
-      "get-api-v2-organizations-name-tasks-68536e": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
             }
           }
         }
@@ -3662,7 +4586,7 @@
           }
         }
       },
-      "get-api-v2-teams-id-notification-configurations-cc06a2": {
+      "get-api-v2-task-results-id-outcomes-0445e7": {
         "type": "object",
         "properties": {
           "data": {
@@ -3671,10 +4595,38 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
-      "get-api-v2-terraform-versions-7baf62": {
+      "get-api-v2-teams-id-notification-configurations-cc06a2": {
         "type": "object",
         "properties": {
           "data": {
@@ -3993,6 +4945,654 @@
           }
         }
       },
+      "get-v1-providers-namespace-56a3d5": {
+        "type": "object",
+        "properties": {
+          "meta": {
+            "type": "object",
+            "properties": {
+              "current_offset": {
+                "type": "integer"
+              },
+              "limit": {
+                "type": "integer"
+              }
+            }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "downloads": {
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "published_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "verified": {
+                  "type": "boolean"
+                },
+                "version": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get-v1-providers-namespace-name-821eb0": {
+        "type": "object",
+        "properties": {
+          "downloads": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "get-v1-providers-namespace-name-version-0743f3": {
+        "type": "object",
+        "properties": {
+          "downloads": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "get-v1-providers-namespace-name-versions-81e7db": {
+        "type": "object",
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "platforms": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "protocols": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "version": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "inventory-sources-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "config": {
+                      "type": "object",
+                      "properties": {
+                        "region": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "group-by-availability-zone": {
+                      "type": "boolean"
+                    },
+                    "group-by-instance-id": {
+                      "type": "boolean"
+                    },
+                    "group-by-region": {
+                      "type": "boolean"
+                    },
+                    "group-by-tag": {
+                      "type": "string"
+                    },
+                    "hostname-var": {
+                      "type": "string"
+                    },
+                    "hosts-count": {
+                      "type": "integer"
+                    },
+                    "instance-filters": {
+                      "type": "string"
+                    },
+                    "last-sync-at": {
+                      "nullable": true
+                    },
+                    "last-sync-error": {
+                      "type": "string"
+                    },
+                    "last-sync-log": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "overwrite": {
+                      "type": "boolean"
+                    },
+                    "overwrite-vars": {
+                      "type": "boolean"
+                    },
+                    "source-type": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "sync-schedule": {
+                      "type": "string"
+                    },
+                    "update-cache-timeout": {
+                      "type": "integer"
+                    },
+                    "update-on-launch": {
+                      "type": "boolean"
+                    },
+                    "updated-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "verbosity": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "inventory": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "inventory-sources-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "region": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "group-by-availability-zone": {
+                    "type": "boolean"
+                  },
+                  "group-by-instance-id": {
+                    "type": "boolean"
+                  },
+                  "group-by-region": {
+                    "type": "boolean"
+                  },
+                  "group-by-tag": {
+                    "type": "string"
+                  },
+                  "hostname-var": {
+                    "type": "string"
+                  },
+                  "hosts-count": {
+                    "type": "integer"
+                  },
+                  "instance-filters": {
+                    "type": "string"
+                  },
+                  "last-sync-at": {
+                    "nullable": true
+                  },
+                  "last-sync-error": {
+                    "type": "string"
+                  },
+                  "last-sync-log": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "overwrite": {
+                    "type": "boolean"
+                  },
+                  "overwrite-vars": {
+                    "type": "boolean"
+                  },
+                  "source-type": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "sync-schedule": {
+                    "type": "string"
+                  },
+                  "update-cache-timeout": {
+                    "type": "integer"
+                  },
+                  "update-on-launch": {
+                    "type": "boolean"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "verbosity": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "inventory": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "inventory-syncs-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "finished-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "groups-discovered": {
+                      "type": "integer"
+                    },
+                    "hosts-discovered": {
+                      "type": "integer"
+                    },
+                    "source-name": {
+                      "type": "string"
+                    },
+                    "started-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "triggered-by": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "inventory": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "inventory-syncs-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "error": {
+                    "type": "string"
+                  },
+                  "finished-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "groups-discovered": {
+                    "type": "integer"
+                  },
+                  "hosts-discovered": {
+                    "type": "integer"
+                  },
+                  "output": {
+                    "type": "string"
+                  },
+                  "source-name": {
+                    "type": "string"
+                  },
+                  "started-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "triggered-by": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "inventory": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "jwks": {
         "type": "object",
         "properties": {
@@ -4078,6 +5678,81 @@
                 "type": {
                   "type": "string"
                 }
+              }
+            }
+          }
+        }
+      },
+      "notification-configurations-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "destination-type": {
+                    "type": "string"
+                  },
+                  "email-addresses": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "triggers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "subscribable": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
               }
             }
           }
@@ -5192,6 +6867,142 @@
           }
         }
       },
+      "registry-providers-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "namespace": {
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "properties": {
+                      "can-delete": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "registry-name": {
+                    "type": "string"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "run-triggers-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "sourceable-name": {
+                    "type": "string"
+                  },
+                  "workspace-name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "sourceable": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "workspace": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "runner-stats-response": {
         "type": "object",
         "properties": {
@@ -5551,9 +7362,6 @@
                       "type": "string",
                       "format": "date-time"
                     },
-                    "error-message": {
-                      "type": "string"
-                    },
                     "has-changes": {
                       "type": "boolean"
                     },
@@ -5603,6 +7411,10 @@
                       "type": "object",
                       "properties": {
                         "applied-at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "planned-at": {
                           "type": "string",
                           "format": "date-time"
                         },
@@ -5941,6 +7753,444 @@
           }
         }
       },
+      "task-results-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "status-timestamps": {
+                    "type": "object",
+                    "properties": {
+                      "passed-at": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  },
+                  "task-id": {
+                    "type": "string"
+                  },
+                  "task-name": {
+                    "type": "string"
+                  },
+                  "task-url": {
+                    "type": "string"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "workspace-task-enforcement-level": {
+                    "type": "string"
+                  },
+                  "workspace-task-id": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "task-stage": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "task_stage": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "task-stages-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "actions": {
+                    "type": "object",
+                    "properties": {
+                      "is-overridable": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "properties": {
+                      "can-override": {
+                        "type": "boolean"
+                      },
+                      "can-override-policy": {
+                        "type": "boolean"
+                      },
+                      "can-override-tasks": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "stage": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "status-timestamps": {
+                    "type": "object",
+                    "properties": {
+                      "passed-at": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "policy-evaluations": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  },
+                  "run": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "task-results": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "tasks-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "category": {
+                      "type": "string"
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "global-configuration": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "enforcement-level": {
+                          "type": "string"
+                        },
+                        "stages": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "updated-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "organization": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "workspace-tasks": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "tasks-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": "string"
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "global-configuration": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "enforcement-level": {
+                        "type": "string"
+                      },
+                      "stages": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "workspace-tasks": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "team-access-collection": {
         "type": "object",
         "properties": {
@@ -6048,6 +8298,149 @@
                 "type": {
                   "type": "string"
                 }
+              }
+            }
+          }
+        }
+      },
+      "team-projects-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "access": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "links": {
+                "type": "object",
+                "properties": {
+                  "self": {
+                    "type": "string"
+                  }
+                }
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "project": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "team": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "team-workspaces-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "access": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "links": {
+                "type": "object",
+                "properties": {
+                  "self": {
+                    "type": "string"
+                  }
+                }
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "team": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "workspace": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
               }
             }
           }
@@ -6498,6 +8891,121 @@
           }
         }
       },
+      "terraform-versions-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "archs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "beta": {
+                      "type": "boolean"
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "deprecated": {
+                      "type": "boolean"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "official": {
+                      "type": "boolean"
+                    },
+                    "sha": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "usage": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "terraform-versions-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "archs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "beta": {
+                    "type": "boolean"
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "deprecated": {
+                    "type": "boolean"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "official": {
+                    "type": "boolean"
+                  },
+                  "sha": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "usage": {
+                    "type": "integer"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "tokens-collection": {
         "type": "object",
         "properties": {
@@ -6686,6 +9194,85 @@
                 "type": {
                   "type": "string"
                 }
+              }
+            }
+          }
+        }
+      },
+      "vars-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "hcl": {
+                    "type": "boolean"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "sensitive": {
+                    "type": "boolean"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "version-id": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "links": {
+                "type": "object",
+                "properties": {
+                  "self": {
+                    "type": "string"
+                  }
+                }
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "configurable": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "links": {
+                        "type": "object",
+                        "properties": {
+                          "related": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
               }
             }
           }
@@ -7062,10 +9649,12 @@
                 "type": "object",
                 "properties": {
                   "archived-at": {
-                    "nullable": true
+                    "type": "string",
+                    "format": "date-time"
                   },
                   "archived-by": {
-                    "nullable": true
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "created-at": {
                     "type": "string",
@@ -8021,7 +10610,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-admin-terraform-versions-f9f0e9"
+                  "$ref": "#/components/schemas/terraform-versions-collection"
                 }
               }
             },
@@ -8096,15 +10685,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/terraform-versions-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/admin/terraform-versions/:id",
@@ -8438,15 +11027,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/ansible-credentials-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/credentials/:id",
@@ -8527,15 +11116,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/ansible-groups-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/groups/:id",
@@ -8616,15 +11205,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/ansible-hosts-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/hosts/:id",
@@ -8907,7 +11496,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-ansible-inventories-id-groups-82818b"
+                  "$ref": "#/components/schemas/ansible-groups-collection"
                 }
               }
             },
@@ -8967,7 +11556,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-ansible-inventories-id-hosts-a43abf"
+                  "$ref": "#/components/schemas/ansible-hosts-collection"
                 }
               }
             },
@@ -9089,7 +11678,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-ansible-inventories-id-sources-23f561"
+                  "$ref": "#/components/schemas/inventory-sources-collection"
                 }
               }
             },
@@ -9149,7 +11738,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-ansible-inventories-id-syncs-459cc9"
+                  "$ref": "#/components/schemas/inventory-syncs-collection"
                 }
               }
             },
@@ -9205,15 +11794,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/inventory-sources-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/inventory-sources/:source_id",
@@ -9296,15 +11885,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/inventory-syncs-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/inventory-syncs/:sync_id",
@@ -10445,15 +13034,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/ansible-workflow-jobs-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/workflow-jobs/:id",
@@ -10627,15 +13216,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/ansible-workflows-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/workflows/:id",
@@ -10687,15 +13276,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/get-api-v2-ansible-workflows-id-edges-555fc9"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/workflows/:id/edges",
@@ -10747,15 +13336,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/ansible-workflow-jobs-collection"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/workflows/:id/jobs",
@@ -10809,15 +13398,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/ansible-workflow-nodes-collection"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/ansible/workflows/:id/nodes",
@@ -11124,15 +13713,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/notification-configurations-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/notification-configurations/:id",
@@ -11793,7 +14382,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-organizations-name-ansible-credentials-59121b"
+                  "$ref": "#/components/schemas/ansible-credentials-collection"
                 }
               }
             },
@@ -12407,7 +14996,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-organizations-name-ansible-workflows-dc46cc"
+                  "$ref": "#/components/schemas/ansible-workflows-collection"
                 }
               }
             },
@@ -13656,7 +16245,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-organizations-name-tasks-68536e"
+                  "$ref": "#/components/schemas/tasks-collection"
                 }
               }
             },
@@ -14271,15 +16860,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/vars-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/organizations/:name/varsets/:id/relationships/vars/:variable_id",
@@ -15534,15 +18123,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/registry-providers-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/registry-providers/:id",
@@ -15594,15 +18183,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/run-triggers-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/run-triggers/:id",
@@ -16512,15 +19101,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/task-results-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/task-results/:id",
@@ -16574,15 +19163,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/get-api-v2-task-results-id-outcomes-0445e7"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/task-results/:id/outcomes",
@@ -16605,15 +19194,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/task-stages-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/task-stages/:id",
@@ -16696,15 +19285,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/tasks-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/tasks/:id",
@@ -16825,15 +19414,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/team-projects-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/team-projects/:id",
@@ -16954,15 +19543,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/team-workspaces-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/team-workspaces/:id",
@@ -17395,7 +19984,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-terraform-versions-7baf62"
+                  "$ref": "#/components/schemas/terraform-versions-collection"
                 }
               }
             },
@@ -17778,15 +20367,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/vars-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/varsets/:id/relationships/vars/:variable_id",
@@ -19596,15 +22185,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/vars-response"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /api/v2/workspaces/:id/vars/:variable_id",
@@ -20097,15 +22686,15 @@
           }
         ],
         "responses": {
-          "500": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-500"
+                  "$ref": "#/components/schemas/get-v1-providers-namespace-56a3d5"
                 }
               }
             },
-            "description": "Server Error"
+            "description": "Success"
           }
         },
         "summary": "GET /v1/providers/:namespace",
@@ -20136,15 +22725,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/get-v1-providers-namespace-name-821eb0"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /v1/providers/:namespace/:name",
@@ -20230,15 +22819,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/get-v1-providers-namespace-name-versions-81e7db"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /v1/providers/:namespace/:name/versions",
@@ -20277,15 +22866,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/get-v1-providers-namespace-name-version-0743f3"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Success"
           }
         },
         "summary": "GET /v1/providers/:namespace/:name/:version",

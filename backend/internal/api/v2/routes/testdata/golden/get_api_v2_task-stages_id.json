@@ -1,14 +1,47 @@
 {
   "method": "GET",
   "path": "/api/v2/task-stages/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "actions": {
+          "is-overridable": false
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "permissions": {
+          "can-override": true,
+          "can-override-policy": false,
+          "can-override-tasks": true
+        },
+        "stage": "post_plan",
+        "status": "passed",
+        "status-timestamps": {
+          "passed-at": "\u003ctimestamp\u003e"
+        },
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "policy-evaluations": {
+          "data": []
+        },
+        "run": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "runs"
+          }
+        },
+        "task-results": {
+          "data": [
+            {
+              "id": "\u003cid\u003e",
+              "type": "task-results"
+            }
+          ]
+        }
+      },
+      "type": "task-stages"
+    }
   }
 }

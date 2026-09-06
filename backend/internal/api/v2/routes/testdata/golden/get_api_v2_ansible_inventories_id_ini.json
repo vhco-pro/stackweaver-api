@@ -2,5 +2,5 @@
   "method": "GET",
   "path": "/api/v2/ansible/inventories/:id/ini",
   "status": 200,
-  "body": null
+  "body": "[ungrouped]\nweb-01.demo.internal ansible_host=10.0.1.11\n\n[webservers]\n\n"
 }

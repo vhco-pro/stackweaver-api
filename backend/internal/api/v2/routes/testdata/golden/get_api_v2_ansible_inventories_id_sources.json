@@ -3,14 +3,55 @@
   "path": "/api/v2/ansible/inventories/:id/sources",
   "status": 200,
   "body": {
-    "data": [],
+    "data": [
+      {
+        "attributes": {
+          "config": {
+            "region": "eu-west-1"
+          },
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "Demo dynamic source; never synced against a real account.",
+          "enabled": true,
+          "group-by-availability-zone": false,
+          "group-by-instance-id": false,
+          "group-by-region": true,
+          "group-by-tag": "",
+          "hostname-var": "public_ip",
+          "hosts-count": 0,
+          "instance-filters": "",
+          "last-sync-at": null,
+          "last-sync-error": "",
+          "last-sync-log": "",
+          "name": "aws-eu-west-1",
+          "overwrite": false,
+          "overwrite-vars": false,
+          "source-type": "aws",
+          "status": "never_synced",
+          "sync-schedule": "",
+          "update-cache-timeout": 0,
+          "update-on-launch": true,
+          "updated-at": "\u003ctimestamp\u003e",
+          "verbosity": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          }
+        },
+        "type": "inventory-sources"
+      }
+    ],
     "meta": {
       "pagination": {
         "current-page": 1,
         "next-page": null,
         "page-size": 20,
         "prev-page": null,
-        "total-count": 0,
+        "total-count": 1,
         "total-pages": 1
       }
     }
