@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
@@ -29,14 +30,14 @@ func (h *TOTPHandler) StartTOTPRegistration(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
 	// Start TOTP registration
 	resp, err := h.totpService.StartTOTPRegistration(userSubject)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to start TOTP registration", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to start TOTP registration"+": "+err.Error())
 		return
 	}
 
@@ -52,20 +53,20 @@ type VerifyTOTPRequest struct {
 func (h *TOTPHandler) VerifyTOTP(c *gin.Context) {
 	var req VerifyTOTPRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
 	// Verify TOTP code
 	if err := h.totpService.VerifyTOTP(userSubject, req.Code); err != nil {
-		response.LegacyErrorDetails(c, http.StatusBadRequest, "invalid TOTP code", err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "invalid TOTP code"+": "+err.Error())
 		return
 	}
 
@@ -78,14 +79,14 @@ func (h *TOTPHandler) GetTOTPStatus(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
 	// Check TOTP status
 	enabled, err := h.totpService.CheckTOTPStatus(userSubject)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to check TOTP status", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to check TOTP status"+": "+err.Error())
 		return
 	}
 
@@ -98,13 +99,13 @@ func (h *TOTPHandler) RemoveTOTP(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
 	// Remove TOTP
 	if err := h.totpService.RemoveTOTP(userSubject); err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to remove TOTP", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to remove TOTP"+": "+err.Error())
 		return
 	}
 
@@ -121,20 +122,20 @@ type ChangePasswordRequest struct {
 func (h *TOTPHandler) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
 	// Change password
 	if err := h.totpService.ChangePassword(userSubject, req.CurrentPassword, req.NewPassword); err != nil {
-		response.LegacyErrorDetails(c, http.StatusBadRequest, "failed to change password", err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "failed to change password"+": "+err.Error())
 		return
 	}
 
@@ -147,14 +148,14 @@ func (h *TOTPHandler) ListMFADevices(c *gin.Context) {
 	// Get user's Zitadel subject from context
 	userSubject, err := h.authService.GetUserSubject(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
 	// List MFA devices
 	devices, err := h.totpService.ListMFADevices(userSubject)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to list MFA devices", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to list MFA devices"+": "+err.Error())
 		return
 	}
 

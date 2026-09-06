@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"golang.org/x/time/rate"
 )
 
@@ -25,7 +25,7 @@ func NewRateLimiter(rps int, burst int) *RateLimiter {
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !rl.limiter.Allow() {
-			response.LegacyError(c, http.StatusTooManyRequests, "rate limit exceeded")
+			jsonapi.WriteError(c, http.StatusTooManyRequests, http.StatusText(http.StatusTooManyRequests), "rate limit exceeded")
 			c.Abort()
 			return
 		}
@@ -104,7 +104,7 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 		limiter := rl.getLimiter(ip)
 
 		if !limiter.Allow() {
-			response.LegacyError(c, http.StatusTooManyRequests, "rate limit exceeded")
+			jsonapi.WriteError(c, http.StatusTooManyRequests, http.StatusText(http.StatusTooManyRequests), "rate limit exceeded")
 			c.Abort()
 			return
 		}

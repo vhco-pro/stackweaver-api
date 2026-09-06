@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 )
 
 // CSRFProtection validates Origin and Referer headers on mutating requests
@@ -39,7 +39,7 @@ func CSRFProtection(allowedOrigins []string) gin.HandlerFunc {
 				return
 			}
 			// Origin present but not in allowlist - reject
-			c.JSON(http.StatusForbidden, response.CodeMessageResponse{Code: http.StatusForbidden, Message: "cross-origin request blocked"})
+			jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "cross-origin request blocked")
 			c.Abort()
 			return
 		}
@@ -56,7 +56,7 @@ func CSRFProtection(allowedOrigins []string) gin.HandlerFunc {
 				}
 			}
 			// Referer present but not from allowed origin - reject
-			c.JSON(http.StatusForbidden, response.CodeMessageResponse{Code: http.StatusForbidden, Message: "cross-origin request blocked"})
+			jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "cross-origin request blocked")
 			c.Abort()
 			return
 		}

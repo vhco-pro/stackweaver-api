@@ -999,6 +999,98 @@ func TestGoldenFamiliesResolve(t *testing.T) {
 		len(h.families)-1, len(familyTables), len(unseededFamilies))
 }
 
+// TestGoldenErrorEnvelopeComplete is #757's regression guard: every recorded error body on a
+// surface Stackweaver defines must carry the full JSON:API envelope - non-empty status, title
+// and detail on every member of `errors`.
+//
+// Before the convergence there were four shapes, and which one a client got depended on which
+// endpoint it called: 43 responses carried only a detail, 85 carried a bare {"error"}, five
+// had no title, four spelled the status as a number under a different key. The helpers that
+// produced those shapes are deleted, and this test is what fails if any of them is
+// reinvented inline.
+//
+// Exempt by external specification, not by choice: the OAuth endpoints (RFC 6749 fixes their
+// error body, and terraform login parses it) and the registry protocol (an array of plain
+// strings, per HashiCorp's API docs, parsed by terraform init).
+func TestGoldenErrorEnvelopeComplete(t *testing.T) {
+	exempt := func(path string) bool {
+		return strings.HasPrefix(path, "/v1/") ||
+			strings.HasPrefix(path, "/v2/") || // registry download summaries share the protocol
+			strings.Contains(path, "/oauth/")
+	}
+
+	var violations []string
+	for _, dir := range []string{goldenDir, filepath.Join(goldenDir, "errors")} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || e.Name() == "routes.json" {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				t.Fatalf("read %s: %v", e.Name(), err)
+			}
+			var fx goldenFixture
+			if err := json.Unmarshal(raw, &fx); err != nil {
+				t.Fatalf("parse %s: %v", e.Name(), err)
+			}
+			if fx.Status < 400 || exempt(fx.Path) {
+				continue
+			}
+			body, ok := fx.Body.(map[string]any)
+			if !ok {
+				if fx.Body != nil {
+					violations = append(violations, fmt.Sprintf("%s %s (%d): error body is not an object", fx.Method, fx.Path, fx.Status))
+				}
+				continue
+			}
+			errs, ok := body["errors"].([]any)
+			if !ok || len(errs) == 0 {
+				violations = append(violations, fmt.Sprintf("%s %s (%d): no errors array (members: %v)", fx.Method, fx.Path, fx.Status, keysOf(body)))
+				continue
+			}
+			for _, el := range errs {
+				obj, ok := el.(map[string]any)
+				if !ok {
+					violations = append(violations, fmt.Sprintf("%s %s (%d): errors element is not an object", fx.Method, fx.Path, fx.Status))
+					continue
+				}
+				// status and title are required; detail is optional per the JSON:API spec,
+				// and the title-only class (WriteErrorNoDetail, 117 sites) is legitimate.
+				// What is NOT allowed is a detail key that is present but empty - that is a
+				// bug, not brevity.
+				for _, member := range []string{"status", "title"} {
+					if v, _ := obj[member].(string); v == "" {
+						violations = append(violations, fmt.Sprintf("%s %s (%d): %s missing or empty", fx.Method, fx.Path, fx.Status, member))
+					}
+				}
+				if v, present := obj["detail"]; present {
+					if str, _ := v.(string); str == "" {
+						violations = append(violations, fmt.Sprintf("%s %s (%d): detail present but empty", fx.Method, fx.Path, fx.Status))
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(violations)
+	if len(violations) > 0 {
+		t.Errorf("%d recorded error response(s) do not carry the full JSON:API envelope:\n  %s",
+			len(violations), strings.Join(violations, "\n  "))
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // TestGoldenExclusionsAreLive fails on an exclusion that matches no registered route.
 //
 // This is not pedantry: the first version of goldenExclusions named

@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -122,7 +123,7 @@ func (h *GitHubWebhookHandler) HandleWebhook(c *gin.Context) {
 	// Read the request body
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Failed to read request body")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Failed to read request body")
 		return
 	}
 
@@ -130,11 +131,11 @@ func (h *GitHubWebhookHandler) HandleWebhook(c *gin.Context) {
 	if h.webhookSecret != "" {
 		signature := c.GetHeader("X-Hub-Signature-256")
 		if signature == "" {
-			response.LegacyError(c, http.StatusUnauthorized, "Missing signature header")
+			jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "Missing signature header")
 			return
 		}
 		if !h.validateSignature(body, signature) {
-			response.LegacyError(c, http.StatusUnauthorized, "Invalid signature")
+			jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "Invalid signature")
 			return
 		}
 	}
@@ -178,7 +179,7 @@ func (h *GitHubWebhookHandler) validateSignature(body []byte, signature string) 
 func (h *GitHubWebhookHandler) handlePushEvent(c *gin.Context, body []byte) {
 	var payload GitHubPushPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid push payload")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid push payload")
 		return
 	}
 
@@ -199,7 +200,7 @@ func (h *GitHubWebhookHandler) handlePushEvent(c *gin.Context, body []byte) {
 	playbooks, err := h.findAffectedPlaybooks(payload.Repository.FullName, branch)
 	if err != nil {
 		logger.Infof("Error finding affected playbooks: %v", err)
-		response.LegacyError(c, http.StatusInternalServerError, "Failed to find affected playbooks")
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "Failed to find affected playbooks")
 		return
 	}
 
@@ -248,7 +249,7 @@ func (h *GitHubWebhookHandler) handlePingEvent(c *gin.Context, body []byte) {
 	}
 
 	if err := json.Unmarshal(body, &payload); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid ping payload")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid ping payload")
 		return
 	}
 
@@ -278,7 +279,7 @@ func (h *GitHubWebhookHandler) handleInstallationEvent(c *gin.Context, eventType
 	}
 
 	if err := json.Unmarshal(body, &payload); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "Invalid installation payload")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid installation payload")
 		return
 	}
 

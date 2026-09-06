@@ -17,7 +17,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/redis/go-redis/v9"
@@ -163,46 +162,46 @@ func (h *OAuthLoginHandler) Token(c *gin.Context) {
 	redirectURI := c.PostForm("redirect_uri")
 
 	if grantType != "authorization_code" {
-		response.LegacyError(c, http.StatusBadRequest, "unsupported_grant_type")
+		writeOAuthError(c, http.StatusBadRequest, "unsupported_grant_type")
 		return
 	}
 	if code == "" || verifier == "" {
-		response.LegacyError(c, http.StatusBadRequest, "invalid_request")
+		writeOAuthError(c, http.StatusBadRequest, "invalid_request")
 		return
 	}
 
 	// GetDel atomically consumes the code so it can never be replayed.
 	raw, err := h.redis.GetDel(c.Request.Context(), oauthCodeKeyPrefix+code).Result()
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
+		writeOAuthError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	var stored storedAuthCode
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
+		writeOAuthError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	if redirectURI != stored.RedirectURI {
-		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
+		writeOAuthError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	if !verifyPKCE(verifier, stored.CodeChallenge) {
-		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
+		writeOAuthError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	userID, err := uuid.Parse(stored.UserID)
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "invalid_grant")
+		writeOAuthError(c, http.StatusBadRequest, "invalid_grant")
 		return
 	}
 
 	_, tokenString, err := h.apiKeyService.CreateUserToken(userID, oauthTokenName, nil)
 	if err != nil {
-		response.LegacyError(c, http.StatusInternalServerError, "server_error")
+		writeOAuthError(c, http.StatusInternalServerError, "server_error")
 		return
 	}
 
@@ -243,6 +242,18 @@ func generateAuthCode() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// writeOAuthError emits the RFC 6749 error body, {"error": "..."}.
+//
+// This is the ONE surface deliberately exempt from the #757 convergence: the OAuth error
+// shape is fixed by the specification and `terraform login` parses it, so wrapping these in
+// the JSON:API envelope would break every OAuth client. The helper is local to this file on
+// purpose - nothing else should reach for this shape.
+func writeOAuthError(c *gin.Context, code int, message string) {
+	c.JSON(code, struct {
+		Error string `json:"error"`
+	}{Error: message})
 }
 
 // AuthorizationCodeResponse returns a one-time code to the `terraform login` flow.

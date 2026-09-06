@@ -54,7 +54,7 @@ func (h *RegistryModuleHandler) ListModules(c *gin.Context) {
 
 	modules, total, err := h.moduleService.ListModules(namespace, provider, verified, limit, offset)
 	if err != nil {
-		jsonapi.WriteRegistryError(c, http.StatusInternalServerError, err.Error())
+		jsonapi.WriteRegistryLookupError(c, err, "module not found", "failed to list modules")
 		return
 	}
 	modules = h.filterAccessibleModules(c, modules)
@@ -105,7 +105,7 @@ func (h *RegistryModuleHandler) SearchModules(c *gin.Context) {
 
 	modules, total, err := h.moduleService.SearchModules(query, namespace, provider, verified, limit, offset)
 	if err != nil {
-		jsonapi.WriteRegistryError(c, http.StatusInternalServerError, err.Error())
+		jsonapi.WriteRegistryLookupError(c, err, "module not found", "failed to list modules")
 		return
 	}
 	modules = h.filterAccessibleModules(c, modules)

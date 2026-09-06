@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
@@ -67,14 +68,14 @@ type APIKeyResponse struct {
 func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	var req CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.LegacyError(c, http.StatusBadRequest, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
 	// Get user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
@@ -83,7 +84,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
 		parsed, err := time.Parse(time.RFC3339, *req.ExpiresAt)
 		if err != nil {
-			response.LegacyError(c, http.StatusBadRequest, "invalid expires_at format, use ISO 8601 (RFC3339)")
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "invalid expires_at format, use ISO 8601 (RFC3339)")
 			return
 		}
 		expiresAt = &parsed
@@ -92,7 +93,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	// Create the API key with scopes
 	apiKey, plainKey, err := h.apiKeyService.CreateAPIKey(user.ID, req.Name, req.Scopes, expiresAt)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to create API key", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to create API key"+": "+err.Error())
 		return
 	}
 
@@ -145,14 +146,14 @@ func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 	// Get user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
 	// List API keys
 	apiKeys, err := h.apiKeyService.ListAPIKeys(user.ID)
 	if err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to list API keys", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to list API keys"+": "+err.Error())
 		return
 	}
 
@@ -193,14 +194,14 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		response.LegacyError(c, http.StatusBadRequest, "invalid API key ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "invalid API key ID")
 		return
 	}
 
 	// Get user from context
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
-		response.LegacyError(c, http.StatusUnauthorized, "unauthorized")
+		jsonapi.WriteError(c, http.StatusUnauthorized, jsonapi.TitleUnauthorized, "unauthorized")
 		return
 	}
 
@@ -209,7 +210,7 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 
 	// Delete the API key
 	if err := h.apiKeyService.DeleteAPIKey(id, user.ID); err != nil {
-		response.LegacyErrorDetails(c, http.StatusInternalServerError, "failed to delete API key", err.Error())
+		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to delete API key"+": "+err.Error())
 		return
 	}
 
