@@ -4,7 +4,7 @@
   "status": 404,
   "body": {
     "errors": [
-      "Provider not found"
+      "SHA256SUMS not available for this version"
     ]
   }
 }

@@ -1,14 +1,31 @@
 {
   "method": "GET",
   "path": "/api/v2/team-workspaces/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "access": "write"
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/team-workspaces/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "team": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "teams"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "team-workspaces"
+    }
   }
 }

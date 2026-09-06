@@ -66,6 +66,10 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden fixtures from 
 
 const goldenDir = "testdata/golden"
 
+// goldenSeedInstant anchors the seeded history. It is a constant rather than a computed value
+// on purpose: the whole point is that it does not move.
+const goldenSeedInstant = "2026-09-01T12:00:00Z"
+
 // goldenExclusions names every route deliberately not covered by a fixture, with the reason.
 // This list is the spec's "gaps are named" rule made executable: TestGoldenCoverage fails on
 // any registered route that is neither covered nor listed here, so a gap cannot open silently.
@@ -97,23 +101,25 @@ var goldenExclusions = map[string]string{
 	"DELETE /api/v2/organizations/:name": "destroys the seeded organization the rest of the fixtures depend on",
 }
 
-// timeSensitiveRoutes aggregate over calendar windows or live status, so their numbers move
-// with the wall clock even though the seed is fixed: demoseed anchors its history to time.Now,
-// so a run that was "completed this month" when a fixture was recorded is not next month.
+// timeSensitiveRoutes aggregate over calendar windows or live status, so their numbers move with
+// the wall clock. Their shape is pinned; their numbers are not.
 //
 // This was found the hard way. The fixtures were first recorded and re-verified within a few
 // hours, which hid it entirely; a day later ten endpoints reported spurious diffs
 // (completed_terraform_runs_this_month 5 -> 3, errored_workspaces 2 -> 0) with no code change
-// behind them. Left alone the suite would have failed in CI for a reason no one could act on,
-// which is the flaky-test failure mode the harness exists to avoid.
+// behind them - the flaky-test failure mode the harness exists to avoid.
 //
-// For these routes the numbers are normalised away and the SHAPE is still pinned: every key,
-// every nesting level, every type and null still has to match. That is the property a
-// representational refactor can break, so little is lost. The counts themselves are covered by
-// the handlers' own tests.
+// Pinning the SEED clock was the obvious fix and it is done (goldenSeedInstant), which removed
+// the daily component: the dataset is now byte-reproducible for a given --seed and --now. It is
+// NOT sufficient, and that was measured rather than assumed. Moving the anchor from September to
+// June changed completed_terraform_runs_this_month from 1 to 0, because these handlers evaluate
+// "this month" against the SERVER's clock, not against the data. The harness drives the router
+// in-process over HTTP and has no way to pin that.
 //
-// The real fix is to anchor demoseed's history to a fixed instant so the aggregates stop
-// moving; until then this list is the honest boundary rather than a silent flake.
+// So the numbers are normalised away for these routes while every key, nesting level, type and
+// null is still pinned - which is the property a representational refactor can actually break.
+// Removing this list entirely would need the handlers to take an injectable clock, which is a
+// change to production code for a test's benefit and is not obviously worth it.
 var timeSensitiveRoutes = map[string]string{
 	"GET /api/v2/dashboard/stats":                          "counts runs and jobs per calendar month",
 	"GET /api/v2/dashboard/operations":                     "counts live operations by status",
@@ -218,7 +224,12 @@ func seedGolden(t *testing.T, dbName string) {
 	u, _ := url.Parse(os.Getenv("TEST_DATABASE_URL"))
 	pw, _ := u.User.Password()
 
-	cmd := exec.Command("go", "run", "./cmd/demoseed", "--org", "demo", "--days", "10", "--seed", "20260817")
+	// --now pins the history anchor so the calendar buckets ("completed this month", "active")
+	// fall the same way regardless of when the fixtures are recorded. With --seed alone the data
+	// was reproducible in shape but not in those aggregates, and fixtures recorded one day
+	// reported spurious diffs the next.
+	cmd := exec.Command("go", "run", "./cmd/demoseed",
+		"--org", "demo", "--days", "10", "--seed", "20260817", "--now", goldenSeedInstant)
 	cmd.Dir = filepath.Join(repoRoot, "backend")
 	cmd.Env = append(os.Environ(),
 		"DATABASE_HOST="+u.Hostname(),
@@ -328,8 +339,9 @@ type goldenHarness struct {
 	db       *gorm.DB
 	router   *gin.Engine
 	token    string
-	families map[string]string // resource-family segment -> identifier from seeded data
-	named    map[string]string // parameter name -> value, for self-describing parameters
+	families map[string]string            // resource-family segment -> identifier from seeded data
+	named    map[string]string            // parameter name -> value, for self-describing parameters
+	prefixed map[string]map[string]string // path prefix -> parameter name -> value
 }
 
 func setupGoldenHarness(t *testing.T) *goldenHarness {
@@ -341,6 +353,20 @@ func setupGoldenHarness(t *testing.T) *goldenHarness {
 
 	db, name := goldenDB(t)
 	seedGolden(t, name)
+
+	// The tofu-version catalogue is written by SeedOfficialVersions at API startup, which a
+	// throwaway database never sees - and calling it here would fetch the live version index
+	// over the network, which a test must not. Inserting the static fallback list reproduces
+	// exactly what a freshly booted, offline deployment holds, deterministically.
+	for _, ver := range models.OfficialTofuVersions {
+		if err := db.Create(&models.TofuVersion{
+			Version:  ver,
+			Official: true,
+			Enabled:  true,
+		}).Error; err != nil {
+			t.Fatalf("seed tofu version %s: %v", ver, err)
+		}
+	}
 
 	// Real auth, not an impersonation shim: `tfe-` tokens are verified against the database
 	// by apikey.Service with no Zitadel involvement, so the harness can exercise the same
@@ -393,6 +419,7 @@ func setupGoldenHarness(t *testing.T) *goldenHarness {
 		token:    token,
 		families: resolveFamilies(db),
 		named:    resolveNamedParams(db),
+		prefixed: resolvePrefixParams(t, db),
 	}
 }
 
@@ -423,10 +450,34 @@ var familyTables = map[string]string{
 	"change-requests": "change_requests",
 	"variables":       "variables",
 	"inventories":     "ansible_inventories",
-	"job-templates":   "ansible_job_templates",
-	"jobs":            "ansible_jobs",
-	"playbooks":       "ansible_playbooks",
-	"schedules":       "ansible_schedules",
+	// These were recorded at their not-found path while the rows existed all along - the
+	// resolver simply had no entry, which #758 had attributed to the seeder.
+	"authentication-tokens": "api_keys",
+	"registry-providers":    "providers",
+	"registry-modules":      "modules",
+	// Families seeded by demoseed's coverage extras (#758 Phase 3).
+	"run-triggers":                "run_triggers",
+	"tasks":                       "run_tasks",
+	"task-stages":                 "task_stages",
+	"task-results":                "task_results",
+	"task-result-outcomes":        "task_results",
+	"notification-configurations": "notification_configurations",
+	"credentials":                 "ansible_credentials",
+	"inventory-sources":           "ansible_inventory_sources",
+	"inventory-syncs":             "ansible_inventory_syncs",
+	"workflows":                   "ansible_workflows",
+	"workflow-jobs":               "ansible_workflow_jobs",
+	"team-projects":               "team_project_accesses",
+	"team-workspaces":             "team_workspace_accesses",
+	// The admin tofu-version catalogue is auto-migrated with 65 rows; only the resolver entry
+	// was missing. Groups and hosts are seeded by the coverage extras.
+	"terraform-versions": "tofu_versions",
+	"groups":             "ansible_inventory_groups",
+	"hosts":              "ansible_inventory_hosts",
+	"job-templates":      "ansible_job_templates",
+	"jobs":               "ansible_jobs",
+	"playbooks":          "ansible_playbooks",
+	"schedules":          "ansible_schedules",
 }
 
 // orderColumn picks a deterministic sort key for a table.
@@ -545,6 +596,96 @@ func resolveFamilies(db *gorm.DB) map[string]string {
 	return out
 }
 
+// prefixParams resolves parameters by WHERE they appear, and resolves them as a SET.
+//
+// Two problems live here, and the second is the subtle one.
+//
+// First, the registry protocol reuses parameter names across resources:
+// /v1/modules/:namespace/:name/:provider and /v1/providers/:namespace/:name/:version. A lookup
+// keyed on the parameter name alone cannot tell them apart, so every /v1/providers route
+// resolved :namespace from the MODULES table and :name fell through to the organization name.
+//
+// Second, and this is what a per-parameter resolver cannot fix at all: these routes need values
+// that BELONG TOGETHER. Picking the first namespace, the first name and the first version
+// independently yields a coordinate triple that may name nothing, and the endpoint answers 404
+// while every individual row exists. The same defeats
+// /varsets/:id/relationships/vars/:variable_id, where the first variable set and the first
+// variable-set variable are usually unrelated.
+//
+// So each entry resolves one CONSISTENT row with a single joined query.
+func resolvePrefixParams(t *testing.T, db *gorm.DB) map[string]map[string]string {
+	t.Helper()
+	out := map[string]map[string]string{}
+
+	// One real provider coordinate: namespace, name and a version that exists for it.
+	var prov struct {
+		Namespace string
+		Name      string
+		Version   string
+	}
+	if err := db.Raw(`
+		SELECT p.namespace, p.name, pv.version
+		FROM providers p JOIN provider_versions pv ON pv.provider_id = p.id
+		ORDER BY p.namespace, p.name, pv.version LIMIT 1`).Scan(&prov).Error; err == nil && prov.Name != "" {
+		out["/v1/providers"] = map[string]string{
+			"namespace": prov.Namespace,
+			"name":      prov.Name,
+			"version":   prov.Version,
+		}
+	}
+
+	// One real module coordinate.
+	var mod struct {
+		Namespace string
+		Name      string
+		Provider  string
+		Version   string
+	}
+	if err := db.Raw(`
+		SELECT m.namespace, m.name, m.provider, mv.version
+		FROM modules m JOIN module_versions mv ON mv.module_id = m.id
+		ORDER BY m.namespace, m.name, mv.version LIMIT 1`).Scan(&mod).Error; err == nil && mod.Name != "" {
+		out["/v1/modules"] = map[string]string{
+			"namespace": mod.Namespace,
+			"name":      mod.Name,
+			"provider":  mod.Provider,
+			"version":   mod.Version,
+		}
+	}
+
+	// A variable set together with a variable that actually belongs to it.
+	var vs struct {
+		SetID string
+		VarID string
+	}
+	if err := db.Raw(`
+		SELECT vs.id AS set_id, vsv.id AS var_id
+		FROM variable_sets vs JOIN variable_set_variables vsv ON vsv.variable_set_id = vs.id
+		-- ORDER BY the variable's KEY, not its id: TFE-style ids are randomly generated, so
+		-- ordering by one picks a different row on each seeding run and the fixture churns.
+		ORDER BY vs.name, vsv.key LIMIT 1`).Scan(&vs).Error; err == nil && vs.VarID != "" {
+		pair := map[string]string{"id": vs.SetID, "variable_id": vs.VarID}
+		out["/api/v2/varsets"] = pair
+		out["/api/v2/organizations/:name/varsets"] = pair
+	}
+
+	// A workspace variable that belongs to the workspace the family lookup resolves. The
+	// name-based fallback would hand this route a variable-set variable id, and an arbitrary
+	// variable would not belong to the resolved workspace either way.
+	var wv struct {
+		WsID  string
+		VarID string
+	}
+	if err := db.Raw(`
+		SELECT w.id AS ws_id, v.id AS var_id
+		FROM workspaces w JOIN variables v ON v.workspace_id = w.id
+		ORDER BY w.name, v.key LIMIT 1`).Scan(&wv).Error; err == nil && wv.VarID != "" {
+		out["/api/v2/workspaces/:id/vars"] = map[string]string{"id": wv.WsID, "variable_id": wv.VarID}
+	}
+
+	return out
+}
+
 // namedParams covers parameters whose own name determines the value, independent of family.
 func resolveNamedParams(db *gorm.DB) map[string]string {
 	p := map[string]string{}
@@ -572,7 +713,12 @@ func resolveNamedParams(db *gorm.DB) map[string]string {
 	if v, ok := firstID(db, "ansible_schedules"); ok {
 		p["schedule_id"] = v
 	}
-	if v, ok := firstID(db, "variables"); ok {
+	// :variable_id under a varset means a variable-set variable, not a workspace variable.
+	// Resolving it from the workspace `variables` table made every varset relationship route
+	// answer 404 even though the variable sets themselves resolved fine.
+	if v, ok := firstID(db, "variable_set_variables"); ok {
+		p["variable_id"] = v
+	} else if v, ok := firstID(db, "variables"); ok {
 		p["variable_id"] = v
 	}
 	if v, ok := firstID(db, "teams"); ok {
@@ -610,6 +756,23 @@ func (h *goldenHarness) buildPath(routePath string) string {
 			continue
 		}
 		key := strings.TrimLeft(seg, ":*")
+
+		// Where the parameter sits wins over what it is called: /v1/providers/:namespace is a
+		// provider namespace even though /v1/modules/:namespace is a module namespace.
+		matched := false
+		for prefix, params := range h.prefixed {
+			if !strings.HasPrefix(routePath, prefix) {
+				continue
+			}
+			if v, ok := params[key]; ok {
+				segs[i] = v
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
 
 		// An explicitly named parameter says what it is regardless of position.
 		if v, ok := h.named[key]; ok && (key != "name" || i == 0) {
@@ -779,10 +942,18 @@ func TestGoldenResponses(t *testing.T) {
 //
 // Shrinking this list is how Ansible-workflow, VCS-connection, task and registry-provider
 // payload coverage improves; it needs the seeder to create those resources, not a change here.
+// Every entry here is a deliberate honesty boundary, not a backlog (#758). Each of these
+// resources implies an artefact the seeder cannot create: a state version implies a completed
+// apply with state in object storage, a configuration version an uploaded archive, a VCS
+// connection an OAuth token from a real provider, and a plan a runner execution with output in
+// storage. A row without the artefact produces a payload no real deployment serves, and a
+// fixture pinning a fiction is worse than one pinning a 404 - it reads as coverage.
 var unseededFamilies = []string{
-	"ansible/workflows", "vcs-connections", "state-versions", "tasks", "task-results",
-	"task-stages", "task-result-outcomes", "run-triggers", "registry-providers", "plans",
-	"team-workspaces", "team-projects",
+	"vcs-connections",
+	"state-versions",
+	"configuration-versions",
+	"plans",
+	"applies",
 }
 
 // TestGoldenFamiliesResolve fails when a family the harness claims to resolve has no seeded
@@ -798,6 +969,25 @@ func TestGoldenFamiliesResolve(t *testing.T) {
 			missing = append(missing, fmt.Sprintf("%s (table %s has no rows)", family, table))
 		}
 	}
+	// The other direction (#758 AC2): a family listed as unseedable that actually has rows is a
+	// stale honesty boundary - either the seeder grew support and the list was not updated, or
+	// the entry never belonged. Both mean the 404 fixtures under it are hiding real coverage.
+	unseedableTables := map[string]string{
+		"vcs-connections":        "vcs_connections",
+		"state-versions":         "state_versions",
+		"configuration-versions": "configuration_versions",
+	}
+	for _, fam := range unseededFamilies {
+		table, known := unseedableTables[fam]
+		if !known {
+			continue // no backing table to check (plans, applies)
+		}
+		var n int64
+		if err := h.db.Table(table).Count(&n).Error; err == nil && n > 0 {
+			missing = append(missing, fmt.Sprintf("%s is listed as unseedable but %s has %d row(s)", fam, table, n))
+		}
+	}
+
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		t.Errorf("%d resource famil(ies) the harness claims to resolve are unseeded, so their routes "+

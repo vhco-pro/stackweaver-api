@@ -1,13 +1,42 @@
 {
   "method": "GET",
   "path": "/api/v2/ansible/workflows/:id/nodes",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
+    "data": [
       {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
+        "attributes": {
+          "all-parents-must-converge": false,
+          "approval-message": "",
+          "approval-timeout": 0,
+          "created-at": "\u003ctimestamp\u003e",
+          "extra-vars": "{}",
+          "identifier": "patch",
+          "job-template-name": "patch-linux-fleet",
+          "limit": "",
+          "node-type": "job_template",
+          "position-x": 0,
+          "position-y": 0,
+          "skip-tags": "",
+          "tags": "",
+          "verbosity": 0
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "job-template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          },
+          "workflow": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-workflows"
+            }
+          }
+        },
+        "type": "ansible-workflow-nodes"
       }
     ]
   }

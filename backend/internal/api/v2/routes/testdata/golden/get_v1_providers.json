@@ -9,22 +9,22 @@
     },
     "providers": [
       {
-        "downloads": 224,
-        "id": "demo/internal-dns/0.3.0",
-        "name": "internal-dns",
-        "namespace": "demo",
-        "published_at": "\u003ctimestamp\u003e",
-        "verified": false,
-        "version": "0.3.0"
-      },
-      {
-        "downloads": 237,
+        "downloads": 230,
         "id": "demo/secrets-broker/1.1.0",
         "name": "secrets-broker",
         "namespace": "demo",
         "published_at": "\u003ctimestamp\u003e",
         "verified": false,
         "version": "1.1.0"
+      },
+      {
+        "downloads": 89,
+        "id": "demo/internal-dns/0.3.0",
+        "name": "internal-dns",
+        "namespace": "demo",
+        "published_at": "\u003ctimestamp\u003e",
+        "verified": false,
+        "version": "0.3.0"
       }
     ]
   }

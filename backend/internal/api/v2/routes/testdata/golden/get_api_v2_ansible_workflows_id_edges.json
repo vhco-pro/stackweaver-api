@@ -1,14 +1,8 @@
 {
   "method": "GET",
   "path": "/api/v2/ansible/workflows/:id/edges",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": []
   }
 }

@@ -1,14 +1,32 @@
 {
   "method": "GET",
   "path": "/api/v2/ansible/groups/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Demo group.",
+        "name": "webservers",
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {}
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "children": {
+          "data": []
+        },
+        "hosts": {
+          "data": []
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        }
+      },
+      "type": "ansible-groups"
+    }
   }
 }

@@ -1,14 +1,29 @@
 {
   "method": "GET",
   "path": "/api/v2/registry-providers/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "name": "internal-dns",
+        "namespace": "demo",
+        "permissions": {
+          "can-delete": true
+        },
+        "registry-name": "private",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "registry-providers"
+    }
   }
 }

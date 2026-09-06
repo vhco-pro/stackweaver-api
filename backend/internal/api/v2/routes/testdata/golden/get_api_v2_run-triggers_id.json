@@ -1,14 +1,30 @@
 {
   "method": "GET",
   "path": "/api/v2/run-triggers/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "sourceable-name": "prod-network",
+        "workspace-name": "prod-cluster"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "sourceable": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "run-triggers"
+    }
   }
 }

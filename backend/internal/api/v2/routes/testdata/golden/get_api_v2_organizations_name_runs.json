@@ -18,7 +18,7 @@
           "has-changes": false,
           "is-destroy": false,
           "message": "",
-          "operation": "plan-only",
+          "operation": "plan-and-apply",
           "permissions": {
             "can-apply": false,
             "can-cancel": true,
@@ -26,7 +26,55 @@
             "can-force-cancel": false,
             "can-force-execute": false
           },
-          "plan-only": true,
+          "plan-only": false,
+          "source": "tfe-api",
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "failed",
+          "status-timestamps": {
+            "planning-at": "\u003ctimestamp\u003e"
+          },
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "plan": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "plans"
+            }
+          },
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "actions": {
+            "is-cancelable": false,
+            "is-confirmable": false,
+            "is-discardable": false,
+            "is-force-cancelable": false
+          },
+          "completed-at": "\u003ctimestamp\u003e",
+          "created-at": "\u003ctimestamp\u003e",
+          "error-message": "Error: creating resource: timeout while waiting for state to become 'available'",
+          "has-changes": false,
+          "is-destroy": false,
+          "message": "",
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false,
+            "can-cancel": true,
+            "can-discard": true,
+            "can-force-cancel": false,
+            "can-force-execute": false
+          },
+          "plan-only": false,
           "source": "tfe-api",
           "started-at": "\u003ctimestamp\u003e",
           "status": "failed",
@@ -508,8 +556,9 @@
           "plan-only": false,
           "source": "tfe-api",
           "started-at": "\u003ctimestamp\u003e",
-          "status": "canceled",
+          "status": "applied",
           "status-timestamps": {
+            "applied-at": "\u003ctimestamp\u003e",
             "planning-at": "\u003ctimestamp\u003e"
           },
           "updated-at": "\u003ctimestamp\u003e"
@@ -544,7 +593,7 @@
           "has-changes": false,
           "is-destroy": false,
           "message": "",
-          "operation": "plan-only",
+          "operation": "plan-and-apply",
           "permissions": {
             "can-apply": false,
             "can-cancel": true,
@@ -552,12 +601,59 @@
             "can-force-cancel": false,
             "can-force-execute": false
           },
-          "plan-only": true,
+          "plan-only": false,
           "source": "tfe-api",
           "started-at": "\u003ctimestamp\u003e",
-          "status": "planned",
+          "status": "applied",
           "status-timestamps": {
-            "planned-at": "\u003ctimestamp\u003e",
+            "applied-at": "\u003ctimestamp\u003e",
+            "planning-at": "\u003ctimestamp\u003e"
+          },
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "plan": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "plans"
+            }
+          },
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "actions": {
+            "is-cancelable": false,
+            "is-confirmable": false,
+            "is-discardable": false,
+            "is-force-cancelable": false
+          },
+          "completed-at": "\u003ctimestamp\u003e",
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "message": "",
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false,
+            "can-cancel": true,
+            "can-discard": true,
+            "can-force-cancel": false,
+            "can-force-execute": false
+          },
+          "plan-only": false,
+          "source": "tfe-api",
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "canceled",
+          "status-timestamps": {
             "planning-at": "\u003ctimestamp\u003e"
           },
           "updated-at": "\u003ctimestamp\u003e"
@@ -830,7 +926,7 @@
           "has-changes": false,
           "is-destroy": false,
           "message": "",
-          "operation": "plan-and-apply",
+          "operation": "plan-only",
           "permissions": {
             "can-apply": false,
             "can-cancel": true,
@@ -838,7 +934,7 @@
             "can-force-cancel": false,
             "can-force-execute": false
           },
-          "plan-only": false,
+          "plan-only": true,
           "source": "tfe-api",
           "started-at": "\u003ctimestamp\u003e",
           "status": "applying",
@@ -868,7 +964,7 @@
     "meta": {
       "pagination": {
         "current-page": "\u003cnumber\u003e",
-        "next-page": null,
+        "next-page": "\u003cnumber\u003e",
         "page-size": "\u003cnumber\u003e",
         "prev-page": null,
         "total-count": "\u003cnumber\u003e",

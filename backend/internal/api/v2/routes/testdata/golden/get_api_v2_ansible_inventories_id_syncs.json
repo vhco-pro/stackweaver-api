@@ -3,14 +3,44 @@
   "path": "/api/v2/ansible/inventories/:id/syncs",
   "status": 200,
   "body": {
-    "data": [],
+    "data": [
+      {
+        "attributes": {
+          "created-at": "\u003ctimestamp\u003e",
+          "error": "",
+          "finished-at": "\u003ctimestamp\u003e",
+          "groups-discovered": 0,
+          "hosts-discovered": 4,
+          "source-name": "aws-eu-west-1",
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful",
+          "triggered-by": "manual"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "inventories"
+            }
+          },
+          "source": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "inventory-sources"
+            }
+          }
+        },
+        "type": "inventory-syncs"
+      }
+    ],
     "meta": {
       "pagination": {
         "current-page": 1,
         "next-page": null,
         "page-size": 20,
         "prev-page": null,
-        "total-count": 0,
+        "total-count": 1,
         "total-pages": 1
       }
     }

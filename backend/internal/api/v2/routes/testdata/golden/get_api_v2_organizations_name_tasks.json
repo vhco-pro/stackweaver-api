@@ -3,14 +3,44 @@
   "path": "/api/v2/organizations/:name/tasks",
   "status": 200,
   "body": {
-    "data": [],
+    "data": [
+      {
+        "attributes": {
+          "category": "task",
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "Demo run task; the endpoint does not exist.",
+          "enabled": true,
+          "global-configuration": {
+            "enabled": false,
+            "enforcement-level": "",
+            "stages": []
+          },
+          "name": "drift-scanner",
+          "updated-at": "\u003ctimestamp\u003e",
+          "url": "https://tasks.example.invalid/drift"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "demo",
+              "type": "organizations"
+            }
+          },
+          "workspace-tasks": {
+            "data": []
+          }
+        },
+        "type": "tasks"
+      }
+    ],
     "meta": {
       "pagination": {
         "current-page": 1,
         "next-page": null,
         "page-size": 20,
         "prev-page": null,
-        "total-count": 0,
+        "total-count": 1,
         "total-pages": 1
       }
     }

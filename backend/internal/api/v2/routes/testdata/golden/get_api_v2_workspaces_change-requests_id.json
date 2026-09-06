@@ -5,12 +5,12 @@
   "body": {
     "data": {
       "attributes": {
-        "archived-at": null,
-        "archived-by": null,
+        "archived-at": "\u003ctimestamp\u003e",
+        "archived-by": "\u003cuuid\u003e",
         "created-at": "\u003ctimestamp\u003e",
         "created-by": "\u003cuuid\u003e",
-        "message": "Credentials are past the 90 day rotation window. Coordinate with the application team before applying.",
-        "subject": "Rotate the database credentials",
+        "message": "Production database has deletion protection disabled. Turn it on before the next apply.",
+        "subject": "Enable deletion protection",
         "updated-at": "\u003ctimestamp\u003e"
       },
       "id": "\u003cid\u003e",

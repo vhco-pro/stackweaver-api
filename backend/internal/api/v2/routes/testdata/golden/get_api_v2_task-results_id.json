@@ -1,14 +1,40 @@
 {
   "method": "GET",
   "path": "/api/v2/task-results/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "message": "No drift detected.",
+        "status": "passed",
+        "status-timestamps": {
+          "passed-at": "\u003ctimestamp\u003e"
+        },
+        "task-id": "\u003cid\u003e",
+        "task-name": "",
+        "task-url": "",
+        "updated-at": "\u003ctimestamp\u003e",
+        "url": "",
+        "workspace-task-enforcement-level": "",
+        "workspace-task-id": ""
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "task-stage": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "task-stages"
+          }
+        },
+        "task_stage": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "task-stages"
+          }
+        }
+      },
+      "type": "task-results"
+    }
   }
 }

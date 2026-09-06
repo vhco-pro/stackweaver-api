@@ -1,10 +1,20 @@
 {
   "method": "GET",
   "path": "/v1/providers/:namespace/:name",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      "Provider not found"
+    "downloads": 240,
+    "id": "demo/internal-dns/1.0.0",
+    "name": "internal-dns",
+    "namespace": "demo",
+    "platforms": [],
+    "published_at": "\u003ctimestamp\u003e",
+    "verified": false,
+    "version": "1.0.0",
+    "versions": [
+      "0.3.0",
+      "0.4.0",
+      "1.0.0"
     ]
   }
 }

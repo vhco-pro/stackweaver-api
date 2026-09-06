@@ -3,14 +3,46 @@
   "path": "/api/v2/organizations/:name/ansible/workflows",
   "status": 200,
   "body": {
-    "data": [],
+    "data": [
+      {
+        "attributes": {
+          "allow-simultaneous": false,
+          "ask-inventory-on-launch": false,
+          "ask-limit-on-launch": false,
+          "ask-variables-on-launch": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "description": "Demo workflow chaining the first job template.",
+          "extra-vars": "{}",
+          "limit": "",
+          "name": "patch-and-verify",
+          "survey-enabled": false,
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "organization": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "organizations"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "ansible-workflows"
+      }
+    ],
     "meta": {
       "pagination": {
         "current-page": 1,
         "next-page": null,
         "page-size": 20,
         "prev-page": null,
-        "total-count": 0,
+        "total-count": 1,
         "total-pages": 1
       }
     }

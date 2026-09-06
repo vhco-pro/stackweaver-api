@@ -220,37 +220,7 @@
           },
           {
             "activity": "\u003cnumber\u003e",
-            "date": "2026-08-22",
-            "jobs_failed": "\u003cnumber\u003e",
-            "jobs_other": "\u003cnumber\u003e",
-            "jobs_succeeded": "\u003cnumber\u003e",
-            "runs_failed": "\u003cnumber\u003e",
-            "runs_other": "\u003cnumber\u003e",
-            "runs_succeeded": "\u003cnumber\u003e"
-          },
-          {
-            "activity": "\u003cnumber\u003e",
-            "date": "2026-08-23",
-            "jobs_failed": "\u003cnumber\u003e",
-            "jobs_other": "\u003cnumber\u003e",
-            "jobs_succeeded": "\u003cnumber\u003e",
-            "runs_failed": "\u003cnumber\u003e",
-            "runs_other": "\u003cnumber\u003e",
-            "runs_succeeded": "\u003cnumber\u003e"
-          },
-          {
-            "activity": "\u003cnumber\u003e",
             "date": "2026-08-24",
-            "jobs_failed": "\u003cnumber\u003e",
-            "jobs_other": "\u003cnumber\u003e",
-            "jobs_succeeded": "\u003cnumber\u003e",
-            "runs_failed": "\u003cnumber\u003e",
-            "runs_other": "\u003cnumber\u003e",
-            "runs_succeeded": "\u003cnumber\u003e"
-          },
-          {
-            "activity": "\u003cnumber\u003e",
-            "date": "2026-08-25",
             "jobs_failed": "\u003cnumber\u003e",
             "jobs_other": "\u003cnumber\u003e",
             "jobs_succeeded": "\u003cnumber\u003e",
@@ -270,27 +240,7 @@
           },
           {
             "activity": "\u003cnumber\u003e",
-            "date": "2026-08-30",
-            "jobs_failed": "\u003cnumber\u003e",
-            "jobs_other": "\u003cnumber\u003e",
-            "jobs_succeeded": "\u003cnumber\u003e",
-            "runs_failed": "\u003cnumber\u003e",
-            "runs_other": "\u003cnumber\u003e",
-            "runs_succeeded": "\u003cnumber\u003e"
-          },
-          {
-            "activity": "\u003cnumber\u003e",
-            "date": "2026-09-06",
-            "jobs_failed": "\u003cnumber\u003e",
-            "jobs_other": "\u003cnumber\u003e",
-            "jobs_succeeded": "\u003cnumber\u003e",
-            "runs_failed": "\u003cnumber\u003e",
-            "runs_other": "\u003cnumber\u003e",
-            "runs_succeeded": "\u003cnumber\u003e"
-          },
-          {
-            "activity": "\u003cnumber\u003e",
-            "date": "2026-08-31",
+            "date": "2026-09-02",
             "jobs_failed": "\u003cnumber\u003e",
             "jobs_other": "\u003cnumber\u003e",
             "jobs_succeeded": "\u003cnumber\u003e",
@@ -310,26 +260,6 @@
           },
           {
             "activity": "\u003cnumber\u003e",
-            "date": "2026-08-27",
-            "jobs_failed": "\u003cnumber\u003e",
-            "jobs_other": "\u003cnumber\u003e",
-            "jobs_succeeded": "\u003cnumber\u003e",
-            "runs_failed": "\u003cnumber\u003e",
-            "runs_other": "\u003cnumber\u003e",
-            "runs_succeeded": "\u003cnumber\u003e"
-          },
-          {
-            "activity": "\u003cnumber\u003e",
-            "date": "2026-08-28",
-            "jobs_failed": "\u003cnumber\u003e",
-            "jobs_other": "\u003cnumber\u003e",
-            "jobs_succeeded": "\u003cnumber\u003e",
-            "runs_failed": "\u003cnumber\u003e",
-            "runs_other": "\u003cnumber\u003e",
-            "runs_succeeded": "\u003cnumber\u003e"
-          },
-          {
-            "activity": "\u003cnumber\u003e",
             "date": "2026-09-04",
             "jobs_failed": "\u003cnumber\u003e",
             "jobs_other": "\u003cnumber\u003e",
@@ -340,7 +270,77 @@
           },
           {
             "activity": "\u003cnumber\u003e",
-            "date": "2026-08-29",
+            "date": "2026-09-05",
+            "jobs_failed": "\u003cnumber\u003e",
+            "jobs_other": "\u003cnumber\u003e",
+            "jobs_succeeded": "\u003cnumber\u003e",
+            "runs_failed": "\u003cnumber\u003e",
+            "runs_other": "\u003cnumber\u003e",
+            "runs_succeeded": "\u003cnumber\u003e"
+          },
+          {
+            "activity": "\u003cnumber\u003e",
+            "date": "2026-09-06",
+            "jobs_failed": "\u003cnumber\u003e",
+            "jobs_other": "\u003cnumber\u003e",
+            "jobs_succeeded": "\u003cnumber\u003e",
+            "runs_failed": "\u003cnumber\u003e",
+            "runs_other": "\u003cnumber\u003e",
+            "runs_succeeded": "\u003cnumber\u003e"
+          },
+          {
+            "activity": "\u003cnumber\u003e",
+            "date": "2026-08-25",
+            "jobs_failed": "\u003cnumber\u003e",
+            "jobs_other": "\u003cnumber\u003e",
+            "jobs_succeeded": "\u003cnumber\u003e",
+            "runs_failed": "\u003cnumber\u003e",
+            "runs_other": "\u003cnumber\u003e",
+            "runs_succeeded": "\u003cnumber\u003e"
+          },
+          {
+            "activity": "\u003cnumber\u003e",
+            "date": "2026-08-27",
+            "jobs_failed": "\u003cnumber\u003e",
+            "jobs_other": "\u003cnumber\u003e",
+            "jobs_succeeded": "\u003cnumber\u003e",
+            "runs_failed": "\u003cnumber\u003e",
+            "runs_other": "\u003cnumber\u003e",
+            "runs_succeeded": "\u003cnumber\u003e"
+          },
+          {
+            "activity": "\u003cnumber\u003e",
+            "date": "2026-08-30",
+            "jobs_failed": "\u003cnumber\u003e",
+            "jobs_other": "\u003cnumber\u003e",
+            "jobs_succeeded": "\u003cnumber\u003e",
+            "runs_failed": "\u003cnumber\u003e",
+            "runs_other": "\u003cnumber\u003e",
+            "runs_succeeded": "\u003cnumber\u003e"
+          },
+          {
+            "activity": "\u003cnumber\u003e",
+            "date": "2026-08-23",
+            "jobs_failed": "\u003cnumber\u003e",
+            "jobs_other": "\u003cnumber\u003e",
+            "jobs_succeeded": "\u003cnumber\u003e",
+            "runs_failed": "\u003cnumber\u003e",
+            "runs_other": "\u003cnumber\u003e",
+            "runs_succeeded": "\u003cnumber\u003e"
+          },
+          {
+            "activity": "\u003cnumber\u003e",
+            "date": "2026-08-22",
+            "jobs_failed": "\u003cnumber\u003e",
+            "jobs_other": "\u003cnumber\u003e",
+            "jobs_succeeded": "\u003cnumber\u003e",
+            "runs_failed": "\u003cnumber\u003e",
+            "runs_other": "\u003cnumber\u003e",
+            "runs_succeeded": "\u003cnumber\u003e"
+          },
+          {
+            "activity": "\u003cnumber\u003e",
+            "date": "2026-08-31",
             "jobs_failed": "\u003cnumber\u003e",
             "jobs_other": "\u003cnumber\u003e",
             "jobs_succeeded": "\u003cnumber\u003e",
@@ -360,7 +360,7 @@
           },
           {
             "activity": "\u003cnumber\u003e",
-            "date": "2026-09-02",
+            "date": "2026-08-28",
             "jobs_failed": "\u003cnumber\u003e",
             "jobs_other": "\u003cnumber\u003e",
             "jobs_succeeded": "\u003cnumber\u003e",
@@ -370,7 +370,7 @@
           },
           {
             "activity": "\u003cnumber\u003e",
-            "date": "2026-09-05",
+            "date": "2026-08-29",
             "jobs_failed": "\u003cnumber\u003e",
             "jobs_other": "\u003cnumber\u003e",
             "jobs_succeeded": "\u003cnumber\u003e",
@@ -381,38 +381,56 @@
         ],
         "recent_failures": [
           {
-            "detail": "patch-linux-fleet",
+            "detail": "baseline-compliance",
             "error_message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
             "failed_at": "\u003ctimestamp\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-08-28 08:10",
+            "name": "baseline-compliance - 2026-08-23 11:01",
             "platform": "ansible",
             "workspace_name": ""
           },
           {
-            "detail": "patch-linux-fleet",
+            "detail": "baseline-compliance",
             "error_message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
             "failed_at": "\u003ctimestamp\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "patch-linux-fleet - 2026-08-30 17:43",
+            "name": "baseline-compliance - 2026-08-30 17:24",
             "platform": "ansible",
             "workspace_name": ""
           },
           {
-            "detail": "plan-only",
+            "detail": "plan-and-apply",
             "error_message": "Error: creating resource: timeout while waiting for state to become 'available'",
             "failed_at": "\u003ctimestamp\u003e",
             "id": "\u003cid\u003e",
-            "name": "analytics-warehouse",
+            "name": "payments-staging",
             "platform": "terraform",
-            "workspace_name": "analytics-warehouse"
+            "workspace_name": "payments-staging"
+          },
+          {
+            "detail": "plan-and-apply",
+            "error_message": "Error: creating resource: timeout while waiting for state to become 'available'",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cid\u003e",
+            "name": "prod-network",
+            "platform": "terraform",
+            "workspace_name": "prod-network"
           },
           {
             "detail": "rotate-certificates",
             "error_message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
             "failed_at": "\u003ctimestamp\u003e",
             "id": "\u003cuuid\u003e",
-            "name": "rotate-certificates - 2026-09-01 09:48",
+            "name": "rotate-certificates - 2026-08-22 09:35",
+            "platform": "ansible",
+            "workspace_name": ""
+          },
+          {
+            "detail": "rotate-certificates",
+            "error_message": "fatal: [web-04]: FAILED! =\u003e task 'restart nginx' returned non-zero exit status",
+            "failed_at": "\u003ctimestamp\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "rotate-certificates - 2026-08-24 12:05",
             "platform": "ansible",
             "workspace_name": ""
           }
@@ -456,15 +474,6 @@
             "succeeded": "\u003cnumber\u003e",
             "success_rate": "\u003cnumber\u003e",
             "template_id": "\u003cuuid\u003e",
-            "template_name": "baseline-compliance"
-          },
-          {
-            "avg_duration_seconds": "\u003cnumber\u003e",
-            "failed": "\u003cnumber\u003e",
-            "job_count": "\u003cnumber\u003e",
-            "succeeded": "\u003cnumber\u003e",
-            "success_rate": "\u003cnumber\u003e",
-            "template_id": "\u003cuuid\u003e",
             "template_name": "deploy-web-tier"
           },
           {
@@ -474,7 +483,7 @@
             "succeeded": "\u003cnumber\u003e",
             "success_rate": "\u003cnumber\u003e",
             "template_id": "\u003cuuid\u003e",
-            "template_name": "patch-linux-fleet"
+            "template_name": "rotate-certificates"
           },
           {
             "avg_duration_seconds": "\u003cnumber\u003e",
@@ -483,20 +492,19 @@
             "succeeded": "\u003cnumber\u003e",
             "success_rate": "\u003cnumber\u003e",
             "template_id": "\u003cuuid\u003e",
-            "template_name": "rotate-certificates"
-          }
-        ],
-        "top_workspaces": [
+            "template_name": "baseline-compliance"
+          },
           {
             "avg_duration_seconds": "\u003cnumber\u003e",
             "failed": "\u003cnumber\u003e",
-            "project_name": "payments",
-            "run_count": "\u003cnumber\u003e",
+            "job_count": "\u003cnumber\u003e",
             "succeeded": "\u003cnumber\u003e",
             "success_rate": "\u003cnumber\u003e",
-            "workspace_id": "\u003cid\u003e",
-            "workspace_name": "payments-staging"
-          },
+            "template_id": "\u003cuuid\u003e",
+            "template_name": "patch-linux-fleet"
+          }
+        ],
+        "top_workspaces": [
           {
             "avg_duration_seconds": "\u003cnumber\u003e",
             "failed": "\u003cnumber\u003e",
@@ -520,6 +528,26 @@
           {
             "avg_duration_seconds": "\u003cnumber\u003e",
             "failed": "\u003cnumber\u003e",
+            "project_name": "payments",
+            "run_count": "\u003cnumber\u003e",
+            "succeeded": "\u003cnumber\u003e",
+            "success_rate": "\u003cnumber\u003e",
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "payments-staging"
+          },
+          {
+            "avg_duration_seconds": "\u003cnumber\u003e",
+            "failed": "\u003cnumber\u003e",
+            "project_name": "platform",
+            "run_count": "\u003cnumber\u003e",
+            "succeeded": "\u003cnumber\u003e",
+            "success_rate": "\u003cnumber\u003e",
+            "workspace_id": "\u003cid\u003e",
+            "workspace_name": "prod-network"
+          },
+          {
+            "avg_duration_seconds": "\u003cnumber\u003e",
+            "failed": "\u003cnumber\u003e",
             "project_name": "platform",
             "run_count": "\u003cnumber\u003e",
             "succeeded": "\u003cnumber\u003e",
@@ -535,7 +563,7 @@
             "succeeded": "\u003cnumber\u003e",
             "success_rate": "\u003cnumber\u003e",
             "workspace_id": "\u003cid\u003e",
-            "workspace_name": "prod-network"
+            "workspace_name": "staging-cluster"
           }
         ],
         "window": {

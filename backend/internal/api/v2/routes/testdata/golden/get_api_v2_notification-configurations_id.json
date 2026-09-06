@@ -1,14 +1,32 @@
 {
   "method": "GET",
   "path": "/api/v2/notification-configurations/:id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "destination-type": "generic",
+        "email-addresses": [],
+        "enabled": true,
+        "name": "run-events",
+        "triggers": [
+          "run:completed",
+          "run:errored"
+        ],
+        "updated-at": "\u003ctimestamp\u003e",
+        "url": "https://hooks.example.invalid/runs"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "subscribable": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "notification-configurations"
+    }
   }
 }

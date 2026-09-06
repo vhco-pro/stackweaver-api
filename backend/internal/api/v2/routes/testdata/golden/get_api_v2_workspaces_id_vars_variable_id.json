@@ -1,14 +1,34 @@
 {
   "method": "GET",
   "path": "/api/v2/workspaces/:id/vars/:variable_id",
-  "status": 404,
+  "status": 200,
   "body": {
-    "errors": [
-      {
-        "detail": "Variable not found",
-        "status": "404",
-        "title": "Not Found"
-      }
-    ]
+    "data": {
+      "attributes": {
+        "category": "terraform",
+        "description": "Sensitive value; the UI must redact it.",
+        "hcl": false,
+        "key": "api_token",
+        "sensitive": true,
+        "value": "••••••••",
+        "version-id": ""
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/workspaces/\u003cid\u003e/vars/\u003cid\u003e"
+      },
+      "relationships": {
+        "configurable": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          },
+          "links": {
+            "related": "/api/v2/organizations/demo/workspaces/analytics-warehouse"
+          }
+        }
+      },
+      "type": "vars"
+    }
   }
 }

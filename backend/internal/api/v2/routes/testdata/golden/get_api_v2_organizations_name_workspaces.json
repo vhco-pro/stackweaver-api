@@ -457,6 +457,12 @@
           "agent-pool": {
             "data": null
           },
+          "current-run": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "runs"
+            }
+          },
           "organization": {
             "data": {
               "id": "demo",
@@ -576,6 +582,7 @@
       },
       {
         "attributes": {
+          "completed-at": "\u003ctimestamp\u003e",
           "created-at": "\u003ctimestamp\u003e",
           "has-changes": false,
           "is-destroy": false,
@@ -584,7 +591,32 @@
             "can-apply": false
           },
           "plan-only": false,
-          "status": "applying",
+          "status": "canceled",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      },
+      {
+        "attributes": {
+          "completed-at": "\u003ctimestamp\u003e",
+          "created-at": "\u003ctimestamp\u003e",
+          "has-changes": false,
+          "is-destroy": false,
+          "operation": "plan-and-apply",
+          "permissions": {
+            "can-apply": false
+          },
+          "plan-only": false,
+          "status": "failed",
           "updated-at": "\u003ctimestamp\u003e"
         },
         "id": "\u003cid\u003e",
