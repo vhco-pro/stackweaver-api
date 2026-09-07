@@ -55,29 +55,36 @@ type AnsibleConfigRequest struct {
 // buildAnsibleConfigResponse renders the standard JSON:API resource object
 // (#608): attributes nested and dasherized, scope parents expressed as
 // relationships rather than flat *_id attributes.
-func buildAnsibleConfigResponse(config *models.AnsibleConfig) gin.H {
-	resp := gin.H{
-		"type": "ansible-configs",
-		"id":   config.ID.String(),
-		"attributes": gin.H{
-			"scope":          config.Scope(),
-			"config-content": config.ConfigContent,
-			"created-at":     config.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":     config.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+func buildAnsibleConfigResponse(config *models.AnsibleConfig) jsonapi.Resource[AnsibleConfigAttributes] {
+	resp := jsonapi.Resource[AnsibleConfigAttributes]{
+		ID:   config.ID.String(),
+		Type: "ansible-configs",
+		Attributes: AnsibleConfigAttributes{
+			Scope:         config.Scope(),
+			ConfigContent: config.ConfigContent,
+			CreatedAt:     config.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:     config.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		},
 	}
-	relationships := gin.H{}
+	var relationships AnsibleConfigRelationships
+	var hasScope bool
 	if config.OrganizationID != nil {
-		relationships["organization"] = gin.H{"data": gin.H{"type": "organizations", "id": config.OrganizationID.String()}}
+		r := jsonapi.ToOne(config.OrganizationID.String(), "organizations")
+		relationships.Organization = &r
+		hasScope = true
 	}
 	if config.ProjectID != nil {
-		relationships["project"] = gin.H{"data": gin.H{"type": "projects", "id": config.ProjectID.String()}}
+		r := jsonapi.ToOne(config.ProjectID.String(), "projects")
+		relationships.Project = &r
+		hasScope = true
 	}
 	if config.WorkspaceID != nil {
-		relationships["workspace"] = gin.H{"data": gin.H{"type": "workspaces", "id": *config.WorkspaceID}}
+		r := jsonapi.ToOne(*config.WorkspaceID, "workspaces")
+		relationships.Workspace = &r
+		hasScope = true
 	}
-	if len(relationships) > 0 {
-		resp["relationships"] = relationships
+	if hasScope {
+		resp.Relationships = relationships
 	}
 	return resp
 }

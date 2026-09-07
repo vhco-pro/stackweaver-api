@@ -138,29 +138,14 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 	logger.Infof("Request Host: %s, Scheme: %s", host, scheme)
 
 	// Format in TFE-compatible JSON:API format
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   configVersion.ID,
-		"type": "configuration-versions",
-		"attributes": gin.H{
-			"status":          configVersion.Status,
-			"upload-url":      uploadURL,
-			"source":          configVersion.Source,
-			"auto-queue-runs": configVersion.AutoQueueRuns,
-			"speculative":     configVersion.Speculative,
-			"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		},
-		"relationships": gin.H{
-			"workspace": gin.H{
-				"data": gin.H{
-					"id":   workspace.ID,
-					"type": "workspaces",
-				},
-			},
-		},
-		"links": gin.H{
-			"upload": uploadURL,
-		},
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, configurationVersionResource(configVersion.ID, ConfigurationVersionAttributes{
+		Status:        configVersion.Status,
+		UploadURL:     uploadURL,
+		Source:        configVersion.Source,
+		AutoQueueRuns: configVersion.AutoQueueRuns,
+		Speculative:   configVersion.Speculative,
+		CreatedAt:     configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	}, workspace.ID, uploadURL))
 }
 
 // Get retrieves a configuration version by ID (TFE-compatible)
@@ -189,30 +174,15 @@ func (h *ConfigurationVersionHandlerV2) Get(c *gin.Context) {
 	}
 	uploadURL := fmt.Sprintf("%s://%s/api/v2/configuration-versions/%s/upload", scheme, host, configVersion.ID)
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   configVersion.ID,
-		"type": "configuration-versions",
-		"attributes": gin.H{
-			"status":          configVersion.Status,
-			"upload-url":      uploadURL,
-			"source":          configVersion.Source,
-			"auto-queue-runs": configVersion.AutoQueueRuns,
-			"speculative":     configVersion.Speculative,
-			"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":      configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		},
-		"relationships": gin.H{
-			"workspace": gin.H{
-				"data": gin.H{
-					"id":   configVersion.WorkspaceID,
-					"type": "workspaces",
-				},
-			},
-		},
-		"links": gin.H{
-			"upload": uploadURL,
-		},
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, configurationVersionResource(configVersion.ID, ConfigurationVersionAttributes{
+		Status:        configVersion.Status,
+		UploadURL:     uploadURL,
+		Source:        configVersion.Source,
+		AutoQueueRuns: configVersion.AutoQueueRuns,
+		Speculative:   configVersion.Speculative,
+		CreatedAt:     configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	}, configVersion.WorkspaceID, uploadURL))
 }
 
 // Upload handles configuration file upload (TFE-compatible)
@@ -312,30 +282,15 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 		scheme = "http"
 	}
 	uploadURL := fmt.Sprintf("%s://%s/api/v2/configuration-versions/%s/upload", scheme, host, configVersion.ID)
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   configVersion.ID,
-		"type": "configuration-versions",
-		"attributes": gin.H{
-			"status":          configVersion.Status,
-			"upload-url":      uploadURL,
-			"source":          configVersion.Source,
-			"auto-queue-runs": configVersion.AutoQueueRuns,
-			"speculative":     configVersion.Speculative,
-			"created-at":      configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":      configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		},
-		"relationships": gin.H{
-			"workspace": gin.H{
-				"data": gin.H{
-					"id":   configVersion.WorkspaceID,
-					"type": "workspaces",
-				},
-			},
-		},
-		"links": gin.H{
-			"upload": uploadURL,
-		},
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, configurationVersionResource(configVersion.ID, ConfigurationVersionAttributes{
+		Status:        configVersion.Status,
+		UploadURL:     uploadURL,
+		Source:        configVersion.Source,
+		AutoQueueRuns: configVersion.AutoQueueRuns,
+		Speculative:   configVersion.Speculative,
+		CreatedAt:     configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	}, configVersion.WorkspaceID, uploadURL))
 }
 
 // ListByWorkspace lists configuration versions for a workspace (TFE-compatible)
@@ -353,33 +308,18 @@ func (h *ConfigurationVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, len(configVersions))
+	data := make([]jsonapi.Resource[ConfigurationVersionAttributes], len(configVersions))
 	for i, cv := range configVersions {
 		uploadURL := fmt.Sprintf("/api/v2/configuration-versions/%s/upload", cv.ID)
-		data[i] = gin.H{
-			"id":   cv.ID,
-			"type": "configuration-versions",
-			"attributes": gin.H{
-				"status":          cv.Status,
-				"upload-url":      uploadURL,
-				"source":          cv.Source,
-				"auto-queue-runs": cv.AutoQueueRuns,
-				"speculative":     cv.Speculative,
-				"created-at":      cv.CreatedAt.Format("2006-01-02T15:04:05Z"),
-				"updated-at":      cv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			},
-			"relationships": gin.H{
-				"workspace": gin.H{
-					"data": gin.H{
-						"id":   cv.WorkspaceID,
-						"type": "workspaces",
-					},
-				},
-			},
-			"links": gin.H{
-				"upload": uploadURL,
-			},
-		}
+		data[i] = configurationVersionResource(cv.ID, ConfigurationVersionAttributes{
+			Status:        cv.Status,
+			UploadURL:     uploadURL,
+			Source:        cv.Source,
+			AutoQueueRuns: cv.AutoQueueRuns,
+			Speculative:   cv.Speculative,
+			CreatedAt:     cv.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:     cv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		}, cv.WorkspaceID, uploadURL)
 	}
 
 	jsonapi.WriteDocument(c, http.StatusOK, data)

@@ -125,8 +125,8 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 
 	// Always return JSON:API format (no simple format handling)
 	// Always include user data in included array for frontend
-	data := make([]gin.H, 0, len(members))
-	included := make([]gin.H, 0)
+	data := make([]*OrgMembershipResource, 0, len(members))
+	included := make([]any, 0)
 	seenUserIDs := make(map[uuid.UUID]bool)
 	seenTeamIDs := make(map[uuid.UUID]bool)
 
@@ -150,52 +150,40 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 		}
 
 		// Build teams relationship data
-		teamsData := make([]gin.H, 0, len(teams))
+		teamsData := make([]jsonapi.ResourceID, 0, len(teams))
 		for _, team := range teams {
-			teamsData = append(teamsData, gin.H{
-				"id":   team.ID.String(),
-				"type": "teams",
-			})
+			teamsData = append(teamsData, jsonapi.ResourceID{ID: team.ID.String(), Type: "teams"})
 
 			// Include team data in included array if not already included
 			if !seenTeamIDs[team.ID] {
 				seenTeamIDs[team.ID] = true
-				teamData := gin.H{
-					"id":   team.ID.String(),
-					"type": "teams",
-					"attributes": gin.H{
-						"name":        team.Name,
-						"description": team.Description,
-						"visibility":  team.Visibility,
+				included = append(included, jsonapi.Resource[IncludedTeamAttributes]{
+					ID:   team.ID.String(),
+					Type: "teams",
+					Attributes: IncludedTeamAttributes{
+						Name:        team.Name,
+						Description: team.Description,
+						Visibility:  team.Visibility,
 					},
-				}
-				included = append(included, teamData)
+				})
 			}
 		}
 
-		// Update teams relationship with actual data
-		membershipData["relationships"].(gin.H)["teams"] = gin.H{
-			"data": teamsData,
-		}
+		membershipData.Relationships.Teams = jsonapi.ManyRelationship{Data: teamsData}
 
 		data = append(data, membershipData)
 	}
 
-	response := gin.H{
-		"data": data,
-		"meta": jsonapi.NewPaginationMeta(page, perPage, total),
+	// NewPaginationMeta computes prev/next itself (offset+perPage < total is exactly
+	// page < total-pages). The hand-set variants this replaces type-asserted gin.H on what
+	// #756 had already made a struct - a latent panic on any multi-page listing, dodged only
+	// because the seeded data fits one page.
+	response := jsonapi.Document{
+		Data: data,
+		Meta: jsonapi.NewPaginationMeta(page, perPage, total),
 	}
-
 	if len(included) > 0 {
-		response["included"] = included
-	}
-
-	// Set prev-page and next-page
-	if page > 1 {
-		response["meta"].(gin.H)["pagination"].(gin.H)["prev-page"] = page - 1
-	}
-	if offset+perPage < int(total) {
-		response["meta"].(gin.H)["pagination"].(gin.H)["next-page"] = page + 1
+		response.Included = included
 	}
 
 	logger.Debugf("OrganizationMembershipHandlerV2.List - Returning %d memberships with %d included users", len(data), len(included))
@@ -410,7 +398,7 @@ func (h *OrganizationMembershipHandlerV2) GetByID(c *gin.Context) {
 
 	// Format response - always include user data in included array (JSON:API pattern)
 	membershipData := formatOrganizationMembershipResponse(member, org.Name)
-	included := make([]gin.H, 0)
+	included := make([]any, 0)
 
 	if member.User.ID != uuid.Nil {
 		userData := formatOrganizationMembershipUserResponse(&member.User)
@@ -426,41 +414,31 @@ func (h *OrganizationMembershipHandlerV2) GetByID(c *gin.Context) {
 	}
 
 	// Build teams relationship data
-	teamsData := make([]gin.H, 0, len(teams))
+	teamsData := make([]jsonapi.ResourceID, 0, len(teams))
 	seenTeamIDs := make(map[uuid.UUID]bool)
 	for _, team := range teams {
-		teamsData = append(teamsData, gin.H{
-			"id":   team.ID.String(),
-			"type": "teams",
-		})
+		teamsData = append(teamsData, jsonapi.ResourceID{ID: team.ID.String(), Type: "teams"})
 
 		// Include team data in included array if not already included
 		if !seenTeamIDs[team.ID] {
 			seenTeamIDs[team.ID] = true
-			teamData := gin.H{
-				"id":   team.ID.String(),
-				"type": "teams",
-				"attributes": gin.H{
-					"name":        team.Name,
-					"description": team.Description,
-					"visibility":  team.Visibility,
+			included = append(included, jsonapi.Resource[IncludedTeamAttributes]{
+				ID:   team.ID.String(),
+				Type: "teams",
+				Attributes: IncludedTeamAttributes{
+					Name:        team.Name,
+					Description: team.Description,
+					Visibility:  team.Visibility,
 				},
-			}
-			included = append(included, teamData)
+			})
 		}
 	}
 
-	// Update teams relationship with actual data
-	membershipData["relationships"].(gin.H)["teams"] = gin.H{
-		"data": teamsData,
-	}
+	membershipData.Relationships.Teams = jsonapi.ManyRelationship{Data: teamsData}
 
-	response := gin.H{
-		"data": membershipData,
-	}
-
+	response := jsonapi.Document{Data: membershipData}
 	if len(included) > 0 {
-		response["included"] = included
+		response.Included = included
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -565,19 +543,16 @@ func (h *OrganizationMembershipHandlerV2) Update(c *gin.Context) {
 
 	// Format response - always include user data in included array (JSON:API pattern)
 	membershipData := formatOrganizationMembershipResponse(updatedMember, org.Name)
-	included := make([]gin.H, 0)
+	included := make([]any, 0)
 
 	if updatedMember.User.ID != uuid.Nil {
 		userData := formatOrganizationMembershipUserResponse(&updatedMember.User)
 		included = append(included, userData)
 	}
 
-	response := gin.H{
-		"data": membershipData,
-	}
-
+	response := jsonapi.Document{Data: membershipData}
 	if len(included) > 0 {
-		response["included"] = included
+		response.Included = included
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -637,7 +612,7 @@ func (h *OrganizationMembershipHandlerV2) Delete(c *gin.Context) {
 
 // formatOrganizationMembershipResponse formats an OrganizationMember as TFE OrganizationMembership
 // orgName is the organization name (TFE uses names, not UUIDs, in relationships)
-func formatOrganizationMembershipResponse(member *models.OrganizationMember, orgName string) gin.H {
+func formatOrganizationMembershipResponse(member *models.OrganizationMember, orgName string) *OrgMembershipResource {
 	status := "active"
 	email := "N/A"
 	username := "N/A"
@@ -660,49 +635,36 @@ func formatOrganizationMembershipResponse(member *models.OrganizationMember, org
 		}
 	}
 
-	return gin.H{
-		"id":   member.ID.String(),
-		"type": "organization-memberships",
-		"attributes": gin.H{
-			"email":      email,
-			"status":     status,
-			"role":       nil, // Deprecated: Roles are deprecated, permissions come from team memberships
-			"created-at": member.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			"username":   username, // Added for completeness
-			"name":       name,     // Added for completeness
+	return &OrgMembershipResource{
+		ID:   member.ID.String(),
+		Type: "organization-memberships",
+		Attributes: OrgMembershipAttributes{
+			Email:     email,
+			Status:    status,
+			CreatedAt: member.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			Username:  username,
+			Name:      name,
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{
-					"id":   orgName, // TFE uses organization name, not UUID
-					"type": "organizations",
-				},
-			},
-			"user": gin.H{
-				"data": gin.H{
-					"id":   userID,
-					"type": "users",
-				},
-			},
-			"teams": gin.H{
-				"data": []gin.H{},
-			},
+		Relationships: &OrgMembershipRelationships{
+			Organization: jsonapi.ToOne(orgName, "organizations"), // TFE uses the name, not the UUID
+			User:         jsonapi.ToOne(userID, "users"),
+			Teams:        jsonapi.ManyRelationship{Data: []jsonapi.ResourceID{}},
 		},
 	}
 }
 
 // formatOrganizationMembershipUserResponse formats a User for inclusion in organization membership responses
 // Handles cases where user email/name might be empty (e.g., admin users created before auth)
-func formatOrganizationMembershipUserResponse(user *models.User) gin.H {
+func formatOrganizationMembershipUserResponse(user *models.User) jsonapi.Resource[IncludedUserAttributes] {
 	// Ensure we always return a valid user object, even if email/name are empty
 	// Frontend will handle empty strings by showing "N/A" or "-"
-	return gin.H{
-		"id":   user.ID.String(),
-		"type": "users",
-		"attributes": gin.H{
-			"username": user.Username,
-			"email":    user.Email, // May be empty - frontend handles this
-			"name":     user.Name,  // May be empty - frontend handles this
+	return jsonapi.Resource[IncludedUserAttributes]{
+		ID:   user.ID.String(),
+		Type: "users",
+		Attributes: IncludedUserAttributes{
+			Username: user.Username,
+			Email:    user.Email,
+			Name:     user.Name,
 		},
 	}
 }

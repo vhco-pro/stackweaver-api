@@ -272,64 +272,44 @@ func (h *GroupHandler) Delete(c *gin.Context) {
 }
 
 // formatGroupResponse formats a group for JSON:API response
-func formatGroupResponse(group *models.AnsibleInventoryGroup) gin.H {
-	hosts := make([]gin.H, len(group.Hosts))
+func formatGroupResponse(group *models.AnsibleInventoryGroup) jsonapi.Resource[GroupAttributes] {
+	hosts := make([]jsonapi.ResourceID, len(group.Hosts))
 	for i, host := range group.Hosts {
-		hosts[i] = gin.H{
-			"id":   host.ID.String(),
-			"type": "ansible-hosts",
-		}
+		hosts[i] = jsonapi.ResourceID{ID: host.ID.String(), Type: "ansible-hosts"}
 	}
 
-	children := make([]gin.H, len(group.Children))
+	children := make([]jsonapi.ResourceID, len(group.Children))
 	for i, child := range group.Children {
-		children[i] = gin.H{
-			"id":   child.ID.String(),
-			"type": "ansible-groups",
-		}
+		children[i] = jsonapi.ResourceID{ID: child.ID.String(), Type: "ansible-groups"}
 	}
 
-	relationships := gin.H{
-		"inventory": gin.H{
-			"data": gin.H{
-				"id":   group.InventoryID.String(),
-				"type": "ansible-inventories",
-			},
-		},
-		"hosts": gin.H{
-			"data": hosts,
-		},
-		"children": gin.H{
-			"data": children,
-		},
+	relationships := GroupRelationships{
+		Inventory: jsonapi.ToOne(group.InventoryID.String(), "ansible-inventories"),
+		Hosts:     jsonapi.ManyRelationship{Data: hosts},
+		Children:  jsonapi.ManyRelationship{Data: children},
 	}
-
 	if group.ParentID != nil {
-		relationships["parent"] = gin.H{
-			"data": gin.H{
-				"id":   group.ParentID.String(),
-				"type": "ansible-groups",
-			},
-		}
+		r := jsonapi.ToOne(group.ParentID.String(), "ansible-groups")
+		relationships.Parent = &r
 	}
 
-	return gin.H{
-		"id":   group.ID.String(),
-		"type": "ansible-groups",
-		"attributes": gin.H{
-			"name":        group.Name,
-			"description": group.Description,
-			"variables":   group.Variables,
-			"created-at":  group.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":  group.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	return jsonapi.Resource[GroupAttributes]{
+		ID:   group.ID.String(),
+		Type: "ansible-groups",
+		Attributes: GroupAttributes{
+			Name:        group.Name,
+			Description: group.Description,
+			Variables:   group.Variables,
+			CreatedAt:   group.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:   group.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		},
-		"relationships": relationships,
+		Relationships: relationships,
 	}
 }
 
 // formatGroupsResponse formats multiple groups for JSON:API response
-func formatGroupsResponse(groups []models.AnsibleInventoryGroup) []gin.H {
-	result := make([]gin.H, len(groups))
+func formatGroupsResponse(groups []models.AnsibleInventoryGroup) []jsonapi.Resource[GroupAttributes] {
+	result := make([]jsonapi.Resource[GroupAttributes], len(groups))
 	for i, group := range groups {
 		result[i] = formatGroupResponse(&group)
 	}

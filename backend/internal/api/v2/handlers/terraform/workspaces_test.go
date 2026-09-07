@@ -1,12 +1,14 @@
 // Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
+// #760: the builders return typed resources, so these assertions read struct fields. The
+// properties under test are unchanged from the map-based originals - only how they are reached.
+
 package terraform
 
 import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -15,18 +17,13 @@ func TestFormatWorkspaceResponse_ResourceCount(t *testing.T) {
 	// resource-count reflects the denormalized workspace.ResourceCount (maintained by the
 	// state materializer on every state write), not a hardcoded 0.
 	ws := &models.Workspace{ID: "ws-rc", Name: "rc", ResourceCount: 7}
-	attrs, ok := formatWorkspaceResponse(ws)["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not gin.H")
-	}
-	if attrs["resource-count"] != 7 {
-		t.Errorf("resource-count = %v, want 7", attrs["resource-count"])
+	if got := formatWorkspaceResponse(ws).Attributes.ResourceCount; got != 7 {
+		t.Errorf("resource-count = %v, want 7", got)
 	}
 
 	// Default (no resources) is 0.
-	attrs0 := formatWorkspaceResponse(&models.Workspace{ID: "ws-z", Name: "z"})["attributes"].(gin.H)
-	if attrs0["resource-count"] != 0 {
-		t.Errorf("resource-count = %v, want 0", attrs0["resource-count"])
+	if got := formatWorkspaceResponse(&models.Workspace{ID: "ws-z", Name: "z"}).Attributes.ResourceCount; got != 0 {
+		t.Errorf("resource-count = %v, want 0", got)
 	}
 }
 
@@ -45,34 +42,31 @@ func TestFormatWorkspaceResponse_Basic(t *testing.T) {
 
 	resp := formatWorkspaceResponse(ws)
 
-	if resp["id"] != "ws-abcdef1234567890" {
-		t.Errorf("id = %v, want ws-abcdef1234567890", resp["id"])
+	if resp.ID != "ws-abcdef1234567890" {
+		t.Errorf("id = %v, want ws-abcdef1234567890", resp.ID)
 	}
-	if resp["type"] != "workspaces" {
-		t.Errorf("type = %v, want workspaces", resp["type"])
+	if resp.Type != "workspaces" {
+		t.Errorf("type = %v, want workspaces", resp.Type)
 	}
 
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not gin.H")
+	attrs := resp.Attributes
+	if attrs.Name != "production" {
+		t.Errorf("name = %v, want production", attrs.Name)
 	}
-	if attrs["name"] != "production" {
-		t.Errorf("name = %v, want production", attrs["name"])
+	if attrs.TerraformVersion != "1.9.0" {
+		t.Errorf("terraform-version = %v, want 1.9.0", attrs.TerraformVersion)
 	}
-	if attrs["terraform-version"] != "1.9.0" {
-		t.Errorf("terraform-version = %v, want 1.9.0", attrs["terraform-version"])
+	if attrs.WorkingDirectory != "infra/" {
+		t.Errorf("working-directory = %v, want infra/", attrs.WorkingDirectory)
 	}
-	if attrs["working-directory"] != "infra/" {
-		t.Errorf("working-directory = %v, want infra/", attrs["working-directory"])
+	if !attrs.AutoApply {
+		t.Error("auto-apply = false, want true")
 	}
-	if attrs["auto-apply"] != true {
-		t.Errorf("auto-apply = %v, want true", attrs["auto-apply"])
+	if attrs.ExecutionMode != "remote" {
+		t.Errorf("execution-mode = %v, want remote", attrs.ExecutionMode)
 	}
-	if attrs["execution-mode"] != "remote" {
-		t.Errorf("execution-mode = %v, want remote", attrs["execution-mode"])
-	}
-	if attrs["description"] != "Production workspace" {
-		t.Errorf("description = %v, want Production workspace", attrs["description"])
+	if attrs.Description != "Production workspace" {
+		t.Errorf("description = %v, want Production workspace", attrs.Description)
 	}
 }
 
@@ -84,15 +78,9 @@ func TestFormatWorkspaceResponse_NoVCS(t *testing.T) {
 		UpdatedAt: time.Now(),
 	}
 
-	resp := formatWorkspaceResponse(ws)
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not gin.H")
-	}
-
-	// When no VCS, vcs-repo should be nil
-	if attrs["vcs-repo"] != nil {
-		t.Errorf("vcs-repo = %v, want nil", attrs["vcs-repo"])
+	// When no VCS, vcs-repo must serialise as null - the pointer must stay nil.
+	if got := formatWorkspaceResponse(ws).Attributes.VCSRepo; got != nil {
+		t.Errorf("vcs-repo = %+v, want nil", got)
 	}
 }
 
@@ -107,24 +95,18 @@ func TestFormatWorkspaceResponse_WithVCS(t *testing.T) {
 		UpdatedAt:            time.Now(),
 	}
 
-	resp := formatWorkspaceResponse(ws)
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not gin.H")
+	vcsRepo := formatWorkspaceResponse(ws).Attributes.VCSRepo
+	if vcsRepo == nil {
+		t.Fatal("vcs-repo is nil")
 	}
-
-	vcsRepo, ok := attrs["vcs-repo"].(gin.H)
-	if !ok {
-		t.Fatal("vcs-repo is not gin.H")
+	if vcsRepo.Identifier != "org/repo" {
+		t.Errorf("vcs-repo.identifier = %v, want org/repo", vcsRepo.Identifier)
 	}
-	if vcsRepo["identifier"] != "org/repo" {
-		t.Errorf("vcs-repo.identifier = %v, want org/repo", vcsRepo["identifier"])
+	if vcsRepo.Branch != "develop" {
+		t.Errorf("vcs-repo.branch = %v, want develop", vcsRepo.Branch)
 	}
-	if vcsRepo["branch"] != "develop" {
-		t.Errorf("vcs-repo.branch = %v, want develop", vcsRepo["branch"])
-	}
-	if vcsRepo["ingress-submodules"] != true {
-		t.Errorf("vcs-repo.ingress-submodules = %v, want true", vcsRepo["ingress-submodules"])
+	if !vcsRepo.IngressSubmodules {
+		t.Error("vcs-repo.ingress-submodules = false, want true")
 	}
 }
 
@@ -138,11 +120,9 @@ func TestFormatWorkspaceResponse_VCSDefaultBranch(t *testing.T) {
 		UpdatedAt:     time.Now(),
 	}
 
-	resp := formatWorkspaceResponse(ws)
-	attrs := resp["attributes"].(gin.H)
-	vcsRepo := attrs["vcs-repo"].(gin.H)
-	if vcsRepo["branch"] != "main" {
-		t.Errorf("vcs-repo.branch = %v, want main (default)", vcsRepo["branch"])
+	vcsRepo := formatWorkspaceResponse(ws).Attributes.VCSRepo
+	if vcsRepo == nil || vcsRepo.Branch != "main" {
+		t.Errorf("vcs-repo.branch = %v, want main (default)", vcsRepo)
 	}
 }
 
@@ -162,43 +142,24 @@ func TestFormatWorkspaceResponse_Relationships(t *testing.T) {
 	}
 	ws.Project.Organization.Name = "test-org"
 
-	resp := formatWorkspaceResponse(ws)
-	rels, ok := resp["relationships"].(gin.H)
-	if !ok {
-		t.Fatal("relationships is not gin.H")
-	}
-
-	// Should have organization and project relationships
-	if _, hasOrg := rels["organization"]; !hasOrg {
+	rels := formatWorkspaceResponse(ws).Relationships
+	if rels.Organization == nil {
 		t.Error("missing organization relationship")
 	}
-	if _, hasProject := rels["project"]; !hasProject {
+	if rels.Project == nil {
 		t.Error("missing project relationship")
 	}
 }
 
-func TestFormatWorkspaceResponse_ResponseStructure(t *testing.T) {
-	ws := &models.Workspace{
-		ID:        "ws-struct",
-		Name:      "struct-test",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+func TestFormatWorkspaceResponse_UnpooledAgentPoolIsNullNotAbsent(t *testing.T) {
+	// go-tfe / tfe_workspace_settings read agent-pool either way, so an unpooled workspace
+	// must emit {"data": null} rather than omitting the member.
+	rels := formatWorkspaceResponse(&models.Workspace{ID: "ws-np", Name: "np"}).Relationships
+	if rels.AgentPool == nil {
+		t.Fatal("agent-pool relationship absent, want present with null data")
 	}
-
-	resp := formatWorkspaceResponse(ws)
-
-	// Verify top-level keys
-	if _, ok := resp["id"]; !ok {
-		t.Error("missing id key")
-	}
-	if _, ok := resp["type"]; !ok {
-		t.Error("missing type key")
-	}
-	if _, ok := resp["attributes"]; !ok {
-		t.Error("missing attributes key")
-	}
-	if _, ok := resp["relationships"]; !ok {
-		t.Error("missing relationships key")
+	if rels.AgentPool.Data != nil {
+		t.Errorf("agent-pool.data = %+v, want null", rels.AgentPool.Data)
 	}
 }
 
@@ -208,16 +169,8 @@ func TestFormatWorkspaceResponse_ResponseStructure(t *testing.T) {
 // which breaks drop-in compatibility.
 func TestFormatWorkspaceResponse_CanForceDelete(t *testing.T) {
 	resp := formatWorkspaceResponse(&models.Workspace{ID: "ws-perm", Name: "perm-test"})
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatalf("attributes not a gin.H: %T", resp["attributes"])
-	}
-	perms, ok := attrs["permissions"].(gin.H)
-	if !ok {
-		t.Fatalf("permissions not a gin.H: %T", attrs["permissions"])
-	}
-	if perms["can-force-delete"] != true {
-		t.Errorf("permissions[can-force-delete] = %v, want true (provider needs it to enable safe-delete)", perms["can-force-delete"])
+	if !resp.Attributes.Permissions.CanForceDelete {
+		t.Error("permissions.can-force-delete = false, want true (provider needs it to enable safe-delete)")
 	}
 }
 
@@ -233,18 +186,13 @@ func TestFormatRunForInclusion_Basic(t *testing.T) {
 
 	resp := formatRunForInclusion(run)
 
-	if resp["id"] != "run-abc123" {
-		t.Errorf("id = %v, want run-abc123", resp["id"])
+	if resp.ID != "run-abc123" {
+		t.Errorf("id = %v, want run-abc123", resp.ID)
 	}
-	if resp["type"] != "runs" {
-		t.Errorf("type = %v, want runs", resp["type"])
+	if resp.Type != "runs" {
+		t.Errorf("type = %v, want runs", resp.Type)
 	}
-
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not gin.H")
-	}
-	if attrs["status"] != "applied" {
-		t.Errorf("status = %v, want applied", attrs["status"])
+	if resp.Attributes.Status != "applied" {
+		t.Errorf("status = %v, want applied", resp.Attributes.Status)
 	}
 }

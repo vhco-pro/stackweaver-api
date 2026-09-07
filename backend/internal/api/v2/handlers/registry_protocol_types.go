@@ -110,3 +110,133 @@ type OpenIDConfigurationResponse struct {
 	SubjectTypesSupported            []string `json:"subject_types_supported"`
 	ClaimsSupported                  []string `json:"claims_supported"`
 }
+
+// RegistryListMeta is the registry protocol's offset-pagination meta block; next_offset and
+// next_url appear only when another page exists.
+type RegistryListMeta struct {
+	Limit         int    `json:"limit"`
+	CurrentOffset int    `json:"current_offset"`
+	NextOffset    int    `json:"next_offset,omitempty"`
+	NextURL       string `json:"next_url,omitempty"`
+}
+
+// RegistryModuleSummary is one module row in a registry list/search response.
+type RegistryModuleSummary struct {
+	ID          string `json:"id"`
+	Owner       string `json:"owner"`
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Provider    string `json:"provider"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	PublishedAt string `json:"published_at"`
+	Downloads   int    `json:"downloads"`
+	Verified    bool   `json:"verified"`
+}
+
+// RegistryModuleListResponse is the body of /v1/modules and /v1/modules/search.
+type RegistryModuleListResponse struct {
+	Meta    RegistryListMeta        `json:"meta"`
+	Modules []RegistryModuleSummary `json:"modules"`
+}
+
+// RegistryModuleInput / Output / Resource: the registry protocol's parsed-config projections.
+// Their members come out of the stored parse blobs, so values stay any where the parser stores
+// arbitrary JSON (defaults can be any shape).
+type RegistryModuleInput struct {
+	Name        any `json:"name"`
+	Description any `json:"description"`
+	Default     any `json:"default"`
+	Type        any `json:"type"`
+}
+
+type RegistryModuleOutput struct {
+	Name        any `json:"name"`
+	Description any `json:"description"`
+}
+
+type RegistryModuleResource struct {
+	Name any `json:"name"`
+	Type any `json:"type"`
+}
+
+// RegistryModuleSubmodule: readme is raw markdown for the frontend's Shiki rendering; inputs
+// and outputs are forwarded as stored.
+type RegistryModuleSubmodule struct {
+	Path    any    `json:"path"`
+	Readme  string `json:"readme"`
+	Empty   any    `json:"empty"`
+	Inputs  any    `json:"inputs"`
+	Outputs any    `json:"outputs"`
+}
+
+// RegistryModuleRoot is the root-module block of a module detail.
+type RegistryModuleRoot struct {
+	Path         string                   `json:"path"`
+	Readme       string                   `json:"readme"`
+	Empty        bool                     `json:"empty"`
+	Inputs       []RegistryModuleInput    `json:"inputs"`
+	Outputs      []RegistryModuleOutput   `json:"outputs"`
+	Dependencies []struct{}               `json:"dependencies"`
+	Resources    []RegistryModuleResource `json:"resources"`
+}
+
+// RegistryModuleDetail is the body of the module detail endpoints.
+type RegistryModuleDetail struct {
+	RegistryModuleSummary
+	Root       RegistryModuleRoot        `json:"root"`
+	Submodules []RegistryModuleSubmodule `json:"submodules"`
+	Providers  []string                  `json:"providers"`
+	Versions   []string                  `json:"versions"`
+}
+
+// ModuleDownloadsSummaryAttributes is the v2 downloads-summary attribute block. Members are
+// any because the stats service returns untyped counters and the old map forwarded them
+// verbatim; narrowing them here would be a wire change.
+type ModuleDownloadsSummaryAttributes struct {
+	Week  any `json:"week"`
+	Month any `json:"month"`
+	Year  any `json:"year"`
+	Total any `json:"total"`
+}
+
+// RegistryProviderSummary is one provider row in a /v1/providers list/search response.
+type RegistryProviderSummary struct {
+	ID          string `json:"id"`
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	PublishedAt string `json:"published_at"`
+	Downloads   int    `json:"downloads"`
+	Verified    bool   `json:"verified"`
+}
+
+// RegistryProviderListResponse is the body of /v1/providers and /v1/providers/search.
+type RegistryProviderListResponse struct {
+	Meta      RegistryListMeta          `json:"meta"`
+	Providers []RegistryProviderSummary `json:"providers"`
+}
+
+// RegistryProviderPlatformEntry is one os/arch build in a provider detail.
+type RegistryProviderPlatformEntry struct {
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
+	Shasum   string `json:"shasum"`
+	Filename string `json:"filename"`
+}
+
+// RegistryProviderDetail is the body of the provider detail endpoint.
+type RegistryProviderDetail struct {
+	RegistryProviderSummary
+	Platforms []RegistryProviderPlatformEntry `json:"platforms"`
+	Versions  []string                        `json:"versions"`
+}
+
+// ProviderDownloadsSummaryAttributes mirrors ModuleDownloadsSummaryAttributes for providers.
+type ProviderDownloadsSummaryAttributes struct {
+	Week  any `json:"week"`
+	Month any `json:"month"`
+	Year  any `json:"year"`
+	Total any `json:"total"`
+}

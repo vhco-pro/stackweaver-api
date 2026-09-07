@@ -278,15 +278,15 @@ func (h *RegistryProviderPublishingHandler) PublishProviderPlatform(c *gin.Conte
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   platform.ID.String(),
-		"type": "registry-provider-platforms",
-		"attributes": gin.H{
-			"os":                       platform.OS,
-			"arch":                     platform.Arch,
-			"filename":                 platform.Filename,
-			"shasum":                   platform.Shasum,
-			"provider-binary-uploaded": true,
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[ProviderPlatformAckAttributes]{
+		ID:   platform.ID.String(),
+		Type: "registry-provider-platforms",
+		Attributes: ProviderPlatformAckAttributes{
+			OS:                     platform.OS,
+			Arch:                   platform.Arch,
+			Filename:               platform.Filename,
+			Shasum:                 platform.Shasum,
+			ProviderBinaryUploaded: true,
 		},
 	})
 }

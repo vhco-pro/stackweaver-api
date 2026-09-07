@@ -246,9 +246,7 @@ func (h *VCSAppInstallationHandlerV2) InitiateInstallation(c *gin.Context) {
 	}
 
 	// Return the installation URL as JSON (frontend will handle redirect)
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"install_url": installURL,
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, VCSInstallURLResponse{InstallURL: installURL})
 }
 
 // InitiateAzureDevOpsInstallation initiates the Azure DevOps OAuth2 installation flow
@@ -281,7 +279,7 @@ func (h *VCSAppInstallationHandlerV2) InitiateAzureDevOpsInstallation(c *gin.Con
 	}
 
 	authURL := h.azureDevOpsManager.GetAuthorizationURL(state)
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{"auth_url": authURL})
+	jsonapi.WriteDocument(c, http.StatusOK, VCSAuthURLResponse{AuthURL: authURL})
 }
 
 // CompleteAzureDevOpsInstallation handles the Azure DevOps OAuth2 callback
@@ -373,10 +371,10 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update VCS connection")
 			return
 		}
-		jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-			"id":         existing.ID,
-			"type":       "vcs-connections",
-			"attributes": gin.H{"provider": existing.Provider, "account_name": existing.AccountName},
+		jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[VCSConnectionAckAttributes]{
+			ID:         existing.ID.String(),
+			Type:       "vcs-connections",
+			Attributes: VCSConnectionAckAttributes{Provider: existing.Provider, AccountName: existing.AccountName},
 		})
 		return
 	}
@@ -402,10 +400,10 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create VCS connection")
 		return
 	}
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":         connection.ID,
-		"type":       "vcs-connections",
-		"attributes": gin.H{"provider": connection.Provider, "account_name": connection.AccountName},
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[VCSConnectionAckAttributes]{
+		ID:         connection.ID.String(),
+		Type:       "vcs-connections",
+		Attributes: VCSConnectionAckAttributes{Provider: connection.Provider, AccountName: connection.AccountName},
 	})
 }
 
@@ -1428,13 +1426,13 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 			return
 		}
 
-		jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-			"id":   existing.ID,
-			"type": "vcs-connections",
-			"attributes": gin.H{
-				"provider":     existing.Provider,
-				"account_name": existing.AccountName,
-				"account_type": existing.AccountType,
+		jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[VCSConnectionAckWithTypeAttributes]{
+			ID:   existing.ID.String(),
+			Type: "vcs-connections",
+			Attributes: VCSConnectionAckWithTypeAttributes{
+				Provider:    existing.Provider,
+				AccountName: existing.AccountName,
+				AccountType: existing.AccountType,
 			},
 		})
 		return
@@ -1454,13 +1452,13 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   connection.ID,
-		"type": "vcs-connections",
-		"attributes": gin.H{
-			"provider":     connection.Provider,
-			"account_name": connection.AccountName,
-			"account_type": connection.AccountType,
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[VCSConnectionAckWithTypeAttributes]{
+		ID:   connection.ID.String(),
+		Type: "vcs-connections",
+		Attributes: VCSConnectionAckWithTypeAttributes{
+			Provider:    connection.Provider,
+			AccountName: connection.AccountName,
+			AccountType: connection.AccountType,
 		},
 	})
 }

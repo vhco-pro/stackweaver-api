@@ -78,7 +78,7 @@ type ncRequest struct {
 }
 
 // formatNotificationConfig renders a config as JSON:API (never includes the token).
-func formatNotificationConfig(nc *models.NotificationConfiguration) gin.H {
+func formatNotificationConfig(nc *models.NotificationConfiguration) jsonapi.Resource[NotificationConfigAttributes] {
 	triggers := []string(nc.Triggers)
 	if triggers == nil {
 		triggers = []string{}
@@ -90,29 +90,32 @@ func formatNotificationConfig(nc *models.NotificationConfiguration) gin.H {
 	// subscribable is polymorphic: the workspace, project or team the config is bound to. Every scope
 	// MUST have a branch here: an unhandled one emits "subscribable": null, a valid-looking 200 that
 	// silently breaks the provider round-trip rather than failing loudly.
-	var subscribable gin.H
+	var subscribable *jsonapi.Relationship
 	switch {
 	case nc.WorkspaceID != nil:
-		subscribable = gin.H{"data": gin.H{"id": *nc.WorkspaceID, "type": "workspaces"}}
+		r := jsonapi.ToOne(*nc.WorkspaceID, "workspaces")
+		subscribable = &r
 	case nc.ProjectID != nil:
-		subscribable = gin.H{"data": gin.H{"id": nc.ProjectID.String(), "type": "projects"}}
+		r := jsonapi.ToOne(nc.ProjectID.String(), "projects")
+		subscribable = &r
 	case nc.TeamID != nil:
-		subscribable = gin.H{"data": gin.H{"id": nc.TeamID.String(), "type": "teams"}}
+		r := jsonapi.ToOne(nc.TeamID.String(), "teams")
+		subscribable = &r
 	}
-	return gin.H{
-		"id":   nc.ID,
-		"type": "notification-configurations",
-		"attributes": gin.H{
-			"name":             nc.Name,
-			"destination-type": string(nc.Destination),
-			"url":              nc.URL,
-			"enabled":          nc.Enabled,
-			"triggers":         triggers,
-			"email-addresses":  emails,
-			"created-at":       nc.CreatedAt.Format(time.RFC3339),
-			"updated-at":       nc.UpdatedAt.Format(time.RFC3339),
+	return jsonapi.Resource[NotificationConfigAttributes]{
+		ID:   nc.ID,
+		Type: "notification-configurations",
+		Attributes: NotificationConfigAttributes{
+			Name:            nc.Name,
+			DestinationType: string(nc.Destination),
+			URL:             nc.URL,
+			Enabled:         nc.Enabled,
+			Triggers:        triggers,
+			EmailAddresses:  emails,
+			CreatedAt:       nc.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:       nc.UpdatedAt.Format(time.RFC3339),
 		},
-		"relationships": gin.H{"subscribable": subscribable},
+		Relationships: NotificationConfigRelationships{Subscribable: subscribable},
 	}
 }
 
@@ -286,7 +289,7 @@ func (h *NotificationConfigurationHandlerV2) respondList(c *gin.Context, configs
 		ncError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list notification configurations")
 		return
 	}
-	data := make([]gin.H, 0, len(configs))
+	data := make([]jsonapi.Resource[NotificationConfigAttributes], 0, len(configs))
 	for i := range configs {
 		data = append(data, formatNotificationConfig(&configs[i]))
 	}

@@ -117,7 +117,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	}
 
 	var totals repository.OrgCounts
-	orgStats := make([]gin.H, 0, len(orgs))
+	orgStats := make([]DashboardOrgCounts, 0, len(orgs))
 	for _, org := range orgs {
 		counts := summaries[org.ID]
 		if counts == nil {
@@ -125,60 +125,63 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		}
 		addCounts(&totals, counts)
 
-		entry := gin.H{
-			"id":                                  org.ID.String(),
-			"name":                                org.Name,
-			"description":                         org.Description,
-			"projects":                            counts.Projects,
-			"terraform_workspaces":                counts.Workspaces,
-			"ansible_playbooks":                   counts.Playbooks,
-			"active_terraform_runs":               counts.ActiveRuns,
-			"pending_terraform_runs":              counts.PendingRuns,
-			"awaiting_approval":                   counts.AwaitingApproval,
-			"pending_workflow_approvals":          counts.PendingWorkflowApprovals,
-			"errored_workspaces":                  counts.ErroredWorkspaces,
-			"errored_job_templates":               counts.ErroredJobTemplates,
-			"failed_inventory_syncs":              counts.FailedInventorySyncs,
-			"recent_run_failures":                 counts.RecentRunFailures,
-			"recent_job_failures":                 counts.RecentJobFailures,
-			"active_ansible_jobs":                 counts.ActiveJobs,
-			"completed_terraform_runs_this_month": counts.SucceededRunsSince,
-			"completed_ansible_jobs_this_month":   counts.SucceededJobsSince,
+		entry := DashboardOrgCounts{
+			ID:                              org.ID.String(),
+			Name:                            org.Name,
+			Description:                     org.Description,
+			Projects:                        counts.Projects,
+			TerraformWorkspaces:             counts.Workspaces,
+			AnsiblePlaybooks:                counts.Playbooks,
+			ActiveTerraformRuns:             counts.ActiveRuns,
+			PendingTerraformRuns:            counts.PendingRuns,
+			AwaitingApproval:                counts.AwaitingApproval,
+			PendingWorkflowApprovals:        counts.PendingWorkflowApprovals,
+			ErroredWorkspaces:               counts.ErroredWorkspaces,
+			ErroredJobTemplates:             counts.ErroredJobTemplates,
+			FailedInventorySyncs:            counts.FailedInventorySyncs,
+			RecentRunFailures:               counts.RecentRunFailures,
+			RecentJobFailures:               counts.RecentJobFailures,
+			ActiveAnsibleJobs:               counts.ActiveJobs,
+			CompletedTerraformRunsThisMonth: counts.SucceededRunsSince,
+			CompletedAnsibleJobsThisMonth:   counts.SucceededJobsSince,
 		}
 		// Absent rather than zero where the caller cannot see it: a hard zero would read as "no
 		// runners offline" to a member who simply is not allowed to know.
 		if n, ok := openChangeRequests[org.ID]; ok {
-			entry["open_change_requests"] = n
+			entry.OpenChangeRequests = &n
 		} else if containsOrg(changeRequestOrgs, org.ID) {
-			entry["open_change_requests"] = int64(0)
+			zero := int64(0)
+			entry.OpenChangeRequests = &zero
 		}
 		if containsOrg(runnerOrgs, org.ID) {
-			entry["runners_total"] = totalRunners[org.ID]
-			entry["runners_offline"] = offlineRunners[org.ID]
+			total := totalRunners[org.ID]
+			offline := offlineRunners[org.ID]
+			entry.RunnersTotal = &total
+			entry.RunnersOffline = &offline
 		}
 		orgStats = append(orgStats, entry)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "dashboard-stats",
-		"attributes": gin.H{
-			"projects":                            totals.Projects,
-			"terraform_workspaces":                totals.Workspaces,
-			"ansible_playbooks":                   totals.Playbooks,
-			"active_terraform_runs":               totals.ActiveRuns,
-			"pending_terraform_runs":              totals.PendingRuns,
-			"awaiting_approval":                   totals.AwaitingApproval,
-			"pending_workflow_approvals":          totals.PendingWorkflowApprovals,
-			"errored_workspaces":                  totals.ErroredWorkspaces,
-			"errored_job_templates":               totals.ErroredJobTemplates,
-			"failed_inventory_syncs":              totals.FailedInventorySyncs,
-			"recent_run_failures":                 totals.RecentRunFailures,
-			"recent_job_failures":                 totals.RecentJobFailures,
-			"active_ansible_jobs":                 totals.ActiveJobs,
-			"completed_terraform_runs_this_month": totals.SucceededRunsSince,
-			"completed_ansible_jobs_this_month":   totals.SucceededJobsSince,
-			"recent_failure_window_days":          int(recentFailureWindow / (24 * time.Hour)),
-			"organizations":                       orgStats,
+	jsonapi.WriteDocument(c, http.StatusOK, DashboardStatsDocument{
+		Type: "dashboard-stats",
+		Attributes: DashboardStatsAttributes{
+			Projects:                        totals.Projects,
+			TerraformWorkspaces:             totals.Workspaces,
+			AnsiblePlaybooks:                totals.Playbooks,
+			ActiveTerraformRuns:             totals.ActiveRuns,
+			PendingTerraformRuns:            totals.PendingRuns,
+			AwaitingApproval:                totals.AwaitingApproval,
+			PendingWorkflowApprovals:        totals.PendingWorkflowApprovals,
+			ErroredWorkspaces:               totals.ErroredWorkspaces,
+			ErroredJobTemplates:             totals.ErroredJobTemplates,
+			FailedInventorySyncs:            totals.FailedInventorySyncs,
+			RecentRunFailures:               totals.RecentRunFailures,
+			RecentJobFailures:               totals.RecentJobFailures,
+			ActiveAnsibleJobs:               totals.ActiveJobs,
+			CompletedTerraformRunsThisMonth: totals.SucceededRunsSince,
+			CompletedAnsibleJobsThisMonth:   totals.SucceededJobsSince,
+			RecentFailureWindowDays:         int(recentFailureWindow / (24 * time.Hour)),
+			Organizations:                   orgStats,
 		},
 	})
 }
@@ -212,27 +215,25 @@ func (h *DashboardHandler) GetOperations(c *gin.Context) {
 		return
 	}
 
-	formatted := make([]gin.H, 0, len(executions))
+	formatted := make([]DashboardExecution, 0, len(executions))
 	for _, execution := range executions {
-		formatted = append(formatted, gin.H{
-			"id":                execution.ID,
-			"platform":          execution.Platform,
-			"organization_id":   execution.OrganizationID.String(),
-			"organization_name": execution.OrganizationName,
-			"name":              execution.Name,
-			"detail":            execution.Detail,
-			"status":            execution.Status,
-			"started_at":        execution.StartedAt.UTC().Format(time.RFC3339),
+		formatted = append(formatted, DashboardExecution{
+			ID:               execution.ID,
+			Platform:         execution.Platform,
+			OrganizationID:   execution.OrganizationID.String(),
+			OrganizationName: execution.OrganizationName,
+			Name:             execution.Name,
+			Detail:           execution.Detail,
+			Status:           execution.Status,
+			StartedAt:        execution.StartedAt.UTC().Format(time.RFC3339),
 		})
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "dashboard-operations",
-		"attributes": gin.H{
-			"executions": formatted,
-			// True when more work is in flight than the list returns, so the UI can say so
-			// rather than implying the list is everything.
-			"truncated": len(executions) == liveExecutionLimit,
+	jsonapi.WriteDocument(c, http.StatusOK, DashboardOperationsDocument{
+		Type: "dashboard-operations",
+		Attributes: DashboardOperationsAttributes{
+			Executions: formatted,
+			Truncated:  len(executions) == liveExecutionLimit,
 		},
 	})
 }

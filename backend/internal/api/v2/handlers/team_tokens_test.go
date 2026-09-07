@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -20,23 +19,24 @@ func TestTeamTokenResource(t *testing.T) {
 	exp := time.Now().Add(24 * time.Hour)
 	key := &models.APIKey{ID: id, CreatedAt: time.Now(), LastUsedAt: &used, ExpiresAt: &exp}
 
-	// On create: token value included.
-	created := teamTokenResource(key, "tfe-teamsecret")
-	data, ok := created["data"].(gin.H)
+	// On create: token value included. Assertions run against the marshaled document, so
+	// "absent" and "present but null" stay distinguishable.
+	created := wireShape(t, teamTokenResource(key, "tfe-teamsecret"))
+	data, ok := created["data"].(map[string]any)
 	if !ok {
 		t.Fatalf("data is not an object: %T", created["data"])
 	}
 	if data["type"] != "authentication-tokens" {
 		t.Fatalf("type = %v, want authentication-tokens", data["type"])
 	}
-	if data["id"] != id {
+	if data["id"] != id.String() {
 		t.Fatalf("id = %v, want %v", data["id"], id)
 	}
-	attrs := data["attributes"].(gin.H)
+	attrs := data["attributes"].(map[string]any)
 	if attrs["token"] != "tfe-teamsecret" {
 		t.Fatalf("token = %v, want the plaintext on create", attrs["token"])
 	}
-	if attrs["expired-at"] != key.ExpiresAt {
+	if attrs["expired-at"] == nil {
 		t.Fatalf("expired-at not surfaced")
 	}
 	// The legacy team token has no description; it must be present and null so go-tfe decodes *string nil.
@@ -46,12 +46,12 @@ func TestTeamTokenResource(t *testing.T) {
 	}
 
 	// On read: no token value.
-	read := teamTokenResource(key, "")
-	rattrs := read["data"].(gin.H)["attributes"].(gin.H)
+	read := wireShape(t, teamTokenResource(key, ""))
+	rattrs := read["data"].(map[string]any)["attributes"].(map[string]any)
 	if _, present := rattrs["token"]; present {
 		t.Fatalf("token must be absent on read, got %v", rattrs["token"])
 	}
-	if rattrs["last-used-at"] != key.LastUsedAt {
+	if rattrs["last-used-at"] == nil {
 		t.Fatalf("last-used-at not surfaced on read")
 	}
 }

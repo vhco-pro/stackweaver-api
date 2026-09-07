@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -90,21 +91,20 @@ func (h *TeamTokenHandlerV2) resolveTeamOwner(c *gin.Context) (*models.Team, boo
 
 // teamTokenResource builds the JSON:API resource for a team token. token is the plaintext, included
 // only on create (empty on read). Legacy team tokens carry no description, so it is always null.
-func teamTokenResource(key *models.APIKey, token string) gin.H {
-	attrs := gin.H{
-		"created-at":   key.CreatedAt,
-		"last-used-at": key.LastUsedAt,
-		"expired-at":   key.ExpiresAt,
-		"description":  nil,
+func teamTokenResource(key *models.APIKey, token string) jsonapi.Document {
+	attrs := TeamTokenAttributes{
+		CreatedAt:  key.CreatedAt,
+		LastUsedAt: key.LastUsedAt,
+		ExpiredAt:  key.ExpiresAt,
 	}
 	if token != "" {
-		attrs["token"] = token
+		attrs.Token = token
 	}
-	return gin.H{
-		"data": gin.H{
-			"id":         key.ID,
-			"type":       "authentication-tokens",
-			"attributes": attrs,
+	return jsonapi.Document{
+		Data: jsonapi.Resource[TeamTokenAttributes]{
+			ID:         key.ID.String(),
+			Type:       "authentication-tokens",
+			Attributes: attrs,
 		},
 	}
 }

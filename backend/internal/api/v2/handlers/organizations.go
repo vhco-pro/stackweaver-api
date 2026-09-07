@@ -147,92 +147,137 @@ type UpdateOrganizationRequestV2 struct {
 	} `json:"data"`
 }
 
-// buildTFEOrganizationResponse creates a TFE-compatible JSON:API response for an organization.
-// defaultProjectID, when non-nil, is emitted as the default-project relationship (the provider's
-// computed default_project_id).
-func buildTFEOrganizationResponse(org *models.Organization, defaultProjectID *uuid.UUID) gin.H {
-	// Use defaults if values are empty
+// OrganizationPermissions is the static permission surface every organization reports.
+// Constants on purpose: Stackweaver's team-based RBAC answers authorisation per request, and
+// this block exists so TFE clients that read it see a self-managed-style "yes" rather than
+// gating features off. Sentinel/SSO/subscription members stay false - no subsystem.
+type OrganizationPermissions struct {
+	CanUpdate                bool `json:"can-update"`
+	CanDestroy               bool `json:"can-destroy"`
+	CanAccessViaTeams        bool `json:"can-access-via-teams"`
+	CanCreateModule          bool `json:"can-create-module"`
+	CanCreateTeam            bool `json:"can-create-team"`
+	CanCreateWorkspace       bool `json:"can-create-workspace"`
+	CanManageUsers           bool `json:"can-manage-users"`
+	CanManageSubscription    bool `json:"can-manage-subscription"`
+	CanManageSSO             bool `json:"can-manage-sso"`
+	CanUpdateOAuth           bool `json:"can-update-oauth"`
+	CanUpdateSentinel        bool `json:"can-update-sentinel"`
+	CanUpdateSSHKeys         bool `json:"can-update-ssh-keys"`
+	CanUpdateAPIToken        bool `json:"can-update-api-token"`
+	CanTraverse              bool `json:"can-traverse"`
+	CanStartTrial            bool `json:"can-start-trial"`
+	CanUpdateAgentPools      bool `json:"can-update-agent-pools"`
+	CanManageTags            bool `json:"can-manage-tags"`
+	CanManageVarsets         bool `json:"can-manage-varsets"`
+	CanReadVarsets           bool `json:"can-read-varsets"`
+	CanManagePublicModules   bool `json:"can-manage-public-modules"`
+	CanCreateProvider        bool `json:"can-create-provider"`
+	CanManagePublicProviders bool `json:"can-manage-public-providers"`
+	CanCreateProject         bool `json:"can-create-project"`
+	CanManageAssessments     bool `json:"can-manage-assessments"`
+	CanReadAssessments       bool `json:"can-read-assessments"`
+	CanViewExplorer          bool `json:"can-view-explorer"`
+	CanDeployNoCodeModules   bool `json:"can-deploy-no-code-modules"`
+	CanManagePolicies        bool `json:"can-manage-policies"`
+	CanManagePolicyOverrides bool `json:"can-manage-policy-overrides"`
+	CanManageRunTasks        bool `json:"can-manage-run-tasks"`
+	CanReadRunTasks          bool `json:"can-read-run-tasks"`
+	CanManageProjects        bool `json:"can-manage-projects"`
+}
+
+// OrganizationResponseAttributes is the TFE organizations attribute block (#760).
+//
+// Two defaulting rules used to live only in comments beside a map and now live beside the
+// fields that carry them. CollaboratorAuthPolicy: an unset value reports "password".
+// DefaultExecutionMode: an unset mode reports "remote", because
+// tfe_organization_default_settings reads it back after every write and "" would show as
+// drift on the provider's next plan. SessionTimeout and SessionRemember are always-null
+// (sessions are Zitadel's), typed as *int so the members stay present as JSON null.
+type OrganizationResponseAttributes struct {
+	Name                                              string `json:"name"`
+	ExternalID                                        string `json:"external-id"`
+	CreatedAt                                         string `json:"created-at"`
+	UpdatedAt                                         string `json:"updated-at"`
+	Email                                             string `json:"email"`
+	SessionTimeout                                    *int   `json:"session-timeout"`
+	SessionRemember                                   *int   `json:"session-remember"`
+	CollaboratorAuthPolicy                            string `json:"collaborator-auth-policy"`
+	CostEstimationEnabled                             bool   `json:"cost-estimation-enabled"`
+	DefaultTerraformVersion                           string `json:"default-terraform-version"`
+	DefaultExecutionMode                              string `json:"default-execution-mode"`
+	AnsibleJobRetentionDays                           int    `json:"ansible-job-retention-days"`
+	AnsibleAdhocModules                               string `json:"ansible-adhoc-modules"`
+	SpeculativePlanManagementEnabled                  bool   `json:"speculative-plan-management-enabled"`
+	AggregatedCommitStatusEnabled                     bool   `json:"aggregated-commit-status-enabled"`
+	AssessmentsEnforced                               bool   `json:"assessments-enforced"`
+	AllowForceDeleteWorkspaces                        bool   `json:"allow-force-delete-workspaces"`
+	UserTokensEnabled                                 bool   `json:"user-tokens-enabled"`
+	SendPassingStatusesForUntriggeredSpeculativePlans bool   `json:"send-passing-statuses-for-untriggered-speculative-plans"`
+	// Declined surface (see the tfe_organization spec): echoed as drift-free constants.
+	OwnersTeamSAMLRoleID string `json:"owners-team-saml-role-id"`
+	EnforceHYOK          bool   `json:"enforce-hyok"`
+	StacksEnabled        bool   `json:"stacks-enabled"`
+	MaxTTLEnabled        bool   `json:"max-ttl-enabled"`
+	TwoFactorConformant  bool   `json:"two-factor-conformant"`
+
+	Permissions OrganizationPermissions `json:"permissions"`
+}
+
+// OrganizationResponseRelationships carries the two optional to-one relationships; both omit when
+// unset, exactly as the map-based builder emitted them conditionally.
+type OrganizationResponseRelationships struct {
+	DefaultAgentPool *jsonapi.Relationship `json:"default-agent-pool,omitempty"`
+	DefaultProject   *jsonapi.Relationship `json:"default-project,omitempty"`
+}
+
+// buildTFEOrganizationResponse builds a TFE-compatible organizations resource. TFE uses the
+// name as the resource id; the uuid rides in external-id.
+func buildTFEOrganizationResponse(org *models.Organization, defaultProjectID *uuid.UUID) jsonapi.Resource[OrganizationResponseAttributes] {
 	collaboratorAuthPolicy := org.CollaboratorAuthPolicy
 	if collaboratorAuthPolicy == "" {
 		collaboratorAuthPolicy = "password"
 	}
-
-	// tfe_organization_default_settings reads this back after every write, so an unset mode must still
-	// report the effective default rather than "" or the provider sees drift on the next plan.
 	defaultExecutionMode := org.DefaultExecutionMode
 	if defaultExecutionMode == "" {
 		defaultExecutionMode = "remote"
 	}
 
-	return gin.H{
-		"id":   org.Name, // TFE uses name as ID for organizations
-		"type": "organizations",
-		"attributes": gin.H{
-			"name":                                org.Name,
-			"external-id":                         org.ID.String(),
-			"created-at":                          org.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":                          org.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			"email":                               org.Email,
-			"session-timeout":                     nil,
-			"session-remember":                    nil,
-			"collaborator-auth-policy":            collaboratorAuthPolicy,
-			"cost-estimation-enabled":             org.CostEstimationEnabled,
-			"default-terraform-version":           org.DefaultTofuVersion,
-			"default-execution-mode":              defaultExecutionMode,
-			"ansible-job-retention-days":          org.AnsibleJobRetentionDays,
-			"ansible-adhoc-modules":               org.AnsibleAdHocModules,
-			"speculative-plan-management-enabled": org.SpeculativePlanManagement(),
-			"aggregated-commit-status-enabled":    org.AggregatedCommitStatusEnabled,
-			"assessments-enforced":                org.AssessmentsEnforced,
-			"allow-force-delete-workspaces":       org.AllowForceDeleteWorkspaces,
-			"user-tokens-enabled":                 org.UserTokensAllowed(),
-			"send-passing-statuses-for-untriggered-speculative-plans": org.SendPassingStatusesForUntriggeredSpeculativePlans,
-			// Declined surface (see the tfe_organization spec): echoed as drift-free constants.
-			// Sessions are Zitadel's; SAML/HYOK/Stacks/max-TTL have no subsystem.
-			"owners-team-saml-role-id": "",
-			"enforce-hyok":             false,
-			"stacks-enabled":           false,
-			"max-ttl-enabled":          false,
-			"two-factor-conformant":    false,
-			"permissions": gin.H{
-				"can-update":                  true,
-				"can-destroy":                 true,
-				"can-access-via-teams":        true,
-				"can-create-module":           true,
-				"can-create-team":             true,
-				"can-create-workspace":        true,
-				"can-manage-users":            true,
-				"can-manage-subscription":     false,
-				"can-manage-sso":              false,
-				"can-update-oauth":            true,
-				"can-update-sentinel":         false,
-				"can-update-ssh-keys":         true,
-				"can-update-api-token":        true,
-				"can-traverse":                true,
-				"can-start-trial":             false,
-				"can-update-agent-pools":      true,
-				"can-manage-tags":             true,
-				"can-manage-varsets":          true,
-				"can-read-varsets":            true,
-				"can-manage-public-modules":   true,
-				"can-create-provider":         true,
-				"can-manage-public-providers": false,
-				"can-create-project":          true,
-				"can-manage-assessments":      true,
-				"can-read-assessments":        true,
-				"can-view-explorer":           true,
-				"can-deploy-no-code-modules":  false,
-				"can-manage-policies":         true,
-				"can-manage-policy-overrides": true,
-				"can-manage-run-tasks":        true,
-				"can-read-run-tasks":          true,
-				"can-manage-projects":         true,
+	return jsonapi.Resource[OrganizationResponseAttributes]{
+		ID:   org.Name,
+		Type: "organizations",
+		Attributes: OrganizationResponseAttributes{
+			Name:                             org.Name,
+			ExternalID:                       org.ID.String(),
+			CreatedAt:                        org.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:                        org.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			Email:                            org.Email,
+			CollaboratorAuthPolicy:           collaboratorAuthPolicy,
+			CostEstimationEnabled:            org.CostEstimationEnabled,
+			DefaultTerraformVersion:          org.DefaultTofuVersion,
+			DefaultExecutionMode:             defaultExecutionMode,
+			AnsibleJobRetentionDays:          org.AnsibleJobRetentionDays,
+			AnsibleAdhocModules:              org.AnsibleAdHocModules,
+			SpeculativePlanManagementEnabled: org.SpeculativePlanManagement(),
+			AggregatedCommitStatusEnabled:    org.AggregatedCommitStatusEnabled,
+			AssessmentsEnforced:              org.AssessmentsEnforced,
+			AllowForceDeleteWorkspaces:       org.AllowForceDeleteWorkspaces,
+			UserTokensEnabled:                org.UserTokensAllowed(),
+			SendPassingStatusesForUntriggeredSpeculativePlans: org.SendPassingStatusesForUntriggeredSpeculativePlans,
+			Permissions: OrganizationPermissions{
+				CanUpdate: true, CanDestroy: true, CanAccessViaTeams: true,
+				CanCreateModule: true, CanCreateTeam: true, CanCreateWorkspace: true,
+				CanManageUsers: true, CanUpdateOAuth: true, CanUpdateSSHKeys: true,
+				CanUpdateAPIToken: true, CanTraverse: true, CanUpdateAgentPools: true,
+				CanManageTags: true, CanManageVarsets: true, CanReadVarsets: true,
+				CanManagePublicModules: true, CanCreateProvider: true, CanCreateProject: true,
+				CanManageAssessments: true, CanReadAssessments: true, CanViewExplorer: true,
+				CanManagePolicies: true, CanManagePolicyOverrides: true,
+				CanManageRunTasks: true, CanReadRunTasks: true, CanManageProjects: true,
 			},
 		},
-		"relationships": orgRelationshipsResponse(org, defaultProjectID),
-		"links": gin.H{
-			"self": "/api/v2/organizations/" + org.Name,
-		},
+		Relationships: orgRelationshipsResponse(org, defaultProjectID),
+		Links:         jsonapi.SelfLink{Self: "/api/v2/organizations/" + org.Name},
 	}
 }
 
@@ -290,17 +335,15 @@ func (h *OrganizationHandlerV2) applyOrgDefaultSettings(org *models.Organization
 // explicit {"data": null} is equally valid JSON:API but noisier to no benefit. default-project is
 // likewise omitted when the org has no "default" project (pre-bootstrap edge) - the provider
 // nil-guards its read.
-func orgRelationshipsResponse(org *models.Organization, defaultProjectID *uuid.UUID) gin.H {
-	rels := gin.H{}
+func orgRelationshipsResponse(org *models.Organization, defaultProjectID *uuid.UUID) OrganizationResponseRelationships {
+	var rels OrganizationResponseRelationships
 	if org.DefaultAgentPoolID != nil {
-		rels["default-agent-pool"] = gin.H{
-			"data": gin.H{"id": org.DefaultAgentPoolID.String(), "type": "agent-pools"},
-		}
+		r := jsonapi.ToOne(org.DefaultAgentPoolID.String(), "agent-pools")
+		rels.DefaultAgentPool = &r
 	}
 	if defaultProjectID != nil {
-		rels["default-project"] = gin.H{
-			"data": gin.H{"id": defaultProjectID.String(), "type": "projects"},
-		}
+		r := jsonapi.ToOne(defaultProjectID.String(), "projects")
+		rels.DefaultProject = &r
 	}
 	return rels
 }
@@ -385,7 +428,7 @@ func (h *OrganizationHandlerV2) List(c *gin.Context) {
 	// not raw model structs). The default-project relationship is omitted here (nil): the provider's
 	// list path reads only names + external-ids, and resolving it per row would be an N+1 across the
 	// page. The single-org GET still emits it.
-	data := make([]gin.H, 0, len(paginatedOrgs))
+	data := make([]jsonapi.Resource[OrganizationResponseAttributes], 0, len(paginatedOrgs))
 	for i := range paginatedOrgs {
 		data = append(data, buildTFEOrganizationResponse(&paginatedOrgs[i], nil))
 	}
@@ -788,27 +831,43 @@ func (h *OrganizationHandlerV2) GetEntitlementSet(c *gin.Context) {
 	// TFE-compatible entitlement set response
 	// This endpoint returns what features/entitlements the organization has access to
 	// JSON:API format: id and type at top level, attributes contain the actual data
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   org.ID.String(),
-		"type": "entitlement-sets",
-		"attributes": gin.H{
-			"cost-estimation":         true,
-			"configuration-design":    true,
-			"operations":              true,
-			"private-module-registry": true,
-			"state-storage":           true,
-			"teams":                   true,
-			"vcs-integrations":        true,
-			"usage-reporting":         true,
-			"user-limit":              0, // 0 means unlimited
-			"self-serve-billing":      false,
-			"audit-logging":           true,
-			"sso":                     false,
-			"sentinel":                false,
-			"agents":                  false,
-			"policy-enforcement":      false,
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[EntitlementSetAttributes]{
+		ID:   org.ID.String(),
+		Type: "entitlement-sets",
+		Attributes: EntitlementSetAttributes{
+			CostEstimation:        true,
+			ConfigurationDesign:   true,
+			Operations:            true,
+			PrivateModuleRegistry: true,
+			StateStorage:          true,
+			Teams:                 true,
+			VCSIntegrations:       true,
+			UsageReporting:        true,
+			AuditLogging:          true,
 		},
 	})
+}
+
+// EntitlementSetAttributes is the TFE entitlement-sets block: which features the deployment
+// grants. Constants, because Stackweaver has no billing tiers - everything implemented is on,
+// everything without a subsystem (sso, sentinel, agents billing, policy enforcement) reports
+// false, and UserLimit 0 means unlimited.
+type EntitlementSetAttributes struct {
+	CostEstimation        bool `json:"cost-estimation"`
+	ConfigurationDesign   bool `json:"configuration-design"`
+	Operations            bool `json:"operations"`
+	PrivateModuleRegistry bool `json:"private-module-registry"`
+	StateStorage          bool `json:"state-storage"`
+	Teams                 bool `json:"teams"`
+	VCSIntegrations       bool `json:"vcs-integrations"`
+	UsageReporting        bool `json:"usage-reporting"`
+	UserLimit             int  `json:"user-limit"`
+	SelfServeBilling      bool `json:"self-serve-billing"`
+	AuditLogging          bool `json:"audit-logging"`
+	SSO                   bool `json:"sso"`
+	Sentinel              bool `json:"sentinel"`
+	Agents                bool `json:"agents"`
+	PolicyEnforcement     bool `json:"policy-enforcement"`
 }
 
 // createDefaultProject creates the default project and grants the owners team full access
@@ -1076,9 +1135,9 @@ func (h *OrganizationHandlerV2) GetEffectivePermissions(c *gin.Context) {
 		result[string(perm)] = granted
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type":       "effective-permissions",
-		"id":         org.ID.String(),
-		"attributes": result,
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[map[string]bool]{
+		ID:         org.ID.String(),
+		Type:       "effective-permissions",
+		Attributes: result,
 	})
 }

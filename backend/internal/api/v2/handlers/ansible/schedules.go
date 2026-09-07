@@ -227,99 +227,69 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 }
 
 // formatScheduleResponse formats a schedule for JSON:API response
-func formatScheduleResponse(schedule *models.AnsibleSchedule) gin.H {
+func formatScheduleResponse(schedule *models.AnsibleSchedule) jsonapi.Resource[ScheduleAttributes] {
 	// Ensure config is not nil for response
 	config := schedule.Config
 	if config == nil {
 		config = make(models.ScheduleConfig)
 	}
 
-	attributes := gin.H{
-		"name":            schedule.Name,
-		"description":     schedule.Description,
-		"schedule-type":   schedule.Type,
-		"status":          schedule.Status,
-		"cron-expression": schedule.CronExpression,
-		"timezone":        schedule.Timezone,
-		"config":          config,
-		"created-at":      schedule.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"updated-at":      schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	attributes := ScheduleAttributes{
+		Name:           schedule.Name,
+		Description:    schedule.Description,
+		ScheduleType:   schedule.Type,
+		Status:         schedule.Status,
+		CronExpression: schedule.CronExpression,
+		Timezone:       schedule.Timezone,
+		Config:         config,
+		CreatedAt:      schedule.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:      schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		LastRunStatus:  schedule.LastRunStatus,
+		RunCount:       schedule.RunCount,
 	}
 
 	if schedule.StartDateTime != nil {
-		attributes["start-date-time"] = schedule.StartDateTime.Format(time.RFC3339)
+		attributes.StartDateTime = schedule.StartDateTime.Format(time.RFC3339)
 	}
 	if schedule.EndDateTime != nil {
-		attributes["end-date-time"] = schedule.EndDateTime.Format(time.RFC3339)
+		attributes.EndDateTime = schedule.EndDateTime.Format(time.RFC3339)
 	}
 	if schedule.NextRunAt != nil {
-		attributes["next-run-at"] = schedule.NextRunAt.Format(time.RFC3339)
+		attributes.NextRunAt = schedule.NextRunAt.Format(time.RFC3339)
 	}
 	if schedule.LastRunAt != nil {
-		attributes["last-run-at"] = schedule.LastRunAt.Format(time.RFC3339)
-	}
-	if schedule.LastRunStatus != "" {
-		attributes["last-run-status"] = schedule.LastRunStatus
-	}
-	if schedule.RunCount > 0 {
-		attributes["run-count"] = schedule.RunCount
+		attributes.LastRunAt = schedule.LastRunAt.Format(time.RFC3339)
 	}
 
-	relationships := gin.H{
-		"organization": gin.H{
-			"data": gin.H{
-				"id":   schedule.OrganizationID.String(),
-				"type": "organizations",
-			},
-		},
+	relationships := ScheduleRelationships{
+		Organization: jsonapi.ToOne(schedule.OrganizationID.String(), "organizations"),
 	}
-
 	if schedule.JobTemplateID != nil {
-		relationships["job-template"] = gin.H{
-			"data": gin.H{
-				"id":   schedule.JobTemplateID.String(),
-				"type": "ansible-job-templates",
-			},
-		}
+		r := jsonapi.ToOne(schedule.JobTemplateID.String(), "ansible-job-templates")
+		relationships.JobTemplate = &r
 	}
 	if schedule.InventorySourceID != nil {
-		relationships["inventory-source"] = gin.H{
-			"data": gin.H{
-				"id":   schedule.InventorySourceID.String(),
-				"type": "ansible-inventory-sources",
-			},
-		}
+		r := jsonapi.ToOne(schedule.InventorySourceID.String(), "ansible-inventory-sources")
+		relationships.InventorySource = &r
 	}
 	if schedule.PlaybookID != nil {
-		relationships["playbook"] = gin.H{
-			"data": gin.H{
-				"id":   schedule.PlaybookID.String(),
-				"type": "ansible-playbooks",
-			},
-		}
+		r := jsonapi.ToOne(schedule.PlaybookID.String(), "ansible-playbooks")
+		relationships.Playbook = &r
 	}
 	if schedule.LastJobID != nil {
-		relationships["last-job"] = gin.H{
-			"data": gin.H{
-				"id":   schedule.LastJobID.String(),
-				"type": "ansible-jobs",
-			},
-		}
+		r := jsonapi.ToOne(schedule.LastJobID.String(), "ansible-jobs")
+		relationships.LastJob = &r
 	}
 	if schedule.CreatedBy != nil {
-		relationships["created-by"] = gin.H{
-			"data": gin.H{
-				"id":   schedule.CreatedBy.String(),
-				"type": "users",
-			},
-		}
+		r := jsonapi.ToOne(schedule.CreatedBy.String(), "users")
+		relationships.CreatedBy = &r
 	}
 
-	return gin.H{
-		"id":            schedule.ID.String(),
-		"type":          "schedules",
-		"attributes":    attributes,
-		"relationships": relationships,
+	return jsonapi.Resource[ScheduleAttributes]{
+		ID:            schedule.ID.String(),
+		Type:          "schedules",
+		Attributes:    attributes,
+		Relationships: relationships,
 	}
 }
 
@@ -412,7 +382,7 @@ func (h *ScheduleHandler) List(c *gin.Context) {
 		return
 	}
 
-	formatted := make([]gin.H, 0, len(schedules))
+	formatted := make([]jsonapi.Resource[ScheduleAttributes], 0, len(schedules))
 	for i := range schedules {
 		formatted = append(formatted, formatScheduleResponse(&schedules[i]))
 	}
@@ -524,7 +494,7 @@ func (h *ScheduleHandler) Delete(c *gin.Context) {
 // @Description Enable a schedule
 // @Tags Ansible Schedules
 // @Param id path string true "Schedule ID"
-// @Success 200 {object} gin.H
+// @Success 200 {object} response.MessageResponse
 // @Failure 400 {object} response.ErrorResponse
 // @Failure 500 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{schedule_id}/actions/enable [post]
@@ -569,7 +539,7 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 // @Description Disable a schedule
 // @Tags Ansible Schedules
 // @Param id path string true "Schedule ID"
-// @Success 200 {object} gin.H
+// @Success 200 {object} response.MessageResponse
 // @Failure 400 {object} response.ErrorResponse
 // @Failure 500 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{schedule_id}/actions/disable [post]
@@ -719,7 +689,7 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 		return
 	}
 
-	formatted := make([]gin.H, 0, len(schedules))
+	formatted := make([]jsonapi.Resource[ScheduleAttributes], 0, len(schedules))
 	for i := range schedules {
 		formatted = append(formatted, formatScheduleResponse(&schedules[i]))
 	}
@@ -731,7 +701,7 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 // @Description Trigger immediate execution of a schedule
 // @Tags Ansible Schedules
 // @Param id path string true "Schedule ID"
-// @Success 200 {object} gin.H
+// @Success 200 {object} response.MessageResponse
 // @Failure 400 {object} response.ErrorResponse
 // @Failure 500 {object} response.ErrorResponse
 // @Router /api/v2/ansible/schedules/{id}/actions/run-now [post]

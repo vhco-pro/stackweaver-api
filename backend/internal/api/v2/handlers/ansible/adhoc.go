@@ -243,11 +243,11 @@ func (h *AdHocHandler) ListModules(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You don't have permission to view this organization's ad hoc modules")
 		return
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "adhoc-modules",
-		"id":   org.ID.String(),
-		"attributes": gin.H{
-			"modules": AdHocModules(org),
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[AdHocModulesAttributes]{
+		ID:   org.ID.String(),
+		Type: "adhoc-modules",
+		Attributes: AdHocModulesAttributes{
+			Modules: AdHocModules(org),
 		},
 	})
 }

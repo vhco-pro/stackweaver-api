@@ -88,24 +88,20 @@ func regProvErr(c *gin.Context, status int, title, detail string) {
 }
 
 // formatRegistryProviderResponse renders a provider as a go-tfe-compatible JSON:API resource.
-func formatRegistryProviderResponse(p *models.Provider) gin.H {
-	return gin.H{
-		"id":   p.ID.String(),
-		"type": registryProviderType,
-		"attributes": gin.H{
-			"name":          p.Name,
-			"namespace":     p.Namespace,
-			"registry-name": p.RegistryName,
-			"created-at":    p.CreatedAt.UTC().Format(time.RFC3339),
-			"updated-at":    p.UpdatedAt.UTC().Format(time.RFC3339),
-			"permissions": gin.H{
-				"can-delete": true,
-			},
+func formatRegistryProviderResponse(p *models.Provider) jsonapi.Resource[RegistryProviderAttributes] {
+	return jsonapi.Resource[RegistryProviderAttributes]{
+		ID:   p.ID.String(),
+		Type: registryProviderType,
+		Attributes: RegistryProviderAttributes{
+			Name:         p.Name,
+			Namespace:    p.Namespace,
+			RegistryName: p.RegistryName,
+			CreatedAt:    p.CreatedAt.UTC().Format(time.RFC3339),
+			UpdatedAt:    p.UpdatedAt.UTC().Format(time.RFC3339),
+			Permissions:  RegistryProviderPermissions{CanDelete: true},
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{"id": p.Organization.Name, "type": "organizations"},
-			},
+		Relationships: WorkspaceOnlyRelationshipsNamed{
+			Organization: jsonapi.ToOne(p.Organization.Name, "organizations"),
 		},
 	}
 }
@@ -216,7 +212,7 @@ func (h *RegistryProviderResourceHandler) ListProviders(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, 0, len(providers))
+	data := make([]jsonapi.Resource[RegistryProviderAttributes], 0, len(providers))
 	for i := range providers {
 		data = append(data, formatRegistryProviderResponse(&providers[i]))
 	}

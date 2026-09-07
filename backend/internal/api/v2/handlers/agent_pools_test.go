@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -24,56 +24,47 @@ func TestFormatAgentPoolResponse_Basic(t *testing.T) {
 	resp := formatAgentPoolResponse(pool, orgName, 3)
 
 	// Verify top-level fields
-	if resp["id"] != poolID.String() {
-		t.Errorf("id = %v, want %s", resp["id"], poolID.String())
+	if resp.ID != poolID.String() {
+		t.Errorf("id = %v, want %s", resp.ID, poolID.String())
 	}
-	if resp["type"] != "agent-pools" {
-		t.Errorf("type = %v, want agent-pools", resp["type"])
+	if resp.Type != "agent-pools" {
+		t.Errorf("type = %v, want agent-pools", resp.Type)
 	}
 
 	// Verify attributes
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not gin.H")
+	if resp.Attributes.Name != "production-pool" {
+		t.Errorf("attributes.name = %v, want production-pool", resp.Attributes.Name)
 	}
-	if attrs["name"] != "production-pool" {
-		t.Errorf("attributes.name = %v, want production-pool", attrs["name"])
+	if resp.Attributes.AgentCount != 3 {
+		t.Errorf("attributes.agent-count = %v, want 3", resp.Attributes.AgentCount)
 	}
-	if attrs["agent-count"] != 3 {
-		t.Errorf("attributes.agent-count = %v, want 3", attrs["agent-count"])
-	}
-	if attrs["organization-scoped"] != true {
-		t.Errorf("attributes.organization-scoped = %v, want true", attrs["organization-scoped"])
+	if !resp.Attributes.OrganizationScoped {
+		t.Errorf("attributes.organization-scoped = %v, want true", resp.Attributes.OrganizationScoped)
 	}
 
 	// Verify relationships
-	rels, ok := resp["relationships"].(gin.H)
+	rels, ok := resp.Relationships.(AgentPoolRelationships)
 	if !ok {
-		t.Fatal("relationships is not gin.H")
+		t.Fatal("relationships is not AgentPoolRelationships")
 	}
-	orgRel, ok := rels["organization"].(gin.H)
-	if !ok {
-		t.Fatal("relationships.organization is not gin.H")
+	if rels.Organization.Data == nil {
+		t.Fatal("relationships.organization.data is nil")
 	}
-	orgData, ok := orgRel["data"].(gin.H)
-	if !ok {
-		t.Fatal("relationships.organization.data is not gin.H")
+	if rels.Organization.Data.ID != orgName {
+		t.Errorf("organization.data.id = %v, want %s", rels.Organization.Data.ID, orgName)
 	}
-	if orgData["id"] != orgName {
-		t.Errorf("organization.data.id = %v, want %s", orgData["id"], orgName)
-	}
-	if orgData["type"] != "organizations" {
-		t.Errorf("organization.data.type = %v, want organizations", orgData["type"])
+	if rels.Organization.Data.Type != "organizations" {
+		t.Errorf("organization.data.type = %v, want organizations", rels.Organization.Data.Type)
 	}
 
 	// Verify links
-	links, ok := resp["links"].(gin.H)
+	links, ok := resp.Links.(jsonapi.SelfLink)
 	if !ok {
-		t.Fatal("links is not gin.H")
+		t.Fatal("links is not jsonapi.SelfLink")
 	}
 	expectedSelf := "/api/v2/agent-pools/" + poolID.String()
-	if links["self"] != expectedSelf {
-		t.Errorf("links.self = %v, want %s", links["self"], expectedSelf)
+	if links.Self != expectedSelf {
+		t.Errorf("links.self = %v, want %s", links.Self, expectedSelf)
 	}
 }
 
@@ -90,27 +81,20 @@ func TestFormatAgentPoolResponse_WithAllowedWorkspaces(t *testing.T) {
 	}
 
 	resp := formatAgentPoolResponse(pool, "org", 0)
-	rels, ok := resp["relationships"].(gin.H)
-	if !ok {
-		t.Fatal("relationships is not gin.H")
-	}
+	rels := resp.Relationships.(AgentPoolRelationships)
 
-	awRel, ok := rels["allowed-workspaces"].(gin.H)
-	if !ok {
+	if rels.AllowedWorkspaces == nil {
 		t.Fatal("relationships should include allowed-workspaces when workspaces are present")
 	}
-	data, ok := awRel["data"].([]gin.H)
-	if !ok {
-		t.Fatal("allowed-workspaces.data should be []gin.H")
-	}
+	data := rels.AllowedWorkspaces.Data
 	if len(data) != 2 {
 		t.Fatalf("allowed-workspaces.data has %d items, want 2", len(data))
 	}
-	if data[0]["id"] != "ws-workspace00001" {
-		t.Errorf("allowed-workspaces.data[0].id = %v, want ws-workspace00001", data[0]["id"])
+	if data[0].ID != "ws-workspace00001" {
+		t.Errorf("allowed-workspaces.data[0].id = %v, want ws-workspace00001", data[0].ID)
 	}
-	if data[0]["type"] != "workspaces" {
-		t.Errorf("allowed-workspaces.data[0].type = %v, want workspaces", data[0]["type"])
+	if data[0].Type != "workspaces" {
+		t.Errorf("allowed-workspaces.data[0].type = %v, want workspaces", data[0].Type)
 	}
 }
 
@@ -127,20 +111,19 @@ func TestFormatAgentPoolResponse_WithAllowedProjects(t *testing.T) {
 	}
 
 	resp := formatAgentPoolResponse(pool, "org", 0)
-	rels := resp["relationships"].(gin.H)
-	apRel, ok := rels["allowed-projects"].(gin.H)
-	if !ok {
+	rels := resp.Relationships.(AgentPoolRelationships)
+	if rels.AllowedProjects == nil {
 		t.Fatal("relationships should include allowed-projects when projects are present")
 	}
-	data := apRel["data"].([]gin.H)
+	data := rels.AllowedProjects.Data
 	if len(data) != 1 {
 		t.Fatalf("allowed-projects.data has %d items, want 1", len(data))
 	}
-	if data[0]["id"] != projID.String() {
-		t.Errorf("allowed-projects.data[0].id = %v, want %s", data[0]["id"], projID.String())
+	if data[0].ID != projID.String() {
+		t.Errorf("allowed-projects.data[0].id = %v, want %s", data[0].ID, projID.String())
 	}
-	if data[0]["type"] != "projects" {
-		t.Errorf("allowed-projects.data[0].type = %v, want projects", data[0]["type"])
+	if data[0].Type != "projects" {
+		t.Errorf("allowed-projects.data[0].type = %v, want projects", data[0].Type)
 	}
 }
 
@@ -156,17 +139,16 @@ func TestFormatAgentPoolResponse_WithExcludedWorkspaces(t *testing.T) {
 	}
 
 	resp := formatAgentPoolResponse(pool, "org", 0)
-	rels := resp["relationships"].(gin.H)
-	ewRel, ok := rels["excluded-workspaces"].(gin.H)
-	if !ok {
+	rels := resp.Relationships.(AgentPoolRelationships)
+	if rels.ExcludedWorkspaces == nil {
 		t.Fatal("relationships should include excluded-workspaces when exclusions are present")
 	}
-	data := ewRel["data"].([]gin.H)
+	data := rels.ExcludedWorkspaces.Data
 	if len(data) != 1 {
 		t.Fatalf("excluded-workspaces.data has %d items, want 1", len(data))
 	}
-	if data[0]["id"] != "ws-excluded00001" {
-		t.Errorf("excluded-workspaces.data[0].id = %v, want ws-excluded00001", data[0]["id"])
+	if data[0].ID != "ws-excluded00001" {
+		t.Errorf("excluded-workspaces.data[0].id = %v, want ws-excluded00001", data[0].ID)
 	}
 }
 
@@ -179,19 +161,20 @@ func TestFormatAgentPoolResponse_NoRelationships(t *testing.T) {
 	}
 
 	resp := formatAgentPoolResponse(pool, "org", 0)
-	rels := resp["relationships"].(gin.H)
+	rels := resp.Relationships.(AgentPoolRelationships)
 
-	// Should only have organization relationship, not allowed/excluded
-	if _, exists := rels["allowed-workspaces"]; exists {
+	// Should only have organization relationship, not allowed/excluded (nil pointers are
+	// omitted from the JSON via omitempty)
+	if rels.AllowedWorkspaces != nil {
 		t.Error("relationships should not include allowed-workspaces when empty")
 	}
-	if _, exists := rels["allowed-projects"]; exists {
+	if rels.AllowedProjects != nil {
 		t.Error("relationships should not include allowed-projects when empty")
 	}
-	if _, exists := rels["excluded-workspaces"]; exists {
+	if rels.ExcludedWorkspaces != nil {
 		t.Error("relationships should not include excluded-workspaces when empty")
 	}
-	if _, exists := rels["organization"]; !exists {
+	if rels.Organization.Data == nil {
 		t.Error("relationships should always include organization")
 	}
 }
@@ -204,9 +187,8 @@ func TestFormatAgentPoolResponse_ZeroAgentCount(t *testing.T) {
 	}
 
 	resp := formatAgentPoolResponse(pool, "org", 0)
-	attrs := resp["attributes"].(gin.H)
-	if attrs["agent-count"] != 0 {
-		t.Errorf("attributes.agent-count = %v, want 0", attrs["agent-count"])
+	if resp.Attributes.AgentCount != 0 {
+		t.Errorf("attributes.agent-count = %v, want 0", resp.Attributes.AgentCount)
 	}
 }
 

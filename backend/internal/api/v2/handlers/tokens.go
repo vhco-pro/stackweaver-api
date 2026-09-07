@@ -71,14 +71,14 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 
 	// Return token with plaintext token (only time it's shown)
 	// TFE-compatible response format
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   apiKey.ID,
-		"type": "tokens",
-		"attributes": gin.H{
-			"token":       tokenString, // Plaintext token (only shown once)
-			"description": apiKey.Name,
-			"expires_at":  apiKey.ExpiresAt,
-			"created_at":  apiKey.CreatedAt,
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[UserTokenCreateAttributes]{
+		ID:   apiKey.ID.String(),
+		Type: "tokens",
+		Attributes: UserTokenCreateAttributes{
+			Token:       tokenString, // Plaintext token (only shown once)
+			Description: apiKey.Name,
+			ExpiresAt:   apiKey.ExpiresAt,
+			CreatedAt:   apiKey.CreatedAt,
 		},
 	})
 }
@@ -99,16 +99,16 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 	}
 
 	// Convert to response format (without plaintext tokens)
-	responseData := make([]gin.H, 0, len(tokens))
+	responseData := make([]jsonapi.Resource[UserTokenListAttributes], 0, len(tokens))
 	for _, token := range tokens {
-		responseData = append(responseData, gin.H{
-			"id":   token.ID,
-			"type": "tokens",
-			"attributes": gin.H{
-				"description":  token.Name,
-				"last_used_at": token.LastUsedAt,
-				"expires_at":   token.ExpiresAt,
-				"created_at":   token.CreatedAt,
+		responseData = append(responseData, jsonapi.Resource[UserTokenListAttributes]{
+			ID:   token.ID.String(),
+			Type: "tokens",
+			Attributes: UserTokenListAttributes{
+				Description: token.Name,
+				LastUsedAt:  token.LastUsedAt,
+				ExpiresAt:   token.ExpiresAt,
+				CreatedAt:   token.CreatedAt,
 			},
 		})
 	}

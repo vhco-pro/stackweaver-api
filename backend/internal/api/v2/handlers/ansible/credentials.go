@@ -484,40 +484,35 @@ func (h *CredentialHandler) Delete(c *gin.Context) {
 
 // formatCredentialResponse formats a credential for JSON:API response
 // Note: Sensitive fields are never included in responses
-func formatCredentialResponse(cred *models.AnsibleCredential) gin.H {
-	return gin.H{
-		"id":   cred.ID.String(),
-		"type": "ansible-credentials",
-		"attributes": gin.H{
-			"name":                cred.Name,
-			"description":         cred.Description,
-			"credential-type":     cred.Type,
-			"username":            cred.Username,
-			"azure-tenant-id":     cred.AzureTenantID,
-			"azure-client-id":     cred.AzureClientID,
-			"ssh-port":            cred.SSHPort,
-			"ssh-become-user":     cred.SSHBecomeUser,
-			"has-ssh-private-key": cred.HasSSHPrivateKey,
-			"has-password":        cred.HasPassword,
-			"has-vault-password":  cred.HasVaultPassword,
-			"has-become-password": cred.HasBecomePassword,
-			"created-at":          cred.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":          cred.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+func formatCredentialResponse(cred *models.AnsibleCredential) jsonapi.Resource[CredentialAttributes] {
+	return jsonapi.Resource[CredentialAttributes]{
+		ID:   cred.ID.String(),
+		Type: "ansible-credentials",
+		Attributes: CredentialAttributes{
+			Name:              cred.Name,
+			Description:       cred.Description,
+			CredentialType:    cred.Type,
+			Username:          cred.Username,
+			AzureTenantID:     cred.AzureTenantID,
+			AzureClientID:     cred.AzureClientID,
+			SSHPort:           cred.SSHPort,
+			SSHBecomeUser:     cred.SSHBecomeUser,
+			HasSSHPrivateKey:  cred.HasSSHPrivateKey,
+			HasPassword:       cred.HasPassword,
+			HasVaultPassword:  cred.HasVaultPassword,
+			HasBecomePassword: cred.HasBecomePassword,
+			CreatedAt:         cred.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:         cred.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{
-					"id":   cred.OrganizationID.String(),
-					"type": "organizations",
-				},
-			},
+		Relationships: CredentialRelationships{
+			Organization: jsonapi.ToOne(cred.OrganizationID.String(), "organizations"),
 		},
 	}
 }
 
 // formatCredentialsResponse formats multiple credentials for JSON:API response
-func formatCredentialsResponse(credentials []models.AnsibleCredential) []gin.H {
-	result := make([]gin.H, len(credentials))
+func formatCredentialsResponse(credentials []models.AnsibleCredential) []jsonapi.Resource[CredentialAttributes] {
+	result := make([]jsonapi.Resource[CredentialAttributes], len(credentials))
 	for i, cred := range credentials {
 		result[i] = formatCredentialResponse(&cred)
 	}

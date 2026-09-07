@@ -110,7 +110,11 @@ func (h *ProvisioningCallbackHandler) Handle(c *gin.Context) {
 		return
 	}
 	logger.Infof("Provisioning callback: launched job %s for host %s (template %s)", job.ID, hostName, template.Name)
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{"id": job.ID.String(), "type": "ansible-jobs", "attributes": gin.H{"status": job.Status, "limit": hostName}})
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[CallbackJobAttributes]{
+		ID:         job.ID.String(),
+		Type:       "ansible-jobs",
+		Attributes: CallbackJobAttributes{Status: job.Status, Limit: hostName},
+	})
 }
 
 // findRequestingHost matches a client IP against the inventory's hosts (name,

@@ -461,61 +461,51 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 }
 
 // formatInventorySourceResponse formats a source for JSON:API response
-func formatInventorySourceResponse(source *models.AnsibleInventorySource) gin.H {
-	resp := gin.H{
-		"id":   source.ID.String(),
-		"type": "inventory-sources",
-		"attributes": gin.H{
-			"name":                       source.Name,
-			"description":                source.Description,
-			"source-type":                string(source.Type),
-			"config":                     source.Config,
-			"update-on-launch":           source.UpdateOnLaunch,
-			"update-cache-timeout":       source.UpdateCacheTimeout,
-			"overwrite":                  source.Overwrite,
-			"overwrite-vars":             source.OverwriteVars,
-			"verbosity":                  source.Verbosity,
-			"group-by-instance-id":       source.GroupByInstanceID,
-			"group-by-region":            source.GroupByRegion,
-			"group-by-availability-zone": source.GroupByAvailabilityZone,
-			"group-by-tag":               source.GroupByTag,
-			"hostname-var":               source.HostnameVar,
-			"instance-filters":           source.InstanceFilters,
-			"sync-schedule":              source.SyncSchedule,
-			"status":                     string(source.Status),
-			"last-sync-at":               source.LastSyncAt,
-			"last-sync-error":            source.LastSyncError,
-			"last-sync-log":              source.LastSyncLog,
-			"hosts-count":                source.HostsCount,
-			"enabled":                    source.Enabled,
-			"created-at":                 source.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":                 source.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		},
-		"relationships": gin.H{
-			"inventory": gin.H{
-				"data": gin.H{
-					"id":   source.InventoryID.String(),
-					"type": "ansible-inventories",
-				},
-			},
-		},
+func formatInventorySourceResponse(source *models.AnsibleInventorySource) jsonapi.Resource[InventorySourceAttributes] {
+	relationships := InventorySourceRelationships{
+		Inventory: jsonapi.ToOne(source.InventoryID.String(), "ansible-inventories"),
 	}
-
 	if source.CredentialID != nil {
-		resp["relationships"].(gin.H)["credential"] = gin.H{
-			"data": gin.H{
-				"id":   source.CredentialID.String(),
-				"type": "ansible-credentials",
-			},
-		}
+		r := jsonapi.ToOne(source.CredentialID.String(), "ansible-credentials")
+		relationships.Credential = &r
 	}
 
-	return resp
+	return jsonapi.Resource[InventorySourceAttributes]{
+		ID:   source.ID.String(),
+		Type: "inventory-sources",
+		Attributes: InventorySourceAttributes{
+			Name:                    source.Name,
+			Description:             source.Description,
+			SourceType:              string(source.Type),
+			Config:                  source.Config,
+			UpdateOnLaunch:          source.UpdateOnLaunch,
+			UpdateCacheTimeout:      source.UpdateCacheTimeout,
+			Overwrite:               source.Overwrite,
+			OverwriteVars:           source.OverwriteVars,
+			Verbosity:               source.Verbosity,
+			GroupByInstanceID:       source.GroupByInstanceID,
+			GroupByRegion:           source.GroupByRegion,
+			GroupByAvailabilityZone: source.GroupByAvailabilityZone,
+			GroupByTag:              source.GroupByTag,
+			HostnameVar:             source.HostnameVar,
+			InstanceFilters:         source.InstanceFilters,
+			SyncSchedule:            source.SyncSchedule,
+			Status:                  string(source.Status),
+			LastSyncAt:              source.LastSyncAt,
+			LastSyncError:           source.LastSyncError,
+			LastSyncLog:             source.LastSyncLog,
+			HostsCount:              source.HostsCount,
+			Enabled:                 source.Enabled,
+			CreatedAt:               source.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:               source.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		},
+		Relationships: relationships,
+	}
 }
 
 // formatInventorySourcesResponse formats multiple sources for JSON:API response
-func formatInventorySourcesResponse(sources []models.AnsibleInventorySource) []gin.H {
-	result := make([]gin.H, len(sources))
+func formatInventorySourcesResponse(sources []models.AnsibleInventorySource) []jsonapi.Resource[InventorySourceAttributes] {
+	result := make([]jsonapi.Resource[InventorySourceAttributes], len(sources))
 	for i := range sources {
 		result[i] = formatInventorySourceResponse(&sources[i])
 	}

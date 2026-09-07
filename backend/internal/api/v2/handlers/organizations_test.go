@@ -5,7 +5,6 @@ package handlers
 import (
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -17,55 +16,45 @@ func TestBuildTFEOrganizationResponse_PolicyDefaults(t *testing.T) {
 	orgID := uuid.New()
 	org := &models.Organization{ID: orgID, Name: "acme", Email: "admin@acme.test"}
 
+	// #760: the builder returns a typed resource now, so the assertions read struct fields.
+	// The properties under test are unchanged - only how they are reached.
 	resp := buildTFEOrganizationResponse(org, nil)
 
-	if resp["id"] != "acme" {
-		t.Errorf("id = %v, want acme (TFE uses the org name as id)", resp["id"])
+	if resp.ID != "acme" {
+		t.Errorf("id = %v, want acme (TFE uses the org name as id)", resp.ID)
 	}
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not gin.H")
-	}
-	if attrs["external-id"] != orgID.String() {
-		t.Errorf("external-id = %v, want %s", attrs["external-id"], orgID.String())
+	attrs := resp.Attributes
+	if attrs.ExternalID != orgID.String() {
+		t.Errorf("external-id = %v, want %s", attrs.ExternalID, orgID.String())
 	}
 
 	// Unset *bool policy flags must echo their TFE default of TRUE.
-	for _, key := range []string{"user-tokens-enabled", "speculative-plan-management-enabled"} {
-		if attrs[key] != true {
-			t.Errorf("%s = %v, want true (TFE default)", key, attrs[key])
-		}
+	if !attrs.UserTokensEnabled || !attrs.SpeculativePlanManagementEnabled {
+		t.Errorf("user-tokens/speculative-plan-management = %v/%v, want true/true (TFE default)",
+			attrs.UserTokensEnabled, attrs.SpeculativePlanManagementEnabled)
 	}
 	// Plain bool flags default false.
-	for _, key := range []string{
-		"aggregated-commit-status-enabled",
-		"assessments-enforced",
-		"allow-force-delete-workspaces",
-		"send-passing-statuses-for-untriggered-speculative-plans",
-	} {
-		if attrs[key] != false {
-			t.Errorf("%s = %v, want false", key, attrs[key])
-		}
+	if attrs.AggregatedCommitStatusEnabled || attrs.AssessmentsEnforced ||
+		attrs.AllowForceDeleteWorkspaces || attrs.SendPassingStatusesForUntriggeredSpeculativePlans {
+		t.Error("plain bool policy flags must default false")
 	}
 	// Declined surface: drift-free constants.
-	if attrs["owners-team-saml-role-id"] != "" {
-		t.Errorf("owners-team-saml-role-id = %v, want \"\"", attrs["owners-team-saml-role-id"])
+	if attrs.OwnersTeamSAMLRoleID != "" {
+		t.Errorf("owners-team-saml-role-id = %v, want \"\"", attrs.OwnersTeamSAMLRoleID)
 	}
-	for _, key := range []string{"enforce-hyok", "stacks-enabled", "max-ttl-enabled", "two-factor-conformant"} {
-		if attrs[key] != false {
-			t.Errorf("%s = %v, want false (declined constant)", key, attrs[key])
-		}
+	if attrs.EnforceHYOK || attrs.StacksEnabled || attrs.MaxTTLEnabled || attrs.TwoFactorConformant {
+		t.Error("declined-surface constants must be false")
 	}
-	if attrs["session-timeout"] != nil || attrs["session-remember"] != nil {
-		t.Errorf("session attrs = %v/%v, want null/null (Zitadel owns sessions)", attrs["session-timeout"], attrs["session-remember"])
+	if attrs.SessionTimeout != nil || attrs.SessionRemember != nil {
+		t.Errorf("session attrs = %v/%v, want null/null (Zitadel owns sessions)", attrs.SessionTimeout, attrs.SessionRemember)
 	}
 
 	// No default project passed => no default-project relationship.
-	rels, ok := resp["relationships"].(gin.H)
+	rels, ok := resp.Relationships.(OrganizationResponseRelationships)
 	if !ok {
-		t.Fatal("relationships is not gin.H")
+		t.Fatalf("relationships is %T, want OrganizationResponseRelationships", resp.Relationships)
 	}
-	if _, present := rels["default-project"]; present {
+	if rels.DefaultProject != nil {
 		t.Error("default-project relationship present, want omitted when nil")
 	}
 }
@@ -84,31 +73,20 @@ func TestBuildTFEOrganizationResponse_PolicyValuesAndDefaultProject(t *testing.T
 
 	resp := buildTFEOrganizationResponse(org, &projectID)
 
-	attrs := resp["attributes"].(gin.H)
-	if attrs["user-tokens-enabled"] != false {
-		t.Errorf("user-tokens-enabled = %v, want false", attrs["user-tokens-enabled"])
+	attrs := resp.Attributes
+	if attrs.UserTokensEnabled || attrs.SpeculativePlanManagementEnabled {
+		t.Error("explicit false pointers must echo false")
 	}
-	if attrs["speculative-plan-management-enabled"] != false {
-		t.Errorf("speculative-plan-management-enabled = %v, want false", attrs["speculative-plan-management-enabled"])
-	}
-	if attrs["allow-force-delete-workspaces"] != true {
-		t.Errorf("allow-force-delete-workspaces = %v, want true", attrs["allow-force-delete-workspaces"])
-	}
-	if attrs["assessments-enforced"] != true {
-		t.Errorf("assessments-enforced = %v, want true", attrs["assessments-enforced"])
-	}
-	if attrs["aggregated-commit-status-enabled"] != true {
-		t.Errorf("aggregated-commit-status-enabled = %v, want true", attrs["aggregated-commit-status-enabled"])
+	if !attrs.AllowForceDeleteWorkspaces || !attrs.AssessmentsEnforced || !attrs.AggregatedCommitStatusEnabled {
+		t.Error("set bool flags must echo true")
 	}
 
-	rels := resp["relationships"].(gin.H)
-	projRel, ok := rels["default-project"].(gin.H)
-	if !ok {
+	rels := resp.Relationships.(OrganizationResponseRelationships)
+	if rels.DefaultProject == nil || rels.DefaultProject.Data == nil {
 		t.Fatal("default-project relationship missing")
 	}
-	data := projRel["data"].(gin.H)
-	if data["id"] != projectID.String() || data["type"] != "projects" {
-		t.Errorf("default-project.data = %v, want id=%s type=projects", data, projectID.String())
+	if rels.DefaultProject.Data.ID != projectID.String() || rels.DefaultProject.Data.Type != "projects" {
+		t.Errorf("default-project.data = %+v, want id=%s type=projects", rels.DefaultProject.Data, projectID.String())
 	}
 }
 

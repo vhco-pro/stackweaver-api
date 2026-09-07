@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -29,17 +28,15 @@ func TestFormatRegistryProviderResponse_TFEShape(t *testing.T) {
 
 	resp := formatRegistryProviderResponse(p)
 
-	if resp["type"] != registryProviderType {
-		t.Errorf("type = %v, want %q", resp["type"], registryProviderType)
+	if resp.Type != registryProviderType {
+		t.Errorf("type = %v, want %q", resp.Type, registryProviderType)
 	}
-	if resp["id"] != p.ID.String() {
-		t.Errorf("id = %v, want %q", resp["id"], p.ID.String())
+	if resp.ID != p.ID.String() {
+		t.Errorf("id = %v, want %q", resp.ID, p.ID.String())
 	}
 
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatalf("attributes has unexpected type %T", resp["attributes"])
-	}
+	// Assert on the marshaled JSON so the kebab-case member names stay locked.
+	attrs := wireShape(t, resp.Attributes)
 	want := map[string]any{
 		"name":          "example",
 		"namespace":     "dev-test",
@@ -52,7 +49,7 @@ func TestFormatRegistryProviderResponse_TFEShape(t *testing.T) {
 			t.Errorf("attribute %q = %v, want %v", k, attrs[k], v)
 		}
 	}
-	perms, ok := attrs["permissions"].(gin.H)
+	perms, ok := attrs["permissions"].(map[string]any)
 	if !ok || perms["can-delete"] != true {
 		t.Errorf("permissions.can-delete missing/false: %v", attrs["permissions"])
 	}

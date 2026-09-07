@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -46,32 +47,32 @@ func (h *ProfileHandler) GetProfile(c *gin.Context) {
 	}
 
 	// Merge Zitadel profile with local user data
-	response := gin.H{
-		"id":         user.ID.String(),
-		"email":      user.Email,
-		"name":       user.Name,
-		"username":   user.Username,
-		"bio":        user.Bio,
-		"company":    user.Company,
-		"location":   user.Location,
-		"created_at": user.CreatedAt,
-		"updated_at": user.UpdatedAt,
+	response := ProfileResponse{
+		ID:        user.ID.String(),
+		Email:     user.Email,
+		Name:      user.Name,
+		Username:  user.Username,
+		Bio:       user.Bio,
+		Company:   user.Company,
+		Location:  user.Location,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
 	}
 
 	// Override with Zitadel data if available (Zitadel is source of truth for name/email)
 	if zitadelProfile != nil {
 		if zitadelProfile.Email != "" {
-			response["email"] = zitadelProfile.Email
+			response.Email = zitadelProfile.Email
 		}
 		if zitadelProfile.Name != "" {
-			response["name"] = zitadelProfile.Name
+			response.Name = zitadelProfile.Name
 		}
 	}
 
 	// Fetch avatar from Zitadel UserInfo (picture claim) for JWT-authenticated users.
 	// On failure, avatar is simply omitted - the frontend will show a fallback.
 	if picture := h.authService.FetchUserInfoPicture(c.Request.Context(), c); picture != "" {
-		response["avatar"] = picture
+		response.Avatar = picture
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -220,4 +221,20 @@ type ProfileSummary struct {
 type ProfileUpdateResponse struct {
 	Message string         `json:"message"`
 	Profile ProfileSummary `json:"profile"`
+}
+
+// ProfileResponse is the settings-profile payload: local user data with Zitadel's name and
+// email taking precedence where present. Avatar comes from Zitadel's picture claim and is
+// omitted on failure, so the frontend falls back rather than rendering a broken image.
+type ProfileResponse struct {
+	ID        string    `json:"id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	Username  string    `json:"username"`
+	Bio       string    `json:"bio"`
+	Company   string    `json:"company"`
+	Location  string    `json:"location"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Avatar    string    `json:"avatar,omitempty"`
 }

@@ -88,19 +88,16 @@ const privateRegistry = "private"
 // The resource id is the GPG key id (the provider addresses reads/deletes by
 // {namespace}/{key_id} and stores key-id as the Terraform state id), and namespace is
 // the owning organization's name.
-func formatGPGKeyResponse(key *models.GPGKey, namespace string) gin.H {
-	return gin.H{
-		"id":   key.KeyID,
-		"type": gpgKeyType,
-		"attributes": gin.H{
-			"ascii-armor":     key.ASCIIArmor,
-			"created-at":      key.CreatedAt.UTC().Format(time.RFC3339),
-			"updated-at":      key.UpdatedAt.UTC().Format(time.RFC3339),
-			"key-id":          key.KeyID,
-			"namespace":       namespace,
-			"source":          "",
-			"source-url":      nil,
-			"trust-signature": "",
+func formatGPGKeyResponse(key *models.GPGKey, namespace string) jsonapi.Resource[GPGKeyAttributes] {
+	return jsonapi.Resource[GPGKeyAttributes]{
+		ID:   key.KeyID,
+		Type: gpgKeyType,
+		Attributes: GPGKeyAttributes{
+			ASCIIArmor: key.ASCIIArmor,
+			CreatedAt:  key.CreatedAt.UTC().Format(time.RFC3339),
+			UpdatedAt:  key.UpdatedAt.UTC().Format(time.RFC3339),
+			KeyID:      key.KeyID,
+			Namespace:  namespace,
 		},
 	}
 }
@@ -201,7 +198,7 @@ func (h *GPGKeyHandler) ListGPGKeys(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, 0)
+	data := make([]jsonapi.Resource[GPGKeyAttributes], 0)
 	for _, namespace := range namespaces {
 		org, err := h.orgRepo.GetByName(namespace)
 		if err != nil {

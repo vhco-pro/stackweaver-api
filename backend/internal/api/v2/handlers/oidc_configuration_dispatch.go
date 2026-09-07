@@ -75,31 +75,41 @@ func (h *OIDCConfigDispatchHandler) List(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, 0)
+	// One list, four resource types: each element is a typed Resource of its own cloud's
+	// attribute block, so only the container is heterogeneous.
+	data := make([]any, 0)
 	azureData, err := h.azure.listData(org.ID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list OIDC configurations")
 		return
 	}
-	data = append(data, azureData...)
+	for i := range azureData {
+		data = append(data, azureData[i])
+	}
 	awsData, err := h.aws.listData(org.ID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list OIDC configurations")
 		return
 	}
-	data = append(data, awsData...)
+	for i := range awsData {
+		data = append(data, awsData[i])
+	}
 	gcpData, err := h.gcp.listData(org.ID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list OIDC configurations")
 		return
 	}
-	data = append(data, gcpData...)
+	for i := range gcpData {
+		data = append(data, gcpData[i])
+	}
 	vaultData, err := h.vault.listData(org.ID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list OIDC configurations")
 		return
 	}
-	data = append(data, vaultData...)
+	for i := range vaultData {
+		data = append(data, vaultData[i])
+	}
 
 	jsonapi.WriteDocument(c, http.StatusOK, data)
 }

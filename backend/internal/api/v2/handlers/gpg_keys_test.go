@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -29,19 +28,16 @@ func TestFormatGPGKeyResponse_TFEShape(t *testing.T) {
 
 	resp := formatGPGKeyResponse(key, "dev-test")
 
-	if got := resp["type"]; got != gpgKeyType {
-		t.Errorf("type = %v, want %q", got, gpgKeyType)
+	if resp.Type != gpgKeyType {
+		t.Errorf("type = %v, want %q", resp.Type, gpgKeyType)
 	}
-	if got := resp["id"]; got != "9FC214C0" {
-		t.Errorf("id = %v, want the key id %q (not the UUID)", got, "9FC214C0")
-	}
-
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatalf("attributes has unexpected type %T", resp["attributes"])
+	if resp.ID != "9FC214C0" {
+		t.Errorf("id = %v, want the key id %q (not the UUID)", resp.ID, "9FC214C0")
 	}
 
-	// Kebab-case attribute names only - the provider unmarshals via jsonapi kebab tags.
+	// Assert on the marshaled JSON so the kebab-case member names stay locked - the
+	// provider unmarshals via jsonapi kebab tags.
+	attrs := wireShape(t, resp.Attributes)
 	wantAttrs := map[string]any{
 		"ascii-armor":     key.ASCIIArmor,
 		"key-id":          "9FC214C0",

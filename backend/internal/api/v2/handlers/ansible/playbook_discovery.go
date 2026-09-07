@@ -274,13 +274,13 @@ func (h *PlaybookHandler) ListPlaybookFiles(c *gin.Context) {
 		return
 	}
 
-	entries := make([]gin.H, 0, len(candidates))
+	entries := make([]DiscoveredPlaybook, 0, len(candidates))
 	for _, filePath := range candidates {
-		entry := gin.H{"path": filePath, "name": path.Base(filePath), "registered": false}
+		entry := DiscoveredPlaybook{Path: filePath, Name: path.Base(filePath)}
 		if pb, ok := registered[filePath]; ok {
-			entry["registered"] = true
-			entry["playbook_id"] = pb.ID.String()
-			entry["playbook_name"] = pb.Name
+			entry.Registered = true
+			entry.PlaybookID = pb.ID.String()
+			entry.PlaybookName = pb.Name
 		}
 		entries = append(entries, entry)
 	}
@@ -376,20 +376,20 @@ func (h *PlaybookHandler) BulkImportPlaybooks(c *gin.Context) {
 		return
 	}
 
-	results := make([]gin.H, 0, len(req.Playbooks))
+	results := make([]BulkImportResult, 0, len(req.Playbooks))
 	created, skipped, failed := 0, 0, 0
 	for _, entry := range req.Playbooks {
 		playbook, wasCreated, err := h.importOnePlaybook(registered, projectID, dc.conn.ID, req.Repository, req.Branch, entry.Path, entry.Name, req.SourceMode)
 		switch {
 		case err != nil:
 			failed++
-			results = append(results, gin.H{"path": entry.Path, "status": "failed", "error": err.Error()})
+			results = append(results, BulkImportResult{Path: entry.Path, Status: "failed", Error: err.Error()})
 		case wasCreated:
 			created++
-			results = append(results, gin.H{"path": entry.Path, "status": "created", "playbook_id": playbook.ID.String(), "name": playbook.Name})
+			results = append(results, BulkImportResult{Path: entry.Path, Status: "created", PlaybookID: playbook.ID.String(), Name: playbook.Name})
 		default:
 			skipped++
-			results = append(results, gin.H{"path": entry.Path, "status": "skipped", "playbook_id": playbook.ID.String(), "name": playbook.Name})
+			results = append(results, BulkImportResult{Path: entry.Path, Status: "skipped", PlaybookID: playbook.ID.String(), Name: playbook.Name})
 		}
 	}
 
@@ -398,11 +398,11 @@ func (h *PlaybookHandler) BulkImportPlaybooks(c *gin.Context) {
 		h.maybeRegisterADOWebhook(&dc.conn.ID, req.Repository)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"results": results,
-		"created": created,
-		"skipped": skipped,
-		"failed":  failed,
+	jsonapi.WriteDocument(c, http.StatusOK, BulkImportResponse{
+		Results: results,
+		Created: created,
+		Skipped: skipped,
+		Failed:  failed,
 	})
 }
 
@@ -462,7 +462,7 @@ func (h *PlaybookHandler) FindOrCreatePlaybook(c *gin.Context) {
 	if wasCreated {
 		status = http.StatusCreated
 	}
-	jsonapi.WriteDocumentMeta(c, status, formatPlaybookResponse(playbook), gin.H{"created": wasCreated})
+	jsonapi.WriteDocumentMeta(c, status, formatPlaybookResponse(playbook), FindOrCreateMeta{Created: wasCreated})
 }
 
 // resolveProjectForOrg parses and validates an optional project ID against the

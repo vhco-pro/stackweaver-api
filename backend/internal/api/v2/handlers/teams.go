@@ -275,167 +275,88 @@ func (h *TeamHandlerV2) updateOrganizationAccessFromRequest(orgAccess *models.Te
 
 // formatTeamResponse formats a team in TFE-compatible JSON:API format
 // userID is optional - if provided, permissions will be calculated based on user's role
-func formatTeamResponse(team *models.Team, orgName string, userID ...uuid.UUID) gin.H {
+func formatTeamResponse(team *models.Team, orgName string, userID ...uuid.UUID) *TeamResource {
+	_ = orgName // kept for call-site compatibility; the org rides in the URL, not the payload
 	visibility := team.Visibility
 	if visibility == "" {
 		visibility = "secret" // TFE default is "secret", not "organization"
 	}
 
-	// Format organization access (always include, even if nil)
-	orgAccess := gin.H{
-		"manage-policies":              false,
-		"manage-policy-overrides":      false,
-		"manage-workspaces":            false,
-		"manage-vcs-settings":          false,
-		"manage-providers":             false,
-		"manage-modules":               false,
-		"manage-run-tasks":             false,
-		"manage-projects":              false,
-		"read-workspaces":              false,
-		"read-projects":                false,
-		"manage-membership":            false,
-		"manage-teams":                 false,
-		"manage-organization-access":   false,
-		"access-secret-teams":          false,
-		"manage-agent-pools":           false,
-		"manage-ansible":               false,
-		"read-ansible":                 false,
-		"manage-ansible-playbooks":     false,
-		"read-ansible-playbooks":       false,
-		"manage-ansible-inventories":   false,
-		"read-ansible-inventories":     false,
-		"manage-ansible-credentials":   false,
-		"read-ansible-credentials":     false,
-		"manage-ansible-job-templates": false,
-		"read-ansible-job-templates":   false,
-		"manage-ansible-jobs":          false,
-		"read-ansible-jobs":            false,
-		"manage-ansible-schedules":     false,
-		"read-ansible-schedules":       false,
-	}
-
-	if team.OrganizationAccess != nil {
-		orgAccess = gin.H{
-			"manage-policies":              team.OrganizationAccess.ManagePolicies,
-			"manage-policy-overrides":      team.OrganizationAccess.ManagePolicyOverrides,
-			"manage-workspaces":            team.OrganizationAccess.ManageWorkspaces,
-			"manage-vcs-settings":          team.OrganizationAccess.ManageVCSSettings,
-			"manage-providers":             team.OrganizationAccess.ManageProviders,
-			"manage-modules":               team.OrganizationAccess.ManageModules,
-			"manage-run-tasks":             team.OrganizationAccess.ManageRunTasks,
-			"manage-projects":              team.OrganizationAccess.ManageProjects,
-			"read-workspaces":              team.OrganizationAccess.ReadWorkspaces,
-			"read-projects":                team.OrganizationAccess.ReadProjects,
-			"manage-membership":            team.OrganizationAccess.ManageMembership,
-			"manage-teams":                 team.OrganizationAccess.ManageTeams,
-			"manage-organization-access":   team.OrganizationAccess.ManageOrganizationAccess,
-			"access-secret-teams":          team.OrganizationAccess.AccessSecretTeams,
-			"manage-agent-pools":           team.OrganizationAccess.ManageAgentPools,
-			"manage-ansible":               team.OrganizationAccess.ManageAnsible,
-			"read-ansible":                 team.OrganizationAccess.ReadAnsible,
-			"manage-ansible-playbooks":     team.OrganizationAccess.ManageAnsiblePlaybooks,
-			"read-ansible-playbooks":       team.OrganizationAccess.ReadAnsiblePlaybooks,
-			"manage-ansible-inventories":   team.OrganizationAccess.ManageAnsibleInventories,
-			"read-ansible-inventories":     team.OrganizationAccess.ReadAnsibleInventories,
-			"manage-ansible-credentials":   team.OrganizationAccess.ManageAnsibleCredentials,
-			"read-ansible-credentials":     team.OrganizationAccess.ReadAnsibleCredentials,
-			"manage-ansible-job-templates": team.OrganizationAccess.ManageAnsibleJobTemplates,
-			"read-ansible-job-templates":   team.OrganizationAccess.ReadAnsibleJobTemplates,
-			"manage-ansible-jobs":          team.OrganizationAccess.ManageAnsibleJobs,
-			"read-ansible-jobs":            team.OrganizationAccess.ReadAnsibleJobs,
-			"manage-ansible-schedules":     team.OrganizationAccess.ManageAnsibleSchedules,
-			"read-ansible-schedules":       team.OrganizationAccess.ReadAnsibleSchedules,
+	var orgAccess TeamOrganizationAccessAttributes
+	if a := team.OrganizationAccess; a != nil {
+		orgAccess = TeamOrganizationAccessAttributes{
+			ManagePolicies:            a.ManagePolicies,
+			ManagePolicyOverrides:     a.ManagePolicyOverrides,
+			ManageWorkspaces:          a.ManageWorkspaces,
+			ManageVCSSettings:         a.ManageVCSSettings,
+			ManageProviders:           a.ManageProviders,
+			ManageModules:             a.ManageModules,
+			ManageRunTasks:            a.ManageRunTasks,
+			ManageProjects:            a.ManageProjects,
+			ReadWorkspaces:            a.ReadWorkspaces,
+			ReadProjects:              a.ReadProjects,
+			ManageMembership:          a.ManageMembership,
+			ManageTeams:               a.ManageTeams,
+			ManageOrganizationAccess:  a.ManageOrganizationAccess,
+			AccessSecretTeams:         a.AccessSecretTeams,
+			ManageAgentPools:          a.ManageAgentPools,
+			ManageAnsible:             a.ManageAnsible,
+			ReadAnsible:               a.ReadAnsible,
+			ManageAnsiblePlaybooks:    a.ManageAnsiblePlaybooks,
+			ReadAnsiblePlaybooks:      a.ReadAnsiblePlaybooks,
+			ManageAnsibleInventories:  a.ManageAnsibleInventories,
+			ReadAnsibleInventories:    a.ReadAnsibleInventories,
+			ManageAnsibleCredentials:  a.ManageAnsibleCredentials,
+			ReadAnsibleCredentials:    a.ReadAnsibleCredentials,
+			ManageAnsibleJobTemplates: a.ManageAnsibleJobTemplates,
+			ReadAnsibleJobTemplates:   a.ReadAnsibleJobTemplates,
+			ManageAnsibleJobs:         a.ManageAnsibleJobs,
+			ReadAnsibleJobs:           a.ReadAnsibleJobs,
+			ManageAnsibleSchedules:    a.ManageAnsibleSchedules,
+			ReadAnsibleSchedules:      a.ReadAnsibleSchedules,
 		}
 	}
 
-	// Format SSO team ID (must be present, even if null)
-	ssoTeamID := interface{}(nil)
-	if team.SSOTeamID != nil {
-		ssoTeamID = *team.SSOTeamID
-	}
-
-	// Format allow member token management (default to true if not set)
-	allowTokenMgmt := team.AllowMemberTokenManagement
-
-	// Format users relationship (TFE-compatible)
-	usersData := make([]gin.H, len(team.Members))
+	usersData := make([]jsonapi.ResourceID, len(team.Members))
 	for i, member := range team.Members {
-		usersData[i] = gin.H{
-			"id":   member.UserID.String(),
-			"type": "users",
-		}
+		usersData[i] = jsonapi.ResourceID{ID: member.UserID.String(), Type: "users"}
 	}
 
 	teamID := team.ID.String()
-
-	// Permissions will be calculated by the handler and passed in
-	// Default to no permissions (handler will override)
-	permissions := gin.H{
-		"can-update-membership":          false,
-		"can-destroy":                    false,
-		"can-update-organization-access": false,
-		"can-update-api-token":           false,
-		"can-update-visibility":          false,
-	}
-
-	// Format organization-memberships relationship (TFE-compatible)
-	// This will be populated by the handler when include=organization-memberships is requested
-	orgMembershipsData := make([]gin.H, 0)
-
-	return gin.H{
-		"id":   teamID,
-		"type": "teams",
-		"attributes": gin.H{
-			"name":                          team.Name,
-			"visibility":                    visibility,
-			"users-count":                   len(team.Members),
-			"allow-member-token-management": allowTokenMgmt,
-			"organization-access":           orgAccess,
-			"sso-team-id":                   ssoTeamID,
-			"permissions":                   permissions,
+	return &TeamResource{
+		ID:   teamID,
+		Type: "teams",
+		Attributes: TeamAttributes{
+			Name:                       team.Name,
+			Visibility:                 visibility,
+			UsersCount:                 len(team.Members),
+			AllowMemberTokenManagement: team.AllowMemberTokenManagement,
+			OrganizationAccess:         orgAccess,
+			SSOTeamID:                  team.SSOTeamID,
+			// Permissions default to none; the handler overwrites them for the caller.
 		},
-		"relationships": gin.H{
-			"users": gin.H{
-				"data": usersData,
-			},
-			"organization-memberships": gin.H{
-				"data": orgMembershipsData,
-			},
-			"authentication-token": gin.H{
-				"meta": gin.H{},
-			},
+		Relationships: &TeamRelationships{
+			Users: jsonapi.ManyRelationship{Data: usersData},
+			// Filled by the show handler when include=organization-memberships is requested.
+			OrganizationMemberships: jsonapi.ManyRelationship{Data: []jsonapi.ResourceID{}},
 		},
-		"links": gin.H{
-			"self": "/api/v2/teams/" + teamID,
-		},
+		Links: jsonapi.SelfLink{Self: "/api/v2/teams/" + teamID},
 	}
 }
 
 // calculateTeamPermissions calculates team permissions based on user's team memberships in organization
 // Roles are deprecated - all permissions now come from team memberships
-func (h *TeamHandlerV2) calculateTeamPermissions(ctx context.Context, userID, orgID uuid.UUID) gin.H {
-	// Default: no permissions
-	permissions := gin.H{
-		"can-update-membership":          false,
-		"can-destroy":                    false,
-		"can-update-organization-access": false,
-		"can-update-api-token":           false,
-		"can-update-visibility":          false,
-	}
-
-	// Check if user has permission to manage teams (using team-based permissions)
+func (h *TeamHandlerV2) calculateTeamPermissions(ctx context.Context, userID, orgID uuid.UUID) TeamPermissions {
+	// Team-based permissions: all five rights follow manage-teams.
 	hasPermission, err := h.rbacService.CheckOrgManageTeams(ctx, userID, orgID)
-	if err == nil && hasPermission {
-		permissions = gin.H{
-			"can-update-membership":          true,
-			"can-destroy":                    true,
-			"can-update-organization-access": true,
-			"can-update-api-token":           true,
-			"can-update-visibility":          true,
-		}
+	granted := err == nil && hasPermission
+	return TeamPermissions{
+		CanUpdateMembership:         granted,
+		CanDestroy:                  granted,
+		CanUpdateOrganizationAccess: granted,
+		CanUpdateAPIToken:           granted,
+		CanUpdateVisibility:         granted,
 	}
-
-	return permissions
 }
 
 // List lists teams for an organization
@@ -488,13 +409,13 @@ func (h *TeamHandlerV2) List(c *gin.Context) {
 	}
 
 	// Format response
-	data := make([]gin.H, len(teams))
+	data := make([]*TeamResource, len(teams))
 	for i := range teams {
 		// Calculate permissions for this team
 		permissions := h.calculateTeamPermissions(c.Request.Context(), userID, org.ID)
 		teamResp := formatTeamResponse(&teams[i], orgName)
 		// Override permissions in response
-		teamResp["attributes"].(gin.H)["permissions"] = permissions
+		teamResp.Attributes.Permissions = permissions
 		data[i] = teamResp
 	}
 
@@ -527,7 +448,7 @@ func (h *TeamHandlerV2) Get(c *gin.Context) {
 	// Calculate permissions
 	permissions := h.calculateTeamPermissions(c.Request.Context(), userID, org.ID)
 	teamResp := formatTeamResponse(team, orgName)
-	teamResp["attributes"].(gin.H)["permissions"] = permissions
+	teamResp.Attributes.Permissions = permissions
 
 	jsonapi.WriteDocument(c, http.StatusOK, teamResp)
 }
@@ -653,7 +574,7 @@ func (h *TeamHandlerV2) Create(c *gin.Context) {
 	// Calculate permissions (user is admin since they created the team)
 	permissions := h.calculateTeamPermissions(c.Request.Context(), user.ID, org.ID)
 	teamResp := formatTeamResponse(team, orgName)
-	teamResp["attributes"].(gin.H)["permissions"] = permissions
+	teamResp.Attributes.Permissions = permissions
 
 	jsonapi.WriteDocument(c, http.StatusCreated, teamResp)
 }
@@ -774,7 +695,7 @@ func (h *TeamHandlerV2) Update(c *gin.Context) {
 	// Calculate permissions
 	permissions := h.calculateTeamPermissions(c.Request.Context(), user.ID, org.ID)
 	teamResp := formatTeamResponse(team, orgName)
-	teamResp["attributes"].(gin.H)["permissions"] = permissions
+	teamResp.Attributes.Permissions = permissions
 
 	jsonapi.WriteDocument(c, http.StatusOK, teamResp)
 }
@@ -872,11 +793,11 @@ func (h *TeamHandlerV2) GetByID(c *gin.Context) {
 	// Calculate permissions
 	permissions := h.calculateTeamPermissions(c.Request.Context(), userID, org.ID)
 	teamResp := formatTeamResponse(team, org.Name)
-	teamResp["attributes"].(gin.H)["permissions"] = permissions
+	teamResp.Attributes.Permissions = permissions
 
 	// Build included resources and relationships
-	included := make([]gin.H, 0)
-	orgMembershipsData := make([]gin.H, 0)
+	included := make([]any, 0)
+	orgMembershipsData := make([]jsonapi.ResourceID, 0)
 
 	// Always get organization memberships for all team members (TFE always includes this relationship)
 	// Query organization memberships directly for all team member user IDs
@@ -925,9 +846,9 @@ func (h *TeamHandlerV2) GetByID(c *gin.Context) {
 	// CRITICAL: Only include memberships that actually exist - this prevents drift
 	for _, orgMember := range orgMemberships {
 		// Add to relationships data (always include in relationships)
-		orgMembershipsData = append(orgMembershipsData, gin.H{
-			"id":   orgMember.ID.String(),
-			"type": "organization-memberships",
+		orgMembershipsData = append(orgMembershipsData, jsonapi.ResourceID{
+			ID:   orgMember.ID.String(),
+			Type: "organization-memberships",
 		})
 		// Add to included resources only if requested
 		if includeOrgMemberships {
@@ -937,9 +858,7 @@ func (h *TeamHandlerV2) GetByID(c *gin.Context) {
 	}
 
 	// Always update relationships (TFE always includes this relationship)
-	teamResp["relationships"].(gin.H)["organization-memberships"] = gin.H{
-		"data": orgMembershipsData,
-	}
+	teamResp.Relationships.OrganizationMemberships = jsonapi.ManyRelationship{Data: orgMembershipsData}
 
 	// If users are requested, add them to included
 	if includeUsers {
@@ -953,26 +872,22 @@ func (h *TeamHandlerV2) GetByID(c *gin.Context) {
 				if username == "" {
 					username = teamMember.User.Email
 				}
-				userData := gin.H{
-					"id":   teamMember.User.ID.String(),
-					"type": "users",
-					"attributes": gin.H{
-						"username": username,
-						"email":    teamMember.User.Email,
-						"name":     teamMember.User.Name,
+				included = append(included, jsonapi.Resource[IncludedUserAttributes]{
+					ID:   teamMember.User.ID.String(),
+					Type: "users",
+					Attributes: IncludedUserAttributes{
+						Username: username,
+						Email:    teamMember.User.Email,
+						Name:     teamMember.User.Name,
 					},
-				}
-				included = append(included, userData)
+				})
 			}
 		}
 	}
 
-	response := gin.H{
-		"data": teamResp,
-	}
-
+	response := jsonapi.Document{Data: teamResp}
 	if len(included) > 0 {
-		response["included"] = included
+		response.Included = included
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -1099,7 +1014,7 @@ func (h *TeamHandlerV2) UpdateByID(c *gin.Context) {
 	// Calculate permissions
 	permissions := h.calculateTeamPermissions(c.Request.Context(), user.ID, org.ID)
 	teamResp := formatTeamResponse(team, org.Name)
-	teamResp["attributes"].(gin.H)["permissions"] = permissions
+	teamResp.Attributes.Permissions = permissions
 
 	jsonapi.WriteDocument(c, http.StatusOK, teamResp)
 }

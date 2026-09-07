@@ -67,24 +67,24 @@ type workspaceTaskRequest struct {
 
 // formatWorkspaceTask renders an attachment as JSON:API. BOTH `stage` (deprecated, = stages[0]) and
 // `stages` are emitted: the provider stores both and go-tfe decodes both.
-func formatWorkspaceTask(wt *models.WorkspaceTask) gin.H {
+func formatWorkspaceTask(wt *models.WorkspaceTask) jsonapi.Resource[WorkspaceTaskAttributes] {
 	stages := wt.Stages
 	if len(stages) == 0 {
 		stages = models.StringArray{models.TaskStagePostPlan}
 	}
-	return gin.H{
-		"id":   wt.ID,
-		"type": "workspace-tasks",
-		"attributes": gin.H{
-			"enforcement-level": wt.EnforcementLevel,
-			"stage":             stages[0],
-			"stages":            stages,
-			"created-at":        wt.CreatedAt.Format(time.RFC3339),
-			"updated-at":        wt.UpdatedAt.Format(time.RFC3339),
+	return jsonapi.Resource[WorkspaceTaskAttributes]{
+		ID:   wt.ID,
+		Type: "workspace-tasks",
+		Attributes: WorkspaceTaskAttributes{
+			EnforcementLevel: wt.EnforcementLevel,
+			Stage:            stages[0],
+			Stages:           stages,
+			CreatedAt:        wt.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:        wt.UpdatedAt.Format(time.RFC3339),
 		},
-		"relationships": gin.H{
-			"task":      gin.H{"data": gin.H{"id": wt.TaskID, "type": "tasks"}},
-			"workspace": gin.H{"data": gin.H{"id": wt.WorkspaceID, "type": "workspaces"}},
+		Relationships: WorkspaceTaskRelationships{
+			Task:      jsonapi.ToOne(wt.TaskID, "tasks"),
+			Workspace: jsonapi.ToOne(wt.WorkspaceID, "workspaces"),
 		},
 	}
 }
@@ -215,7 +215,7 @@ func (h *WorkspaceRunTaskHandlerV2) List(c *gin.Context) {
 		taskError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workspace run tasks")
 		return
 	}
-	data := make([]gin.H, 0, len(wts))
+	data := make([]jsonapi.Resource[WorkspaceTaskAttributes], 0, len(wts))
 	for i := range wts {
 		data = append(data, formatWorkspaceTask(&wts[i]))
 	}

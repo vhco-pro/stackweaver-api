@@ -183,119 +183,58 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, len(variableSets))
+	data := make([]jsonapi.Resource[VarsetAttributes], len(variableSets))
 	for i, vs := range variableSets {
-		// Include full variable details in relationships (they're already preloaded)
-		variablesData := make([]gin.H, len(vs.Variables))
-		for j, v := range vs.Variables {
-			value := v.Value
-			if v.Sensitive {
-				value = maskedValue
-			}
-			variablesData[j] = gin.H{
-				"id":   v.ID,
-				"type": "vars", // TFE uses "vars" not "variable-set-variables"
-				"attributes": gin.H{
-					"key":         v.Key,
-					"value":       value,
-					"description": v.Description,
-					"sensitive":   v.Sensitive,
-					"category":    v.Category,
-					"hcl":         v.HCL,
-				},
-			}
+		// Full variable details ride inline in the vars relationship (already preloaded).
+		variablesData := make([]jsonapi.Resource[VarsetVarAttributes], len(vs.Variables))
+		for j := range vs.Variables {
+			variablesData[j] = varsetVarEmbedded(&vs.Variables[j])
 		}
 
-		// Build parent relationship - project-owned or organization-owned
-		parentData := gin.H{
-			"id":   org.Name,
-			"type": "organizations",
-		}
+		// Parent is the owning project when project-owned, else the organization.
+		parent := jsonapi.ToOne(org.Name, "organizations")
 		if vs.ProjectID != nil {
-			// Find project to get its ID
-			for _, p := range vs.Projects {
-				if p.ID == *vs.ProjectID {
-					parentData = gin.H{
-						"id":   p.ID.String(),
-						"type": "projects",
-					}
+			found := false
+			for _, pr := range vs.Projects {
+				if pr.ID == *vs.ProjectID {
+					parent = jsonapi.ToOne(pr.ID.String(), "projects")
+					found = true
 					break
 				}
 			}
-			// If not found in preloaded projects, fetch it
-			if parentData["type"] == "organizations" {
-				project, err := h.projectRepo.GetByID(*vs.ProjectID)
-				if err == nil && project != nil {
-					parentData = gin.H{
-						"id":   project.ID.String(),
-						"type": "projects",
-					}
+			if !found {
+				if project, err := h.projectRepo.GetByID(*vs.ProjectID); err == nil && project != nil {
+					parent = jsonapi.ToOne(project.ID.String(), "projects")
 				}
 			}
 		}
 
-		relationships := gin.H{
-			"organization": gin.H{
-				"data": gin.H{
-					"id":   org.Name,
-					"type": "organizations",
-				},
-			},
-			"parent": gin.H{
-				"data": parentData,
-			},
-			"vars": gin.H{
-				"data": variablesData,
-			},
+		orgRel := jsonapi.ToOne(org.Name, "organizations")
+		relationships := VarsetRelationships{
+			Organization: &orgRel,
+			Parent:       &parent,
+			Vars:         &VarsetVarsRelationship{Data: variablesData},
 		}
-
-		// Include projects if organization-scoped and has projects assigned
 		if len(vs.Projects) > 0 { // AUD-150: project attachments exist only on org-owned sets
-			projectsData := make([]gin.H, len(vs.Projects))
-			for j, p := range vs.Projects {
-				projectsData[j] = gin.H{
-					"id":   p.ID.String(),
-					"type": "projects",
-				}
+			ids := make([]string, len(vs.Projects))
+			for j, pr := range vs.Projects {
+				ids[j] = pr.ID.String()
 			}
-			relationships["projects"] = gin.H{
-				"data": projectsData,
-			}
+			relationships.Projects = &jsonapi.ManyRelationship{Data: resourceIDs("projects", ids)}
 		}
-
-		// Include workspaces if workspace-scoped and has workspaces assigned
 		if len(vs.Workspaces) > 0 { // AUD-150: workspace attachments exist only on org-owned sets
-			workspacesData := make([]gin.H, len(vs.Workspaces))
+			ids := make([]string, len(vs.Workspaces))
 			for j, w := range vs.Workspaces {
-				workspacesData[j] = gin.H{
-					"id":   w.ID,
-					"type": "workspaces",
-				}
+				ids[j] = w.ID
 			}
-			relationships["workspaces"] = gin.H{
-				"data": workspacesData,
-			}
+			relationships.Workspaces = &jsonapi.ManyRelationship{Data: resourceIDs("workspaces", ids)}
 		}
 
-		// TFE uses "global" and "priority" instead of "scope"
-		global := vs.Global // AUD-150: global is now its own field, independent of ownership
-
-		attributes := gin.H{
-			"name":            vs.Name,
-			"description":     vs.Description,
-			"global":          global,      // TFE-compatible
-			"priority":        vs.Priority, // TFE-compatible
-			"updated-at":      vs.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			"var-count":       len(vs.Variables),
-			"workspace-count": len(vs.Workspaces),
-			"project-count":   len(vs.Projects),
-		}
-
-		data[i] = gin.H{
-			"id":            vs.ID,
-			"type":          "varsets", // TFE uses "varsets" not "variable-sets"
-			"attributes":    attributes,
-			"relationships": relationships,
+		data[i] = jsonapi.Resource[VarsetAttributes]{
+			ID:            vs.ID,
+			Type:          "varsets", // TFE uses "varsets" not "variable-sets"
+			Attributes:    varsetAttributes(&vs, len(vs.Variables), len(vs.Workspaces), len(vs.Projects)),
+			Relationships: relationships,
 		}
 	}
 
@@ -351,48 +290,19 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 		return
 	}
 
-	variablesData := make([]gin.H, len(variables))
-	for i, v := range variables {
-		value := v.Value
-		if v.Sensitive {
-			value = maskedValue
-		}
-		variablesData[i] = gin.H{
-			"id":   v.ID,
-			"type": "vars", // TFE uses "vars" not "variable-set-variables"
-			"attributes": gin.H{
-				"key":         v.Key,
-				"value":       value,
-				"description": v.Description,
-				"sensitive":   v.Sensitive,
-				"category":    v.Category,
-				"hcl":         v.HCL,
-			},
-		}
+	variablesData := make([]jsonapi.Resource[VarsetVarAttributes], len(variables))
+	for i := range variables {
+		variablesData[i] = varsetVarEmbedded(&variables[i])
 	}
 
-	// Get projects for this set (if organization-scoped)
-	// TFE spec: projects relationship is just id/type, not full attributes
-	projectsData := make([]gin.H, 0)
-	if len(variableSet.Projects) > 0 { // AUD-150: project attachments exist only on org-owned sets
-		for _, p := range variableSet.Projects {
-			projectsData = append(projectsData, gin.H{
-				"id":   p.ID.String(),
-				"type": "projects",
-			})
-		}
+	// Projects and workspaces relationships are bare id/type per the TFE spec.
+	projectIDsList := make([]string, 0, len(variableSet.Projects))
+	for _, pr := range variableSet.Projects { // AUD-150: project attachments only on org-owned sets
+		projectIDsList = append(projectIDsList, pr.ID.String())
 	}
-
-	// Get workspaces for this set (if workspace-scoped)
-	// TFE spec: workspaces relationship is just id/type, not full attributes
-	workspacesData := make([]gin.H, 0)
-	if len(variableSet.Workspaces) > 0 { // AUD-150: workspace attachments exist only on org-owned sets
-		for _, w := range variableSet.Workspaces {
-			workspacesData = append(workspacesData, gin.H{
-				"id":   w.ID,
-				"type": "workspaces",
-			})
-		}
+	workspaceIDsList := make([]string, 0, len(variableSet.Workspaces))
+	for _, w := range variableSet.Workspaces { // AUD-150: workspace attachments only on org-owned sets
+		workspaceIDsList = append(workspaceIDsList, w.ID)
 	}
 
 	// Get organization for relationships if not already retrieved (AUD-129: a missing
@@ -406,69 +316,32 @@ func (h *VariableSetHandlerV2) GetVariableSet(c *gin.Context) {
 		}
 	}
 
-	relationships := gin.H{
-		"organization": gin.H{
-			"data": gin.H{
-				"id":   org.Name,
-				"type": "organizations",
-			},
-		},
-		"parent": gin.H{
-			"data": func() gin.H {
-				// If project-owned, return project; otherwise organization
-				if variableSet.ProjectID != nil {
-					project, _ := h.projectRepo.GetByID(*variableSet.ProjectID)
-					if project != nil {
-						return gin.H{
-							"id":   project.ID.String(),
-							"type": "projects",
-						}
-					}
-				}
-				return gin.H{
-					"id":   org.Name,
-					"type": "organizations",
-				}
-			}(),
-		},
-		"vars": gin.H{
-			"data": variablesData,
-		},
-	}
-
-	// Include projects relationship if there are projects assigned
-	if len(projectsData) > 0 {
-		relationships["projects"] = gin.H{
-			"data": projectsData,
+	// Parent is the owning project when project-owned, else the organization.
+	parent := jsonapi.ToOne(org.Name, "organizations")
+	if variableSet.ProjectID != nil {
+		if project, _ := h.projectRepo.GetByID(*variableSet.ProjectID); project != nil {
+			parent = jsonapi.ToOne(project.ID.String(), "projects")
 		}
 	}
-
-	// Include workspaces relationship if there are workspaces assigned
-	if len(workspacesData) > 0 {
-		relationships["workspaces"] = gin.H{
-			"data": workspacesData,
-		}
+	orgRel := jsonapi.ToOne(org.Name, "organizations")
+	relationships := VarsetRelationships{
+		Organization: &orgRel,
+		Parent:       &parent,
+		Vars:         &VarsetVarsRelationship{Data: variablesData},
+	}
+	if len(projectIDsList) > 0 {
+		relationships.Projects = &jsonapi.ManyRelationship{Data: resourceIDs("projects", projectIDsList)}
+	}
+	if len(workspaceIDsList) > 0 {
+		relationships.Workspaces = &jsonapi.ManyRelationship{Data: resourceIDs("workspaces", workspaceIDsList)}
 	}
 
-	// TFE uses "global" and "priority" instead of "scope"
-	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   variableSet.ID,
-		"type": "varsets", // TFE uses "varsets" not "variable-sets"
-		"attributes": gin.H{
-			"name":            variableSet.Name,
-			"description":     variableSet.Description,
-			"global":          global,               // TFE-compatible
-			"priority":        variableSet.Priority, // TFE-compatible
-			"updated-at":      variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			"var-count":       len(variables),
-			"workspace-count": len(workspacesData),
-			"project-count":   len(projectsData),
-		},
-		"relationships": relationships,
-		"links": gin.H{
-			"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-		},
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[VarsetAttributes]{
+		ID:            variableSet.ID,
+		Type:          "varsets", // TFE uses "varsets" not "variable-sets"
+		Attributes:    varsetAttributes(variableSet, len(variables), len(workspaceIDsList), len(projectIDsList)),
+		Relationships: relationships,
+		Links:         jsonapi.SelfLink{Self: fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID)},
 	})
 }
 
@@ -644,42 +517,19 @@ func (h *VariableSetHandlerV2) CreateVariableSet(c *gin.Context) {
 		return
 	}
 
-	// TFE uses "global" instead of "scope"
-	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   variableSet.ID,
-		"type": "varsets", // TFE uses "varsets" not "variable-sets"
-		"attributes": gin.H{
-			"name":        variableSet.Name,
-			"description": variableSet.Description,
-			"global":      global,               // TFE-compatible
-			"priority":    variableSet.Priority, // TFE-compatible
-			"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			// AUD-129: report real counts from what was just created instead of hardcoded 0.
-			"var-count":       len(variables),
-			"workspace-count": len(workspaceIDs),
-			"project-count":   len(projectIDs),
+	orgRel := jsonapi.ToOne(org.Name, "organizations")
+	parentRel := jsonapi.ToOne(org.Name, "organizations")
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[VarsetAttributes]{
+		ID:   variableSet.ID,
+		Type: "varsets", // TFE uses "varsets" not "variable-sets"
+		// AUD-129: report real counts from what was just created instead of hardcoded 0.
+		Attributes: varsetAttributes(variableSet, len(variables), len(workspaceIDs), len(projectIDs)),
+		Relationships: VarsetRelationships{
+			Organization: &orgRel,
+			Parent:       &parentRel,
+			Vars:         &VarsetVarsRelationship{Data: []jsonapi.Resource[VarsetVarAttributes]{}},
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{
-					"id":   org.Name,
-					"type": "organizations",
-				},
-			},
-			"parent": gin.H{
-				"data": gin.H{
-					"id":   org.Name,
-					"type": "organizations",
-				},
-			},
-			"vars": gin.H{
-				"data": []gin.H{},
-			},
-		},
-		"links": gin.H{
-			"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-		},
+		Links: jsonapi.SelfLink{Self: fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID)},
 	})
 }
 
@@ -797,52 +647,26 @@ func (h *VariableSetHandlerV2) UpdateVariableSet(c *gin.Context) {
 		}
 	}
 
-	// Build parent relationship - project-owned or organization-owned
-	parentData := gin.H{
-		"id":   org.Name,
-		"type": "organizations",
-	}
+	// Parent is the owning project when project-owned, else the organization.
+	parent := jsonapi.ToOne(org.Name, "organizations")
 	if variableSet.ProjectID != nil {
-		project, err := h.projectRepo.GetByID(*variableSet.ProjectID)
-		if err == nil && project != nil {
-			parentData = gin.H{
-				"id":   project.ID.String(),
-				"type": "projects",
-			}
+		if project, err := h.projectRepo.GetByID(*variableSet.ProjectID); err == nil && project != nil {
+			parent = jsonapi.ToOne(project.ID.String(), "projects")
 		}
 	}
-
-	// TFE uses "global" instead of "scope"
-	global := variableSet.Global // AUD-150: global is now its own field, independent of ownership
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   variableSet.ID,
-		"type": "varsets", // TFE uses "varsets" not "variable-sets"
-		"attributes": gin.H{
-			"name":        variableSet.Name,
-			"description": variableSet.Description,
-			"global":      global,               // TFE-compatible
-			"priority":    variableSet.Priority, // TFE-compatible
-			"updated-at":  variableSet.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-			// AUD-129: report the real counts from the preloaded set rather than
-			// hardcoding 0 (GetByID preloads Variables/Workspaces/Projects).
-			"var-count":       len(variableSet.Variables),
-			"workspace-count": len(variableSet.Workspaces),
-			"project-count":   len(variableSet.Projects),
+	orgRel := jsonapi.ToOne(org.Name, "organizations")
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[VarsetAttributes]{
+		ID:   variableSet.ID,
+		Type: "varsets", // TFE uses "varsets" not "variable-sets"
+		// AUD-129: report the real counts from the preloaded set rather than hardcoding 0
+		// (GetByID preloads Variables/Workspaces/Projects). Update deliberately carries no
+		// vars relationship, unlike list and show - preserved from the map-based response.
+		Attributes: varsetAttributes(variableSet, len(variableSet.Variables), len(variableSet.Workspaces), len(variableSet.Projects)),
+		Relationships: VarsetRelationships{
+			Organization: &orgRel,
+			Parent:       &parent,
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{
-					"id":   org.Name,
-					"type": "organizations",
-				},
-			},
-			"parent": gin.H{
-				"data": parentData,
-			},
-		},
-		"links": gin.H{
-			"self": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-		},
+		Links: jsonapi.SelfLink{Self: fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID)},
 	})
 }
 
@@ -1389,55 +1213,30 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 	}
 
 	// Format response similar to ListVariableSets
-	data := make([]gin.H, len(variableSets))
+	data := make([]jsonapi.Resource[VarsetAttributes], len(variableSets))
 	for i, vs := range variableSets {
 		// Get variables for this set
 		variables, _ := h.variableSetVariableRepo.ListByVariableSet(vs.ID)
 
-		relationships := gin.H{}
+		var relationships VarsetRelationships
 		if org != nil {
-			relationships["organization"] = gin.H{
-				"data": gin.H{
-					"id":   org.Name,
-					"type": "organizations",
-				},
-			}
+			orgRel := jsonapi.ToOne(org.Name, "organizations")
+			relationships.Organization = &orgRel
 		}
-
-		// Include projects if organization-scoped and has projects assigned
 		if len(vs.Projects) > 0 { // AUD-150: project attachments exist only on org-owned sets
-			projectsData := make([]gin.H, len(vs.Projects))
-			for j, p := range vs.Projects {
-				projectsData[j] = gin.H{
-					"id":   p.ID.String(),
-					"type": "projects",
-				}
+			ids := make([]string, len(vs.Projects))
+			for j, pr := range vs.Projects {
+				ids[j] = pr.ID.String()
 			}
-			relationships["projects"] = gin.H{
-				"data": projectsData,
-			}
+			relationships.Projects = &jsonapi.ManyRelationship{Data: resourceIDs("projects", ids)}
 		}
 
-		// TFE uses "global" instead of "scope"
-		global := vs.Global // AUD-150: global is now its own field, independent of ownership
-
-		data[i] = gin.H{
-			"id":   vs.ID,
-			"type": "varsets",
-			"attributes": gin.H{
-				"name":            vs.Name,
-				"description":     vs.Description,
-				"global":          global,
-				"priority":        vs.Priority,
-				"updated-at":      vs.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-				"var-count":       len(variables),
-				"workspace-count": 0,
-				"project-count":   len(vs.Projects),
-			},
-			"relationships": relationships,
-			"links": gin.H{
-				"self": fmt.Sprintf("/api/v2/varsets/%s", vs.ID),
-			},
+		data[i] = jsonapi.Resource[VarsetAttributes]{
+			ID:            vs.ID,
+			Type:          "varsets",
+			Attributes:    varsetAttributes(&vs, len(variables), 0, len(vs.Projects)),
+			Relationships: relationships,
+			Links:         jsonapi.SelfLink{Self: fmt.Sprintf("/api/v2/varsets/%s", vs.ID)},
 		}
 	}
 
@@ -1526,39 +1325,9 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, len(variables))
-	for i, v := range variables {
-		value := v.Value
-		if v.Sensitive {
-			value = maskedValue
-		}
-		data[i] = gin.H{
-			"id":   v.ID,
-			"type": "vars", // TFE uses "vars" not "variable-set-variables"
-			"attributes": gin.H{
-				"key":         v.Key,
-				"value":       value,
-				"description": v.Description,
-				"sensitive":   v.Sensitive,
-				"category":    v.Category,
-				"hcl":         v.HCL,
-				"created-at":  v.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			},
-			"relationships": gin.H{
-				"varset": gin.H{
-					"data": gin.H{
-						"id":   variableSet.ID,
-						"type": "varsets",
-					},
-					"links": gin.H{
-						"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-					},
-				},
-			},
-			"links": gin.H{
-				"self": fmt.Sprintf("/api/v2/vars/%s", v.ID),
-			},
-		}
+	data := make([]jsonapi.Resource[VarsetVarAttributes], len(variables))
+	for i := range variables {
+		data[i] = varsetVarResource(&variables[i], variableSet.ID, true)
 	}
 
 	jsonapi.WriteDocument(c, http.StatusOK, data)
@@ -1614,32 +1383,7 @@ func (h *VariableSetHandlerV2) GetVariableSetVariable(c *gin.Context) {
 		return
 	}
 
-	value := variable.Value
-	if variable.Sensitive {
-		value = maskedValue
-	}
-	data := gin.H{
-		"id":   variable.ID,
-		"type": "vars",
-		"attributes": gin.H{
-			"key":         variable.Key,
-			"value":       value,
-			"description": variable.Description,
-			"sensitive":   variable.Sensitive,
-			"category":    variable.Category,
-			"hcl":         variable.HCL,
-			"created-at":  variable.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		},
-		"relationships": gin.H{
-			"varset": gin.H{
-				"data":  gin.H{"id": variableSet.ID, "type": "varsets"},
-				"links": gin.H{"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID)},
-			},
-		},
-		"links": gin.H{"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID)},
-	}
-
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocument(c, http.StatusOK, varsetVarResource(variable, variableSet.ID, true))
 }
 
 // CreateVariableSetVariable handles POST /api/v2/varsets/:id/relationships/vars
@@ -1755,37 +1499,7 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		return
 	}
 
-	value := variable.Value
-	if variable.Sensitive {
-		value = maskedValue
-	}
-
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   variable.ID,
-		"type": "vars", // TFE uses "vars" not "variable-set-variables"
-		"attributes": gin.H{
-			"key":         variable.Key,
-			"value":       value,
-			"description": variable.Description,
-			"sensitive":   variable.Sensitive,
-			"category":    variable.Category,
-			"hcl":         variable.HCL,
-		},
-		"relationships": gin.H{
-			"varset": gin.H{
-				"data": gin.H{
-					"id":   variableSet.ID,
-					"type": "varsets",
-				},
-				"links": gin.H{
-					"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-				},
-			},
-		},
-		"links": gin.H{
-			"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID),
-		},
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, varsetVarResource(variable, variableSet.ID, false))
 }
 
 // UpdateVariableSetVariable handles PATCH /api/v2/varsets/:id/relationships/vars/:variable_id
@@ -1907,37 +1621,7 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 		return
 	}
 
-	value := variable.Value
-	if variable.Sensitive {
-		value = maskedValue
-	}
-
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   variable.ID,
-		"type": "vars", // TFE uses "vars" not "variable-set-variables"
-		"attributes": gin.H{
-			"key":         variable.Key,
-			"value":       value,
-			"description": variable.Description,
-			"sensitive":   variable.Sensitive,
-			"category":    variable.Category,
-			"hcl":         variable.HCL,
-		},
-		"relationships": gin.H{
-			"varset": gin.H{
-				"data": gin.H{
-					"id":   variableSet.ID,
-					"type": "varsets",
-				},
-				"links": gin.H{
-					"related": fmt.Sprintf("/api/v2/varsets/%s", variableSet.ID),
-				},
-			},
-		},
-		"links": gin.H{
-			"self": fmt.Sprintf("/api/v2/vars/%s", variable.ID),
-		},
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, varsetVarResource(variable, variableSet.ID, false))
 }
 
 // DeleteVariableSetVariable handles DELETE /api/v2/varsets/:id/relationships/vars/:variable_id

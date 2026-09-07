@@ -120,6 +120,14 @@ var goldenExclusions = map[string]string{
 // null is still pinned - which is the property a representational refactor can actually break.
 // Removing this list entirely would need the handlers to take an injectable clock, which is a
 // change to production code for a test's benefit and is not obviously worth it.
+//
+// Blanking numbers alone turned out to be incomplete for the same reason, one layer down. The
+// analytics daily series labels each bucket with a calendar date ("2026-09-06"), which is a
+// string, so blankNumbers left it pinned and the fixture failed on the next calendar day with
+// the whole window shifted by one entry - exactly the spurious diff this list exists to
+// prevent. Whole-string dates are therefore blanked too, and only whole-string ones: a date
+// embedded in a seeded name ("baseline-compliance - 2026-08-23 11:01") comes from the pinned
+// seed clock, is stable, and stays pinned.
 var timeSensitiveRoutes = map[string]string{
 	"GET /api/v2/dashboard/stats":                          "counts runs and jobs per calendar month",
 	"GET /api/v2/dashboard/operations":                     "counts live operations by status",
@@ -133,24 +141,34 @@ var timeSensitiveRoutes = map[string]string{
 	"GET /api/v2/workspaces/:id/runs":                      "run status depends on elapsed time",
 }
 
-// blankNumbers replaces every number in a parsed value with a placeholder, leaving keys,
-// nesting, types and nulls intact.
-func blankNumbers(v any) any {
+// calendarDateRe matches a value that is entirely a calendar date, the label form the
+// analytics daily series uses. Anchored on both ends so a date inside a longer string is
+// left alone.
+var calendarDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// blankTimeVarying replaces every number and every whole-string calendar date in a parsed
+// value with a placeholder, leaving keys, nesting, types and nulls intact.
+func blankTimeVarying(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
-			out[k] = blankNumbers(val)
+			out[k] = blankTimeVarying(val)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, val := range t {
-			out[i] = blankNumbers(val)
+			out[i] = blankTimeVarying(val)
 		}
 		return out
 	case float64:
 		return "<number>"
+	case string:
+		if calendarDateRe.MatchString(t) {
+			return "<date>"
+		}
+		return t
 	default:
 		return v
 	}
@@ -847,7 +865,7 @@ func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFi
 	}
 	normalised := normalise(body)
 	if _, timeSensitive := timeSensitiveRoutes[method+" "+routePath]; timeSensitive {
-		normalised = blankNumbers(normalised)
+		normalised = blankTimeVarying(normalised)
 	}
 	return goldenFixture{
 		Method: method,

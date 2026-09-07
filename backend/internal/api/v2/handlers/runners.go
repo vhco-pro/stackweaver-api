@@ -117,7 +117,7 @@ func (h *RunnerHandlerV2) List(c *gin.Context) {
 	}
 
 	// Build response
-	data := make([]gin.H, 0, len(runners))
+	data := make([]jsonapi.Resource[RunnerAttributes], 0, len(runners))
 	for _, r := range runners {
 		data = append(data, buildRunnerResponse(&r))
 	}
@@ -157,21 +157,21 @@ func (h *RunnerHandlerV2) GetByID(c *gin.Context) {
 	response := buildRunnerResponse(runner)
 
 	// Add job history to response
-	jobHistory := make([]gin.H, 0, len(jobs))
+	jobHistory := make([]RunnerRecentJob, 0, len(jobs))
 	for _, j := range jobs {
-		jobHistory = append(jobHistory, gin.H{
-			"id":             j.ID.String(),
-			"job_type":       j.JobType,
-			"job_id":         j.JobID.String(),
-			"workspace_id":   j.WorkspaceID,
-			"workspace_name": j.WorkspaceName,
-			"status":         j.Status,
-			"started_at":     j.StartedAt,
-			"finished_at":    j.FinishedAt,
-			"duration_ms":    j.Duration().Milliseconds(),
+		jobHistory = append(jobHistory, RunnerRecentJob{
+			ID:            j.ID.String(),
+			JobType:       j.JobType,
+			JobID:         j.JobID.String(),
+			WorkspaceID:   j.WorkspaceID,
+			WorkspaceName: j.WorkspaceName,
+			Status:        j.Status,
+			StartedAt:     j.StartedAt,
+			FinishedAt:    j.FinishedAt,
+			DurationMS:    j.Duration().Milliseconds(),
 		})
 	}
-	response["attributes"].(gin.H)["recent_jobs"] = jobHistory
+	response.Attributes.RecentJobs = &jobHistory
 
 	jsonapi.WriteDocument(c, http.StatusOK, response)
 }
@@ -285,61 +285,57 @@ func (h *RunnerHandlerV2) GetStats(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "runner-stats",
-		"attributes": gin.H{
-			"total":   total,
-			"online":  online,
-			"offline": total - online,
+	jsonapi.WriteDocument(c, http.StatusOK, RunnerStatsDocument{
+		Type: "runner-stats",
+		Attributes: RunnerStatsAttributes{
+			Total:   total,
+			Online:  online,
+			Offline: total - online,
 		},
 	})
 }
 
 // buildRunnerResponse builds a JSON:API response for a runner
-func buildRunnerResponse(r *models.Runner) gin.H {
+func buildRunnerResponse(r *models.Runner) jsonapi.Resource[RunnerAttributes] {
 	var lastHeartbeat *string
 	if r.LastHeartbeatAt != nil {
 		formatted := r.LastHeartbeatAt.Format("2006-01-02T15:04:05Z")
 		lastHeartbeat = &formatted
 	}
 
-	attrs := gin.H{
-		"name":                  r.Name,
-		"description":           r.Description,
-		"agent-pool-id":         r.AgentPoolID.String(),
-		"runner-type":           r.RunnerType,
-		"status":                r.Status,
-		"hostname":              r.Hostname,
-		"ip-address":            r.IPAddress,
-		"os-type":               r.OSType,
-		"os-version":            r.OSVersion,
-		"agent-version":         r.AgentVersion,
-		"labels":                r.Labels,
-		"tofu-version":          r.TofuVersion,
-		"ansible-version":       r.AnsibleVersion,
-		"available-collections": r.AvailableCollections,
-		"max-concurrent-jobs":   r.MaxConcurrentJobs,
-		"current-jobs":          r.CurrentJobs,
-		"last-heartbeat-at":     lastHeartbeat,
-		"registered-at":         r.RegisteredAt.Format("2006-01-02T15:04:05Z"),
+	attrs := RunnerAttributes{
+		Name:                 r.Name,
+		Description:          r.Description,
+		AgentPoolID:          r.AgentPoolID.String(),
+		RunnerType:           r.RunnerType,
+		Status:               r.Status,
+		Hostname:             r.Hostname,
+		IPAddress:            r.IPAddress,
+		OSType:               r.OSType,
+		OSVersion:            r.OSVersion,
+		AgentVersion:         r.AgentVersion,
+		Labels:               r.Labels,
+		TofuVersion:          r.TofuVersion,
+		AnsibleVersion:       r.AnsibleVersion,
+		AvailableCollections: r.AvailableCollections,
+		MaxConcurrentJobs:    r.MaxConcurrentJobs,
+		CurrentJobs:          r.CurrentJobs,
+		LastHeartbeatAt:      lastHeartbeat,
+		RegisteredAt:         r.RegisteredAt.Format("2006-01-02T15:04:05Z"),
 	}
 
 	// Include pool name if preloaded
 	if r.AgentPool.ID != uuid.Nil {
-		attrs["agent-pool-name"] = r.AgentPool.Name
+		attrs.AgentPoolName = r.AgentPool.Name
 	}
 
-	return gin.H{
-		"id":         r.ID.String(),
-		"type":       "runners",
-		"attributes": attrs,
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{"id": r.OrganizationID.String(), "type": "organizations"},
-			},
-			"agent-pool": gin.H{
-				"data": gin.H{"id": r.AgentPoolID.String(), "type": "agent-pools"},
-			},
+	return jsonapi.Resource[RunnerAttributes]{
+		ID:         r.ID.String(),
+		Type:       "runners",
+		Attributes: attrs,
+		Relationships: OrgAndAgentPoolRelationships{
+			Organization: jsonapi.ToOne(r.OrganizationID.String(), "organizations"),
+			AgentPool:    jsonapi.ToOne(r.AgentPoolID.String(), "agent-pools"),
 		},
 	}
 }

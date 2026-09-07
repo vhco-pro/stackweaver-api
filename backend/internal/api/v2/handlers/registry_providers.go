@@ -114,17 +114,14 @@ func (h *RegistryProviderHandler) ListProviders(c *gin.Context) {
 	providers = h.filterAccessibleProviders(c, providers)
 
 	// Format response according to Terraform Registry API spec
-	response := gin.H{
-		"meta": gin.H{
-			"limit":          limit,
-			"current_offset": offset,
-		},
-		"providers": formatProviders(providers),
+	response := RegistryProviderListResponse{
+		Meta:      RegistryListMeta{Limit: limit, CurrentOffset: offset},
+		Providers: formatProviders(providers),
 	}
 
 	if offset+limit < int(total) {
-		response["meta"].(gin.H)["next_offset"] = offset + limit
-		response["meta"].(gin.H)["next_url"] = c.Request.URL.Path + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset+limit)
+		response.Meta.NextOffset = offset + limit
+		response.Meta.NextURL = c.Request.URL.Path + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset+limit)
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -164,17 +161,14 @@ func (h *RegistryProviderHandler) SearchProviders(c *gin.Context) {
 	}
 	providers = h.filterAccessibleProviders(c, providers)
 
-	response := gin.H{
-		"meta": gin.H{
-			"limit":          limit,
-			"current_offset": offset,
-		},
-		"providers": formatProviders(providers),
+	response := RegistryProviderListResponse{
+		Meta:      RegistryListMeta{Limit: limit, CurrentOffset: offset},
+		Providers: formatProviders(providers),
 	}
 
 	if offset+limit < int(total) {
-		response["meta"].(gin.H)["next_offset"] = offset + limit
-		response["meta"].(gin.H)["next_url"] = c.Request.URL.Path + "?q=" + query + "&limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset+limit)
+		response.Meta.NextOffset = offset + limit
+		response.Meta.NextURL = c.Request.URL.Path + "?q=" + query + "&limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset+limit)
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -528,22 +522,22 @@ func (h *RegistryProviderHandler) GetProviderDownloadsSummary(c *gin.Context) {
 	}
 
 	// Format according to Terraform Registry v2 API spec
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "provider-downloads-summary",
-		"id":   latestVersion.ID.String(),
-		"attributes": gin.H{
-			"week":  stats["week"],
-			"month": stats["month"],
-			"year":  stats["year"],
-			"total": stats["total"],
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[ProviderDownloadsSummaryAttributes]{
+		ID:   latestVersion.ID.String(),
+		Type: "provider-downloads-summary",
+		Attributes: ProviderDownloadsSummaryAttributes{
+			Week:  stats["week"],
+			Month: stats["month"],
+			Year:  stats["year"],
+			Total: stats["total"],
 		},
 	})
 }
 
 // Helper functions
 
-func formatProviders(providers []models.Provider) []gin.H {
-	result := make([]gin.H, 0, len(providers))
+func formatProviders(providers []models.Provider) []RegistryProviderSummary {
+	result := make([]RegistryProviderSummary, 0, len(providers))
 	for _, p := range providers {
 		// Get latest version for each provider
 		var latestVersion *models.ProviderVersion
@@ -552,28 +546,28 @@ func formatProviders(providers []models.Provider) []gin.H {
 		}
 
 		if latestVersion != nil {
-			result = append(result, gin.H{
-				"id":           p.Organization.Name + "/" + p.Name + "/" + latestVersion.Version,
-				"namespace":    p.Organization.Name,
-				"name":         p.Name,
-				"version":      latestVersion.Version,
-				"published_at": latestVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
-				"downloads":    latestVersion.Downloads,
-				"verified":     p.Verified,
+			result = append(result, RegistryProviderSummary{
+				ID:          p.Organization.Name + "/" + p.Name + "/" + latestVersion.Version,
+				Namespace:   p.Organization.Name,
+				Name:        p.Name,
+				Version:     latestVersion.Version,
+				PublishedAt: latestVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
+				Downloads:   latestVersion.Downloads,
+				Verified:    p.Verified,
 			})
 		}
 	}
 	return result
 }
 
-func formatProviderDetail(provider *models.Provider, version *models.ProviderVersion) gin.H {
-	platforms := make([]gin.H, len(version.Platforms))
+func formatProviderDetail(provider *models.Provider, version *models.ProviderVersion) RegistryProviderDetail {
+	platforms := make([]RegistryProviderPlatformEntry, len(version.Platforms))
 	for i, p := range version.Platforms {
-		platforms[i] = gin.H{
-			"os":       p.OS,
-			"arch":     p.Arch,
-			"shasum":   p.Shasum,
-			"filename": p.Filename,
+		platforms[i] = RegistryProviderPlatformEntry{
+			OS:       p.OS,
+			Arch:     p.Arch,
+			Shasum:   p.Shasum,
+			Filename: p.Filename,
 		}
 	}
 
@@ -583,15 +577,17 @@ func formatProviderDetail(provider *models.Provider, version *models.ProviderVer
 		allVersions[i] = v.Version
 	}
 
-	return gin.H{
-		"id":           provider.Organization.Name + "/" + provider.Name + "/" + version.Version,
-		"namespace":    provider.Organization.Name,
-		"name":         provider.Name,
-		"version":      version.Version,
-		"published_at": version.PublishedAt.Format("2006-01-02T15:04:05Z"),
-		"downloads":    version.Downloads,
-		"verified":     provider.Verified,
-		"platforms":    platforms,
-		"versions":     allVersions,
+	return RegistryProviderDetail{
+		RegistryProviderSummary: RegistryProviderSummary{
+			ID:          provider.Organization.Name + "/" + provider.Name + "/" + version.Version,
+			Namespace:   provider.Organization.Name,
+			Name:        provider.Name,
+			Version:     version.Version,
+			PublishedAt: version.PublishedAt.Format("2006-01-02T15:04:05Z"),
+			Downloads:   version.Downloads,
+			Verified:    provider.Verified,
+		},
+		Platforms: platforms,
+		Versions:  allVersions,
 	}
 }

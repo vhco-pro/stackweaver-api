@@ -5,7 +5,6 @@ package terraform
 import (
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -33,23 +32,20 @@ func TestBuildMaterializedOutputs_ValueAndType(t *testing.T) {
 
 	found := false
 	for _, output := range result {
-		attrs, ok := output["attributes"].(gin.H)
-		if !ok {
-			continue
-		}
-		if attrs["name"] == "vpc_id" {
+		attrs := output.Attributes
+		if attrs.Name == "vpc_id" {
 			found = true
-			if attrs["value"] != "vpc-abc123" {
-				t.Errorf("vpc_id value = %v, want vpc-abc123 (decoded)", attrs["value"])
+			if attrs.Value != "vpc-abc123" {
+				t.Errorf("vpc_id value = %v, want vpc-abc123 (decoded)", attrs.Value)
 			}
-			if attrs["type"] != "string" {
-				t.Errorf("vpc_id type = %v, want string", attrs["type"])
+			if attrs.Type != "string" {
+				t.Errorf("vpc_id type = %v, want string", attrs.Type)
 			}
-			if output["type"] != "state-version-outputs" {
-				t.Errorf("output type = %v, want state-version-outputs", output["type"])
+			if output.Type != "state-version-outputs" {
+				t.Errorf("output type = %v, want state-version-outputs", output.Type)
 			}
-			if output["id"] != "wsout-vpc" {
-				t.Errorf("output id = %v, want wsout-vpc", output["id"])
+			if output.ID != "wsout-vpc" {
+				t.Errorf("output id = %v, want wsout-vpc", output.ID)
 			}
 		}
 	}
@@ -65,10 +61,10 @@ func TestBuildMaterializedOutputs_NumberDecoded(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 output, got %d", len(result))
 	}
-	attrs := result[0]["attributes"].(gin.H)
+	attrs := result[0].Attributes
 	// JSON numbers decode to float64.
-	if v, ok := attrs["value"].(float64); !ok || v != 3 {
-		t.Errorf("count value = %v (%T), want float64(3)", attrs["value"], attrs["value"])
+	if v, ok := attrs.Value.(float64); !ok || v != 3 {
+		t.Errorf("count value = %v (%T), want float64(3)", attrs.Value, attrs.Value)
 	}
 }
 
@@ -80,17 +76,17 @@ func TestBuildMaterializedOutputs_SensitiveMasked(t *testing.T) {
 	result := buildMaterializedOutputs(rows, true, nil)
 
 	for _, output := range result {
-		attrs := output["attributes"].(gin.H)
-		if attrs["name"] == "db_password" {
-			if attrs["value"] != nil {
-				t.Errorf("sensitive value should be nil when masked, got %v", attrs["value"])
+		attrs := output.Attributes
+		if attrs.Name == "db_password" {
+			if attrs.Value != nil {
+				t.Errorf("sensitive value should be nil when masked, got %v", attrs.Value)
 			}
-			if attrs["sensitive"] != true {
-				t.Errorf("sensitive flag should be true, got %v", attrs["sensitive"])
+			if !attrs.Sensitive {
+				t.Errorf("sensitive flag should be true, got %v", attrs.Sensitive)
 			}
 		}
-		if attrs["name"] == "public_ip" && attrs["value"] != "10.0.0.1" {
-			t.Errorf("non-sensitive value should be preserved, got %v", attrs["value"])
+		if attrs.Name == "public_ip" && attrs.Value != "10.0.0.1" {
+			t.Errorf("non-sensitive value should be preserved, got %v", attrs.Value)
 		}
 	}
 }
@@ -102,9 +98,9 @@ func TestBuildMaterializedOutputs_SensitiveNotMasked(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 output, got %d", len(result))
 	}
-	attrs := result[0]["attributes"].(gin.H)
-	if attrs["value"] != "secret123" {
-		t.Errorf("value should be visible when not masked, got %v", attrs["value"])
+	attrs := result[0].Attributes
+	if attrs.Value != "secret123" {
+		t.Errorf("value should be visible when not masked, got %v", attrs.Value)
 	}
 }
 
@@ -123,13 +119,13 @@ func TestBuildMaterializedOutputs_EncryptedValueDecrypted(t *testing.T) {
 
 	// With crypto and no masking, the encrypted value is decrypted back to plaintext.
 	result := buildMaterializedOutputs(rows, false, cs)
-	if v := result[0]["attributes"].(gin.H)["value"]; v != "secret123" {
+	if v := result[0].Attributes.Value; v != "secret123" {
 		t.Errorf("encrypted value should decrypt to secret123, got %v", v)
 	}
 
 	// With crypto and masking, it is still nulled (TFE behaviour preserved).
 	result = buildMaterializedOutputs(rows, true, cs)
-	if v := result[0]["attributes"].(gin.H)["value"]; v != nil {
+	if v := result[0].Attributes.Value; v != nil {
 		t.Errorf("encrypted+masked value should be nil, got %v", v)
 	}
 }
@@ -140,7 +136,7 @@ func TestBuildMaterializedOutputs_EncryptedValueNeverLeaksWithoutKey(t *testing.
 		{ID: "wsout-pw", Name: "db_password", Value: "Y2lwaGVydGV4dA==", Sensitive: true, ValueEncrypted: true},
 	}
 	result := buildMaterializedOutputs(rows, false, nil)
-	if v := result[0]["attributes"].(gin.H)["value"]; v != nil {
+	if v := result[0].Attributes.Value; v != nil {
 		t.Errorf("encrypted value must be nil without a key, got %v", v)
 	}
 }

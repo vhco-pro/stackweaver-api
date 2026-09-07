@@ -135,7 +135,7 @@ func (h *AdminTofuVersionsHandler) List(c *gin.Context) {
 	}
 
 	// Format as JSON:API
-	data := make([]gin.H, 0, len(versions))
+	data := make([]jsonapi.Resource[TofuVersionAttributes], 0, len(versions))
 	for _, v := range versions {
 		v.Usage = usageCounts[v.Version]
 		data = append(data, formatTerraformVersion(&v))
@@ -457,7 +457,7 @@ func (h *AdminTofuVersionsHandler) ListEnabled(c *gin.Context) {
 		`).
 		Find(&versions)
 
-	data := make([]gin.H, 0, len(versions))
+	data := make([]jsonapi.Resource[TofuVersionAttributes], 0, len(versions))
 	for _, v := range versions {
 		data = append(data, formatTerraformVersion(&v))
 	}
@@ -493,53 +493,48 @@ func marshalArchs(archs []terraformVersionArch) *string {
 }
 
 // formatTerraformVersion formats a TerraformVersion as a JSON:API resource.
-func formatTerraformVersion(v *models.TofuVersion) gin.H {
+func formatTerraformVersion(v *models.TofuVersion) jsonapi.Resource[TofuVersionAttributes] {
 	// Return stored archs if they exist (user explicitly provided them).
 	// Otherwise return empty array - this prevents the provider's
 	// PreserveAMD64ArchsOnChange plan modifier from corrupting archs by
 	// setting url=null when url isn't in the user's config.
-	var archs []gin.H
+	// The stored archs already have the wire member names, so they are forwarded as-is
+	// rather than re-spelled.
+	var archs []terraformVersionArch
 	if v.ArchsJSON != nil && *v.ArchsJSON != "" {
 		var stored []terraformVersionArch
 		if err := json.Unmarshal([]byte(*v.ArchsJSON), &stored); err == nil {
-			for _, a := range stored {
-				archs = append(archs, gin.H{
-					"url":  a.URL,
-					"sha":  a.Sha,
-					"os":   a.OS,
-					"arch": a.Arch,
-				})
-			}
+			archs = append(archs, stored...)
 		}
 	}
 	if archs == nil {
-		archs = []gin.H{}
+		archs = []terraformVersionArch{}
 	}
 
-	attrs := gin.H{
-		"version":    v.Version,
-		"url":        v.URL,
-		"sha":        v.Sha,
-		"deprecated": v.Deprecated,
-		"official":   v.Official,
-		"enabled":    v.Enabled,
-		"beta":       v.Beta,
-		"usage":      v.Usage,
-		"created-at": v.CreatedAt.Format(time.RFC3339),
-		"archs":      archs,
+	attrs := TofuVersionAttributes{
+		Version:    v.Version,
+		URL:        v.URL,
+		Sha:        v.Sha,
+		Deprecated: v.Deprecated,
+		Official:   v.Official,
+		Enabled:    v.Enabled,
+		Beta:       v.Beta,
+		Usage:      v.Usage,
+		CreatedAt:  v.CreatedAt.Format(time.RFC3339),
+		Archs:      archs,
 	}
 	// Only include deprecated-reason when non-nil AND non-empty.
 	// The tfe provider always sends deprecated-reason="" even when user doesn't set it,
 	// but on read it maps nil → types.StringNull(). Including "" would cause:
 	// "was null, but now cty.StringVal("")" inconsistency.
 	if v.DeprecatedReason != nil && *v.DeprecatedReason != "" {
-		attrs["deprecated-reason"] = *v.DeprecatedReason
+		attrs.DeprecatedReason = *v.DeprecatedReason
 	}
 
-	return gin.H{
-		"id":         v.ID,
-		"type":       "terraform-versions",
-		"attributes": attrs,
+	return jsonapi.Resource[TofuVersionAttributes]{
+		ID:         v.ID,
+		Type:       "terraform-versions",
+		Attributes: attrs,
 	}
 }
 

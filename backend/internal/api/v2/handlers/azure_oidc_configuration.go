@@ -67,39 +67,37 @@ type UpdateAzureOIDCConfigRequest struct {
 }
 
 // formatAzureOIDCConfigResponse formats an Azure OIDC configuration as a JSON:API response.
-func formatAzureOIDCConfigResponse(config *models.AzureOIDCConfiguration) gin.H {
+func formatAzureOIDCConfigResponse(config *models.AzureOIDCConfiguration) jsonapi.Resource[AzureOIDCConfigAttributes] {
 	orgName := ""
 	if config.Organization != nil {
 		orgName = config.Organization.Name
 	}
 
-	return gin.H{
-		"id":   config.ID,
-		"type": azureOIDCConfigType,
-		"attributes": gin.H{
-			"client-id":       config.ClientID,
-			"subscription-id": config.SubscriptionID,
-			"tenant-id":       config.TenantID,
+	return jsonapi.Resource[AzureOIDCConfigAttributes]{
+		ID:   config.ID,
+		Type: azureOIDCConfigType,
+		Attributes: AzureOIDCConfigAttributes{
+			ClientID:       config.ClientID,
+			SubscriptionID: config.SubscriptionID,
+			TenantID:       config.TenantID,
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{"id": orgName, "type": "organizations"},
-			},
+		Relationships: WorkspaceOnlyRelationshipsNamed{
+			Organization: jsonapi.ToOne(orgName, "organizations"),
 		},
-		"links": gin.H{
-			"self": "/api/v2/oidc-configurations/" + config.ID,
+		Links: jsonapi.SelfLink{
+			Self: "/api/v2/oidc-configurations/" + config.ID,
 		},
 	}
 }
 
 // listData returns the org's Azure OIDC configs formatted as JSON:API resource objects (used by the
 // dispatcher's merged List across providers).
-func (h *AzureOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]gin.H, error) {
+func (h *AzureOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]jsonapi.Resource[AzureOIDCConfigAttributes], error) {
 	configs, err := h.configRepo.GetByOrganization(orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]gin.H, 0, len(configs))
+	out := make([]jsonapi.Resource[AzureOIDCConfigAttributes], 0, len(configs))
 	for i := range configs {
 		out = append(out, formatAzureOIDCConfigResponse(&configs[i]))
 	}

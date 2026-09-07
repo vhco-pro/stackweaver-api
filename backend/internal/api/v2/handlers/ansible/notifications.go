@@ -84,19 +84,19 @@ func (h *NotificationHandler) resolveOrg(c *gin.Context, write bool) *models.Org
 	return org
 }
 
-func formatNotificationTemplate(t *models.AnsibleNotificationTemplate) gin.H {
+func formatNotificationTemplate(t *models.AnsibleNotificationTemplate) jsonapi.Resource[NotificationTemplateAttributes] {
 	var config map[string]interface{}
 	_ = json.Unmarshal(t.Config, &config)
-	return gin.H{
-		"id":   t.ID.String(),
-		"type": "ansible-notification-templates",
-		"attributes": gin.H{
-			"name":              t.Name,
-			"description":       t.Description,
-			"notification-type": t.Type,
-			"config":            config,
-			"has-secret":        t.Secret != "",
-			"created-at":        t.CreatedAt,
+	return jsonapi.Resource[NotificationTemplateAttributes]{
+		ID:   t.ID.String(),
+		Type: "ansible-notification-templates",
+		Attributes: NotificationTemplateAttributes{
+			Name:             t.Name,
+			Description:      t.Description,
+			NotificationType: t.Type,
+			Config:           config,
+			HasSecret:        t.Secret != "",
+			CreatedAt:        t.CreatedAt,
 		},
 	}
 }
@@ -123,7 +123,7 @@ func (h *NotificationHandler) List(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list notification templates")
 		return
 	}
-	data := make([]gin.H, 0, len(templates))
+	data := make([]jsonapi.Resource[NotificationTemplateAttributes], 0, len(templates))
 	for i := range templates {
 		data = append(data, formatNotificationTemplate(&templates[i]))
 	}
@@ -405,35 +405,37 @@ func (h *NotificationHandler) ListForJobTemplate(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list notifications")
 		return
 	}
-	data := make([]gin.H, 0, len(attachments))
+	data := make([]jsonapi.Resource[NotificationAttachmentAttributes], 0, len(attachments))
 	for i := range attachments {
 		data = append(data, formatAttachment(&attachments[i], &attachments[i].NotificationTemplate.Name))
 	}
 	jsonapi.WriteDocument(c, http.StatusOK, data)
 }
 
-func formatAttachment(a *models.AnsibleNotificationAttachment, templateName *string) gin.H {
-	attrs := gin.H{
-		"on-started": a.OnStarted,
-		"on-success": a.OnSuccess,
-		"on-failure": a.OnFailure,
+func formatAttachment(a *models.AnsibleNotificationAttachment, templateName *string) jsonapi.Resource[NotificationAttachmentAttributes] {
+	attrs := NotificationAttachmentAttributes{
+		OnStarted: a.OnStarted,
+		OnSuccess: a.OnSuccess,
+		OnFailure: a.OnFailure,
 	}
 	if templateName != nil {
-		attrs["notification-template-name"] = *templateName
+		attrs.NotificationTemplateName = *templateName
 	}
-	rels := gin.H{
-		"notification-template": gin.H{"data": gin.H{"id": a.NotificationTemplateID.String(), "type": "ansible-notification-templates"}},
+	rels := NotificationAttachmentRelationships{
+		NotificationTemplate: jsonapi.ToOne(a.NotificationTemplateID.String(), "ansible-notification-templates"),
 	}
 	if a.JobTemplateID != nil {
-		rels["job-template"] = gin.H{"data": gin.H{"id": a.JobTemplateID.String(), "type": "ansible-job-templates"}}
+		r := jsonapi.ToOne(a.JobTemplateID.String(), "ansible-job-templates")
+		rels.JobTemplate = &r
 	}
 	if a.WorkflowID != nil {
-		rels["workflow"] = gin.H{"data": gin.H{"id": a.WorkflowID.String(), "type": "ansible-workflows"}}
+		r := jsonapi.ToOne(a.WorkflowID.String(), "ansible-workflows")
+		rels.Workflow = &r
 	}
-	return gin.H{
-		"id":            a.ID.String(),
-		"type":          "ansible-notification-attachments",
-		"attributes":    attrs,
-		"relationships": rels,
+	return jsonapi.Resource[NotificationAttachmentAttributes]{
+		ID:            a.ID.String(),
+		Type:          "ansible-notification-attachments",
+		Attributes:    attrs,
+		Relationships: rels,
 	}
 }

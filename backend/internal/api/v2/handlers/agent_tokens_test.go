@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -19,15 +18,16 @@ func TestAgentTokenResource(t *testing.T) {
 	used := time.Now().Add(-time.Hour)
 	key := &models.APIKey{ID: id, Name: "production agents", CreatedAt: time.Now(), LastUsedAt: &used}
 
-	// On create: token value included.
-	created := agentTokenResource(key, "tfe-agentsecret")
+	// On create: token value included. Assertions run against the marshaled document, so
+	// "absent" and "present but null" stay distinguishable.
+	created := wireShape(t, agentTokenResource(key, "tfe-agentsecret"))
 	if created["type"] != "authentication-tokens" {
 		t.Fatalf("type = %v, want authentication-tokens", created["type"])
 	}
-	if created["id"] != id {
+	if created["id"] != id.String() {
 		t.Fatalf("id = %v, want %v", created["id"], id)
 	}
-	attrs := created["attributes"].(gin.H)
+	attrs := created["attributes"].(map[string]any)
 	if attrs["token"] != "tfe-agentsecret" {
 		t.Fatalf("token = %v, want the plaintext on create", attrs["token"])
 	}
@@ -36,15 +36,15 @@ func TestAgentTokenResource(t *testing.T) {
 	}
 
 	// On read: no token value, description still present.
-	read := agentTokenResource(key, "")
-	rattrs := read["attributes"].(gin.H)
+	read := wireShape(t, agentTokenResource(key, ""))
+	rattrs := read["attributes"].(map[string]any)
 	if _, present := rattrs["token"]; present {
 		t.Fatalf("token must be absent on read, got %v", rattrs["token"])
 	}
 	if rattrs["description"] != "production agents" {
 		t.Fatalf("description not surfaced on read")
 	}
-	if rattrs["last-used-at"] != key.LastUsedAt {
+	if rattrs["last-used-at"] == nil {
 		t.Fatalf("last-used-at not surfaced on read")
 	}
 }

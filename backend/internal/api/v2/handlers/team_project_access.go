@@ -121,8 +121,8 @@ type UpdateTeamProjectAccessRequestV2 struct {
 
 // formatTeamProjectAccessResponse formats a team project access in TFE-compatible JSON:API format
 // TFE uses type "team-projects" (not "team-project-accesses")
-func formatTeamProjectAccessResponse(access *models.TeamProjectAccess) gin.H {
-	attributes := gin.H{}
+func formatTeamProjectAccessResponse(access *models.TeamProjectAccess) jsonapi.Resource[TeamProjectAccessAttributes] {
+	attributes := TeamProjectAccessAttributes{}
 
 	// Check if we have custom permissions (any permission field is set)
 	hasCustomPermissions := access.ProjectSettings != nil || access.ProjectTeams != nil || access.ProjectVariableSets != nil ||
@@ -133,101 +133,74 @@ func formatTeamProjectAccessResponse(access *models.TeamProjectAccess) gin.H {
 	// TFE behavior: If custom permissions are set, access should be "custom"
 	// If fixed access level is set, use that
 	if hasCustomPermissions {
-		// Custom permissions: set access to "custom"
-		attributes["access"] = "custom"
+		// Custom permissions: set access to "custom", with TFE's defaults where unspecified
+		attributes.Access = "custom"
 
-		// Add custom project access block
-		projectAccess := gin.H{}
+		projectAccess := &TeamProjectProjectAccess{
+			Settings:     "read",
+			Teams:        "none",
+			VariableSets: "none",
+		}
 		if access.ProjectSettings != nil {
-			projectAccess["settings"] = *access.ProjectSettings
-		} else {
-			projectAccess["settings"] = "read" // Default when not specified
+			projectAccess.Settings = *access.ProjectSettings
 		}
 		if access.ProjectTeams != nil {
-			projectAccess["teams"] = *access.ProjectTeams
-		} else {
-			projectAccess["teams"] = "none" // Default when not specified
+			projectAccess.Teams = *access.ProjectTeams
 		}
 		if access.ProjectVariableSets != nil {
-			projectAccess["variable-sets"] = *access.ProjectVariableSets
-		} else {
-			projectAccess["variable-sets"] = "none" // Default when not specified
+			projectAccess.VariableSets = *access.ProjectVariableSets
 		}
-		attributes["project-access"] = projectAccess
+		attributes.ProjectAccess = projectAccess
 
-		// Add custom workspace access block
-		workspaceAccess := gin.H{}
+		workspaceAccess := &TeamProjectWorkspaceAccess{
+			Runs:          "read",
+			SentinelMocks: "none",
+			StateVersions: "none",
+			Variables:     "none",
+		}
 		if access.WorkspaceRuns != nil {
-			workspaceAccess["runs"] = *access.WorkspaceRuns
-		} else {
-			workspaceAccess["runs"] = "read" // Default when not specified
+			workspaceAccess.Runs = *access.WorkspaceRuns
 		}
 		if access.WorkspaceSentinelMocks != nil {
-			workspaceAccess["sentinel-mocks"] = *access.WorkspaceSentinelMocks
-		} else {
-			workspaceAccess["sentinel-mocks"] = "none" // Default when not specified
+			workspaceAccess.SentinelMocks = *access.WorkspaceSentinelMocks
 		}
 		if access.WorkspaceStateVersions != nil {
-			workspaceAccess["state-versions"] = *access.WorkspaceStateVersions
-		} else {
-			workspaceAccess["state-versions"] = "none" // Default when not specified
+			workspaceAccess.StateVersions = *access.WorkspaceStateVersions
 		}
 		if access.WorkspaceVariables != nil {
-			workspaceAccess["variables"] = *access.WorkspaceVariables
-		} else {
-			workspaceAccess["variables"] = "none" // Default when not specified
+			workspaceAccess.Variables = *access.WorkspaceVariables
 		}
 		if access.WorkspaceCreate != nil {
-			workspaceAccess["create"] = *access.WorkspaceCreate
-		} else {
-			workspaceAccess["create"] = false // Default when not specified
+			workspaceAccess.Create = *access.WorkspaceCreate
 		}
 		if access.WorkspaceLocking != nil {
-			workspaceAccess["locking"] = *access.WorkspaceLocking
-		} else {
-			workspaceAccess["locking"] = false // Default when not specified
+			workspaceAccess.Locking = *access.WorkspaceLocking
 		}
 		if access.WorkspaceMove != nil {
-			workspaceAccess["move"] = *access.WorkspaceMove
-		} else {
-			workspaceAccess["move"] = false // Default when not specified
+			workspaceAccess.Move = *access.WorkspaceMove
 		}
 		if access.WorkspaceDelete != nil {
-			workspaceAccess["delete"] = *access.WorkspaceDelete
-		} else {
-			workspaceAccess["delete"] = false // Default when not specified
+			workspaceAccess.Delete = *access.WorkspaceDelete
 		}
 		if access.WorkspaceRunTasks != nil {
-			workspaceAccess["run-tasks"] = *access.WorkspaceRunTasks
-		} else {
-			workspaceAccess["run-tasks"] = false // Default when not specified
+			workspaceAccess.RunTasks = *access.WorkspaceRunTasks
 		}
-		attributes["workspace-access"] = workspaceAccess
+		attributes.WorkspaceAccess = workspaceAccess
 	} else if access.Access != nil {
 		// Fixed access level: use the access value
-		attributes["access"] = *access.Access
+		attributes.Access = *access.Access
 	}
 
-	return gin.H{
-		"id":         access.ID.String(),
-		"type":       "team-projects", // TFE uses "team-projects" as the resource type
-		"attributes": attributes,
-		"relationships": gin.H{
-			"team": gin.H{
-				"data": gin.H{
-					"id":   access.TeamID.String(),
-					"type": "teams",
-				},
-			},
-			"project": gin.H{
-				"data": gin.H{
-					"id":   access.ProjectID.String(),
-					"type": "projects",
-				},
-			},
+	return jsonapi.Resource[TeamProjectAccessAttributes]{
+		ID:         access.ID.String(),
+		Type:       "team-projects", // TFE uses "team-projects" as the resource type
+		Attributes: attributes,
+		Relationships: TeamAndProjectRelationships{
+			Team:    jsonapi.ToOne(access.TeamID.String(), "teams"),
+			Project: jsonapi.ToOne(access.ProjectID.String(), "projects"),
 		},
-		"links": gin.H{
-			"self": "/api/v2/team-projects/" + access.ID.String(),
+		Links: jsonapi.SelfLink{
+			Self: "/api/v2/team-projects/" + access.ID.String(),
 		},
 	}
 }
@@ -305,7 +278,7 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 	}
 
 	// Format responses, hiding rows the caller is not entitled to see
-	data := make([]gin.H, 0, len(accesses))
+	data := make([]jsonapi.Resource[TeamProjectAccessAttributes], 0, len(accesses))
 	for i := range accesses {
 		if !teamAccessVisible(accesses[i].Team, memberOf, isTeamAdmin) {
 			continue

@@ -132,8 +132,8 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 
 	// Always return JSON:API format (no simple format handling)
 	// Use formatOrganizationMembershipResponse for consistent formatting
-	data := make([]gin.H, len(orgMemberships))
-	included := make([]gin.H, 0)
+	data := make([]*OrgMembershipResource, len(orgMemberships))
+	included := make([]any, 0)
 	seenUserIDs := make(map[uuid.UUID]bool)
 
 	for i, membership := range orgMemberships {
@@ -144,21 +144,21 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 		// Include user data in included array (JSON:API pattern)
 		if membership.User.ID != uuid.Nil && !seenUserIDs[membership.User.ID] {
 			seenUserIDs[membership.User.ID] = true
-			included = append(included, gin.H{
-				"id":   membership.User.ID.String(),
-				"type": "users",
-				"attributes": gin.H{
-					"username": membership.User.Username,
-					"email":    membership.User.Email,
-					"name":     membership.User.Name,
+			included = append(included, jsonapi.Resource[IncludedUserAttributes]{
+				ID:   membership.User.ID.String(),
+				Type: "users",
+				Attributes: IncludedUserAttributes{
+					Username: membership.User.Username,
+					Email:    membership.User.Email,
+					Name:     membership.User.Name,
 				},
 			})
 		}
 	}
 
-	response := gin.H{"data": data}
+	response := jsonapi.Document{Data: data}
 	if len(included) > 0 {
-		response["included"] = included
+		response.Included = included
 	}
 	c.JSON(http.StatusOK, response)
 }

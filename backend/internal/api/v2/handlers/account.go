@@ -37,15 +37,15 @@ func (h *AccountHandlerV2) Details(c *gin.Context) {
 		username = user.Email
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   user.ID,
-		"type": "users",
-		"attributes": gin.H{
-			"username":           username,
-			"email":              user.Email,
-			"is-service-account": false,
-			"avatar-url":         "",
-			"v2-only":            true,
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[AccountAttributes]{
+		ID:   user.ID.String(),
+		Type: "users",
+		Attributes: AccountAttributes{
+			Username:         username,
+			Email:            user.Email,
+			IsServiceAccount: false,
+			AvatarURL:        "",
+			V2Only:           true,
 		},
 	})
 }
