@@ -32,27 +32,31 @@ func TestFormatChangeRequestOpen(t *testing.T) {
 
 	out := formatChangeRequest(cr)
 
-	if out["type"] != "workspace_change_requests" {
-		t.Errorf("type = %v, want workspace_change_requests", out["type"])
+	if out.Type != "workspace_change_requests" {
+		t.Errorf("type = %v, want workspace_change_requests", out.Type)
 	}
-	if out["id"] != "cr-abc" {
-		t.Errorf("id = %v, want cr-abc", out["id"])
+	if out.ID != "cr-abc" {
+		t.Errorf("id = %v, want cr-abc", out.ID)
 	}
 
-	attrs, ok := out["attributes"].(gin.H)
-	if !ok {
-		t.Fatalf("attributes is %T, want gin.H", out["attributes"])
-	}
-	if attrs["subject"] != "Bump the deprecated module" {
-		t.Errorf("subject = %v", attrs["subject"])
+	if out.Attributes.Subject != "Bump the deprecated module" {
+		t.Errorf("subject = %v", out.Attributes.Subject)
 	}
 	// An open request must report null, not a zero value: a client distinguishes open from archived
-	// purely by these being null.
+	// purely by these being null. Assert on the marshaled JSON, since that is where the
+	// distinction between a nil pointer and an emitted null actually lives.
+	attrs := marshalAttrs(t, out.Attributes)
 	if attrs["archived-by"] != nil {
 		t.Errorf("archived-by = %v, want nil for an open request", attrs["archived-by"])
 	}
+	if _, present := attrs["archived-by"]; !present {
+		t.Error("archived-by must be emitted as null, not omitted")
+	}
 	if attrs["archived-at"] != nil {
 		t.Errorf("archived-at = %v, want nil for an open request", attrs["archived-at"])
+	}
+	if _, present := attrs["archived-at"]; !present {
+		t.Error("archived-at must be emitted as null, not omitted")
 	}
 	if attrs["created-by"] != filer.String() {
 		t.Errorf("created-by = %v, want %v", attrs["created-by"], filer)
@@ -65,21 +69,31 @@ func TestFormatChangeRequestOpen(t *testing.T) {
 		t.Errorf("workspace-name should be absent when Workspace is not preloaded")
 	}
 
-	rels, ok := out["relationships"].(gin.H)
+	rels, ok := out.Relationships.(WorkspaceOnlyRelationshipsWS)
 	if !ok {
-		t.Fatalf("relationships is %T, want gin.H", out["relationships"])
+		t.Fatalf("relationships is %T, want WorkspaceOnlyRelationshipsWS", out.Relationships)
 	}
-	ws, ok := rels["workspace"].(gin.H)
-	if !ok {
-		t.Fatalf("relationships.workspace is %T, want gin.H", rels["workspace"])
+	if rels.Workspace.Data == nil {
+		t.Fatal("relationships.workspace.data is nil")
 	}
-	data, ok := ws["data"].(gin.H)
-	if !ok {
-		t.Fatalf("relationships.workspace.data is %T, want gin.H", ws["data"])
+	if rels.Workspace.Data.ID != "ws-123" || rels.Workspace.Data.Type != "workspaces" {
+		t.Errorf("workspace linkage = %v, want ws-123/workspaces", *rels.Workspace.Data)
 	}
-	if data["id"] != "ws-123" || data["type"] != "workspaces" {
-		t.Errorf("workspace linkage = %v, want ws-123/workspaces", data)
+}
+
+// marshalAttrs renders a typed attribute block the way the wire sees it, so absent-vs-null
+// assertions test the emitted document rather than the Go zero value.
+func marshalAttrs(t *testing.T, v any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal attributes: %v", err)
 	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal attributes: %v", err)
+	}
+	return out
 }
 
 // TestFormatChangeRequestArchived pins that archiving surfaces both archived fields.
@@ -95,7 +109,7 @@ func TestFormatChangeRequestArchived(t *testing.T) {
 		Workspace:   &models.Workspace{Name: "prod-network"},
 	}
 
-	attrs := formatChangeRequest(cr)["attributes"].(gin.H)
+	attrs := marshalAttrs(t, formatChangeRequest(cr).Attributes)
 
 	if attrs["archived-by"] != archiver.String() {
 		t.Errorf("archived-by = %v, want %v", attrs["archived-by"], archiver)

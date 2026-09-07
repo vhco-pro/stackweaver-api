@@ -95,8 +95,8 @@ type UpdateTeamWorkspaceAccessRequestV2 struct {
 
 // formatTeamWorkspaceAccessResponse formats a team workspace access in TFE-compatible JSON:API format
 // TFE uses type "team-workspaces" (not "team-workspace-accesses")
-func formatTeamWorkspaceAccessResponse(access *models.TeamWorkspaceAccess) gin.H {
-	attributes := gin.H{}
+func formatTeamWorkspaceAccessResponse(access *models.TeamWorkspaceAccess) jsonapi.Resource[TeamWorkspaceAccessAttributes] {
+	attributes := TeamWorkspaceAccessAttributes{}
 
 	// Check if we have custom permissions (any permission field is set)
 	hasCustomPermissions := access.Runs != nil || access.Variables != nil || access.StateVersions != nil ||
@@ -105,67 +105,48 @@ func formatTeamWorkspaceAccessResponse(access *models.TeamWorkspaceAccess) gin.H
 	// TFE behavior: If custom permissions are set, access should be "custom"
 	// If fixed access level is set, use that
 	if hasCustomPermissions {
-		// Custom permissions: set access to "custom"
-		attributes["access"] = "custom"
-
-		// Add custom permissions block
-		permissions := gin.H{}
+		// Custom permissions: set access to "custom", with TFE's defaults where unspecified
+		attributes.Access = "custom"
+		permissions := &TeamWorkspacePermissions{
+			Runs:          "read",
+			Variables:     "none",
+			StateVersions: "none",
+			SentinelMocks: "none",
+		}
 		if access.Runs != nil {
-			permissions["runs"] = *access.Runs
-		} else {
-			permissions["runs"] = "read" // Default when not specified
+			permissions.Runs = *access.Runs
 		}
 		if access.Variables != nil {
-			permissions["variables"] = *access.Variables
-		} else {
-			permissions["variables"] = "none" // Default when not specified
+			permissions.Variables = *access.Variables
 		}
 		if access.StateVersions != nil {
-			permissions["state-versions"] = *access.StateVersions
-		} else {
-			permissions["state-versions"] = "none" // Default when not specified
+			permissions.StateVersions = *access.StateVersions
 		}
 		if access.SentinelMocks != nil {
-			permissions["sentinel-mocks"] = *access.SentinelMocks
-		} else {
-			permissions["sentinel-mocks"] = "none" // Default when not specified
+			permissions.SentinelMocks = *access.SentinelMocks
 		}
 		if access.WorkspaceLocking != nil {
-			permissions["workspace-locking"] = *access.WorkspaceLocking
-		} else {
-			permissions["workspace-locking"] = false // Default when not specified
+			permissions.WorkspaceLocking = *access.WorkspaceLocking
 		}
 		if access.RunTasks != nil {
-			permissions["run-tasks"] = *access.RunTasks
-		} else {
-			permissions["run-tasks"] = false // Default when not specified
+			permissions.RunTasks = *access.RunTasks
 		}
-		attributes["permissions"] = permissions
+		attributes.Permissions = permissions
 	} else if access.Access != nil {
 		// Fixed access level: use the access value
-		attributes["access"] = *access.Access
+		attributes.Access = *access.Access
 	}
 
-	return gin.H{
-		"id":         access.ID.String(),
-		"type":       "team-workspaces", // TFE uses "team-workspaces" as the resource type
-		"attributes": attributes,
-		"relationships": gin.H{
-			"team": gin.H{
-				"data": gin.H{
-					"id":   access.TeamID.String(),
-					"type": "teams",
-				},
-			},
-			"workspace": gin.H{
-				"data": gin.H{
-					"id":   access.WorkspaceID,
-					"type": "workspaces",
-				},
-			},
+	return jsonapi.Resource[TeamWorkspaceAccessAttributes]{
+		ID:         access.ID.String(),
+		Type:       "team-workspaces", // TFE uses "team-workspaces" as the resource type
+		Attributes: attributes,
+		Relationships: TeamAndWorkspaceRelationships{
+			Team:      jsonapi.ToOne(access.TeamID.String(), "teams"),
+			Workspace: jsonapi.ToOne(access.WorkspaceID, "workspaces"),
 		},
-		"links": gin.H{
-			"self": "/api/v2/team-workspaces/" + access.ID.String(), // TFE-compatible self link
+		Links: jsonapi.SelfLink{
+			Self: "/api/v2/team-workspaces/" + access.ID.String(), // TFE-compatible self link
 		},
 	}
 }
@@ -239,7 +220,7 @@ func (h *TeamWorkspaceAccessHandlerV2) List(c *gin.Context) {
 	}
 
 	// Format response, hiding rows the caller is not entitled to see
-	data := make([]gin.H, 0, len(accessList))
+	data := make([]jsonapi.Resource[TeamWorkspaceAccessAttributes], 0, len(accessList))
 	for i := range accessList {
 		if !teamAccessVisible(accessList[i].Team, memberOf, isTeamAdmin) {
 			continue

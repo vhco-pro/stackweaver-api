@@ -88,7 +88,7 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, 0, len(syncs))
+	data := make([]jsonapi.Resource[InventorySyncAttributes], 0, len(syncs))
 	for i := range syncs {
 		data = append(data, formatInventorySyncResponse(&syncs[i], false))
 	}
@@ -121,37 +121,34 @@ func (h *InventorySyncHandler) Get(c *gin.Context) {
 
 // formatInventorySyncResponse formats a sync run for JSON:API responses.
 // Output is only included on detail fetches.
-func formatInventorySyncResponse(sync *models.AnsibleInventorySync, includeOutput bool) gin.H {
-	attrs := gin.H{
-		"status":            string(sync.Status),
-		"triggered-by":      sync.TriggeredBy,
-		"hosts-discovered":  sync.HostsDiscovered,
-		"groups-discovered": sync.GroupsDiscovered,
-		"error":             sync.Error,
-		"started-at":        sync.StartedAt,
-		"finished-at":       sync.FinishedAt,
-		"created-at":        sync.CreatedAt,
+func formatInventorySyncResponse(sync *models.AnsibleInventorySync, includeOutput bool) jsonapi.Resource[InventorySyncAttributes] {
+	attrs := InventorySyncAttributes{
+		Status:           string(sync.Status),
+		TriggeredBy:      sync.TriggeredBy,
+		HostsDiscovered:  sync.HostsDiscovered,
+		GroupsDiscovered: sync.GroupsDiscovered,
+		Error:            sync.Error,
+		StartedAt:        sync.StartedAt,
+		FinishedAt:       sync.FinishedAt,
+		CreatedAt:        sync.CreatedAt,
 	}
 	if sync.Source != nil {
-		attrs["source-name"] = sync.Source.Name
+		attrs.SourceName = sync.Source.Name
 	}
 	if includeOutput {
-		attrs["output"] = sync.Output
+		attrs.Output = &sync.Output
 	}
-	resp := gin.H{
-		"id":         sync.ID.String(),
-		"type":       "inventory-syncs",
-		"attributes": attrs,
-		"relationships": gin.H{
-			"inventory": gin.H{
-				"data": gin.H{"id": sync.InventoryID.String(), "type": "inventories"},
-			},
-		},
+	relationships := InventorySyncRelationships{
+		Inventory: jsonapi.ToOne(sync.InventoryID.String(), "inventories"),
 	}
 	if sync.SourceID != nil {
-		resp["relationships"].(gin.H)["source"] = gin.H{
-			"data": gin.H{"id": sync.SourceID.String(), "type": "inventory-sources"},
-		}
+		r := jsonapi.ToOne(sync.SourceID.String(), "inventory-sources")
+		relationships.Source = &r
 	}
-	return resp
+	return jsonapi.Resource[InventorySyncAttributes]{
+		ID:            sync.ID.String(),
+		Type:          "inventory-syncs",
+		Attributes:    attrs,
+		Relationships: relationships,
+	}
 }

@@ -73,29 +73,27 @@ type UpdateVaultOIDCConfigRequest struct {
 }
 
 // formatVaultOIDCConfigResponse formats a Vault OIDC configuration as a JSON:API response.
-func formatVaultOIDCConfigResponse(config *models.VaultOIDCConfiguration) gin.H {
+func formatVaultOIDCConfigResponse(config *models.VaultOIDCConfiguration) jsonapi.Resource[VaultOIDCConfigAttributes] {
 	orgName := ""
 	if config.Organization != nil {
 		orgName = config.Organization.Name
 	}
 
-	return gin.H{
-		"id":   config.ID,
-		"type": vaultOIDCConfigType,
-		"attributes": gin.H{
-			"address":        config.Address,
-			"role":           config.RoleName,
-			"namespace":      config.Namespace,
-			"auth-path":      config.JWTAuthPath,
-			"encoded-cacert": config.TLSCACertificate,
+	return jsonapi.Resource[VaultOIDCConfigAttributes]{
+		ID:   config.ID,
+		Type: vaultOIDCConfigType,
+		Attributes: VaultOIDCConfigAttributes{
+			Address:       config.Address,
+			Role:          config.RoleName,
+			Namespace:     config.Namespace,
+			AuthPath:      config.JWTAuthPath,
+			EncodedCACert: config.TLSCACertificate,
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{"id": orgName, "type": "organizations"},
-			},
+		Relationships: WorkspaceOnlyRelationshipsNamed{
+			Organization: jsonapi.ToOne(orgName, "organizations"),
 		},
-		"links": gin.H{
-			"self": "/api/v2/oidc-configurations/" + config.ID,
+		Links: jsonapi.SelfLink{
+			Self: "/api/v2/oidc-configurations/" + config.ID,
 		},
 	}
 }
@@ -266,12 +264,12 @@ func (h *VaultOIDCConfigurationHandlerV2) loadAuthorized(c *gin.Context) (*model
 
 // listData returns the org's Vault OIDC configs formatted as JSON:API resource objects (used by the
 // dispatcher's merged List).
-func (h *VaultOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]gin.H, error) {
+func (h *VaultOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]jsonapi.Resource[VaultOIDCConfigAttributes], error) {
 	configs, err := h.configRepo.GetByOrganization(orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]gin.H, 0, len(configs))
+	out := make([]jsonapi.Resource[VaultOIDCConfigAttributes], 0, len(configs))
 	for i := range configs {
 		out = append(out, formatVaultOIDCConfigResponse(&configs[i]))
 	}

@@ -85,7 +85,7 @@ func (h *JobTemplateVariableHandlerV2) authorizeTemplate(c *gin.Context, templat
 }
 
 // formatVariableResponse formats a template variable in TFE-compatible JSON:API format
-func (h *JobTemplateVariableHandlerV2) formatVariableResponse(variable *models.AnsibleJobTemplateVariable, templateID uuid.UUID) gin.H {
+func (h *JobTemplateVariableHandlerV2) formatVariableResponse(variable *models.AnsibleJobTemplateVariable, templateID uuid.UUID) jsonapi.Resource[TemplateVariableAttributes] {
 	// TFE-compatible response format
 	// Sensitive variable values must be masked in API responses
 	value := variable.Value
@@ -93,27 +93,22 @@ func (h *JobTemplateVariableHandlerV2) formatVariableResponse(variable *models.A
 		value = "••••••••"
 	}
 
-	return gin.H{
-		"id":   variable.ID,
-		"type": "vars", // TFE uses "vars" not "variables"
-		"attributes": gin.H{
-			"key":         variable.Key,
-			"value":       value, // Masked if sensitive
-			"description": variable.Description,
-			"sensitive":   variable.Sensitive,
-			"category":    variable.Category,
-			"hcl":         variable.HCL,
+	return jsonapi.Resource[TemplateVariableAttributes]{
+		ID:   variable.ID,
+		Type: "vars", // TFE uses "vars" not "variables"
+		Attributes: TemplateVariableAttributes{
+			Key:         variable.Key,
+			Value:       value, // Masked if sensitive
+			Description: variable.Description,
+			Sensitive:   variable.Sensitive,
+			Category:    variable.Category,
+			HCL:         variable.HCL,
 		},
-		"relationships": gin.H{
-			"configurable": gin.H{ // TFE uses "configurable"
-				"data": gin.H{
-					"id":   templateID.String(),
-					"type": "job-templates",
-				},
-			},
+		Relationships: ConfigurableRelationship{ // TFE uses "configurable"
+			Configurable: jsonapi.ToOne(templateID.String(), "job-templates"),
 		},
-		"links": gin.H{
-			"self": fmt.Sprintf("/api/v2/ansible/job-templates/%s/vars/%s", templateID.String(), variable.ID),
+		Links: jsonapi.SelfLink{
+			Self: fmt.Sprintf("/api/v2/ansible/job-templates/%s/vars/%s", templateID.String(), variable.ID),
 		},
 	}
 }
@@ -172,13 +167,13 @@ func (h *JobTemplateVariableHandlerV2) ListByJobTemplate(c *gin.Context) {
 	}
 
 	// Format response (TFE-compatible JSON:API format)
-	data := make([]gin.H, 0, len(variables))
+	data := make([]jsonapi.Resource[TemplateVariableAttributes], 0, len(variables))
 	for _, v := range variables {
 		data = append(data, h.formatVariableResponse(&v, templateID))
 	}
 
-	c.JSON(http.StatusOK, jsonapi.Document{Data: data, Links: gin.H{
-		"self": fmt.Sprintf("/api/v2/ansible/job-templates/%s/vars", templateIDStr),
+	c.JSON(http.StatusOK, jsonapi.Document{Data: data, Links: jsonapi.SelfLink{
+		Self: fmt.Sprintf("/api/v2/ansible/job-templates/%s/vars", templateIDStr),
 	}})
 }
 

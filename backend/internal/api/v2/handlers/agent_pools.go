@@ -88,45 +88,42 @@ type jsonAPIRef struct {
 	Type string `json:"type"`
 }
 
-func formatAgentPoolResponse(p *models.AgentPool, orgName string, agentCount int) gin.H {
-	attrs := gin.H{
-		"name":                p.Name,
-		"agent-count":         agentCount,
-		"organization-scoped": p.OrganizationScoped,
-		"created-at":          p.CreatedAt.Format(time.RFC3339),
-	}
-	rel := gin.H{
-		"organization": gin.H{
-			"data": gin.H{"id": orgName, "type": "organizations"},
-		},
+func formatAgentPoolResponse(p *models.AgentPool, orgName string, agentCount int) jsonapi.Resource[AgentPoolAttributes] {
+	rel := AgentPoolRelationships{
+		Organization: jsonapi.ToOne(orgName, "organizations"),
 	}
 	if len(p.AllowedWorkspaces) > 0 {
-		var refs []gin.H
+		refs := make([]jsonapi.ResourceID, 0, len(p.AllowedWorkspaces))
 		for _, w := range p.AllowedWorkspaces {
-			refs = append(refs, gin.H{"id": w.ID, "type": "workspaces"})
+			refs = append(refs, jsonapi.ResourceID{ID: w.ID, Type: "workspaces"})
 		}
-		rel["allowed-workspaces"] = gin.H{"data": refs}
+		rel.AllowedWorkspaces = &jsonapi.ManyRelationship{Data: refs}
 	}
 	if len(p.AllowedProjects) > 0 {
-		var refs []gin.H
+		refs := make([]jsonapi.ResourceID, 0, len(p.AllowedProjects))
 		for _, pr := range p.AllowedProjects {
-			refs = append(refs, gin.H{"id": pr.ID.String(), "type": "projects"})
+			refs = append(refs, jsonapi.ResourceID{ID: pr.ID.String(), Type: "projects"})
 		}
-		rel["allowed-projects"] = gin.H{"data": refs}
+		rel.AllowedProjects = &jsonapi.ManyRelationship{Data: refs}
 	}
 	if len(p.ExcludedWorkspaces) > 0 {
-		var refs []gin.H
+		refs := make([]jsonapi.ResourceID, 0, len(p.ExcludedWorkspaces))
 		for _, w := range p.ExcludedWorkspaces {
-			refs = append(refs, gin.H{"id": w.ID, "type": "workspaces"})
+			refs = append(refs, jsonapi.ResourceID{ID: w.ID, Type: "workspaces"})
 		}
-		rel["excluded-workspaces"] = gin.H{"data": refs}
+		rel.ExcludedWorkspaces = &jsonapi.ManyRelationship{Data: refs}
 	}
-	return gin.H{
-		"id":            p.ID.String(),
-		"type":          "agent-pools",
-		"attributes":    attrs,
-		"relationships": rel,
-		"links":         gin.H{"self": "/api/v2/agent-pools/" + p.ID.String()},
+	return jsonapi.Resource[AgentPoolAttributes]{
+		ID:   p.ID.String(),
+		Type: "agent-pools",
+		Attributes: AgentPoolAttributes{
+			Name:               p.Name,
+			AgentCount:         agentCount,
+			OrganizationScoped: p.OrganizationScoped,
+			CreatedAt:          p.CreatedAt.Format(time.RFC3339),
+		},
+		Relationships: rel,
+		Links:         jsonapi.SelfLink{Self: "/api/v2/agent-pools/" + p.ID.String()},
 	}
 }
 
@@ -183,7 +180,7 @@ func (h *AgentPoolHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, 0, len(pools))
+	data := make([]jsonapi.Resource[AgentPoolAttributes], 0, len(pools))
 	for i := range pools {
 		agentCount := 0
 		if h.runnerRepo != nil {
@@ -464,19 +461,18 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 	}
 
 	// Format as TFE Agent shape: id, name, ip-address, status, last-ping-at
-	data := make([]gin.H, 0, len(runners))
+	data := make([]jsonapi.Resource[AgentAttributes], 0, len(runners))
 	for _, r := range runners {
-		agent := gin.H{
-			"id":   r.ID.String(),
-			"type": "agents",
-			"attributes": gin.H{
-				"name":         r.Name,
-				"ip-address":   r.IPAddress,
-				"status":       string(r.Status),
-				"last-ping-at": r.LastHeartbeatAt,
+		data = append(data, jsonapi.Resource[AgentAttributes]{
+			ID:   r.ID.String(),
+			Type: "agents",
+			Attributes: AgentAttributes{
+				Name:       r.Name,
+				IPAddress:  r.IPAddress,
+				Status:     string(r.Status),
+				LastPingAt: r.LastHeartbeatAt,
 			},
-		}
-		data = append(data, agent)
+		})
 	}
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(1, 20, int64(len(data))))
 }
@@ -560,16 +556,16 @@ func (h *AgentPoolHandlerV2) QueueDepth(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "queue-depths",
-		"id":   id.String(),
-		"attributes": gin.H{
-			"pending-terraform-jobs": depth.PendingTerraformJobs,
-			"pending-ansible-jobs":   depth.PendingAnsibleJobs,
-			"total-pending":          depth.TotalPending,
-			"busy-runners":           depth.BusyRunners,
-			"total-runners":          depth.TotalRunners,
-			"idle-runners":           depth.IdleRunners,
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[QueueDepthAttributes]{
+		ID:   id.String(),
+		Type: "queue-depths",
+		Attributes: QueueDepthAttributes{
+			PendingTerraformJobs: depth.PendingTerraformJobs,
+			PendingAnsibleJobs:   depth.PendingAnsibleJobs,
+			TotalPending:         depth.TotalPending,
+			BusyRunners:          depth.BusyRunners,
+			TotalRunners:         depth.TotalRunners,
+			IdleRunners:          depth.IdleRunners,
 		},
 	})
 }

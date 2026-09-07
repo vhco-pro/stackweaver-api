@@ -140,45 +140,41 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 	}
 
 	// Format response
-	activitiesData := make([]gin.H, len(activities))
+	activitiesData := make([]jsonapi.Resource[ActivityAttributes], len(activities))
 	for i, act := range activities {
-		attrs := gin.H{
-			"action":        act.Action,
-			"resource_type": act.ResourceType,
-			"details":       act.Details,
-			"created_at":    act.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		attrs := ActivityAttributes{
+			Action:       act.Action,
+			ResourceType: act.ResourceType,
+			Details:      act.Details,
+			CreatedAt:    act.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		}
 
 		// Convert UUID pointers to strings (or omit if nil)
 		if act.ResourceID != nil {
-			attrs["resource_id"] = act.ResourceID.String()
+			attrs.ResourceID = act.ResourceID.String()
 		}
 		if act.UserID != nil {
-			attrs["user_id"] = act.UserID.String()
+			attrs.UserID = act.UserID.String()
 		}
 		if act.OrganizationID != nil {
-			attrs["organization_id"] = act.OrganizationID.String()
+			attrs.OrganizationID = act.OrganizationID.String()
 		}
 		if act.ProjectID != nil {
-			attrs["project_id"] = act.ProjectID.String()
+			attrs.ProjectID = act.ProjectID.String()
 		}
 		if act.WorkspaceID != nil {
-			attrs["workspace_id"] = act.WorkspaceID.String()
+			attrs.WorkspaceID = act.WorkspaceID.String()
 		}
 
-		activitiesData[i] = gin.H{
-			"id":         act.ID.String(),
-			"type":       "activity",
-			"attributes": attrs,
+		activitiesData[i] = jsonapi.Resource[ActivityAttributes]{
+			ID:         act.ID.String(),
+			Type:       "activity",
+			Attributes: attrs,
 		}
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, activitiesData, gin.H{
-		"pagination": gin.H{
-			"total":  total,
-			"limit":  limit,
-			"offset": offset,
-		},
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, activitiesData, ActivityPageMeta{
+		Pagination: ActivityPage{Total: total, Limit: limit, Offset: offset},
 	})
 }
 
@@ -212,36 +208,36 @@ func (h *ActivityHandlerV2) GetRecentActivities(c *gin.Context) {
 		return
 	}
 
-	activitiesData := make([]gin.H, len(activities))
+	activitiesData := make([]jsonapi.Resource[ActivityAttributes], len(activities))
 	for i, act := range activities {
-		attrs := gin.H{
-			"action":        act.Action,
-			"resource_type": act.ResourceType,
-			"details":       act.Details,
-			"created_at":    act.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		attrs := ActivityAttributes{
+			Action:       act.Action,
+			ResourceType: act.ResourceType,
+			Details:      act.Details,
+			CreatedAt:    act.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		}
 
 		// Convert UUID pointers to strings (or omit if nil)
 		if act.ResourceID != nil {
-			attrs["resource_id"] = act.ResourceID.String()
+			attrs.ResourceID = act.ResourceID.String()
 		}
 		if act.UserID != nil {
-			attrs["user_id"] = act.UserID.String()
+			attrs.UserID = act.UserID.String()
 		}
 		if act.OrganizationID != nil {
-			attrs["organization_id"] = act.OrganizationID.String()
+			attrs.OrganizationID = act.OrganizationID.String()
 		}
 		if act.ProjectID != nil {
-			attrs["project_id"] = act.ProjectID.String()
+			attrs.ProjectID = act.ProjectID.String()
 		}
 		if act.WorkspaceID != nil {
-			attrs["workspace_id"] = act.WorkspaceID.String()
+			attrs.WorkspaceID = act.WorkspaceID.String()
 		}
 
-		activitiesData[i] = gin.H{
-			"id":         act.ID.String(),
-			"type":       "activity",
-			"attributes": attrs,
+		activitiesData[i] = jsonapi.Resource[ActivityAttributes]{
+			ID:         act.ID.String(),
+			Type:       "activity",
+			Attributes: attrs,
 		}
 	}
 

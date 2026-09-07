@@ -51,15 +51,15 @@ func (h *PlaybookHandler) resolveTemplateForCredentialOp(c *gin.Context, permiss
 	return template
 }
 
-func formatTemplateCredential(cred *models.AnsibleCredential) gin.H {
-	return gin.H{
-		"id":   cred.ID.String(),
-		"type": "ansible-credentials",
-		"attributes": gin.H{
-			"name":            cred.Name,
-			"credential-type": cred.Type,
-			"vault-id":        cred.VaultID,
-			"username":        cred.Username,
+func formatTemplateCredential(cred *models.AnsibleCredential) jsonapi.Resource[TemplateCredentialAttributes] {
+	return jsonapi.Resource[TemplateCredentialAttributes]{
+		ID:   cred.ID.String(),
+		Type: "ansible-credentials",
+		Attributes: TemplateCredentialAttributes{
+			Name:           cred.Name,
+			CredentialType: cred.Type,
+			VaultID:        cred.VaultID,
+			Username:       cred.Username,
 		},
 	}
 }
@@ -77,16 +77,16 @@ func (h *PlaybookHandler) GetTemplateAccess(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to compute team access")
 		return
 	}
-	data := make([]gin.H, 0, len(access))
+	data := make([]jsonapi.Resource[TeamAccessAttributes], 0, len(access))
 	for _, a := range access {
-		data = append(data, gin.H{
-			"id":   a.TeamID.String(),
-			"type": "team-access",
-			"attributes": gin.H{
-				"team-name": a.TeamName,
-				"read":      a.Read,
-				"write":     a.Write,
-				"execute":   a.Execute,
+		data = append(data, jsonapi.Resource[TeamAccessAttributes]{
+			ID:   a.TeamID.String(),
+			Type: "team-access",
+			Attributes: TeamAccessAttributes{
+				TeamName: a.TeamName,
+				Read:     a.Read,
+				Write:    a.Write,
+				Execute:  a.Execute,
 			},
 		})
 	}
@@ -105,7 +105,7 @@ func (h *PlaybookHandler) ListTemplateCredentials(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list credentials")
 		return
 	}
-	data := make([]gin.H, 0, len(creds))
+	data := make([]jsonapi.Resource[TemplateCredentialAttributes], 0, len(creds))
 	for i := range creds {
 		data = append(data, formatTemplateCredential(&creds[i]))
 	}

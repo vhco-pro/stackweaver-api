@@ -65,25 +65,23 @@ type UpdateAWSOIDCConfigRequest struct {
 }
 
 // formatAWSOIDCConfigResponse formats an AWS OIDC configuration as a JSON:API response.
-func formatAWSOIDCConfigResponse(config *models.AWSOIDCConfiguration) gin.H {
+func formatAWSOIDCConfigResponse(config *models.AWSOIDCConfiguration) jsonapi.Resource[AWSOIDCConfigAttributes] {
 	orgName := ""
 	if config.Organization != nil {
 		orgName = config.Organization.Name
 	}
 
-	return gin.H{
-		"id":   config.ID,
-		"type": awsOIDCConfigType,
-		"attributes": gin.H{
-			"role-arn": config.RoleARN,
+	return jsonapi.Resource[AWSOIDCConfigAttributes]{
+		ID:   config.ID,
+		Type: awsOIDCConfigType,
+		Attributes: AWSOIDCConfigAttributes{
+			RoleARN: config.RoleARN,
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{"id": orgName, "type": "organizations"},
-			},
+		Relationships: WorkspaceOnlyRelationshipsNamed{
+			Organization: jsonapi.ToOne(orgName, "organizations"),
 		},
-		"links": gin.H{
-			"self": "/api/v2/oidc-configurations/" + config.ID,
+		Links: jsonapi.SelfLink{
+			Self: "/api/v2/oidc-configurations/" + config.ID,
 		},
 	}
 }
@@ -234,12 +232,12 @@ func (h *AWSOIDCConfigurationHandlerV2) loadAuthorized(c *gin.Context) (*models.
 
 // listData returns the org's AWS OIDC configs formatted as JSON:API resource objects (used by the
 // dispatcher's merged List).
-func (h *AWSOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]gin.H, error) {
+func (h *AWSOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]jsonapi.Resource[AWSOIDCConfigAttributes], error) {
 	configs, err := h.configRepo.GetByOrganization(orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]gin.H, 0, len(configs))
+	out := make([]jsonapi.Resource[AWSOIDCConfigAttributes], 0, len(configs))
 	for i := range configs {
 		out = append(out, formatAWSOIDCConfigResponse(&configs[i]))
 	}

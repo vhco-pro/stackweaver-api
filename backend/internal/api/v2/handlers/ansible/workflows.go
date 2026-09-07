@@ -178,7 +178,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, len(workflows))
+	data := make([]*WorkflowResource, len(workflows))
 	for i, w := range workflows {
 		data[i] = formatWorkflowResponse(&w)
 	}
@@ -311,17 +311,17 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 	response := formatWorkflowResponse(workflow)
 
 	// Add nodes and edges
-	nodesData := make([]gin.H, len(workflow.Nodes))
+	nodesData := make([]jsonapi.Resource[WorkflowNodeAttributes], len(workflow.Nodes))
 	for i, node := range workflow.Nodes {
 		nodesData[i] = formatNodeResponse(&node)
 	}
-	response["relationships"].(gin.H)["nodes"] = gin.H{"data": nodesData}
+	response.Relationships.Nodes = &WorkflowNodesRelationship{Data: nodesData}
 
-	edgesData := make([]gin.H, len(edges))
+	edgesData := make([]jsonapi.Resource[WorkflowEdgeAttributes], len(edges))
 	for i, edge := range edges {
 		edgesData[i] = formatEdgeResponse(&edge)
 	}
-	response["relationships"].(gin.H)["edges"] = gin.H{"data": edgesData}
+	response.Relationships.Edges = &WorkflowEdgesRelationship{Data: edgesData}
 
 	jsonapi.WriteDocument(c, http.StatusOK, response)
 }
@@ -575,7 +575,7 @@ func (h *WorkflowHandler) ListNodes(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, len(nodes))
+	data := make([]jsonapi.Resource[WorkflowNodeAttributes], len(nodes))
 	for i, node := range nodes {
 		data[i] = formatNodeResponse(&node)
 	}
@@ -819,7 +819,7 @@ func (h *WorkflowHandler) ListEdges(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, len(edges))
+	data := make([]jsonapi.Resource[WorkflowEdgeAttributes], len(edges))
 	for i, edge := range edges {
 		data[i] = formatEdgeResponse(&edge)
 	}
@@ -884,113 +884,92 @@ func (h *WorkflowHandler) DeleteEdge(c *gin.Context) {
 // Response formatters
 // ============================================================================
 
-func formatWorkflowResponse(w *models.AnsibleWorkflow) gin.H {
-	response := gin.H{
-		"type": "ansible-workflows",
-		"id":   w.ID.String(),
-		"attributes": gin.H{
-			"name":                    w.Name,
-			"description":             w.Description,
-			"allow-simultaneous":      w.AllowSimultaneous,
-			"ask-variables-on-launch": w.AskVariablesOnLaunch,
-			"ask-inventory-on-launch": w.AskInventoryOnLaunch,
-			"ask-limit-on-launch":     w.AskLimitOnLaunch,
-			"extra-vars":              string(w.ExtraVars),
-			"limit":                   w.Limit,
-			"survey-enabled":          w.SurveyEnabled,
-			"created-at":              w.CreatedAt,
-			"updated-at":              w.UpdatedAt,
-		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{"type": "organizations", "id": w.OrganizationID.String()},
-			},
-		},
+func formatWorkflowResponse(w *models.AnsibleWorkflow) *WorkflowResource {
+	rels := &WorkflowRelationships{
+		Organization: jsonapi.ToOne(w.OrganizationID.String(), "organizations"),
 	}
-
 	if w.ProjectID != uuid.Nil {
-		response["relationships"].(gin.H)["project"] = gin.H{
-			"data": gin.H{"type": "projects", "id": w.ProjectID.String()},
-		}
+		r := jsonapi.ToOne(w.ProjectID.String(), "projects")
+		rels.Project = &r
 	}
-
 	if w.InventoryID != nil {
-		response["relationships"].(gin.H)["inventory"] = gin.H{
-			"data": gin.H{"type": "ansible-inventories", "id": w.InventoryID.String()},
-		}
+		r := jsonapi.ToOne(w.InventoryID.String(), "ansible-inventories")
+		rels.Inventory = &r
 	}
-
-	return response
+	return &WorkflowResource{
+		ID:   w.ID.String(),
+		Type: "ansible-workflows",
+		Attributes: WorkflowAttributes{
+			Name:                 w.Name,
+			Description:          w.Description,
+			AllowSimultaneous:    w.AllowSimultaneous,
+			AskVariablesOnLaunch: w.AskVariablesOnLaunch,
+			AskInventoryOnLaunch: w.AskInventoryOnLaunch,
+			AskLimitOnLaunch:     w.AskLimitOnLaunch,
+			ExtraVars:            string(w.ExtraVars),
+			Limit:                w.Limit,
+			SurveyEnabled:        w.SurveyEnabled,
+			CreatedAt:            w.CreatedAt,
+			UpdatedAt:            w.UpdatedAt,
+		},
+		Relationships: rels,
+	}
 }
 
-func formatNodeResponse(n *models.AnsibleWorkflowNode) gin.H {
-	response := gin.H{
-		"type": "ansible-workflow-nodes",
-		"id":   n.ID.String(),
-		"attributes": gin.H{
-			"node-type":                 string(n.NodeType),
-			"identifier":                n.Identifier,
-			"position-x":                n.PositionX,
-			"position-y":                n.PositionY,
-			"extra-vars":                string(n.ExtraVars),
-			"limit":                     n.Limit,
-			"tags":                      n.Tags,
-			"skip-tags":                 n.SkipTags,
-			"verbosity":                 n.Verbosity,
-			"all-parents-must-converge": n.AllParentsMustConverge,
-			"approval-timeout":          n.ApprovalTimeout,
-			"approval-message":          n.ApprovalMessage,
-			"created-at":                n.CreatedAt,
-		},
-		"relationships": gin.H{
-			"workflow": gin.H{
-				"data": gin.H{"type": "ansible-workflows", "id": n.WorkflowID.String()},
-			},
-		},
+func formatNodeResponse(n *models.AnsibleWorkflowNode) jsonapi.Resource[WorkflowNodeAttributes] {
+	attrs := WorkflowNodeAttributes{
+		NodeType:               string(n.NodeType),
+		Identifier:             n.Identifier,
+		PositionX:              n.PositionX,
+		PositionY:              n.PositionY,
+		ExtraVars:              string(n.ExtraVars),
+		Limit:                  n.Limit,
+		Tags:                   n.Tags,
+		SkipTags:               n.SkipTags,
+		Verbosity:              n.Verbosity,
+		AllParentsMustConverge: n.AllParentsMustConverge,
+		ApprovalTimeout:        n.ApprovalTimeout,
+		ApprovalMessage:        n.ApprovalMessage,
+		CreatedAt:              n.CreatedAt,
 	}
-
+	rels := WorkflowNodeRelationships{
+		Workflow: jsonapi.ToOne(n.WorkflowID.String(), "ansible-workflows"),
+	}
 	if n.JobTemplateID != nil {
-		response["relationships"].(gin.H)["job-template"] = gin.H{
-			"data": gin.H{"type": "ansible-job-templates", "id": n.JobTemplateID.String()},
-		}
+		r := jsonapi.ToOne(n.JobTemplateID.String(), "ansible-job-templates")
+		rels.JobTemplate = &r
 		if n.JobTemplate != nil {
-			response["attributes"].(gin.H)["job-template-name"] = n.JobTemplate.Name
+			attrs.JobTemplateName = n.JobTemplate.Name
 		}
 	}
-
 	if n.InventoryID != nil {
-		response["relationships"].(gin.H)["inventory"] = gin.H{
-			"data": gin.H{"type": "ansible-inventories", "id": n.InventoryID.String()},
-		}
+		r := jsonapi.ToOne(n.InventoryID.String(), "ansible-inventories")
+		rels.Inventory = &r
 	}
-
 	if n.CredentialID != nil {
-		response["relationships"].(gin.H)["credential"] = gin.H{
-			"data": gin.H{"type": "ansible-credentials", "id": n.CredentialID.String()},
-		}
+		r := jsonapi.ToOne(n.CredentialID.String(), "ansible-credentials")
+		rels.Credential = &r
 	}
-
-	return response
+	return jsonapi.Resource[WorkflowNodeAttributes]{
+		ID:            n.ID.String(),
+		Type:          "ansible-workflow-nodes",
+		Attributes:    attrs,
+		Relationships: rels,
+	}
 }
 
-func formatEdgeResponse(e *models.AnsibleWorkflowEdge) gin.H {
-	return gin.H{
-		"type": "ansible-workflow-edges",
-		"id":   e.ID.String(),
-		"attributes": gin.H{
-			"condition":  string(e.Condition),
-			"created-at": e.CreatedAt,
+func formatEdgeResponse(e *models.AnsibleWorkflowEdge) jsonapi.Resource[WorkflowEdgeAttributes] {
+	return jsonapi.Resource[WorkflowEdgeAttributes]{
+		ID:   e.ID.String(),
+		Type: "ansible-workflow-edges",
+		Attributes: WorkflowEdgeAttributes{
+			Condition: string(e.Condition),
+			CreatedAt: e.CreatedAt,
 		},
-		"relationships": gin.H{
-			"workflow": gin.H{
-				"data": gin.H{"type": "ansible-workflows", "id": e.WorkflowID.String()},
-			},
-			"source-node": gin.H{
-				"data": gin.H{"type": "ansible-workflow-nodes", "id": e.SourceNodeID.String()},
-			},
-			"target-node": gin.H{
-				"data": gin.H{"type": "ansible-workflow-nodes", "id": e.TargetNodeID.String()},
-			},
+		Relationships: WorkflowEdgeRelationships{
+			Workflow:   jsonapi.ToOne(e.WorkflowID.String(), "ansible-workflows"),
+			SourceNode: jsonapi.ToOne(e.SourceNodeID.String(), "ansible-workflow-nodes"),
+			TargetNode: jsonapi.ToOne(e.TargetNodeID.String(), "ansible-workflow-nodes"),
 		},
 	}
 }

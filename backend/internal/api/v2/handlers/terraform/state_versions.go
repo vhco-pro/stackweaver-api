@@ -13,6 +13,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -173,15 +174,11 @@ func (h *StateVersionHandlerV2) CurrentStateVersion(c *gin.Context) {
 	attrs := buildStateVersionAttributes(version)
 	attrs["hosted-state-download-url"] = h.hostedStateDownloadURL(c, version)
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":         version.ID,
-		"type":       "state-versions",
-		"attributes": attrs,
-		"relationships": gin.H{
-			"workspace": gin.H{
-				"data": gin.H{"id": version.WorkspaceID, "type": "workspaces"},
-			},
-		},
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[map[string]interface{}]{
+		ID:            version.ID,
+		Type:          "state-versions",
+		Attributes:    attrs,
+		Relationships: WorkspaceOnlyRelationships{Workspace: jsonapi.ToOne(version.WorkspaceID, "workspaces")},
 	})
 }
 
@@ -227,18 +224,11 @@ func (h *StateVersionHandlerV2) Get(c *gin.Context) {
 	attrs := buildStateVersionAttributes(version)
 	attrs["hosted-state-download-url"] = h.hostedStateDownloadURL(c, version)
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":         version.ID,
-		"type":       "state-versions",
-		"attributes": attrs,
-		"relationships": gin.H{
-			"workspace": gin.H{
-				"data": gin.H{
-					"id":   version.WorkspaceID,
-					"type": "workspaces",
-				},
-			},
-		},
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[map[string]interface{}]{
+		ID:            version.ID,
+		Type:          "state-versions",
+		Attributes:    attrs,
+		Relationships: WorkspaceOnlyRelationships{Workspace: jsonapi.ToOne(version.WorkspaceID, "workspaces")},
 	})
 }
 
@@ -416,7 +406,7 @@ func (h *StateVersionHandlerV2) CurrentStateVersionResources(c *gin.Context) {
 		return
 	}
 	mode := c.Query("mode")
-	resources := []gin.H{}
+	resources := []jsonapi.Resource[StateVersionResourceAttributes]{}
 	if h.stateResourceRepo != nil {
 		rows, listErr := h.stateResourceRepo.ListByStateVersion(version.ID, mode)
 		if listErr != nil {
@@ -429,20 +419,20 @@ func (h *StateVersionHandlerV2) CurrentStateVersionResources(c *gin.Context) {
 }
 
 // buildMaterializedResources renders state-version-resources JSON:API objects from rows.
-func buildMaterializedResources(rows []models.StateVersionResource) []gin.H {
-	result := []gin.H{}
+func buildMaterializedResources(rows []models.StateVersionResource) []jsonapi.Resource[StateVersionResourceAttributes] {
+	result := []jsonapi.Resource[StateVersionResourceAttributes]{}
 	for _, r := range rows {
-		result = append(result, gin.H{
-			"id":   r.ID,
-			"type": "state-version-resources",
-			"attributes": gin.H{
-				"address":        r.Address,
-				"mode":           r.Mode,
-				"type":           r.Type,
-				"name":           r.Name,
-				"provider":       r.Provider,
-				"module":         r.Module,
-				"instance-count": r.InstanceCount,
+		result = append(result, jsonapi.Resource[StateVersionResourceAttributes]{
+			ID:   r.ID,
+			Type: "state-version-resources",
+			Attributes: StateVersionResourceAttributes{
+				Address:       r.Address,
+				Mode:          r.Mode,
+				Type:          r.Type,
+				Name:          r.Name,
+				Provider:      r.Provider,
+				Module:        r.Module,
+				InstanceCount: r.InstanceCount,
 			},
 		})
 	}
@@ -453,13 +443,13 @@ func buildMaterializedResources(rows []models.StateVersionResource) []gin.H {
 // materialized state_version_outputs table (State Storage Rework - the single source of truth).
 // cryptoSvc decrypts sensitive output values stored encrypted at rest (#95); pass nil when
 // encryption is disabled.
-func materializedOutputs(repo *repository.StateVersionOutputRepository, version *models.StateVersion, maskSensitive bool, cryptoSvc *crypto.CryptoService) []gin.H {
+func materializedOutputs(repo *repository.StateVersionOutputRepository, version *models.StateVersion, maskSensitive bool, cryptoSvc *crypto.CryptoService) []jsonapi.Resource[StateVersionOutputAttributes] {
 	if repo == nil || version == nil {
-		return []gin.H{}
+		return []jsonapi.Resource[StateVersionOutputAttributes]{}
 	}
 	outs, err := repo.ListByStateVersion(version.ID)
 	if err != nil {
-		return []gin.H{}
+		return []jsonapi.Resource[StateVersionOutputAttributes]{}
 	}
 	return buildMaterializedOutputs(outs, maskSensitive, cryptoSvc)
 }
@@ -470,8 +460,8 @@ func materializedOutputs(repo *repository.StateVersionOutputRepository, version 
 // are decrypted with cryptoSvc first; if a value is encrypted and cannot be decrypted
 // (no key) it is nulled so ciphertext never leaks. Sensitive values are nulled when
 // maskSensitive.
-func buildMaterializedOutputs(outs []models.StateVersionOutput, maskSensitive bool, cryptoSvc *crypto.CryptoService) []gin.H {
-	result := []gin.H{}
+func buildMaterializedOutputs(outs []models.StateVersionOutput, maskSensitive bool, cryptoSvc *crypto.CryptoService) []jsonapi.Resource[StateVersionOutputAttributes] {
+	result := []jsonapi.Resource[StateVersionOutputAttributes]{}
 	for _, o := range outs {
 		raw := o.Value
 		if o.ValueEncrypted {
@@ -490,17 +480,17 @@ func buildMaterializedOutputs(outs []models.StateVersionOutput, maskSensitive bo
 		if maskSensitive && o.Sensitive {
 			value = nil
 		}
-		attrs := gin.H{"name": o.Name, "value": value, "sensitive": o.Sensitive}
+		attrs := StateVersionOutputAttributes{Name: o.Name, Value: value, Sensitive: o.Sensitive}
 		if o.Type != "" {
 			var t any
 			if err := json.Unmarshal([]byte(o.Type), &t); err == nil {
-				attrs["type"] = t
+				attrs.Type = t
 			}
 		}
-		result = append(result, gin.H{
-			"id":         o.ID,
-			"type":       "state-version-outputs",
-			"attributes": attrs,
+		result = append(result, jsonapi.Resource[StateVersionOutputAttributes]{
+			ID:         o.ID,
+			Type:       "state-version-outputs",
+			Attributes: attrs,
 		})
 	}
 	return result
@@ -607,18 +597,11 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":         stateVersion.ID,
-		"type":       "state-versions",
-		"attributes": stateVersion,
-		"relationships": gin.H{
-			"workspace": gin.H{
-				"data": gin.H{
-					"id":   workspaceID,
-					"type": "workspaces",
-				},
-			},
-		},
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[*models.StateVersion]{
+		ID:            stateVersion.ID,
+		Type:          "state-versions",
+		Attributes:    stateVersion,
+		Relationships: WorkspaceOnlyRelationships{Workspace: jsonapi.ToOne(workspaceID, "workspaces")},
 	})
 }
 
@@ -689,8 +672,8 @@ func (h *StateVersionHandlerV2) RemoveResource(c *gin.Context) {
 	}
 
 	// Return success
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Resource %s removed from state", req.Address),
+	jsonapi.WriteDocument(c, http.StatusOK, response.MessageResponse{
+		Message: fmt.Sprintf("Resource %s removed from state", req.Address),
 	})
 }
 

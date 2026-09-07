@@ -1636,7 +1636,7 @@ func (h *PlaybookHandler) DeleteTemplate(c *gin.Context) {
 }
 
 // formatPlaybookResponse formats a playbook for JSON:API response
-func formatPlaybookResponse(playbook *models.AnsiblePlaybook) gin.H {
+func formatPlaybookResponse(playbook *models.AnsiblePlaybook) jsonapi.Resource[PlaybookAttributes] {
 	// Derive VCS provider and account name from the preloaded VCSConnection
 	vcsProvider := ""
 	vcsAccountName := ""
@@ -1645,62 +1645,51 @@ func formatPlaybookResponse(playbook *models.AnsiblePlaybook) gin.H {
 		vcsAccountName = playbook.VCSConnection.AccountName
 	}
 
-	attributes := gin.H{
-		"name":              playbook.Name,
-		"description":       playbook.Description,
-		"vcs-repository":    playbook.VCSRepository,
-		"vcs-branch":        playbook.VCSBranch,
-		"vcs-provider":      vcsProvider,
-		"vcs-account-name":  vcsAccountName,
-		"playbook-path":     playbook.PlaybookPath,
-		"source-mode":       playbook.SourceMode,
-		"last-sync-at":      nil,
-		"last-sync-status":  playbook.LastSyncStatus,
-		"last-sync-commit":  playbook.LastSyncCommit,
-		"last-sync-error":   playbook.LastSyncError,
-		"cached-commit":     playbook.CachedCommit,
-		"cached-at":         nil,
-		"cached-size-bytes": playbook.CachedSizeBytes,
-		"created-at":        playbook.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"updated-at":        playbook.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	attributes := PlaybookAttributes{
+		Name:            playbook.Name,
+		Description:     playbook.Description,
+		VCSRepository:   playbook.VCSRepository,
+		VCSBranch:       playbook.VCSBranch,
+		VCSProvider:     vcsProvider,
+		VCSAccountName:  vcsAccountName,
+		PlaybookPath:    playbook.PlaybookPath,
+		SourceMode:      playbook.SourceMode,
+		LastSyncStatus:  playbook.LastSyncStatus,
+		LastSyncCommit:  playbook.LastSyncCommit,
+		LastSyncError:   playbook.LastSyncError,
+		CachedCommit:    playbook.CachedCommit,
+		CachedSizeBytes: playbook.CachedSizeBytes,
+		CreatedAt:       playbook.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:       playbook.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
-
 	if playbook.LastSyncAt != nil {
-		attributes["last-sync-at"] = playbook.LastSyncAt.Format("2006-01-02T15:04:05Z")
+		v := playbook.LastSyncAt.Format("2006-01-02T15:04:05Z")
+		attributes.LastSyncAt = &v
 	}
 	if playbook.CachedAt != nil {
-		attributes["cached-at"] = playbook.CachedAt.Format("2006-01-02T15:04:05Z")
+		v := playbook.CachedAt.Format("2006-01-02T15:04:05Z")
+		attributes.CachedAt = &v
 	}
 
-	relationships := gin.H{
-		"project": gin.H{
-			"data": gin.H{
-				"id":   playbook.ProjectID.String(),
-				"type": "projects",
-			},
-		},
+	relationships := PlaybookRelationships{
+		Project: jsonapi.ToOne(playbook.ProjectID.String(), "projects"),
 	}
-
 	if playbook.VCSConnectionID != nil {
-		relationships["vcs-connection"] = gin.H{
-			"data": gin.H{
-				"id":   playbook.VCSConnectionID.String(),
-				"type": "vcs-connections",
-			},
-		}
+		r := jsonapi.ToOne(playbook.VCSConnectionID.String(), "vcs-connections")
+		relationships.VCSConnection = &r
 	}
 
-	return gin.H{
-		"id":            playbook.ID.String(),
-		"type":          "ansible-playbooks",
-		"attributes":    attributes,
-		"relationships": relationships,
+	return jsonapi.Resource[PlaybookAttributes]{
+		ID:            playbook.ID.String(),
+		Type:          "ansible-playbooks",
+		Attributes:    attributes,
+		Relationships: relationships,
 	}
 }
 
 // formatPlaybooksResponse formats multiple playbooks for JSON:API response
-func formatPlaybooksResponse(playbooks []models.AnsiblePlaybook) []gin.H {
-	result := make([]gin.H, len(playbooks))
+func formatPlaybooksResponse(playbooks []models.AnsiblePlaybook) []jsonapi.Resource[PlaybookAttributes] {
+	result := make([]jsonapi.Resource[PlaybookAttributes], len(playbooks))
 	for i, playbook := range playbooks {
 		result[i] = formatPlaybookResponse(&playbook)
 	}
@@ -1738,79 +1727,58 @@ func (h *PlaybookHandler) applyTemplateCredentials(c *gin.Context, template *mod
 	_ = c
 }
 
-func formatJobTemplateResponse(template *models.AnsibleJobTemplate) gin.H {
-	relationships := gin.H{
-		"project": gin.H{
-			"data": gin.H{
-				"id":   template.ProjectID.String(),
-				"type": "projects",
-			},
-		},
-		"playbook": gin.H{
-			"data": gin.H{
-				"id":   template.PlaybookID.String(),
-				"type": "ansible-playbooks",
-			},
-		},
-		"inventory": gin.H{
-			"data": gin.H{
-				"id":   template.InventoryID.String(),
-				"type": "ansible-inventories",
-			},
-		},
+func formatJobTemplateResponse(template *models.AnsibleJobTemplate) jsonapi.Resource[JobTemplateAttributes] {
+	relationships := JobTemplateRelationships{
+		Project:   jsonapi.ToOne(template.ProjectID.String(), "projects"),
+		Playbook:  jsonapi.ToOne(template.PlaybookID.String(), "ansible-playbooks"),
+		Inventory: jsonapi.ToOne(template.InventoryID.String(), "ansible-inventories"),
 	}
-
 	if len(template.Credentials) > 0 {
-		refs := make([]gin.H, 0, len(template.Credentials))
+		refs := make([]jsonapi.ResourceID, 0, len(template.Credentials))
 		for _, cred := range template.Credentials {
-			refs = append(refs, gin.H{"id": cred.ID.String(), "type": "ansible-credentials"})
+			refs = append(refs, jsonapi.ResourceID{ID: cred.ID.String(), Type: "ansible-credentials"})
 		}
-		relationships["credentials"] = gin.H{"data": refs}
+		relationships.Credentials = &jsonapi.ManyRelationship{Data: refs}
 	}
-
 	if template.AgentPoolID != nil {
-		relationships["agent-pool"] = gin.H{
-			"data": gin.H{
-				"id":   template.AgentPoolID.String(),
-				"type": "agent-pools",
-			},
-		}
+		r := jsonapi.ToOne(template.AgentPoolID.String(), "agent-pools")
+		relationships.AgentPool = &r
 	}
 
-	return gin.H{
-		"id":   template.ID.String(),
-		"type": "ansible-job-templates",
-		"attributes": gin.H{
-			"name":               template.Name,
-			"description":        template.Description,
-			"extra-vars":         template.ExtraVars,
-			"limit":              template.Limit,
-			"tags":               template.Tags,
-			"skip-tags":          template.SkipTags,
-			"verbosity":          template.Verbosity,
-			"forks":              template.Forks,
-			"become-enabled":     template.BecomeEnabled,
-			"diff-mode":          template.DiffMode,
-			"schedule-enabled":   template.ScheduleEnabled,
-			"schedule-cron":      template.ScheduleCron,
-			"enabled":            !template.Disabled,
-			"timeout-seconds":    template.TimeoutSeconds,
-			"allow-simultaneous": template.AllowSimultaneous,
-			"retention-days":     template.RetentionDays,
-			"job-slice-count":    template.JobSliceCount,
-			"allow-callbacks":    template.AllowCallbacks,
-			"launch-on-webhook":  template.LaunchOnWebhook,
-			"host-config-key":    template.HostConfigKey,
-			"created-at":         template.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":         template.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	return jsonapi.Resource[JobTemplateAttributes]{
+		ID:   template.ID.String(),
+		Type: "ansible-job-templates",
+		Attributes: JobTemplateAttributes{
+			Name:              template.Name,
+			Description:       template.Description,
+			ExtraVars:         template.ExtraVars,
+			Limit:             template.Limit,
+			Tags:              template.Tags,
+			SkipTags:          template.SkipTags,
+			Verbosity:         template.Verbosity,
+			Forks:             template.Forks,
+			BecomeEnabled:     template.BecomeEnabled,
+			DiffMode:          template.DiffMode,
+			ScheduleEnabled:   template.ScheduleEnabled,
+			ScheduleCron:      template.ScheduleCron,
+			Enabled:           !template.Disabled,
+			TimeoutSeconds:    template.TimeoutSeconds,
+			AllowSimultaneous: template.AllowSimultaneous,
+			RetentionDays:     template.RetentionDays,
+			JobSliceCount:     template.JobSliceCount,
+			AllowCallbacks:    template.AllowCallbacks,
+			LaunchOnWebhook:   template.LaunchOnWebhook,
+			HostConfigKey:     template.HostConfigKey,
+			CreatedAt:         template.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:         template.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		},
-		"relationships": relationships,
+		Relationships: relationships,
 	}
 }
 
 // formatJobTemplatesResponse formats multiple job templates for JSON:API response
-func formatJobTemplatesResponse(templates []models.AnsibleJobTemplate) []gin.H {
-	result := make([]gin.H, len(templates))
+func formatJobTemplatesResponse(templates []models.AnsibleJobTemplate) []jsonapi.Resource[JobTemplateAttributes] {
+	result := make([]jsonapi.Resource[JobTemplateAttributes], len(templates))
 	for i, template := range templates {
 		result[i] = formatJobTemplateResponse(&template)
 	}

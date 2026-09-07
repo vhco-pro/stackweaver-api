@@ -210,15 +210,15 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 	_ = req.VCSConnectionID != nil && req.AutoPublishTags && h.githubAppManager != nil && h.githubAppManager.IsEnabled()
 
 	// Format response (TFE-compatible)
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   module.ID.String(),
-		"type": "registry-modules",
-		"attributes": gin.H{
-			"name":              module.Name,
-			"provider":          module.Provider,
-			"description":       module.Description,
-			"vcs_repository":    module.VCSRepository,
-			"auto_publish_tags": module.AutoPublishTags,
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[PublishedModuleAttributes]{
+		ID:   module.ID.String(),
+		Type: "registry-modules",
+		Attributes: PublishedModuleAttributes{
+			Name:            module.Name,
+			Provider:        module.Provider,
+			Description:     module.Description,
+			VCSRepository:   module.VCSRepository,
+			AutoPublishTags: module.AutoPublishTags,
 		},
 	})
 }
@@ -296,7 +296,7 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 	}
 
 	// Format response
-	data := make([]gin.H, len(modules))
+	data := make([]jsonapi.Resource[PublishedModuleAttributes], len(modules))
 	for i, m := range modules {
 		// Get latest version for this module
 		var latestVersion string
@@ -312,24 +312,25 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 			downloads = versions[0].Downloads
 		}
 
-		listAttrs := gin.H{
-			"name":              m.Name,
-			"provider":          m.Provider,
-			"description":       m.Description,
-			"vcs_repository":    m.VCSRepository,
-			"auto_publish_tags": m.AutoPublishTags,
-			"latest_version":    latestVersion,
-			"published_at":      publishedAt.Format("2006-01-02T15:04:05Z"),
-			"downloads":         downloads,
+		published := publishedAt.Format("2006-01-02T15:04:05Z")
+		listAttrs := PublishedModuleAttributes{
+			Name:            m.Name,
+			Provider:        m.Provider,
+			Description:     m.Description,
+			VCSRepository:   m.VCSRepository,
+			AutoPublishTags: m.AutoPublishTags,
+			LatestVersion:   &latestVersion,
+			PublishedAt:     &published,
+			Downloads:       &downloads,
 		}
 		if m.VCSConnection != nil {
-			listAttrs["vcs_provider"] = string(m.VCSConnection.Provider)
-			listAttrs["vcs_account_name"] = m.VCSConnection.AccountName
+			listAttrs.VCSProvider = string(m.VCSConnection.Provider)
+			listAttrs.VCSAccountName = m.VCSConnection.AccountName
 		}
-		data[i] = gin.H{
-			"id":         m.ID.String(),
-			"type":       "registry-modules",
-			"attributes": listAttrs,
+		data[i] = jsonapi.Resource[PublishedModuleAttributes]{
+			ID:         m.ID.String(),
+			Type:       "registry-modules",
+			Attributes: listAttrs,
 		}
 	}
 
@@ -354,22 +355,22 @@ func (h *RegistryPublishingHandler) GetModule(c *gin.Context) {
 		return
 	}
 
-	attrs := gin.H{
-		"name":              module.Name,
-		"provider":          module.Provider,
-		"description":       module.Description,
-		"vcs_repository":    module.VCSRepository,
-		"auto_publish_tags": module.AutoPublishTags,
+	attrs := PublishedModuleAttributes{
+		Name:            module.Name,
+		Provider:        module.Provider,
+		Description:     module.Description,
+		VCSRepository:   module.VCSRepository,
+		AutoPublishTags: module.AutoPublishTags,
 	}
 	if module.VCSConnection != nil {
-		attrs["vcs_provider"] = string(module.VCSConnection.Provider)
-		attrs["vcs_account_name"] = module.VCSConnection.AccountName
+		attrs.VCSProvider = string(module.VCSConnection.Provider)
+		attrs.VCSAccountName = module.VCSConnection.AccountName
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":         module.ID.String(),
-		"type":       "registry-modules",
-		"attributes": attrs,
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[PublishedModuleAttributes]{
+		ID:         module.ID.String(),
+		Type:       "registry-modules",
+		Attributes: attrs,
 	})
 }
 
@@ -403,7 +404,7 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 	logger.Infof("ListModuleVersions: Found %d version(s) for module %s/%s/%s", len(versions), orgName, moduleName, provider)
 
 	// Format response (sort by published_at DESC - latest first)
-	data := make([]gin.H, len(versions))
+	data := make([]jsonapi.Resource[PublishedModuleVersionAttributes], len(versions))
 	for i, v := range versions {
 		// Convert JSONB fields to proper format
 		var inputs, outputs, dependencies, resources, submodules interface{}
@@ -423,21 +424,21 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 			submodules = v.Submodules
 		}
 
-		data[i] = gin.H{
-			"id":   v.ID.String(),
-			"type": "module-versions",
-			"attributes": gin.H{
-				"version":      v.Version,
-				"source":       v.Source,
-				"readme":       v.Readme, // Return raw markdown for frontend Shiki rendering
-				"published_at": v.PublishedAt.Format("2006-01-02T15:04:05Z"),
-				"downloads":    v.Downloads,
-				"inputs":       inputs,
-				"outputs":      outputs,
-				"dependencies": dependencies,
-				"resources":    resources,
-				"submodules":   submodules,
-				"tarball_size": v.TarballSize,
+		data[i] = jsonapi.Resource[PublishedModuleVersionAttributes]{
+			ID:   v.ID.String(),
+			Type: "module-versions",
+			Attributes: PublishedModuleVersionAttributes{
+				Version:      v.Version,
+				Source:       v.Source,
+				Readme:       v.Readme, // Return raw markdown for frontend Shiki rendering
+				PublishedAt:  v.PublishedAt.Format("2006-01-02T15:04:05Z"),
+				Downloads:    v.Downloads,
+				Inputs:       inputs,
+				Outputs:      outputs,
+				Dependencies: dependencies,
+				Resources:    resources,
+				Submodules:   submodules,
+				TarballSize:  v.TarballSize,
 			},
 		}
 	}
@@ -511,12 +512,12 @@ func (h *RegistryPublishingHandler) PublishVersion(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   moduleVersion.ID.String(),
-		"type": "registry-module-versions",
-		"attributes": gin.H{
-			"version":      moduleVersion.Version,
-			"published_at": moduleVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[PublishedModuleVersionAckAttributes]{
+		ID:   moduleVersion.ID.String(),
+		Type: "registry-module-versions",
+		Attributes: PublishedModuleVersionAckAttributes{
+			Version:     moduleVersion.Version,
+			PublishedAt: moduleVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
 		},
 	})
 }

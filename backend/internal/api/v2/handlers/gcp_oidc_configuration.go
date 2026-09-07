@@ -69,27 +69,25 @@ type UpdateGCPOIDCConfigRequest struct {
 }
 
 // formatGCPOIDCConfigResponse formats a GCP OIDC configuration as a JSON:API response.
-func formatGCPOIDCConfigResponse(config *models.GCPOIDCConfiguration) gin.H {
+func formatGCPOIDCConfigResponse(config *models.GCPOIDCConfiguration) jsonapi.Resource[GCPOIDCConfigAttributes] {
 	orgName := ""
 	if config.Organization != nil {
 		orgName = config.Organization.Name
 	}
 
-	return gin.H{
-		"id":   config.ID,
-		"type": gcpOIDCConfigType,
-		"attributes": gin.H{
-			"service-account-email":  config.ServiceAccountEmail,
-			"project-number":         config.ProjectNumber,
-			"workload-provider-name": config.WorkloadProviderName,
+	return jsonapi.Resource[GCPOIDCConfigAttributes]{
+		ID:   config.ID,
+		Type: gcpOIDCConfigType,
+		Attributes: GCPOIDCConfigAttributes{
+			ServiceAccountEmail:  config.ServiceAccountEmail,
+			ProjectNumber:        config.ProjectNumber,
+			WorkloadProviderName: config.WorkloadProviderName,
 		},
-		"relationships": gin.H{
-			"organization": gin.H{
-				"data": gin.H{"id": orgName, "type": "organizations"},
-			},
+		Relationships: WorkspaceOnlyRelationshipsNamed{
+			Organization: jsonapi.ToOne(orgName, "organizations"),
 		},
-		"links": gin.H{
-			"self": "/api/v2/oidc-configurations/" + config.ID,
+		Links: jsonapi.SelfLink{
+			Self: "/api/v2/oidc-configurations/" + config.ID,
 		},
 	}
 }
@@ -256,12 +254,12 @@ func (h *GCPOIDCConfigurationHandlerV2) loadAuthorized(c *gin.Context) (*models.
 
 // listData returns the org's GCP OIDC configs formatted as JSON:API resource objects (used by the
 // dispatcher's merged List).
-func (h *GCPOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]gin.H, error) {
+func (h *GCPOIDCConfigurationHandlerV2) listData(orgID uuid.UUID) ([]jsonapi.Resource[GCPOIDCConfigAttributes], error) {
 	configs, err := h.configRepo.GetByOrganization(orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]gin.H, 0, len(configs))
+	out := make([]jsonapi.Resource[GCPOIDCConfigAttributes], 0, len(configs))
 	for i := range configs {
 		out = append(out, formatGCPOIDCConfigResponse(&configs[i]))
 	}

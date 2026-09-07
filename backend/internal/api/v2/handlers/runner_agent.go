@@ -1782,11 +1782,11 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		}
 	}
 
-	response := gin.H{
-		"job_id":            run.ID,
-		"job_type":          "tofu_run",
-		"tofu_version":      tfVersion,
-		"working_directory": run.Workspace.WorkingDirectory,
+	response := AgentJobArtifacts{
+		JobID:            run.ID,
+		JobType:          "tofu_run",
+		TofuVersion:      tfVersion,
+		WorkingDirectory: run.Workspace.WorkingDirectory,
 	}
 
 	// Get configuration tarball from storage if configuration version exists
@@ -1794,7 +1794,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", *run.ConfigurationVersionID)
 		ctx := context.Background()
 		if data, err := h.storageClient.Get(ctx, storageKey); err == nil {
-			response["config_tarball"] = base64.StdEncoding.EncodeToString(data)
+			response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
 		}
 	}
 
@@ -1826,10 +1826,10 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				hasAuth := strings.Contains(repoURL, "@")
 				logger.Infof("VCS clone URL for run %s: hasAuth=%v, repo=%s, branch=%s, provider=%s",
 					runID, hasAuth, run.Workspace.VCSRepository, run.Workspace.VCSBranch, vcsConn.Provider)
-				response["vcs"] = gin.H{
-					"repo_url":   repoURL,
-					"branch":     run.Workspace.VCSBranch,
-					"repository": run.Workspace.VCSRepository,
+				response.VCS = &AgentJobVCS{
+					RepoURL:    repoURL,
+					Branch:     run.Workspace.VCSBranch,
+					Repository: run.Workspace.VCSRepository,
 				}
 			} else {
 				logger.Warnf("VCS clone URL is empty for run %s: provider=%s",
@@ -1852,17 +1852,17 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					hclKeys = append(hclKeys, k)
 				}
 			}
-			response["variables"] = vars
+			response.Variables = vars
 			// AUD-022: tell the self-hosted agent which variables are HCL-typed so it writes them
 			// unquoted in tfvars. Sent as a separate optional field so older agents (which ignore
 			// unknown fields) keep working with the plain string map.
 			if len(hclKeys) > 0 {
-				response["variables_hcl"] = hclKeys
+				response.VariablesHCL = hclKeys
 			}
 		}
 		// Get environment variables (category == "env")
 		if envVars, err := h.variableService.GetEnvironmentVariablesForRun(ctx, run.WorkspaceID); err == nil && len(envVars) > 0 {
-			response["environment_vars"] = envVars
+			response.EnvironmentVars = envVars
 		}
 	}
 
@@ -1903,7 +1903,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					logger.Warnf("Failed to generate OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
 					// Ensure environment_vars map exists
-					envVars, _ := response["environment_vars"].(map[string]string)
+					envVars := response.EnvironmentVars
 					if envVars == nil {
 						envVars = make(map[string]string)
 					}
@@ -1913,7 +1913,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					envVars["ARM_SUBSCRIPTION_ID"] = config.SubscriptionID
 					envVars["ARM_TENANT_ID"] = config.TenantID
 					envVars["ARM_USE_OIDC"] = "true"
-					response["environment_vars"] = envVars
+					response.EnvironmentVars = envVars
 					logger.Infof("Injected OIDC workload identity token for self-hosted runner (run %s, org=%s)", runID, org.Name)
 				}
 			}
@@ -1951,7 +1951,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate AWS OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
-					envVars, _ := response["environment_vars"].(map[string]string)
+					envVars := response.EnvironmentVars
 					if envVars == nil {
 						envVars = make(map[string]string)
 					}
@@ -1959,7 +1959,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					envVars["AWS_ROLE_SESSION_NAME"] = fmt.Sprintf("stackweaver-%s", run.ID)
 					// Raw token: the agent writes it to a file and sets AWS_WEB_IDENTITY_TOKEN_FILE.
 					envVars["AWS_WEB_IDENTITY_TOKEN"] = token
-					response["environment_vars"] = envVars
+					response.EnvironmentVars = envVars
 					logger.Infof("Injected AWS OIDC workload identity for self-hosted runner (run %s, org=%s, role=%s)", runID, org.Name, awsConfig.RoleARN)
 				}
 			}
@@ -2000,7 +2000,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate GCP OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
-					envVars, _ := response["environment_vars"].(map[string]string)
+					envVars := response.EnvironmentVars
 					if envVars == nil {
 						envVars = make(map[string]string)
 					}
@@ -2010,7 +2010,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					envVars["GCP_OIDC_SERVICE_ACCOUNT_EMAIL"] = gcpConfig.ServiceAccountEmail
 					envVars["GCP_OIDC_WORKLOAD_PROVIDER_NAME"] = gcpConfig.WorkloadProviderName
 					envVars["GCP_OIDC_PROJECT_NUMBER"] = gcpConfig.ProjectNumber
-					response["environment_vars"] = envVars
+					response.EnvironmentVars = envVars
 					logger.Infof("Injected GCP OIDC workload identity for self-hosted runner (run %s, org=%s, sa=%s)", runID, org.Name, gcpConfig.ServiceAccountEmail)
 				}
 			}
@@ -2050,7 +2050,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				if tokenErr != nil {
 					logger.Warnf("Failed to generate Vault OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
 				} else {
-					envVars, _ := response["environment_vars"].(map[string]string)
+					envVars := response.EnvironmentVars
 					if envVars == nil {
 						envVars = make(map[string]string)
 					}
@@ -2061,7 +2061,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 					envVars["VAULT_OIDC_NAMESPACE"] = vaultConfig.Namespace
 					envVars["VAULT_OIDC_AUTH_PATH"] = vaultConfig.JWTAuthPath
 					envVars["VAULT_OIDC_ENCODED_CACERT"] = vaultConfig.TLSCACertificate
-					response["environment_vars"] = envVars
+					response.EnvironmentVars = envVars
 					logger.Infof("Injected Vault OIDC workload identity for self-hosted runner (run %s, org=%s, addr=%s)", runID, org.Name, vaultConfig.Address)
 				}
 			}
@@ -2080,7 +2080,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 			// state to plaintext before base64-encoding it into the job payload.
 			ctx := context.Background()
 			if stateData, err := h.stateService.GetStateObject(ctx, run.WorkspaceID, latestState.Version); err == nil && len(stateData) > 0 {
-				response["state_json"] = base64.StdEncoding.EncodeToString(stateData)
+				response.StateJSON = base64.StdEncoding.EncodeToString(stateData)
 				logger.Infof("Including state version %d (%d bytes) in artifacts for run %s", latestState.Version, len(stateData), runID)
 			}
 		}

@@ -209,27 +209,27 @@ func (h *AnalyticsHandler) GetOrganizationAnalytics(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "analytics",
-		"id":   org.Name,
-		"attributes": gin.H{
-			"window": gin.H{
-				"since": window.Since.UTC().Format(time.RFC3339),
-				"until": window.Until.UTC().Format(time.RFC3339),
-				"days":  int(window.Until.Sub(window.Since).Hours()/24 + 0.5),
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[AnalyticsAttributes]{
+		ID:   org.Name,
+		Type: "analytics",
+		Attributes: AnalyticsAttributes{
+			Window: AnalyticsWindowBlock{
+				Since: window.Since.UTC().Format(time.RFC3339),
+				Until: window.Until.UTC().Format(time.RFC3339),
+				Days:  int(window.Until.Sub(window.Since).Hours()/24 + 0.5),
 			},
-			"runs":            outcomePayload(runTotals, runDurations, runTotalsPrev, runDurationsPrev),
-			"ansible_jobs":    outcomePayload(jobTotals, jobDurations, jobTotalsPrev, DurationStatsZero),
-			"daily":           dailyPayload(runDaily, jobDaily, activityDaily, window),
-			"top_workspaces":  topWorkspacePayload(topWorkspaces),
-			"top_templates":   topTemplatePayload(topTemplates),
-			"activity":        activityPayload(activityTotal, activityByAction, activityByResource),
-			"resources":       resources,
-			"recent_failures": failurePayload(runFailures, jobFailures, analyticsFailureLimit),
-			"running_now": gin.H{
-				"runs":  runningRuns,
-				"jobs":  runningJobs,
-				"total": runningRuns + runningJobs,
+			Runs:           outcomePayload(runTotals, runDurations, runTotalsPrev, runDurationsPrev),
+			AnsibleJobs:    outcomePayload(jobTotals, jobDurations, jobTotalsPrev, DurationStatsZero),
+			Daily:          dailyPayload(runDaily, jobDaily, activityDaily, window),
+			TopWorkspaces:  topWorkspacePayload(topWorkspaces),
+			TopTemplates:   topTemplatePayload(topTemplates),
+			Activity:       activityPayload(activityTotal, activityByAction, activityByResource),
+			Resources:      resources,
+			RecentFailures: failurePayload(runFailures, jobFailures, analyticsFailureLimit),
+			RunningNow: AnalyticsRunningNow{
+				Runs:  runningRuns,
+				Jobs:  runningJobs,
+				Total: runningRuns + runningJobs,
 			},
 		},
 	})
@@ -320,36 +320,35 @@ func (h *AnalyticsHandler) GetOrganizationExecutions(c *gin.Context) {
 		truncated = true
 	}
 
-	data := make([]gin.H, 0, len(rows))
+	data := make([]AnalyticsExecutionEntry, 0, len(rows))
 	for _, row := range rows {
-		entry := gin.H{
-			"id":         row.ID,
-			"platform":   row.Platform,
-			"name":       row.Name,
-			"detail":     row.Detail,
-			"status":     row.Status,
-			"outcome":    row.Outcome,
-			"created_at": row.CreatedAt.UTC().Format(time.RFC3339),
-		}
-		if row.WorkspaceName != "" {
-			entry["workspace_name"] = row.WorkspaceName
+		entry := AnalyticsExecutionEntry{
+			ID:            row.ID,
+			Platform:      row.Platform,
+			Name:          row.Name,
+			Detail:        row.Detail,
+			Status:        row.Status,
+			Outcome:       row.Outcome,
+			CreatedAt:     row.CreatedAt.UTC().Format(time.RFC3339),
+			WorkspaceName: row.WorkspaceName,
 		}
 		if row.DurationSeconds != nil {
-			entry["duration_seconds"] = round1(*row.DurationSeconds)
+			d := round1(*row.DurationSeconds)
+			entry.DurationSeconds = &d
 		}
 		data = append(data, entry)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"type": "analytics-executions",
-		"id":   org.Name,
-		"attributes": gin.H{
-			"executions": data,
-			"count":      len(data),
-			"truncated":  truncated,
-			"window": gin.H{
-				"since": window.Since.UTC().Format(time.RFC3339),
-				"until": window.Until.UTC().Format(time.RFC3339),
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[AnalyticsExecutionsAttributes]{
+		ID:   org.Name,
+		Type: "analytics-executions",
+		Attributes: AnalyticsExecutionsAttributes{
+			Executions: data,
+			Count:      len(data),
+			Truncated:  truncated,
+			Window: AnalyticsExecutionsWindow{
+				Since: window.Since.UTC().Format(time.RFC3339),
+				Until: window.Until.UTC().Format(time.RFC3339),
 			},
 		},
 	})
@@ -361,33 +360,33 @@ var DurationStatsZero = repository.DurationStats{}
 
 // organizationResources returns the current (not window-bounded) inventory of org assets shown in
 // the resource strip.
-func (h *AnalyticsHandler) organizationResources(ctx context.Context, orgID uuid.UUID) (gin.H, error) {
+func (h *AnalyticsHandler) organizationResources(ctx context.Context, orgID uuid.UUID) (AnalyticsResourceCounts, error) {
 	projects, err := h.projectRepo.WithContext(ctx).CountByOrganization(orgID)
 	if err != nil {
-		return nil, err
+		return AnalyticsResourceCounts{}, err
 	}
 	workspaces, err := h.workspaceRepo.WithContext(ctx).CountByOrganization(orgID)
 	if err != nil {
-		return nil, err
+		return AnalyticsResourceCounts{}, err
 	}
 	playbooks, err := h.ansiblePlaybookRepo.WithContext(ctx).CountByOrganization(orgID)
 	if err != nil {
-		return nil, err
+		return AnalyticsResourceCounts{}, err
 	}
 	templates, err := h.ansibleTemplateRepo.WithContext(ctx).CountByOrganization(orgID)
 	if err != nil {
-		return nil, err
+		return AnalyticsResourceCounts{}, err
 	}
 	inventories, err := h.inventoryRepo.WithContext(ctx).CountByOrganization(orgID)
 	if err != nil {
-		return nil, err
+		return AnalyticsResourceCounts{}, err
 	}
-	return gin.H{
-		"projects":      projects,
-		"workspaces":    workspaces,
-		"playbooks":     playbooks,
-		"job_templates": templates,
-		"inventories":   inventories,
+	return AnalyticsResourceCounts{
+		Projects:     projects,
+		Workspaces:   workspaces,
+		Playbooks:    playbooks,
+		JobTemplates: templates,
+		Inventories:  inventories,
 	}, nil
 }
 
@@ -428,24 +427,24 @@ func parseAnalyticsWindow(c *gin.Context) (repository.AnalyticsWindow, repositor
 }
 
 // outcomePayload renders one platform's KPI block, including the previous-period comparison.
-func outcomePayload(totals repository.OutcomeTotals, durations repository.DurationStats, prevTotals repository.OutcomeTotals, prevDurations repository.DurationStats) gin.H {
-	return gin.H{
-		"total":                totals.Total,
-		"succeeded":            totals.Succeeded,
-		"failed":               totals.Failed,
-		"running":              totals.Running,
-		"pending":              totals.Pending,
-		"canceled":             totals.Canceled,
-		"success_rate":         successRate(totals),
-		"avg_duration_seconds": round1(durations.AvgSeconds),
-		"p95_duration_seconds": round1(durations.P95Seconds),
-		"duration_samples":     durations.Samples,
-		"previous": gin.H{
-			"total":                prevTotals.Total,
-			"succeeded":            prevTotals.Succeeded,
-			"failed":               prevTotals.Failed,
-			"success_rate":         successRate(prevTotals),
-			"avg_duration_seconds": round1(prevDurations.AvgSeconds),
+func outcomePayload(totals repository.OutcomeTotals, durations repository.DurationStats, prevTotals repository.OutcomeTotals, prevDurations repository.DurationStats) AnalyticsOutcomeBlock {
+	return AnalyticsOutcomeBlock{
+		Total:              totals.Total,
+		Succeeded:          totals.Succeeded,
+		Failed:             totals.Failed,
+		Running:            totals.Running,
+		Pending:            totals.Pending,
+		Canceled:           totals.Canceled,
+		SuccessRate:        successRate(totals),
+		AvgDurationSeconds: round1(durations.AvgSeconds),
+		P95DurationSeconds: round1(durations.P95Seconds),
+		DurationSamples:    durations.Samples,
+		Previous: AnalyticsOutcomePrevious{
+			Total:              prevTotals.Total,
+			Succeeded:          prevTotals.Succeeded,
+			Failed:             prevTotals.Failed,
+			SuccessRate:        successRate(prevTotals),
+			AvgDurationSeconds: round1(prevDurations.AvgSeconds),
 		},
 	}
 }
@@ -472,84 +471,84 @@ func round1(v float64) float64 {
 
 // dailyPayload merges the three sparse series into one dense, zero-filled series keyed by day, so
 // the chart can plot runs, jobs, and activity on a shared continuous axis.
-func dailyPayload(runs, jobs []repository.DailyOutcome, activity []repository.DailyCount, w repository.AnalyticsWindow) []gin.H {
+func dailyPayload(runs, jobs []repository.DailyOutcome, activity []repository.DailyCount, w repository.AnalyticsWindow) []AnalyticsDailyEntry {
 	filledRuns := repository.FillDailyOutcomes(runs, w)
 	filledJobs := repository.FillDailyOutcomes(jobs, w)
 	filledActivity := repository.FillDailyCounts(activity, w)
 
-	out := make([]gin.H, 0, len(filledRuns))
+	out := make([]AnalyticsDailyEntry, 0, len(filledRuns))
 	for i := range filledRuns {
 		day := filledRuns[i].Day
-		entry := gin.H{
-			"date":           day.Format("2006-01-02"),
-			"runs_succeeded": filledRuns[i].Succeeded,
-			"runs_failed":    filledRuns[i].Failed,
-			"runs_other":     filledRuns[i].Other,
+		entry := AnalyticsDailyEntry{
+			Date:          day.Format("2006-01-02"),
+			RunsSucceeded: filledRuns[i].Succeeded,
+			RunsFailed:    filledRuns[i].Failed,
+			RunsOther:     filledRuns[i].Other,
 		}
 		if i < len(filledJobs) {
-			entry["jobs_succeeded"] = filledJobs[i].Succeeded
-			entry["jobs_failed"] = filledJobs[i].Failed
-			entry["jobs_other"] = filledJobs[i].Other
+			entry.JobsSucceeded = &filledJobs[i].Succeeded
+			entry.JobsFailed = &filledJobs[i].Failed
+			entry.JobsOther = &filledJobs[i].Other
 		}
 		if i < len(filledActivity) {
-			entry["activity"] = filledActivity[i].Count
+			entry.Activity = &filledActivity[i].Count
 		}
 		out = append(out, entry)
 	}
 	return out
 }
 
-func topWorkspacePayload(rows []repository.TopWorkspace) []gin.H {
-	out := make([]gin.H, 0, len(rows))
+func topWorkspacePayload(rows []repository.TopWorkspace) []AnalyticsTopWorkspace {
+	out := make([]AnalyticsTopWorkspace, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, gin.H{
-			"workspace_id":         row.WorkspaceID,
-			"workspace_name":       row.WorkspaceName,
-			"project_name":         row.ProjectName,
-			"run_count":            row.RunCount,
-			"succeeded":            row.Succeeded,
-			"failed":               row.Failed,
-			"success_rate":         successRate(repository.OutcomeTotals{Succeeded: row.Succeeded, Failed: row.Failed}),
-			"avg_duration_seconds": round1(row.AvgSeconds),
+		out = append(out, AnalyticsTopWorkspace{
+			WorkspaceID:        row.WorkspaceID,
+			WorkspaceName:      row.WorkspaceName,
+			ProjectName:        row.ProjectName,
+			RunCount:           row.RunCount,
+			Succeeded:          row.Succeeded,
+			Failed:             row.Failed,
+			SuccessRate:        successRate(repository.OutcomeTotals{Succeeded: row.Succeeded, Failed: row.Failed}),
+			AvgDurationSeconds: round1(row.AvgSeconds),
 		})
 	}
 	return out
 }
 
-func topTemplatePayload(rows []repository.TopTemplate) []gin.H {
-	out := make([]gin.H, 0, len(rows))
+func topTemplatePayload(rows []repository.TopTemplate) []AnalyticsTopTemplate {
+	out := make([]AnalyticsTopTemplate, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, gin.H{
-			"template_id":          row.TemplateID,
-			"template_name":        row.TemplateName,
-			"job_count":            row.JobCount,
-			"succeeded":            row.Succeeded,
-			"failed":               row.Failed,
-			"success_rate":         successRate(repository.OutcomeTotals{Succeeded: row.Succeeded, Failed: row.Failed}),
-			"avg_duration_seconds": round1(row.AvgSeconds),
+		out = append(out, AnalyticsTopTemplate{
+			TemplateID:         row.TemplateID,
+			TemplateName:       row.TemplateName,
+			JobCount:           row.JobCount,
+			Succeeded:          row.Succeeded,
+			Failed:             row.Failed,
+			SuccessRate:        successRate(repository.OutcomeTotals{Succeeded: row.Succeeded, Failed: row.Failed}),
+			AvgDurationSeconds: round1(row.AvgSeconds),
 		})
 	}
 	return out
 }
 
-func activityPayload(total int64, byAction, byResource []repository.LabeledCount) gin.H {
-	return gin.H{
-		"total":            total,
-		"by_action":        labeledPayload(byAction),
-		"by_resource_type": labeledPayload(byResource),
+func activityPayload(total int64, byAction, byResource []repository.LabeledCount) AnalyticsActivityBlock {
+	return AnalyticsActivityBlock{
+		Total:          total,
+		ByAction:       labeledPayload(byAction),
+		ByResourceType: labeledPayload(byResource),
 	}
 }
 
-func labeledPayload(rows []repository.LabeledCount) []gin.H {
-	out := make([]gin.H, 0, len(rows))
+func labeledPayload(rows []repository.LabeledCount) []AnalyticsLabeledCount {
+	out := make([]AnalyticsLabeledCount, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, gin.H{"label": row.Label, "count": row.Count})
+		out = append(out, AnalyticsLabeledCount{Label: row.Label, Count: row.Count})
 	}
 	return out
 }
 
 // failurePayload interleaves Terraform and Ansible failures into one most-recent-first list.
-func failurePayload(runs, jobs []repository.RecentFailure, limit int) []gin.H {
+func failurePayload(runs, jobs []repository.RecentFailure, limit int) []AnalyticsFailureEntry {
 	merged := make([]repository.RecentFailure, 0, len(runs)+len(jobs))
 	merged = append(merged, runs...)
 	merged = append(merged, jobs...)
@@ -561,16 +560,16 @@ func failurePayload(runs, jobs []repository.RecentFailure, limit int) []gin.H {
 	if len(merged) > limit {
 		merged = merged[:limit]
 	}
-	out := make([]gin.H, 0, len(merged))
+	out := make([]AnalyticsFailureEntry, 0, len(merged))
 	for _, f := range merged {
-		out = append(out, gin.H{
-			"id":             f.ID,
-			"platform":       f.Platform,
-			"name":           f.Name,
-			"detail":         f.Detail,
-			"workspace_name": f.WorkspaceName,
-			"error_message":  f.ErrorMessage,
-			"failed_at":      f.FailedAt.UTC().Format(time.RFC3339),
+		out = append(out, AnalyticsFailureEntry{
+			ID:            f.ID,
+			Platform:      f.Platform,
+			Name:          f.Name,
+			Detail:        f.Detail,
+			WorkspaceName: f.WorkspaceName,
+			ErrorMessage:  f.ErrorMessage,
+			FailedAt:      f.FailedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	return out

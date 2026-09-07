@@ -75,23 +75,9 @@ func (h *VCSConnectionHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	responseData := make([]gin.H, 0, len(connections))
-	for _, conn := range connections {
-		responseData = append(responseData, gin.H{
-			"id":   conn.ID,
-			"type": "vcs-connections",
-			"attributes": gin.H{
-				"provider":         conn.Provider,
-				"account_name":     conn.AccountName,
-				"account_type":     conn.AccountType,
-				"token_expires_at": conn.TokenExpiresAt,
-				"created_at":       conn.CreatedAt,
-				"updated_at":       conn.UpdatedAt,
-			},
-			"relationships": gin.H{
-				"organization": gin.H{"data": gin.H{"id": org.ID, "type": "organizations"}},
-			},
-		})
+	responseData := make([]jsonapi.Resource[VCSConnectionAttributes], 0, len(connections))
+	for i := range connections {
+		responseData = append(responseData, vcsConnectionResource(&connections[i], org.ID))
 	}
 
 	jsonapi.WriteDocument(c, http.StatusOK, responseData)
@@ -175,21 +161,7 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"id":   connection.ID,
-		"type": "vcs-connections",
-		"attributes": gin.H{
-			"provider":         connection.Provider,
-			"account_name":     connection.AccountName,
-			"account_type":     connection.AccountType,
-			"token_expires_at": connection.TokenExpiresAt,
-			"created_at":       connection.CreatedAt,
-			"updated_at":       connection.UpdatedAt,
-		},
-		"relationships": gin.H{
-			"organization": gin.H{"data": gin.H{"id": org.ID, "type": "organizations"}},
-		},
-	})
+	jsonapi.WriteDocument(c, http.StatusCreated, vcsConnectionResource(connection, org.ID))
 }
 
 // Get returns a VCS connection by ID
@@ -212,21 +184,7 @@ func (h *VCSConnectionHandlerV2) Get(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":   connection.ID,
-		"type": "vcs-connections",
-		"attributes": gin.H{
-			"provider":         connection.Provider,
-			"account_name":     connection.AccountName,
-			"account_type":     connection.AccountType,
-			"token_expires_at": connection.TokenExpiresAt,
-			"created_at":       connection.CreatedAt,
-			"updated_at":       connection.UpdatedAt,
-		},
-		"relationships": gin.H{
-			"organization": gin.H{"data": gin.H{"id": connection.OrganizationID, "type": "organizations"}},
-		},
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, vcsConnectionResource(connection, connection.OrganizationID))
 }
 
 // Delete deletes a VCS connection
@@ -372,7 +330,7 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, repos, gin.H{"pagination": gin.H{"page": page, "per_page": perPage}})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, repos, LegacyPageMeta{Pagination: LegacyPage{Page: page, PerPage: perPage}})
 }
 
 // ListProjects lists projects for a VCS connection.
@@ -420,7 +378,7 @@ func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, projects, gin.H{"pagination": gin.H{"page": page, "per_page": perPage}})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, projects, LegacyPageMeta{Pagination: LegacyPage{Page: page, PerPage: perPage}})
 }
 
 // ListBranches lists branches for a repository
@@ -461,7 +419,7 @@ func (h *VCSConnectionHandlerV2) ListBranches(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, branches, gin.H{"pagination": gin.H{"page": page, "per_page": perPage}})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, branches, LegacyPageMeta{Pagination: LegacyPage{Page: page, PerPage: perPage}})
 }
 
 // GetFileContent retrieves file content from a repository
@@ -502,7 +460,7 @@ func (h *VCSConnectionHandlerV2) GetFileContent(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{"content": content, "path": path, "ref": ref})
+	jsonapi.WriteDocument(c, http.StatusOK, VCSFileContentResponse{Content: content, Path: path, Ref: ref})
 }
 
 // ListYamlFiles lists all .yaml and .yml files in a repository

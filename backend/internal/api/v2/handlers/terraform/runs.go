@@ -227,9 +227,9 @@ func resolveRunOperation(req *CreateRunRequestV2) (operation models.RunOperation
 // Based on TFE API spec: https://developer.hashicorp.com/terraform/enterprise/api-docs/run
 // c is optional - if provided, will use auth_method from context to determine source
 // runRepo is optional - if provided, will check for existing apply runs to determine can-apply
-func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repository.ConfigurationVersionRepository, runRepo *repository.RunRepository) gin.H {
+func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repository.ConfigurationVersionRepository, runRepo *repository.RunRepository) jsonapi.Resource[RunAttributes] {
 	// Build status-timestamps (TFE requires these for Terraform CLI to recognize completion)
-	statusTimestamps := gin.H{}
+	var statusTimestamps RunStatusTimestamps
 
 	// Set status-timestamps based on run operation type and status
 	switch run.Operation {
@@ -237,35 +237,35 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		// Plan-and-apply runs: planning → planned → applying → applied
 		// planning-at: when plan started
 		if run.StartedAt != nil {
-			statusTimestamps["planning-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 		// planned-at: when plan phase completed
 		// Include even when status is 'failed' if PlanCompletedAt is set (plan completed before apply failed)
 		if run.PlanCompletedAt != nil {
-			statusTimestamps["planned-at"] = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlannedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 		// applying-at: when apply phase started
 		// Include even when status is 'failed' if ApplyStartedAt is set (apply started before it failed)
 		if run.ApplyStartedAt != nil {
-			statusTimestamps["applying-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.ApplyingAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 		// applied-at: when apply phase completed (status is 'applied')
 		if run.Status == models.RunStatusApplied && run.CompletedAt != nil {
-			statusTimestamps["applied-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.AppliedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 
 	case models.RunOperationPlanOnly:
 		// Plan-only runs: planning → planned
 		// planning-at: when plan started
 		if run.StartedAt != nil {
-			statusTimestamps["planning-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 		// planned-at: when plan completed (status is 'planned' or 'completed')
 		if run.Status == models.RunStatusPlanned || run.Status == models.RunStatusCompleted {
 			if run.PlanCompletedAt != nil {
-				statusTimestamps["planned-at"] = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlannedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
 			} else if run.CompletedAt != nil {
-				statusTimestamps["planned-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlannedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 			}
 		}
 
@@ -273,19 +273,19 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		// TFE-compatible: Destroy runs follow the same two-phase flow as plan-and-apply
 		// planning-at: when destroy plan started
 		if run.StartedAt != nil {
-			statusTimestamps["planning-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 		// planned-at: when destroy plan completed
 		if run.PlanCompletedAt != nil {
-			statusTimestamps["planned-at"] = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlannedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 		// applying-at: when destroy execution started (apply phase)
 		if run.ApplyStartedAt != nil {
-			statusTimestamps["applying-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.ApplyingAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 		// applied-at: when destroy execution completed
 		if run.Status == models.RunStatusApplied && run.CompletedAt != nil {
-			statusTimestamps["applied-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.AppliedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 	}
 
@@ -296,14 +296,14 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 			// For plan-and-apply, check if we're past the plan phase
 			if len(run.PlanOutput) > 0 {
 				// Plan completed, so this must be applying
-				statusTimestamps["applying-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.ApplyingAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 			} else {
 				// Plan phase
-				statusTimestamps["planning-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 			}
 		} else {
 			// Plan-only or legacy plan
-			statusTimestamps["planning-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	}
 	if (run.Status == models.RunStatusCompleted || run.Status == models.RunStatusPlanned) && run.CompletedAt != nil {
@@ -313,17 +313,17 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 			// If plan output exists but status is completed, it might be apply completion
 			// For now, assume it's plan completion if status is "planned"
 			if run.Status == models.RunStatusPlanned {
-				statusTimestamps["planned-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlannedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 			}
 		} else {
 			// Plan-only or legacy: set planned-at
-			statusTimestamps["planned-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlannedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 	}
 
 	// Set plan-queued-at when run is pending (queued for planning)
 	if run.Status == models.RunStatusPending {
-		statusTimestamps["plan-queued-at"] = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		statusTimestamps.PlanQueuedAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
 	}
 
 	// TFE-compatible: Determine run source based on TFE spec
@@ -401,131 +401,92 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 	// We keep status as-is from database (should be "completed" for completed plan runs, not "planned")
 	apiStatus := string(run.Status)
 
-	attributes := gin.H{
-		"status":            apiStatus,
-		"operation":         string(run.Operation), // TFE-compatible: Include operation in attributes
-		"is-destroy":        run.Operation == models.RunOperationDestroy,
-		"plan-only":         planOnly, // TFE-compatible: Indicates if run is plan-only (cannot be applied)
-		"message":           "",
-		"source":            runSource, // TFE-compatible: "tfe-api", "tfe-ui", "tfe-configuration-version" (TFE only has these 3 sources)
-		"created-at":        run.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"updated-at":        run.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		"status-timestamps": statusTimestamps,
-		"has-changes":       hasChanges(run), // Set based on plan output
-		"actions": gin.H{
-			"is-cancelable": run.Status == models.RunStatusRunning || run.Status == models.RunStatusPending || run.Status == models.RunStatusPlanning || run.Status == models.RunStatusApplying ||
+	attributes := RunAttributes{
+		Status:    apiStatus,
+		Operation: string(run.Operation),
+		IsDestroy: run.Operation == models.RunOperationDestroy,
+		PlanOnly:  planOnly,
+		Source:    runSource, // "tfe-api", "tfe-ui", "tfe-configuration-version" - TFE's only three
+		CreatedAt: run.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt: run.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		// TFE requires status-timestamps for the Terraform CLI to recognise completion.
+		StatusTimestamps: statusTimestamps,
+		HasChanges:       hasChanges(run),
+		Actions: RunActions{
+			IsCancelable: run.Status == models.RunStatusRunning || run.Status == models.RunStatusPending || run.Status == models.RunStatusPlanning || run.Status == models.RunStatusApplying ||
 				run.Status == models.RunStatusPrePlanRunning || run.Status == models.RunStatusPostPlanRunning || run.Status == models.RunStatusPreApplyRunning || run.Status == models.RunStatusPostApplyRunning,
-			// TFE-compatible: a plan-and-apply/destroy run waiting at `planned` is confirmable (apply-able).
-			// go-tfe clients (e.g. tfe_workspace_run) poll actions.is-confirmable to know when to confirm
-			// the apply; it mirrors permissions.can-apply. Was hardcoded false, which hung those clients.
-			"is-confirmable":      canApply,
-			"is-discardable":      run.Status == models.RunStatusPending,
-			"is-force-cancelable": false,
+			// A plan-and-apply/destroy run waiting at `planned` is confirmable; mirrors
+			// permissions.can-apply. Was hardcoded false, which hung go-tfe pollers.
+			IsConfirmable: canApply,
+			IsDiscardable: run.Status == models.RunStatusPending,
 		},
-		"permissions": gin.H{
-			"can-apply":         canApply, // TFE-compatible: Only true if run is completed, plan operation, not plan-only, and not auto-applied
-			"can-cancel":        true,
-			"can-discard":       true,
-			"can-force-execute": false,
-			"can-force-cancel":  false,
+		Permissions: RunPermissions{
+			CanApply:   canApply, // completed plan phase, apply-able operation, not auto-applied
+			CanCancel:  true,
+			CanDiscard: true,
 		},
 	}
 
-	// Include configuration version details for context-aware display
-	// This allows frontend to show "Triggered via CLI", "Triggered via UI", or "Triggered via VCS" with commit info
+	// Configuration-version context for the frontend's "Triggered via CLI/UI/VCS" display.
 	if configVersion != nil {
-		attributes["configuration-version-source"] = configVersion.Source // "tfe-vcs", "tfe-cli", "tfe-ui", "tfe-api"
-		if configVersion.CommitHash != "" {
-			attributes["commit-hash"] = configVersion.CommitHash
-		}
-		if configVersion.Committer != "" {
-			attributes["committer"] = configVersion.Committer
-		}
+		attributes.ConfigurationVersionSource = configVersion.Source // "tfe-vcs", "tfe-cli", "tfe-ui", "tfe-api"
+		attributes.CommitHash = configVersion.CommitHash
+		attributes.Committer = configVersion.Committer
 		if configVersion.PRNumber > 0 {
-			attributes["pr-number"] = configVersion.PRNumber
+			attributes.PRNumber = configVersion.PRNumber
 		}
-		if configVersion.SourceBranch != "" {
-			attributes["source-branch"] = configVersion.SourceBranch
-		}
+		attributes.SourceBranch = configVersion.SourceBranch
 	}
 
-	// Add optional timestamp fields
 	if run.StartedAt != nil {
-		attributes["started-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+		attributes.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 	}
 	if run.CompletedAt != nil {
-		attributes["completed-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+		attributes.CompletedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 	}
-	if run.ErrorMessage != "" {
-		attributes["error-message"] = run.ErrorMessage
-	}
+	attributes.ErrorMessage = run.ErrorMessage
 
 	// Self-hosted runner info
 	if run.AgentPoolID != nil {
-		attributes["agent-pool-id"] = run.AgentPoolID.String()
+		attributes.AgentPoolID = run.AgentPoolID.String()
 		if run.AgentPool != nil {
-			attributes["agent-pool-name"] = run.AgentPool.Name
+			attributes.AgentPoolName = run.AgentPool.Name
 		}
 	}
 	if run.RunnerID != nil {
-		attributes["runner-id"] = run.RunnerID.String()
+		attributes.RunnerID = run.RunnerID.String()
 		if run.Runner != nil {
-			attributes["runner-name"] = run.Runner.Name
+			attributes.RunnerName = run.Runner.Name
 		}
 	}
 
-	// TFE-compatible: Plan output is NOT included in run response
-	// Frontend should fetch from /api/v2/runs/:id/plan endpoint instead
-	// This improves scalability and matches TFE behavior
+	// TFE-compatible: plan output is NOT included here; the frontend fetches /runs/:id/plan.
 
 	// Build relationships
-	relationships := gin.H{
-		"workspace": gin.H{
-			"data": gin.H{
-				"id":   run.WorkspaceID,
-				"type": "workspaces",
-			},
-		},
+	relationships := RunRelationships{
+		Workspace: jsonapi.ToOne(run.WorkspaceID, "workspaces"),
 	}
-
 	if run.ConfigurationVersionID != nil {
-		relationships["configuration-version"] = gin.H{
-			"data": gin.H{
-				"id":   *run.ConfigurationVersionID,
-				"type": "configuration-versions",
-			},
-		}
+		r := jsonapi.ToOne(*run.ConfigurationVersionID, "configuration-versions")
+		relationships.ConfigurationVersion = &r
 	}
-
-	// TFE requires a "plan" relationship for runs
-	// For plan operations, the plan ID is typically the same as the run ID
-	// For plan-and-apply and plan-only runs, include plan relationship
-	// For destroy runs, also include plan relationship (destroy uses plan phase)
+	// TFE requires a "plan" relationship for every plan-bearing operation (destroy included);
+	// plan id equals run id by design.
 	if run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationPlanOnly || run.Operation == models.RunOperationDestroy {
-		relationships["plan"] = gin.H{
-			"data": gin.H{
-				"id":   run.ID, // Plan ID = run ID
-				"type": "plans",
-			},
-		}
+		r := jsonapi.ToOne(run.ID, "plans")
+		relationships.Plan = &r
 	}
-
-	// TFE requires an "apply" relationship for plan-and-apply runs that have started apply phase
-	// Apply ID = Run ID (same pattern as Plan ID = Run ID)
+	// An "apply" relationship once the apply phase has started; apply id equals run id.
 	if run.Operation == models.RunOperationPlanAndApply && run.ApplyStartedAt != nil {
-		relationships["apply"] = gin.H{
-			"data": gin.H{
-				"id":   run.ID, // Apply ID = run ID
-				"type": "applies",
-			},
-		}
+		r := jsonapi.ToOne(run.ID, "applies")
+		relationships.Apply = &r
 	}
 
-	return gin.H{
-		"id":            run.ID,
-		"type":          "runs",
-		"attributes":    attributes,
-		"relationships": relationships,
+	return jsonapi.Resource[RunAttributes]{
+		ID:            run.ID,
+		Type:          "runs",
+		Attributes:    attributes,
+		Relationships: relationships,
 	}
 }
 
@@ -1001,7 +962,7 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	// Determine plan status according to TFE Plans API spec
 	// Status values: pending, managed_queued/queued, running, errored, canceled, finished, unreachable
 	planStatus := "pending"
-	planStatusTimestamps := gin.H{}
+	var planStatusTimestamps PhaseStatusTimestamps
 
 	switch run.Status {
 	case models.RunStatusPending:
@@ -1009,7 +970,7 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	case models.RunStatusPlanning:
 		planStatus = "running"
 		if run.StartedAt != nil {
-			planStatusTimestamps["started-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted:
 		planStatus = "pending" // pre_plan run tasks execute before the plan starts
@@ -1021,23 +982,23 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 		// execute after it. go-tfe/terraform wait on the plan document reaching "finished".
 		planStatus = "finished" // TFE uses "finished" for completed plans
 		if run.PlanCompletedAt != nil {
-			planStatusTimestamps["finished-at"] = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.FinishedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 		if run.StartedAt != nil {
-			planStatusTimestamps["started-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusApplying:
 		planStatus = "running" // Apply phase is still running
 		if run.ApplyStartedAt != nil {
-			planStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusApplied:
 		planStatus = "finished"
 		if run.CompletedAt != nil {
-			planStatusTimestamps["finished-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 		if run.ApplyStartedAt != nil {
-			planStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusFailed:
 		planStatus = "errored"
@@ -1046,49 +1007,46 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	case models.RunStatusRunning:
 		planStatus = "running"
 		if run.StartedAt != nil {
-			planStatusTimestamps["started-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusCompleted:
 		planStatus = "finished" // TFE uses "finished" for completed plans, not "completed" or "planned"
 		if run.CompletedAt != nil {
-			planStatusTimestamps["finished-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 		if run.StartedAt != nil {
-			planStatusTimestamps["started-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	}
 
 	// Set queued-at and pending-at timestamps
 	if run.Status == models.RunStatusPending {
-		planStatusTimestamps["pending-at"] = run.CreatedAt.Format("2006-01-02T15:04:05Z")
-		planStatusTimestamps["queued-at"] = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		planStatusTimestamps.PendingAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		planStatusTimestamps.QueuedAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
 	} else if run.StartedAt != nil {
 		// If run has started, set queued-at to created-at (when it was queued)
-		planStatusTimestamps["queued-at"] = run.CreatedAt.Format("2006-01-02T15:04:05Z")
-		planStatusTimestamps["pending-at"] = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		planStatusTimestamps.QueuedAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		planStatusTimestamps.PendingAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
 	}
 
 	// Determine has-changes based on resource and output counts
 	hasChanges := resourceAdditions > 0 || resourceChanges > 0 || resourceDestructions > 0 || outputChangeCount > 0
 
-	attributes := gin.H{
-		"execution-details": gin.H{
-			"mode": "remote", // TFE execution mode: remote, local, or agent
-		},
-		"generated-configuration": false,
-		"has-changes":             hasChanges,
-		"resource-additions":      resourceAdditions,
-		"resource-changes":        resourceChanges,
-		"resource-destructions":   resourceDestructions,
-		"resource-imports":        resourceImports,
-		"status":                  planStatus,
-		"status-timestamps":       planStatusTimestamps,
+	attributes := PlanAttributes{
+		ExecutionDetails:     ExecutionDetails{Mode: "remote"},
+		HasChanges:           hasChanges,
+		ResourceAdditions:    resourceAdditions,
+		ResourceChanges:      resourceChanges,
+		ResourceDestructions: resourceDestructions,
+		ResourceImports:      resourceImports,
+		Status:               planStatus,
+		StatusTimestamps:     planStatusTimestamps,
 	}
 
-	// TFE-compatible: Include plan JSON output in attributes for frontend
-	// The plan JSON contains resource_changes, planned_values, etc.
+	// TFE-compatible: the plan JSON (resource_changes, planned_values, ...) rides along for the
+	// frontend when present.
 	if len(run.PlanOutput) > 0 {
-		attributes["plan-json"] = run.PlanOutput
+		attributes.PlanJSON = run.PlanOutput
 	}
 
 	// TFE-compatible: log-read-url should be an absolute URL
@@ -1111,31 +1069,18 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	// bearer token (which would leak into proxy logs / history). The CLI still prefers its
 	// Authorization header; the query token is the TFE-compatible fallback. If no scoped token can
 	// be minted (no user in context / signing disabled) the URL is emitted without a token.
-	attributes["log-read-url"] = buildLogReadURL(c, scheme, host, run.ID, "")
+	attributes.LogReadURL = buildLogReadURL(c, scheme, host, run.ID, "")
 
-	// Build relationships and links according to TFE Plans API spec
-	// TFE Plans API requires relationships.state-versions and links (self, json-output)
-	relationships := gin.H{
-		"state-versions": gin.H{
-			"data": []gin.H{}, // Empty array - state versions are linked separately
+	// TFE Plans API requires relationships.state-versions and links (self, json-output).
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[PlanAttributes]{
+		ID:            run.ID,
+		Type:          "plans",
+		Attributes:    attributes,
+		Relationships: PhaseRelationships{StateVersions: jsonapi.ManyRelationship{Data: []jsonapi.ResourceID{}}},
+		Links: PlanLinks{
+			Self:       fmt.Sprintf("%s://%s/api/v2/plans/%s", scheme, host, run.ID),
+			JSONOutput: fmt.Sprintf("%s://%s/api/v2/plans/%s/json-output", scheme, host, run.ID),
 		},
-	}
-
-	// Build absolute URLs for links
-	planSelfURL := fmt.Sprintf("%s://%s/api/v2/plans/%s", scheme, host, run.ID)
-	planJSONOutputURL := fmt.Sprintf("%s://%s/api/v2/plans/%s/json-output", scheme, host, run.ID)
-
-	links := gin.H{
-		"self":        planSelfURL,
-		"json-output": planJSONOutputURL,
-	}
-
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":            run.ID,
-		"type":          "plans",
-		"attributes":    attributes,
-		"relationships": relationships,
-		"links":         links,
 	})
 }
 
@@ -1232,7 +1177,7 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 	// Determine apply status according to TFE Applies API spec
 	// Status values: pending, queued, running, finished, errored, canceled, unreachable
 	applyStatus := "pending"
-	applyStatusTimestamps := gin.H{}
+	var applyStatusTimestamps PhaseStatusTimestamps
 
 	switch run.Status {
 	case models.RunStatusPending:
@@ -1249,45 +1194,45 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		// The apply itself finished; only informational post-apply tasks are still running.
 		applyStatus = "finished"
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusRunning:
 		applyStatus = "running"
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		} else if run.StartedAt != nil {
-			applyStatusTimestamps["started-at"] = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusCompleted:
 		applyStatus = "finished"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps["finished-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusFailed:
 		applyStatus = "errored"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps["finished-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusCancelled:
 		applyStatus = "canceled"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps["finished-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusApplying:
 		applyStatus = "running"
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	case models.RunStatusApplied:
 		applyStatus = "finished"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps["finished-at"] = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
 		}
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps["started-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	}
 
@@ -1296,50 +1241,40 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		// queued-at is when apply was queued (before started-at)
 		// For plan-and-apply runs, this is when plan completed
 		if run.PlanCompletedAt != nil {
-			applyStatusTimestamps["queued-at"] = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.QueuedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
 		} else if run.ApplyStartedAt != nil {
 			// Fallback to apply started time if plan completed time not available
-			applyStatusTimestamps["queued-at"] = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.QueuedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
 		}
 	}
 
-	attributes := gin.H{
-		"execution-details": gin.H{
-			"mode": "remote", // TFE execution mode: remote, local, or agent
-		},
-		"status":                applyStatus,
-		"status-timestamps":     applyStatusTimestamps,
-		"resource-additions":    resourceAdditions,
-		"resource-changes":      resourceChanges,
-		"resource-destructions": resourceDestructions,
-		"resource-imports":      resourceImports,
+	attributes := ApplyAttributes{
+		ExecutionDetails:     ExecutionDetails{Mode: "remote"},
+		Status:               applyStatus,
+		StatusTimestamps:     applyStatusTimestamps,
+		ResourceAdditions:    resourceAdditions,
+		ResourceChanges:      resourceChanges,
+		ResourceDestructions: resourceDestructions,
+		ResourceImports:      resourceImports,
 	}
 
-	// Include apply-resources if available (from stored phase state)
+	// apply-resources rides along when stored phase state exists (StackWeaver extension).
 	if len(applyResources) > 0 {
-		// Convert ResourceState to JSON-compatible format
-		applyResourcesJSON := make([]gin.H, len(applyResources))
+		out := make([]ApplyResourceState, len(applyResources))
 		for i, res := range applyResources {
-			resourceJSON := gin.H{
-				"address": res.Address,
-				"status":  res.Status,
-				"action":  res.Action,
-			}
-			if res.ResourceID != "" {
-				resourceJSON["resource_id"] = res.ResourceID
+			out[i] = ApplyResourceState{
+				Address:      res.Address,
+				Status:       res.Status,
+				Action:       res.Action,
+				ResourceID:   res.ResourceID,
+				ErrorMessage: res.ErrorMessage,
+				Details:      res.Details,
 			}
 			if res.CreatedAt != nil {
-				resourceJSON["created_at"] = res.CreatedAt.Format("2006-01-02T15:04:05Z")
+				out[i].CreatedAt = res.CreatedAt.Format("2006-01-02T15:04:05Z")
 			}
-			if res.ErrorMessage != "" {
-				resourceJSON["error_message"] = res.ErrorMessage
-			}
-			if res.Details != "" {
-				resourceJSON["details"] = res.Details
-			}
-			applyResourcesJSON[i] = resourceJSON
 		}
-		attributes["apply-resources"] = applyResourcesJSON
+		attributes.ApplyResources = out
 	}
 
 	// Build log-read-url (TFE-compatible)
@@ -1358,28 +1293,15 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 
 	// AUD-045: run-scoped short-TTL log token instead of the caller's bearer token (see the run
 	// response builder above).
-	attributes["log-read-url"] = buildLogReadURL(c, scheme, host, run.ID, "phase=apply")
+	attributes.LogReadURL = buildLogReadURL(c, scheme, host, run.ID, "phase=apply")
 
-	// Build relationships according to TFE Applies API spec
-	relationships := gin.H{
-		"state-versions": gin.H{
-			"data": []gin.H{}, // Empty array - state versions are linked separately
-		},
-	}
-
-	// Build absolute URLs for links
-	applySelfURL := fmt.Sprintf("%s://%s/api/v2/applies/%s", scheme, host, run.ID)
-
-	links := gin.H{
-		"self": applySelfURL,
-	}
-
-	jsonapi.WriteDocument(c, http.StatusOK, gin.H{
-		"id":            run.ID, // Apply ID = Run ID
-		"type":          "applies",
-		"attributes":    attributes,
-		"relationships": relationships,
-		"links":         links,
+	// TFE Applies API: relationships.state-versions and a self link.
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[ApplyAttributes]{
+		ID:            run.ID, // Apply ID = Run ID
+		Type:          "applies",
+		Attributes:    attributes,
+		Relationships: PhaseRelationships{StateVersions: jsonapi.ManyRelationship{Data: []jsonapi.ResourceID{}}},
+		Links:         jsonapi.SelfLink{Self: fmt.Sprintf("%s://%s/api/v2/applies/%s", scheme, host, run.ID)},
 	})
 }
 
@@ -1921,7 +1843,7 @@ func (h *RunHandlerV2) ListByWorkspace(c *gin.Context) {
 	}
 
 	// Format each run in TFE-compatible JSON:API format
-	formattedRuns := make([]gin.H, len(runs))
+	formattedRuns := make([]jsonapi.Resource[RunAttributes], len(runs))
 	for i, run := range runs {
 		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
 	}
@@ -2156,7 +2078,7 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 	}
 
 	// Format each run in TFE-compatible JSON:API format
-	formattedRuns := make([]gin.H, len(runs))
+	formattedRuns := make([]jsonapi.Resource[RunAttributes], len(runs))
 	for i, run := range runs {
 		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
 	}
@@ -2183,7 +2105,7 @@ func (h *RunHandlerV2) GetQueue(c *gin.Context) {
 	}
 
 	// Format each run in TFE-compatible JSON:API format
-	formattedRuns := make([]gin.H, len(runs))
+	formattedRuns := make([]jsonapi.Resource[RunAttributes], len(runs))
 	for i, run := range runs {
 		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
 	}

@@ -72,31 +72,31 @@ type bulkActionRequest struct {
 // request is open, matching TFE. workspace-name and created-by are Stackweaver extras (TFE exposes
 // neither); they let the UI render a filer and a workspace label without an extra round trip, and
 // additive attributes are ignored by TFE clients.
-func formatChangeRequest(cr *models.ChangeRequest) gin.H {
-	attrs := gin.H{
-		"subject":     cr.Subject,
-		"message":     cr.Message,
-		"archived-by": nil,
-		"archived-at": nil,
-		"created-by":  cr.CreatedBy.String(),
-		"created-at":  cr.CreatedAt.Format(time.RFC3339),
-		"updated-at":  cr.UpdatedAt.Format(time.RFC3339),
+func formatChangeRequest(cr *models.ChangeRequest) jsonapi.Resource[ChangeRequestAttributes] {
+	attrs := ChangeRequestAttributes{
+		Subject:   cr.Subject,
+		Message:   cr.Message,
+		CreatedBy: cr.CreatedBy.String(),
+		CreatedAt: cr.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: cr.UpdatedAt.Format(time.RFC3339),
 	}
 	if cr.ArchivedBy != nil {
-		attrs["archived-by"] = cr.ArchivedBy.String()
+		v := cr.ArchivedBy.String()
+		attrs.ArchivedBy = &v
 	}
 	if cr.ArchivedAt != nil {
-		attrs["archived-at"] = cr.ArchivedAt.Format(time.RFC3339)
+		v := cr.ArchivedAt.Format(time.RFC3339)
+		attrs.ArchivedAt = &v
 	}
 	if cr.Workspace != nil {
-		attrs["workspace-name"] = cr.Workspace.Name
+		attrs.WorkspaceName = cr.Workspace.Name
 	}
-	return gin.H{
-		"id":         cr.ID,
-		"type":       "workspace_change_requests",
-		"attributes": attrs,
-		"relationships": gin.H{
-			"workspace": gin.H{"data": gin.H{"id": cr.WorkspaceID, "type": "workspaces"}},
+	return jsonapi.Resource[ChangeRequestAttributes]{
+		ID:         cr.ID,
+		Type:       "workspace_change_requests",
+		Attributes: attrs,
+		Relationships: WorkspaceOnlyRelationshipsWS{
+			Workspace: jsonapi.ToOne(cr.WorkspaceID, "workspaces"),
 		},
 	}
 }
@@ -235,13 +235,13 @@ func (h *ChangeRequestHandlerV2) BulkActions(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusCreated, gin.H{
-		"type": "bulk_actions",
-		"attributes": gin.H{
-			"organization_id": org.ID.String(),
-			"action_type":     a.ActionType,
-			"action_inputs":   gin.H{"subject": a.ActionInputs.Subject, "message": a.ActionInputs.Message},
-			"created_by":      gin.H{"id": user.ID.String(), "type": "users"},
+	jsonapi.WriteDocument(c, http.StatusCreated, BulkActionDocument{
+		Type: "bulk_actions",
+		Attributes: BulkActionAttributes{
+			OrganizationID: org.ID.String(),
+			ActionType:     a.ActionType,
+			ActionInputs:   BulkActionInputs{Subject: a.ActionInputs.Subject, Message: a.ActionInputs.Message},
+			CreatedBy:      jsonapi.ResourceID{ID: user.ID.String(), Type: "users"},
 		},
 	})
 }
@@ -261,7 +261,7 @@ func (h *ChangeRequestHandlerV2) ListByWorkspace(c *gin.Context) {
 		crError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list change requests")
 		return
 	}
-	data := make([]gin.H, 0, len(crs))
+	data := make([]jsonapi.Resource[ChangeRequestAttributes], 0, len(crs))
 	for i := range crs {
 		data = append(data, formatChangeRequest(&crs[i]))
 	}
@@ -282,7 +282,7 @@ func (h *ChangeRequestHandlerV2) ListByOrganization(c *gin.Context) {
 		crError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list change requests")
 		return
 	}
-	data := make([]gin.H, 0, len(crs))
+	data := make([]jsonapi.Resource[ChangeRequestAttributes], 0, len(crs))
 	for i := range crs {
 		data = append(data, formatChangeRequest(&crs[i]))
 	}

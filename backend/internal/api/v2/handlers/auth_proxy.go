@@ -974,31 +974,31 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 		}
 
 		// Extract OIDC parameters from the original request to return to the SPA
-		response := gin.H{
-			"authRequest": authRequestID,
+		response := AuthorizeParamsResponse{
+			AuthRequest: authRequestID,
 		}
 
 		// Pass through relevant parameters the SPA needs
 		if loginHint := params.Get("login_hint"); loginHint != "" {
-			response["loginHint"] = loginHint
+			response.LoginHint = loginHint
 		}
 		if prompt := params.Get("prompt"); prompt != "" {
-			response["prompt"] = prompt
+			response.Prompt = prompt
 		}
 		if scope := params.Get("scope"); scope != "" {
-			response["scope"] = scope
+			response.Scope = scope
 		}
 
 		// Parse org scope from scope parameter or organization query param
 		if org := params.Get("organization"); org != "" {
-			response["organization"] = org
+			response.Organization = org
 		} else if scope := params.Get("scope"); scope != "" {
 			// Check for urn:zitadel:iam:org:id: or urn:zitadel:iam:org:domain:primary: scopes
 			for s := range strings.FieldsSeq(scope) {
 				if orgID, found := strings.CutPrefix(s, "urn:zitadel:iam:org:id:"); found {
-					response["organizationId"] = orgID
+					response.OrganizationID = orgID
 				} else if domain, found := strings.CutPrefix(s, "urn:zitadel:iam:org:domain:primary:"); found {
-					response["organizationDomain"] = domain
+					response.OrganizationDomain = domain
 				}
 			}
 		}
@@ -3421,7 +3421,7 @@ func (p *AuthProxy) LookupOrgByDomain(c *gin.Context) {
 	// Cache the filtered response so subsequent probes for the same
 	// domain hit the cache. Empty results are also cached - the whole
 	// point of the negative-result amortisation.
-	respBytes, err := json.Marshal(gin.H{"result": out})
+	respBytes, err := json.Marshal(ResultPassthroughResponse{Result: out})
 	if err != nil {
 		// Marshal failure on a fully-typed map should never happen.
 		// Fall through to direct response without caching.

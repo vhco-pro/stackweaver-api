@@ -49,7 +49,7 @@ func (h *VariableHandlerV2) SetRepositories(orgRepo *repository.OrganizationRepo
 
 // formatVariableResponse formats a variable in TFE-compatible JSON:API format
 // Reference: https://developer.hashicorp.com/terraform/enterprise/api-docs/workspace-variables
-func (h *VariableHandlerV2) formatVariableResponse(variable *models.Variable, workspaceID string) gin.H {
+func (h *VariableHandlerV2) formatVariableResponse(variable *models.Variable, workspaceID string) jsonapi.Resource[WorkspaceVariableAttributes] {
 	// Get workspace to build proper links
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	var orgName, workspaceName string
@@ -84,33 +84,40 @@ func (h *VariableHandlerV2) formatVariableResponse(variable *models.Variable, wo
 		value = "••••••••"
 	}
 
-	return gin.H{
-		"id":   variable.ID,
-		"type": "vars", // TFE uses "vars" not "variables"
-		"attributes": gin.H{
-			"key":         variable.Key,
-			"value":       value, // Masked if sensitive
-			"description": variable.Description,
-			"sensitive":   variable.Sensitive,
-			"category":    variable.Category,
-			"hcl":         variable.HCL,
-			"version-id":  "", // TFE includes this, we can leave empty for now
+	configurable := jsonapi.ToOne(workspaceID, "workspaces")
+	configurable.Links = jsonapi.RelatedLink{Related: configurableLink}
+	return jsonapi.Resource[WorkspaceVariableAttributes]{
+		ID:   variable.ID,
+		Type: "vars", // TFE uses "vars" not "variables"
+		Attributes: WorkspaceVariableAttributes{
+			Key:         variable.Key,
+			Value:       value, // Masked if sensitive
+			Description: variable.Description,
+			Sensitive:   variable.Sensitive,
+			Category:    variable.Category,
+			HCL:         variable.HCL,
 		},
-		"relationships": gin.H{
-			"configurable": gin.H{ // TFE uses "configurable" not "workspace"
-				"data": gin.H{
-					"id":   workspaceID,
-					"type": "workspaces",
-				},
-				"links": gin.H{
-					"related": configurableLink,
-				},
-			},
-		},
-		"links": gin.H{
-			"self": fmt.Sprintf("/api/v2/workspaces/%s/vars/%s", workspaceID, variable.ID),
-		},
+		// TFE uses "configurable", not "workspace".
+		Relationships: WorkspaceVariableRelationships{Configurable: configurable},
+		Links:         jsonapi.SelfLink{Self: fmt.Sprintf("/api/v2/workspaces/%s/vars/%s", workspaceID, variable.ID)},
 	}
+}
+
+// WorkspaceVariableAttributes is the workspace vars attribute block. VersionID is always the
+// empty string (TFE includes the member; there is no versioning subsystem behind it).
+type WorkspaceVariableAttributes struct {
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+	Description string `json:"description"`
+	Sensitive   bool   `json:"sensitive"`
+	Category    string `json:"category"`
+	HCL         bool   `json:"hcl"`
+	VersionID   string `json:"version-id"`
+}
+
+// WorkspaceVariableRelationships carries TFE's "configurable" relation.
+type WorkspaceVariableRelationships struct {
+	Configurable jsonapi.Relationship `json:"configurable"`
 }
 
 // CreateVariableRequestV2 uses JSON:API format (TFE-compatible)
@@ -186,7 +193,7 @@ func (h *VariableHandlerV2) ListByWorkspace(c *gin.Context) {
 	}
 
 	// Format variables in TFE-compatible JSON:API format
-	variablesData := make([]gin.H, len(variables))
+	variablesData := make([]jsonapi.Resource[WorkspaceVariableAttributes], len(variables))
 	for i := range variables {
 		variablesData[i] = h.formatVariableResponse(&variables[i], workspaceID)
 	}

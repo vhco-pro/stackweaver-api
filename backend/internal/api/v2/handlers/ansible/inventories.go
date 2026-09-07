@@ -474,11 +474,11 @@ func (h *InventoryHandler) Get(c *gin.Context) {
 	// Constructed inventories also list their ordered inputs
 	if inventory.Type == models.InventoryTypeConstructed {
 		if inputs, err := h.inventoryRepo.ListConstructedInputs(inventory.ID); err == nil {
-			inputList := make([]gin.H, 0, len(inputs))
+			inputList := make([]ConstructedInputEntry, 0, len(inputs))
 			for i := range inputs {
-				inputList = append(inputList, gin.H{"id": inputs[i].ID.String(), "name": inputs[i].Name})
+				inputList = append(inputList, ConstructedInputEntry{ID: inputs[i].ID.String(), Name: inputs[i].Name})
 			}
-			resp["attributes"].(gin.H)["input-inventories"] = inputList
+			resp.Attributes.InputInventories = &inputList
 		}
 	}
 	jsonapi.WriteDocument(c, http.StatusOK, resp)
@@ -927,69 +927,54 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 }
 
 // formatInventoryResponse formats an inventory for JSON:API response
-func formatInventoryResponse(inv *models.AnsibleInventory) gin.H {
-	attributes := gin.H{
-		"name":                       inv.Name,
-		"description":                inv.Description,
-		"inventory-type":             inv.Type,
-		"source":                     inv.Source,
-		"variables":                  inv.Variables,
-		"last-sync-at":               inv.LastSyncAt,
-		"last-sync-status":           inv.LastSyncStatus,
-		"last-sync-error":            inv.LastSyncError,
-		"last-sync-hosts-discovered": inv.LastSyncHostsDiscovered,
-		"last-sync-log":              inv.LastSyncLog,
-		"source-vars":                inv.SourceVars,
-		"constructed-limit":          inv.ConstructedLimit,
-		"constructed-cache-timeout":  inv.ConstructedCacheTimeout,
-		"created-at":                 inv.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"updated-at":                 inv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+func formatInventoryResponse(inv *models.AnsibleInventory) *jsonapi.Resource[InventoryAttributes] {
+	attributes := InventoryAttributes{
+		Name:                    inv.Name,
+		Description:             inv.Description,
+		InventoryType:           inv.Type,
+		Source:                  inv.Source,
+		Variables:               inv.Variables,
+		LastSyncAt:              inv.LastSyncAt,
+		LastSyncStatus:          inv.LastSyncStatus,
+		LastSyncError:           inv.LastSyncError,
+		LastSyncHostsDiscovered: inv.LastSyncHostsDiscovered,
+		LastSyncLog:             inv.LastSyncLog,
+		SourceVars:              inv.SourceVars,
+		ConstructedLimit:        inv.ConstructedLimit,
+		ConstructedCacheTimeout: inv.ConstructedCacheTimeout,
+		CreatedAt:               inv.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:               inv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 
 	// Add VCS fields if present
 	if inv.VCSConnectionID != nil {
-		attributes["vcs_connection_id"] = inv.VCSConnectionID.String()
+		attributes.VCSConnectionID = inv.VCSConnectionID.String()
 	}
-	if inv.VCSRepository != "" {
-		attributes["vcs_repository"] = inv.VCSRepository
-	}
-	if inv.VCSBranch != "" {
-		attributes["vcs_branch"] = inv.VCSBranch
-	}
-	if inv.InventoryPath != "" {
-		attributes["inventory_path"] = inv.InventoryPath
-	}
+	attributes.VCSRepository = inv.VCSRepository
+	attributes.VCSBranch = inv.VCSBranch
+	attributes.InventoryPath = inv.InventoryPath
 
-	relationships := gin.H{
-		"organization": gin.H{
-			"data": gin.H{
-				"id":   inv.OrganizationID.String(),
-				"type": "organizations",
-			},
-		},
+	relationships := InventoryRelationships{
+		Organization: jsonapi.ToOne(inv.OrganizationID.String(), "organizations"),
 	}
 
 	// Add VCS connection relationship if present
 	if inv.VCSConnectionID != nil {
-		relationships["vcs_connection"] = gin.H{
-			"data": gin.H{
-				"id":   inv.VCSConnectionID.String(),
-				"type": "vcs-connections",
-			},
-		}
+		r := jsonapi.ToOne(inv.VCSConnectionID.String(), "vcs-connections")
+		relationships.VCSConnection = &r
 	}
 
-	return gin.H{
-		"id":            inv.ID.String(),
-		"type":          "ansible-inventories",
-		"attributes":    attributes,
-		"relationships": relationships,
+	return &jsonapi.Resource[InventoryAttributes]{
+		ID:            inv.ID.String(),
+		Type:          "ansible-inventories",
+		Attributes:    attributes,
+		Relationships: relationships,
 	}
 }
 
 // formatInventoriesResponse formats multiple inventories for JSON:API response
-func formatInventoriesResponse(inventories []models.AnsibleInventory) []gin.H {
-	result := make([]gin.H, len(inventories))
+func formatInventoriesResponse(inventories []models.AnsibleInventory) []*jsonapi.Resource[InventoryAttributes] {
+	result := make([]*jsonapi.Resource[InventoryAttributes], len(inventories))
 	for i, inv := range inventories {
 		result[i] = formatInventoryResponse(&inv)
 	}

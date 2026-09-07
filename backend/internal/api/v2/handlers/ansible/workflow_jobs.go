@@ -58,47 +58,47 @@ func (h *WorkflowHandler) resolveWorkflowByID(c *gin.Context, id uuid.UUID, perm
 	return workflow
 }
 
-func formatWorkflowJob(job *models.AnsibleWorkflowJob) gin.H {
-	attrs := gin.H{
-		"name":        job.Name,
-		"status":      job.Status,
-		"started-at":  job.StartedAt,
-		"finished-at": job.FinishedAt,
-		"created-at":  job.CreatedAt.Format(time.RFC3339),
-	}
-	return gin.H{
-		"id":         job.ID.String(),
-		"type":       "ansible-workflow-jobs",
-		"attributes": attrs,
-		"relationships": gin.H{
-			"workflow": gin.H{"data": gin.H{"id": job.WorkflowID.String(), "type": "ansible-workflows"}},
+func formatWorkflowJob(job *models.AnsibleWorkflowJob) jsonapi.Resource[WorkflowJobAttributes] {
+	return jsonapi.Resource[WorkflowJobAttributes]{
+		ID:   job.ID.String(),
+		Type: "ansible-workflow-jobs",
+		Attributes: WorkflowJobAttributes{
+			Name:       job.Name,
+			Status:     job.Status,
+			StartedAt:  job.StartedAt,
+			FinishedAt: job.FinishedAt,
+			CreatedAt:  job.CreatedAt.Format(time.RFC3339),
+		},
+		Relationships: WorkflowJobOnlyRelationships{
+			Workflow: jsonapi.ToOne(job.WorkflowID.String(), "ansible-workflows"),
 		},
 	}
 }
 
-func formatWorkflowNodeJob(nodeJob *models.AnsibleWorkflowNodeJob) gin.H {
-	attrs := gin.H{
-		"status":      nodeJob.Status,
-		"node-type":   nodeJob.Node.NodeType,
-		"identifier":  nodeJob.Node.Identifier,
-		"started-at":  nodeJob.StartedAt,
-		"finished-at": nodeJob.FinishedAt,
-		"denied":      nodeJob.Denied,
-	}
-	rels := gin.H{
-		"node": gin.H{"data": gin.H{"id": nodeJob.NodeID.String(), "type": "ansible-workflow-nodes"}},
+func formatWorkflowNodeJob(nodeJob *models.AnsibleWorkflowNodeJob) jsonapi.Resource[WorkflowNodeJobAttributes] {
+	rels := WorkflowNodeJobRelationships{
+		Node: jsonapi.ToOne(nodeJob.NodeID.String(), "ansible-workflow-nodes"),
 	}
 	if nodeJob.AnsibleJobID != nil {
-		rels["job"] = gin.H{"data": gin.H{"id": nodeJob.AnsibleJobID.String(), "type": "ansible-jobs"}}
+		r := jsonapi.ToOne(nodeJob.AnsibleJobID.String(), "ansible-jobs")
+		rels.Job = &r
 	}
 	if nodeJob.Node.JobTemplateID != nil {
-		rels["job-template"] = gin.H{"data": gin.H{"id": nodeJob.Node.JobTemplateID.String(), "type": "ansible-job-templates"}}
+		r := jsonapi.ToOne(nodeJob.Node.JobTemplateID.String(), "ansible-job-templates")
+		rels.JobTemplate = &r
 	}
-	return gin.H{
-		"id":            nodeJob.ID.String(),
-		"type":          "ansible-workflow-node-jobs",
-		"attributes":    attrs,
-		"relationships": rels,
+	return jsonapi.Resource[WorkflowNodeJobAttributes]{
+		ID:   nodeJob.ID.String(),
+		Type: "ansible-workflow-node-jobs",
+		Attributes: WorkflowNodeJobAttributes{
+			Status:     nodeJob.Status,
+			NodeType:   nodeJob.Node.NodeType,
+			Identifier: nodeJob.Node.Identifier,
+			StartedAt:  nodeJob.StartedAt,
+			FinishedAt: nodeJob.FinishedAt,
+			Denied:     nodeJob.Denied,
+		},
+		Relationships: rels,
 	}
 }
 
@@ -144,11 +144,11 @@ func (h *WorkflowHandler) ListWorkflowJobs(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workflow runs")
 		return
 	}
-	data := make([]gin.H, 0, len(jobs))
+	data := make([]jsonapi.Resource[WorkflowJobAttributes], 0, len(jobs))
 	for i := range jobs {
 		data = append(data, formatWorkflowJob(&jobs[i]))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, gin.H{"total-count": total})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, TotalCountMeta{TotalCount: total})
 }
 
 // GetWorkflowJob returns one run with its node jobs.
@@ -168,7 +168,7 @@ func (h *WorkflowHandler) GetWorkflowJob(c *gin.Context) {
 	if h.resolveWorkflowByID(c, wfJob.WorkflowID, rbac.PermissionAnsibleJobTemplateRead) == nil {
 		return
 	}
-	nodes := make([]gin.H, 0, len(wfJob.NodeJobs))
+	nodes := make([]jsonapi.Resource[WorkflowNodeJobAttributes], 0, len(wfJob.NodeJobs))
 	for i := range wfJob.NodeJobs {
 		nodes = append(nodes, formatWorkflowNodeJob(&wfJob.NodeJobs[i]))
 	}

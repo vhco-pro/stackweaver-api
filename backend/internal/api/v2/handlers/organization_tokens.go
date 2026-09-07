@@ -97,20 +97,20 @@ func (h *OrganizationTokenHandlerV2) resolveOrgOwner(c *gin.Context) (*models.Or
 
 // orgTokenResource builds the JSON:API resource for an org token. token is the plaintext, included only
 // on create (empty on read).
-func orgTokenResource(key *models.APIKey, token string) gin.H {
-	attrs := gin.H{
-		"created-at":   key.CreatedAt,
-		"last-used-at": key.LastUsedAt,
-		"expired-at":   key.ExpiresAt,
+func orgTokenResource(key *models.APIKey, token string) jsonapi.Document {
+	attrs := OrgTokenAttributes{
+		CreatedAt:  key.CreatedAt,
+		LastUsedAt: key.LastUsedAt,
+		ExpiredAt:  key.ExpiresAt,
 	}
 	if token != "" {
-		attrs["token"] = token
+		attrs.Token = token
 	}
-	return gin.H{
-		"data": gin.H{
-			"id":         key.ID,
-			"type":       "authentication-tokens",
-			"attributes": attrs,
+	return jsonapi.Document{
+		Data: jsonapi.Resource[OrgTokenAttributes]{
+			ID:         key.ID.String(),
+			Type:       "authentication-tokens",
+			Attributes: attrs,
 		},
 	}
 }

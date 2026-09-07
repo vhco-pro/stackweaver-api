@@ -64,19 +64,32 @@ func (h *RunTriggerHandlerV2) checkWorkspacePermission(c *gin.Context, ws *model
 	return true
 }
 
-func formatRunTriggerResponse(rt *models.RunTrigger) gin.H {
-	return gin.H{
-		"id":   rt.ID,
-		"type": "run-triggers",
-		"attributes": gin.H{
-			"workspace-name":  rt.Workspace.Name,
-			"sourceable-name": rt.Sourceable.Name,
-			"created-at":      rt.CreatedAt.UTC().Format(time.RFC3339),
+// RunTriggerAttributes carries the display names of both ends of the trigger.
+type RunTriggerAttributes struct {
+	WorkspaceName  string `json:"workspace-name"`
+	SourceableName string `json:"sourceable-name"`
+	CreatedAt      string `json:"created-at"`
+}
+
+// RunTriggerRelationships: workspace = the TARGET (whose runs are triggered);
+// sourceable = the SOURCE.
+type RunTriggerRelationships struct {
+	Workspace  jsonapi.Relationship `json:"workspace"`
+	Sourceable jsonapi.Relationship `json:"sourceable"`
+}
+
+func formatRunTriggerResponse(rt *models.RunTrigger) jsonapi.Resource[RunTriggerAttributes] {
+	return jsonapi.Resource[RunTriggerAttributes]{
+		ID:   rt.ID,
+		Type: "run-triggers",
+		Attributes: RunTriggerAttributes{
+			WorkspaceName:  rt.Workspace.Name,
+			SourceableName: rt.Sourceable.Name,
+			CreatedAt:      rt.CreatedAt.UTC().Format(time.RFC3339),
 		},
-		"relationships": gin.H{
-			// workspace = the TARGET (whose runs are triggered); sourceable = the SOURCE.
-			"workspace":  gin.H{"data": gin.H{"id": rt.WorkspaceID, "type": "workspaces"}},
-			"sourceable": gin.H{"data": gin.H{"id": rt.SourceableID, "type": "workspaces"}},
+		Relationships: RunTriggerRelationships{
+			Workspace:  jsonapi.ToOne(rt.WorkspaceID, "workspaces"),
+			Sourceable: jsonapi.ToOne(rt.SourceableID, "workspaces"),
 		},
 	}
 }
@@ -237,7 +250,7 @@ func (h *RunTriggerHandlerV2) ListByWorkspace(c *gin.Context) {
 		return
 	}
 
-	data := make([]gin.H, 0, len(triggers))
+	data := make([]jsonapi.Resource[RunTriggerAttributes], 0, len(triggers))
 	for i := range triggers {
 		data = append(data, formatRunTriggerResponse(&triggers[i]))
 	}

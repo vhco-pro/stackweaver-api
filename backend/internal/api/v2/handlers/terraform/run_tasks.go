@@ -95,35 +95,35 @@ type runTaskRequest struct {
 // global-configuration is ALWAYS present with a boolean `enabled` - go-tfe only parses the
 // sub-object when that key is a JSON bool, and tfe_organization_run_task_global_settings errors on
 // a task without it.
-func formatRunTask(t *models.RunTask, orgName string, workspaceTasks []models.WorkspaceTask) gin.H {
+func formatRunTask(t *models.RunTask, orgName string, workspaceTasks []models.WorkspaceTask) jsonapi.Resource[RunTaskAttributes] {
 	stages := t.GlobalStages
 	if stages == nil {
 		stages = models.StringArray{}
 	}
-	wtRefs := make([]gin.H, 0, len(workspaceTasks))
+	wtRefs := make([]jsonapi.ResourceID, 0, len(workspaceTasks))
 	for i := range workspaceTasks {
-		wtRefs = append(wtRefs, gin.H{"id": workspaceTasks[i].ID, "type": "workspace-tasks"})
+		wtRefs = append(wtRefs, jsonapi.ResourceID{ID: workspaceTasks[i].ID, Type: "workspace-tasks"})
 	}
-	return gin.H{
-		"id":   t.ID,
-		"type": "tasks",
-		"attributes": gin.H{
-			"name":        t.Name,
-			"url":         t.URL,
-			"description": t.Description,
-			"category":    t.Category,
-			"enabled":     t.Enabled,
-			"global-configuration": gin.H{
-				"enabled":           t.GlobalEnabled,
-				"stages":            stages,
-				"enforcement-level": t.GlobalEnforcementLevel,
+	return jsonapi.Resource[RunTaskAttributes]{
+		ID:   t.ID,
+		Type: "tasks",
+		Attributes: RunTaskAttributes{
+			Name:        t.Name,
+			URL:         t.URL,
+			Description: t.Description,
+			Category:    t.Category,
+			Enabled:     t.Enabled,
+			GlobalConfiguration: RunTaskGlobalConfiguration{
+				Enabled:          t.GlobalEnabled,
+				Stages:           stages,
+				EnforcementLevel: t.GlobalEnforcementLevel,
 			},
-			"created-at": t.CreatedAt.Format(time.RFC3339),
-			"updated-at": t.UpdatedAt.Format(time.RFC3339),
+			CreatedAt: t.CreatedAt.Format(time.RFC3339),
+			UpdatedAt: t.UpdatedAt.Format(time.RFC3339),
 		},
-		"relationships": gin.H{
-			"organization":    gin.H{"data": gin.H{"id": orgName, "type": "organizations"}},
-			"workspace-tasks": gin.H{"data": wtRefs},
+		Relationships: RunTaskRelationships{
+			Organization:   jsonapi.ToOne(orgName, "organizations"),
+			WorkspaceTasks: jsonapi.ManyRelationship{Data: wtRefs},
 		},
 	}
 }
@@ -306,7 +306,7 @@ func (h *RunTaskHandlerV2) List(c *gin.Context) {
 		taskError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list run tasks")
 		return
 	}
-	data := make([]gin.H, 0, len(tasks))
+	data := make([]jsonapi.Resource[RunTaskAttributes], 0, len(tasks))
 	for i := range tasks {
 		wts, _ := h.wsTaskRepo.ListByTask(tasks[i].ID)
 		data = append(data, formatRunTask(&tasks[i], org.Name, wts))
@@ -321,13 +321,13 @@ func (h *RunTaskHandlerV2) Read(c *gin.Context) {
 		return
 	}
 	wts, _ := h.wsTaskRepo.ListByTask(t.ID)
-	resp := gin.H{"data": formatRunTask(t, org.Name, wts)}
+	resp := jsonapi.Document{Data: formatRunTask(t, org.Name, wts)}
 	if c.Query("include") == "workspace_tasks" || c.Query("include") == "workspace_tasks.workspace" {
-		included := make([]gin.H, 0, len(wts))
+		included := make([]jsonapi.Resource[WorkspaceTaskAttributes], 0, len(wts))
 		for i := range wts {
 			included = append(included, formatWorkspaceTask(&wts[i]))
 		}
-		resp["included"] = included
+		resp.Included = included
 	}
 	c.JSON(http.StatusOK, resp)
 }

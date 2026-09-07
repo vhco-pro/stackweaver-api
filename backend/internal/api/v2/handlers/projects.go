@@ -184,7 +184,7 @@ func (r *UpdateProjectRequestV2) tagsPresent() bool {
 
 // formatProjectResponse formats a project in TFE-compatible JSON:API format
 // orgName is the organization name (not UUID) as TFE uses organization name as the primary identifier
-func formatProjectResponse(project *models.Project, orgName string) gin.H {
+func formatProjectResponse(project *models.Project, orgName string) jsonapi.Resource[ProjectAttributes] {
 	// TFE tfe_project_settings: default workspace execution settings on the project. setting-overwrites
 	// tells the provider which values the project specifies itself (vs. deferring to org defaults) -
 	// mirrors the per-workspace overwrite logic (a non-remote mode / a set pool is an explicit overwrite).
@@ -192,59 +192,56 @@ func formatProjectResponse(project *models.Project, orgName string) gin.H {
 	if execMode == "" {
 		execMode = "remote"
 	}
-	relationships := gin.H{
-		"organization": gin.H{
-			"data": gin.H{
-				"id":   orgName, // TFE uses organization name as primary identifier
-				"type": "organizations",
-			},
-		},
+	relationships := &ProjectRelationships{
+		// TFE uses organization name as primary identifier
+		Organization: jsonapi.ToOne(orgName, "organizations"),
 	}
 	if project.DefaultAgentPoolID != nil {
-		relationships["default-agent-pool"] = gin.H{
-			"data": gin.H{
-				"id":   project.DefaultAgentPoolID.String(),
-				"type": "agent-pools",
-			},
-		}
-	} else {
-		relationships["default-agent-pool"] = gin.H{"data": nil}
+		relationships.DefaultAgentPool = jsonapi.ToOne(project.DefaultAgentPoolID.String(), "agent-pools")
 	}
-	return gin.H{
-		"id":   project.ID.String(),
-		"type": "projects",
-		"attributes": gin.H{
-			"name":                   project.Name,
-			"description":            project.Description,
-			"is-unified":             false, // StackWeaver projects are not unified
-			"default-execution-mode": execMode,
-			"setting-overwrites": gin.H{
+	return jsonapi.Resource[ProjectAttributes]{
+		ID:   project.ID.String(),
+		Type: "projects",
+		Attributes: ProjectAttributes{
+			Name:                 project.Name,
+			Description:          project.Description,
+			IsUnified:            false, // StackWeaver projects are not unified
+			DefaultExecutionMode: execMode,
+			SettingOverwrites: ProjectSettingOverwrites{
 				// The provider sets both overwrite flags together, so they mirror one stored flag.
-				"default-execution-mode": project.SettingsOverwritten,
-				"default-agent-pool":     project.SettingsOverwritten,
+				DefaultExecutionMode: project.SettingsOverwritten,
+				DefaultAgentPool:     project.SettingsOverwritten,
 			},
-			"created-at": project.CreatedAt.Format(time.RFC3339),
-			"updated-at": project.UpdatedAt.Format(time.RFC3339),
+			CreatedAt: project.CreatedAt.Format(time.RFC3339),
+			UpdatedAt: project.UpdatedAt.Format(time.RFC3339),
 		},
-		"relationships": relationships,
-		"links": gin.H{
-			"self": "/api/v2/projects/" + project.ID.String(),
+		Relationships: relationships,
+		Links: jsonapi.SelfLink{
+			Self: "/api/v2/projects/" + project.ID.String(),
 		},
 	}
 }
 
 // formatProjectResponseWithCounts formats a project with resource counts
-func formatProjectResponseWithCounts(project *models.Project, orgName string) gin.H {
+func formatProjectResponseWithCounts(project *models.Project, orgName string) jsonapi.Resource[ProjectAttributes] {
 	response := formatProjectResponse(project, orgName)
 
 	// Add resource counts to attributes
-	attributes := response["attributes"].(gin.H)
-	attributes["workspaces-count"] = len(project.Workspaces)
-	attributes["inventories-count"] = len(project.Inventories)
-	attributes["playbooks-count"] = len(project.Playbooks)
-	attributes["job-templates-count"] = len(project.JobTemplates)
-	attributes["workflows-count"] = len(project.Workflows)
-	attributes["credentials-count"] = len(project.Credentials)
+	counts := []struct {
+		dst **int
+		n   int
+	}{
+		{&response.Attributes.WorkspacesCount, len(project.Workspaces)},
+		{&response.Attributes.InventoriesCount, len(project.Inventories)},
+		{&response.Attributes.PlaybooksCount, len(project.Playbooks)},
+		{&response.Attributes.JobTemplatesCount, len(project.JobTemplates)},
+		{&response.Attributes.WorkflowsCount, len(project.Workflows)},
+		{&response.Attributes.CredentialsCount, len(project.Credentials)},
+	}
+	for _, c := range counts {
+		n := c.n
+		*c.dst = &n
+	}
 
 	return response
 }
@@ -354,7 +351,7 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 	}
 
 	// Format projects in JSON:API format
-	formattedProjects := make([]gin.H, len(projects))
+	formattedProjects := make([]jsonapi.Resource[ProjectAttributes], len(projects))
 	for i := range projects {
 		formattedProjects[i] = formatProjectResponse(&projects[i], org.Name)
 	}
@@ -440,16 +437,16 @@ func (h *ProjectHandlerV2) GetByID(c *gin.Context) {
 	}
 
 	data := formatProjectResponseWithCounts(project, org.Name)
-	resp := gin.H{"data": data}
+	resp := jsonapi.Document{Data: data}
 	// TFE ?include=effective-tag-bindings - the provider's tfe_project resource + data.tfe_project read
 	// the project's tags this way. A project's effective tags equal its own bindings.
 	if includeHasEffectiveTagBindings(c) {
 		bindings, _ := h.tagRepo.ListByProject(project.ID)
-		if rels, ok := data["relationships"].(gin.H); ok {
-			rels["effective-tag-bindings"] = TagBindingsRelationship(bindings, "effective-tag-bindings")
-			rels["tag-bindings"] = TagBindingsRelationship(bindings, "tag-bindings")
+		if rels, ok := data.Relationships.(*ProjectRelationships); ok {
+			rels.EffectiveTagBindings = TagBindingsRelationship(bindings, "effective-tag-bindings")
+			rels.TagBindings = TagBindingsRelationship(bindings, "tag-bindings")
 		}
-		resp["included"] = IncludedTagBindingResources(bindings, "effective-tag-bindings")
+		resp.Included = IncludedTagBindingResources(bindings, "effective-tag-bindings")
 	}
 	c.JSON(http.StatusOK, resp)
 }

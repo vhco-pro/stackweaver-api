@@ -314,45 +314,35 @@ func (h *HostHandler) RemoveFromGroup(c *gin.Context) {
 }
 
 // formatHostResponse formats a host for JSON:API response
-func formatHostResponse(host *models.AnsibleInventoryHost) gin.H {
-	groups := make([]gin.H, len(host.Groups))
+func formatHostResponse(host *models.AnsibleInventoryHost) jsonapi.Resource[HostAttributes] {
+	groups := make([]jsonapi.ResourceID, len(host.Groups))
 	for i, group := range host.Groups {
-		groups[i] = gin.H{
-			"id":   group.ID.String(),
-			"type": "ansible-groups",
-		}
+		groups[i] = jsonapi.ResourceID{ID: group.ID.String(), Type: "ansible-groups"}
 	}
 
-	return gin.H{
-		"id":   host.ID.String(),
-		"type": "ansible-hosts",
-		"attributes": gin.H{
-			"name":        host.Name,
-			"description": host.Description,
-			"hostname":    host.Hostname,
-			"port":        host.Port,
-			"variables":   host.Variables,
-			"enabled":     host.Enabled,
-			"created-at":  host.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			"updated-at":  host.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	return jsonapi.Resource[HostAttributes]{
+		ID:   host.ID.String(),
+		Type: "ansible-hosts",
+		Attributes: HostAttributes{
+			Name:        host.Name,
+			Description: host.Description,
+			Hostname:    host.Hostname,
+			Port:        host.Port,
+			Variables:   host.Variables,
+			Enabled:     host.Enabled,
+			CreatedAt:   host.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:   host.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		},
-		"relationships": gin.H{
-			"inventory": gin.H{
-				"data": gin.H{
-					"id":   host.InventoryID.String(),
-					"type": "ansible-inventories",
-				},
-			},
-			"groups": gin.H{
-				"data": groups,
-			},
+		Relationships: HostRelationships{
+			Inventory: jsonapi.ToOne(host.InventoryID.String(), "ansible-inventories"),
+			Groups:    jsonapi.ManyRelationship{Data: groups},
 		},
 	}
 }
 
 // formatHostsResponse formats multiple hosts for JSON:API response
-func formatHostsResponse(hosts []models.AnsibleInventoryHost) []gin.H {
-	result := make([]gin.H, len(hosts))
+func formatHostsResponse(hosts []models.AnsibleInventoryHost) []jsonapi.Resource[HostAttributes] {
+	result := make([]jsonapi.Resource[HostAttributes], len(hosts))
 	for i, host := range hosts {
 		result[i] = formatHostResponse(&host)
 	}

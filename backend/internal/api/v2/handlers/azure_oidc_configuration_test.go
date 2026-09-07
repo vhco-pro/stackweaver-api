@@ -5,8 +5,8 @@ package handlers
 import (
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -30,18 +30,15 @@ func TestFormatAzureOIDCConfigResponse(t *testing.T) {
 	resp := formatAzureOIDCConfigResponse(config)
 
 	// Verify top-level fields
-	if resp["id"] != "azoidc-1234567890abcdef" {
-		t.Errorf("expected id 'azoidc-1234567890abcdef', got '%v'", resp["id"])
+	if resp.ID != "azoidc-1234567890abcdef" {
+		t.Errorf("expected id 'azoidc-1234567890abcdef', got '%v'", resp.ID)
 	}
-	if resp["type"] != "azure-oidc-configurations" {
-		t.Errorf("expected type 'azure-oidc-configurations', got '%v'", resp["type"])
+	if resp.Type != "azure-oidc-configurations" {
+		t.Errorf("expected type 'azure-oidc-configurations', got '%v'", resp.Type)
 	}
 
 	// Verify attributes (kebab-case keys matching go-tfe jsonapi tags)
-	attrs, ok := resp["attributes"].(gin.H)
-	if !ok {
-		t.Fatal("attributes is not a gin.H")
-	}
+	attrs := wireShape(t, resp.Attributes)
 	if attrs["client-id"] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
 		t.Errorf("expected client-id, got '%v'", attrs["client-id"])
 	}
@@ -53,32 +50,28 @@ func TestFormatAzureOIDCConfigResponse(t *testing.T) {
 	}
 
 	// Verify relationships
-	rels, ok := resp["relationships"].(gin.H)
+	rels, ok := resp.Relationships.(WorkspaceOnlyRelationshipsNamed)
 	if !ok {
-		t.Fatal("relationships is not a gin.H")
+		t.Fatalf("relationships not a WorkspaceOnlyRelationshipsNamed: %T", resp.Relationships)
 	}
-	orgRel, ok := rels["organization"].(gin.H)
-	if !ok {
-		t.Fatal("organization relationship is not a gin.H")
+	orgData := rels.Organization.Data
+	if orgData == nil {
+		t.Fatalf("organization data is nil")
 	}
-	orgData, ok := orgRel["data"].(gin.H)
-	if !ok {
-		t.Fatal("organization data is not a gin.H")
+	if orgData.ID != "test-org" {
+		t.Errorf("expected organization id 'test-org', got '%v'", orgData.ID)
 	}
-	if orgData["id"] != "test-org" {
-		t.Errorf("expected organization id 'test-org', got '%v'", orgData["id"])
-	}
-	if orgData["type"] != "organizations" {
-		t.Errorf("expected organization type 'organizations', got '%v'", orgData["type"])
+	if orgData.Type != "organizations" {
+		t.Errorf("expected organization type 'organizations', got '%v'", orgData.Type)
 	}
 
 	// Verify links
-	links, ok := resp["links"].(gin.H)
+	links, ok := resp.Links.(jsonapi.SelfLink)
 	if !ok {
-		t.Fatal("links is not a gin.H")
+		t.Fatalf("links not a jsonapi.SelfLink: %T", resp.Links)
 	}
-	if links["self"] != "/api/v2/oidc-configurations/azoidc-1234567890abcdef" {
-		t.Errorf("expected self link '/api/v2/oidc-configurations/azoidc-1234567890abcdef', got '%v'", links["self"])
+	if links.Self != "/api/v2/oidc-configurations/azoidc-1234567890abcdef" {
+		t.Errorf("expected self link '/api/v2/oidc-configurations/azoidc-1234567890abcdef', got '%v'", links.Self)
 	}
 }
 
@@ -97,11 +90,13 @@ func TestFormatAzureOIDCConfigResponse_NilOrganization(t *testing.T) {
 	resp := formatAzureOIDCConfigResponse(config)
 
 	// Organization name should be empty string when not preloaded
-	rels := resp["relationships"].(gin.H)
-	orgRel := rels["organization"].(gin.H)
-	orgData := orgRel["data"].(gin.H)
-	if orgData["id"] != "" {
-		t.Errorf("expected empty org id when organization is nil, got '%v'", orgData["id"])
+	rels := resp.Relationships.(WorkspaceOnlyRelationshipsNamed)
+	orgData := rels.Organization.Data
+	if orgData == nil {
+		t.Fatal("organization data is nil")
+	}
+	if orgData.ID != "" {
+		t.Errorf("expected empty org id when organization is nil, got '%v'", orgData.ID)
 	}
 }
 

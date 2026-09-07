@@ -20,68 +20,50 @@ import (
 // status) and the run UI renders them.
 
 // formatTimestamp renders a nullable time for status-timestamps.
-func stageTimestamps(ts *models.TaskStage) gin.H {
-	out := gin.H{}
-	set := func(k string, t *time.Time) {
-		if t != nil {
-			out[k] = t.Format(time.RFC3339)
+func phaseTimestamps(runningAt, passedAt, failedAt, erroredAt, canceledAt *time.Time) TaskPhaseTimestamps {
+	fmtT := func(t *time.Time) string {
+		if t == nil {
+			return ""
 		}
+		return t.Format(time.RFC3339)
 	}
-	set("running-at", ts.RunningAt)
-	set("passed-at", ts.PassedAt)
-	set("failed-at", ts.FailedAt)
-	set("errored-at", ts.ErroredAt)
-	set("canceled-at", ts.CanceledAt)
-	return out
-}
-
-func resultTimestamps(tr *models.TaskResult) gin.H {
-	out := gin.H{}
-	set := func(k string, t *time.Time) {
-		if t != nil {
-			out[k] = t.Format(time.RFC3339)
-		}
+	return TaskPhaseTimestamps{
+		RunningAt:  fmtT(runningAt),
+		PassedAt:   fmtT(passedAt),
+		FailedAt:   fmtT(failedAt),
+		ErroredAt:  fmtT(erroredAt),
+		CanceledAt: fmtT(canceledAt),
 	}
-	set("running-at", tr.RunningAt)
-	set("passed-at", tr.PassedAt)
-	set("failed-at", tr.FailedAt)
-	set("errored-at", tr.ErroredAt)
-	set("canceled-at", tr.CanceledAt)
-	return out
 }
 
 // formatTaskStage renders a task stage as JSON:API (type "task-stages"). permissions/actions
 // reflect the CALLER: canOverride is their apply permission on the run's workspace, and
 // is-overridable additionally requires the stage to actually await an override.
-func formatTaskStage(ts *models.TaskStage, canOverride bool) gin.H {
-	results := make([]gin.H, 0, len(ts.TaskResults))
+func formatTaskStage(ts *models.TaskStage, canOverride bool) jsonapi.Resource[TaskStageAttributes] {
+	results := make([]jsonapi.ResourceID, 0, len(ts.TaskResults))
 	for i := range ts.TaskResults {
-		results = append(results, gin.H{"id": ts.TaskResults[i].ID, "type": "task-results"})
+		results = append(results, jsonapi.ResourceID{ID: ts.TaskResults[i].ID, Type: "task-results"})
 	}
-	overridable := ts.Status == models.TaskStageStatusAwaitingOverride
-	return gin.H{
-		"id":   ts.ID,
-		"type": "task-stages",
-		"attributes": gin.H{
-			"stage":             ts.Stage,
-			"status":            ts.Status,
-			"status-timestamps": stageTimestamps(ts),
-			"created-at":        ts.CreatedAt.Format(time.RFC3339),
-			"updated-at":        ts.UpdatedAt.Format(time.RFC3339),
-			"permissions": gin.H{
-				"can-override-policy": false, // policy evaluations: feature we don't have (divergence)
-				"can-override-tasks":  canOverride,
-				"can-override":        canOverride,
+	return jsonapi.Resource[TaskStageAttributes]{
+		ID:   ts.ID,
+		Type: "task-stages",
+		Attributes: TaskStageAttributes{
+			Stage:            ts.Stage,
+			Status:           ts.Status,
+			StatusTimestamps: phaseTimestamps(ts.RunningAt, ts.PassedAt, ts.FailedAt, ts.ErroredAt, ts.CanceledAt),
+			CreatedAt:        ts.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:        ts.UpdatedAt.Format(time.RFC3339),
+			Permissions: TaskStagePermissions{
+				CanOverrideTasks: canOverride,
+				CanOverride:      canOverride,
 			},
-			"actions": gin.H{
-				"is-overridable": overridable,
-			},
+			Actions: TaskStageActions{IsOverridable: ts.Status == models.TaskStageStatusAwaitingOverride},
 		},
-		"relationships": gin.H{
-			"run":          gin.H{"data": gin.H{"id": ts.RunID, "type": "runs"}},
-			"task-results": gin.H{"data": results},
+		Relationships: TaskStageRelationships{
+			Run:         jsonapi.ToOne(ts.RunID, "runs"),
+			TaskResults: jsonapi.ManyRelationship{Data: results},
 			// Emitted empty: Stackweaver has no policy evaluations (documented divergence).
-			"policy-evaluations": gin.H{"data": []gin.H{}},
+			PolicyEvaluations: jsonapi.ManyRelationship{Data: []jsonapi.ResourceID{}},
 		},
 	}
 }
@@ -89,7 +71,7 @@ func formatTaskStage(ts *models.TaskStage, canOverride bool) gin.H {
 // formatTaskResult renders a task result as JSON:API (type "task-results"). The task-stage relation
 // key is `task_stage` with an UNDERSCORE: that is what go-tfe v1 decodes (v1.go TaskResult struct),
 // even though TFE's v2 OpenAPI spec spells it with a hyphen; we emit both to satisfy either reader.
-func formatTaskResult(tr *models.TaskResult) gin.H {
+func formatTaskResult(tr *models.TaskResult) jsonapi.Resource[TaskResultAttributes] {
 	taskID := ""
 	if tr.TaskID != nil {
 		taskID = *tr.TaskID
@@ -98,47 +80,45 @@ func formatTaskResult(tr *models.TaskResult) gin.H {
 	if tr.WorkspaceTaskID != nil {
 		wstaskID = *tr.WorkspaceTaskID
 	}
-	stageRel := gin.H{"data": gin.H{"id": tr.TaskStageID, "type": "task-stages"}}
-	return gin.H{
-		"id":   tr.ID,
-		"type": "task-results",
-		"attributes": gin.H{
-			"status":                           tr.Status,
-			"message":                          tr.Message,
-			"url":                              tr.URL,
-			"status-timestamps":                resultTimestamps(tr),
-			"task-id":                          taskID,
-			"task-name":                        tr.TaskName,
-			"task-url":                         tr.TaskURL,
-			"workspace-task-id":                wstaskID,
-			"workspace-task-enforcement-level": tr.EnforcementLevel,
-			"created-at":                       tr.CreatedAt.Format(time.RFC3339),
-			"updated-at":                       tr.UpdatedAt.Format(time.RFC3339),
+	stageRel := jsonapi.ToOne(tr.TaskStageID, "task-stages")
+	return jsonapi.Resource[TaskResultAttributes]{
+		ID:   tr.ID,
+		Type: "task-results",
+		Attributes: TaskResultAttributes{
+			Status:                        tr.Status,
+			Message:                       tr.Message,
+			URL:                           tr.URL,
+			StatusTimestamps:              phaseTimestamps(tr.RunningAt, tr.PassedAt, tr.FailedAt, tr.ErroredAt, tr.CanceledAt),
+			TaskID:                        taskID,
+			TaskName:                      tr.TaskName,
+			TaskURL:                       tr.TaskURL,
+			WorkspaceTaskID:               wstaskID,
+			WorkspaceTaskEnforcementLevel: tr.EnforcementLevel,
+			CreatedAt:                     tr.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:                     tr.UpdatedAt.Format(time.RFC3339),
 		},
-		"relationships": gin.H{
-			"task_stage": stageRel,
-			"task-stage": stageRel,
+		Relationships: TaskResultRelationships{
+			TaskStageUnderscore: stageRel,
+			TaskStage:           stageRel,
 		},
 	}
 }
 
 // formatTaskResultOutcome renders an outcome (type "task-result-outcomes").
-func formatTaskResultOutcome(o *models.TaskResultOutcome) gin.H {
-	return gin.H{
-		"id":   o.ID,
-		"type": "task-result-outcomes",
-		"attributes": gin.H{
-			"outcome-id":  o.OutcomeID,
-			"description": o.Description,
-			"body":        o.Body,
-			"url":         o.URL,
-			"tags":        o.Tags,
-			"created-at":  o.CreatedAt.Format(time.RFC3339),
-			"updated-at":  o.UpdatedAt.Format(time.RFC3339),
+func formatTaskResultOutcome(o *models.TaskResultOutcome) jsonapi.Resource[TaskResultOutcomeAttributes] {
+	return jsonapi.Resource[TaskResultOutcomeAttributes]{
+		ID:   o.ID,
+		Type: "task-result-outcomes",
+		Attributes: TaskResultOutcomeAttributes{
+			OutcomeID:   o.OutcomeID,
+			Description: o.Description,
+			Body:        o.Body,
+			URL:         o.URL,
+			Tags:        o.Tags,
+			CreatedAt:   o.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:   o.UpdatedAt.Format(time.RFC3339),
 		},
-		"relationships": gin.H{
-			"task-result": gin.H{"data": gin.H{"id": o.TaskResultID, "type": "task-results"}},
-		},
+		Relationships: TaskResultOutcomeRelationships{TaskResult: jsonapi.ToOne(o.TaskResultID, "task-results")},
 	}
 }
 
@@ -172,7 +152,7 @@ func (h *RunHandlerV2) ListTaskStages(c *gin.Context) {
 		canOverride = h.callerCanOverride(c, run)
 	}
 	page, pageSize, _ := paginate(c)
-	data := make([]gin.H, 0, len(stages))
+	data := make([]jsonapi.Resource[TaskStageAttributes], 0, len(stages))
 	for i := range stages {
 		data = append(data, formatTaskStage(&stages[i], canOverride))
 	}
@@ -190,13 +170,13 @@ func (h *RunHandlerV2) GetTaskStage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resp := gin.H{"data": formatTaskStage(ts, h.callerCanOverride(c, run))}
+	resp := jsonapi.Document{Data: formatTaskStage(ts, h.callerCanOverride(c, run))}
 	if inc := c.Query("include"); inc == "task_results" || inc == "task-results" {
-		included := make([]gin.H, 0, len(ts.TaskResults))
+		included := make([]jsonapi.Resource[TaskResultAttributes], 0, len(ts.TaskResults))
 		for i := range ts.TaskResults {
 			included = append(included, formatTaskResult(&ts.TaskResults[i]))
 		}
-		resp["included"] = included
+		resp.Included = included
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -274,7 +254,7 @@ func (h *RunHandlerV2) ListTaskResultOutcomes(c *gin.Context) {
 		return
 	}
 	page, pageSize, _ := paginate(c)
-	data := make([]gin.H, 0, len(outcomes))
+	data := make([]jsonapi.Resource[TaskResultOutcomeAttributes], 0, len(outcomes))
 	for i := range outcomes {
 		data = append(data, formatTaskResultOutcome(&outcomes[i]))
 	}
