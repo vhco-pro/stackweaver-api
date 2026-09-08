@@ -4,7 +4,6 @@ package ansible
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -79,10 +78,16 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	// page[number]/page[size]. This used to read limit/offset while reporting a correct
+	// six-member block including the true total, which is the most dangerous combination there
+	// is: total-pages can exceed 1, so a client is invited to ask for page 2, and the offset it
+	// sends is never read - it gets page 1 again. That is the inventory-sources bug in #761,
+	// which rendered every row twice. It did not bite here only because the one caller sends
+	// ?limit=50 and never pages. Reporting a true total and honouring page[number] are one
+	// feature; this endpoint had the first half without the second.
+	page, perPage := jsonapi.PageParams(c, 20)
 
-	syncs, total, err := h.syncRepo.ListByInventory(inventoryID, limit, offset)
+	syncs, total, err := h.syncRepo.ListByInventory(inventoryID, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
 		response.InternalError(c, "Failed to list inventory syncs")
 		return
@@ -92,10 +97,7 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 	for i := range syncs {
 		data = append(data, formatInventorySyncResponse(&syncs[i], false))
 	}
-	// limit/offset paging, reported as pages so this collection reads like every other one.
-	// It previously emitted a bare {"total": n} with no page information at all, so a client
-	// could not tell which page it had received.
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(offset/max(limit, 1)+1, limit, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // Get returns one sync run including its captured output.
