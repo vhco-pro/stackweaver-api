@@ -127,7 +127,7 @@ func (h *NotificationHandler) List(c *gin.Context) {
 	for i := range templates {
 		data = append(data, formatNotificationTemplate(&templates[i]))
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // Create a notification template.
@@ -409,7 +409,7 @@ func (h *NotificationHandler) ListForJobTemplate(c *gin.Context) {
 	for i := range attachments {
 		data = append(data, formatAttachment(&attachments[i], &attachments[i].NotificationTemplate.Name))
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 func formatAttachment(a *models.AnsibleNotificationAttachment, templateName *string) jsonapi.Resource[NotificationAttachmentAttributes] {

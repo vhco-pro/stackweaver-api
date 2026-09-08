@@ -293,7 +293,7 @@ func (h *NotificationConfigurationHandlerV2) respondList(c *gin.Context, configs
 	for i := range configs {
 		data = append(data, formatNotificationConfig(&configs[i]))
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // authProject loads the project named by :id and checks the caller's permission (org-manage-projects for

@@ -322,5 +322,5 @@ func (h *ConfigurationVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 		}, cv.WorkspaceID, uploadURL)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }

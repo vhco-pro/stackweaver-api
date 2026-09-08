@@ -709,6 +709,34 @@
                 }
               }
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -2516,8 +2544,28 @@
           "meta": {
             "type": "object",
             "properties": {
-              "total-count": {
-                "type": "integer"
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
               }
             }
           }
@@ -2693,6 +2741,34 @@
                 },
                 "type": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
                 }
               }
             }
@@ -3654,6 +3730,29 @@
             "properties": {
               "message": {
                 "type": "string"
+              },
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
               }
             }
           }
@@ -3719,6 +3818,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -3730,6 +3857,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -3749,6 +3904,34 @@
             "properties": {
               "self": {
                 "type": "string"
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
               }
             }
           }
@@ -4307,6 +4490,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4319,6 +4530,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4330,6 +4569,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -4354,6 +4621,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -4530,6 +4825,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4542,6 +4865,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4553,6 +4904,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -4646,6 +5025,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4698,6 +5105,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4709,6 +5144,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -4722,6 +5185,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4732,6 +5223,34 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -4745,6 +5264,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4756,6 +5303,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -4808,6 +5383,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }
@@ -5691,6 +6294,34 @@
                 }
               }
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -5886,6 +6517,34 @@
                 },
                 "type": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
                 }
               }
             }
@@ -6751,6 +7410,34 @@
                 }
               }
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -6856,6 +7543,34 @@
                 },
                 "type": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
                 }
               }
             }
@@ -8236,6 +8951,34 @@
                 }
               }
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -8308,6 +9051,34 @@
                 },
                 "type": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
                 }
               }
             }
@@ -8958,6 +9729,34 @@
                 }
               }
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -9050,6 +9849,34 @@
                 },
                 "type": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
                 }
               }
             }
@@ -9204,6 +10031,34 @@
                 },
                 "type": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
                 }
               }
             }
@@ -9411,6 +10266,34 @@
                 },
                 "type": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
                 }
               }
             }

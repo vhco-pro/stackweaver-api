@@ -80,7 +80,7 @@ func (h *VCSConnectionHandlerV2) List(c *gin.Context) {
 		responseData = append(responseData, vcsConnectionResource(&connections[i], org.ID))
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, responseData)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, responseData, jsonapi.NewFullPageMeta(len(responseData)))
 }
 
 // Create creates a new VCS connection

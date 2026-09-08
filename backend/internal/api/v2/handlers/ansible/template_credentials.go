@@ -90,7 +90,7 @@ func (h *PlaybookHandler) GetTemplateAccess(c *gin.Context) {
 			},
 		})
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // ListTemplateCredentials lists the template's attached credentials.
@@ -109,7 +109,7 @@ func (h *PlaybookHandler) ListTemplateCredentials(c *gin.Context) {
 	for i := range creds {
 		data = append(data, formatTemplateCredential(&creds[i]))
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // AttachTemplateCredential attaches a credential to the template's set,

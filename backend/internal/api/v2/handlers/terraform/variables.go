@@ -199,7 +199,7 @@ func (h *VariableHandlerV2) ListByWorkspace(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	jsonapi.WriteDocument(c, http.StatusOK, variablesData)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, variablesData, jsonapi.NewFullPageMeta(len(variablesData)))
 }
 
 // Get returns a single workspace variable by ID (TFE-compatible).
@@ -609,5 +609,5 @@ func (h *VariableHandlerV2) GetPlatformVariableKeys(c *gin.Context) {
 	}
 
 	// Return simple JSON array of keys
-	jsonapi.WriteDocument(c, http.StatusOK, keys)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, keys, jsonapi.NewFullPageMeta(len(keys)))
 }

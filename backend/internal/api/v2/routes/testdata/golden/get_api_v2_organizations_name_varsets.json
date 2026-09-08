@@ -128,6 +128,16 @@
         },
         "type": "varsets"
       }
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 2,
+        "prev-page": null,
+        "total-count": 2,
+        "total-pages": 1
+      }
+    }
   }
 }

@@ -580,7 +580,7 @@ func (h *WorkflowHandler) ListNodes(c *gin.Context) {
 		data[i] = formatNodeResponse(&node)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // UpdateNode updates a node
@@ -824,7 +824,7 @@ func (h *WorkflowHandler) ListEdges(c *gin.Context) {
 		data[i] = formatEdgeResponse(&edge)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // DeleteEdge deletes an edge

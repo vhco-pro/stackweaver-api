@@ -3,6 +3,16 @@
   "path": "/api/v2/teams/:id/notification-configurations",
   "status": 200,
   "body": {
-    "data": []
+    "data": [],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 1,
+        "prev-page": null,
+        "total-count": 0,
+        "total-pages": 1
+      }
+    }
   }
 }

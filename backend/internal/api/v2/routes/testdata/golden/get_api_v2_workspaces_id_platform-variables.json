@@ -10,6 +10,16 @@
       "TF_PROJECT_NAME",
       "TF_WORKSPACE_ID",
       "TF_WORKSPACE_NAME"
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 6,
+        "prev-page": null,
+        "total-count": 6,
+        "total-pages": 1
+      }
+    }
   }
 }

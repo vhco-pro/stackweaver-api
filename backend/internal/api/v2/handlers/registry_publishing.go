@@ -289,7 +289,13 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 		return
 	}
 
-	modules, _, err := h.moduleRepo.List(&org.ID, "", nil, 100, 0)
+	// This one caps rows, so it cannot use NewFullPageMeta - stating a total equal to the rows
+	// returned would claim an organization has exactly 100 modules when it has more. The
+	// repository already counts the full set and this call was discarding it. Reporting that
+	// total obliges the handler to honour page[number] as well; see PageParams for why serving
+	// page 1 for every page is the worse of the two failures.
+	page, perPage := jsonapi.PageParams(c, 100)
+	modules, total, err := h.moduleRepo.List(&org.ID, "", nil, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -334,7 +340,7 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetModule handles GET /api/v2/organizations/:name/registry/modules/:name/:provider
@@ -443,7 +449,7 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // PublishVersion handles POST /api/v2/organizations/:name/registry/modules/:name/:provider/versions

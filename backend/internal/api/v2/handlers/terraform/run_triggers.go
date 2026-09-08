@@ -254,5 +254,5 @@ func (h *RunTriggerHandlerV2) ListByWorkspace(c *gin.Context) {
 	for i := range triggers {
 		data = append(data, formatRunTriggerResponse(&triggers[i]))
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }

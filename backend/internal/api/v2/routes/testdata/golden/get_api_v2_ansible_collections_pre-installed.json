@@ -81,6 +81,16 @@
         "id": "community.vmware",
         "type": "ansible-collections"
       }
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 7,
+        "prev-page": null,
+        "total-count": 7,
+        "total-pages": 1
+      }
+    }
   }
 }

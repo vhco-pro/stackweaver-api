@@ -94,3 +94,20 @@ func NewPaginationMeta(page, pageSize int, total int64) PaginationMeta {
 	}
 	return PaginationMeta{Pagination: p}
 }
+
+// NewFullPageMeta is the block for a collection the handler materialises in full: one page,
+// containing everything, total equal to what was sent.
+//
+// It exists to be greppable. #761 converted 36 unlimited collections at once, and the honest
+// block for every one of them is the same three arguments; spelling `NewPaginationMeta(1, n,
+// int64(n))` out at each call site says "one page of n out of n" in a form a reader has to
+// decode, and says nothing about *why* one page is the whole truth there.
+//
+// Do not reach for this on an endpoint that caps its rows. Stating a total equal to the number
+// returned is only true when everything was returned; on a capped endpoint it is a lie the
+// client has no way to detect, and a worse failure than emitting no pagination block at all -
+// see the inventory-sources bug in #761, where correct-looking meta over wrong paging made
+// fetchAllPages collect duplicates rather than merely stop early.
+func NewFullPageMeta(n int) PaginationMeta {
+	return NewPaginationMeta(1, n, int64(n))
+}

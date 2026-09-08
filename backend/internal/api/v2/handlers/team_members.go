@@ -156,7 +156,7 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 		}
 	}
 
-	response := jsonapi.Document{Data: data}
+	response := jsonapi.Document{Data: data, Meta: jsonapi.NewFullPageMeta(len(data))}
 	if len(included) > 0 {
 		response.Included = included
 	}

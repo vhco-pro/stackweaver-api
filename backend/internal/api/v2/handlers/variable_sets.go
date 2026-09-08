@@ -238,7 +238,7 @@ func (h *VariableSetHandlerV2) ListVariableSets(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // GetVariableSet handles GET /api/v2/varsets/:id or GET /api/v2/organizations/:name/varsets/:id
@@ -1240,7 +1240,7 @@ func (h *VariableSetHandlerV2) ListVariableSetsByJobTemplate(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // CreateVariableSetVariableRequestV2 uses JSON:API format (TFE-compatible)
@@ -1330,7 +1330,7 @@ func (h *VariableSetHandlerV2) ListVariableSetVariables(c *gin.Context) {
 		data[i] = varsetVarResource(&variables[i], variableSet.ID, true)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // GetVariableSetVariable handles GET /api/v2/varsets/:id/relationships/vars/:variable_id

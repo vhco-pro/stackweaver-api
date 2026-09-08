@@ -120,6 +120,16 @@
         "id": "\u003cuuid\u003e",
         "type": "users"
       }
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 3,
+        "prev-page": null,
+        "total-count": 3,
+        "total-pages": 1
+      }
+    }
   }
 }
