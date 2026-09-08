@@ -265,9 +265,9 @@ func (h *InventorySourceHandler) Get(c *gin.Context) {
 // @Tags Ansible Inventory Sources
 // @Produce json
 // @Param id path string true "Inventory ID"
-// @Param limit query int false "Limit" default(20)
-// @Param offset query int false "Offset" default(0)
-// @Success 200 {object} response.PaginatedResponse
+// @Param page[number] query int false "Page number" default(1)
+// @Param page[size] query int false "Page size" default(20)
+// @Success 200 {object} jsonapi.Document
 // @Failure 400 {object} response.ErrorResponse
 // @Router /api/v2/ansible/inventories/{id}/sources [get]
 func (h *InventorySourceHandler) List(c *gin.Context) {
@@ -288,18 +288,25 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	// page[number]/page[size], not limit/offset. This handler already emitted correct pagination
+	// meta, which made the mismatch worse rather than harmless: fetchAllPages
+	// (frontend/src/lib/pagination.ts) believed the total-pages it was told, asked for page 2,
+	// and got page 1 back because the offset it sent was never read - so the Sources tab listed
+	// every row twice and never reached the ones past the first page.
+	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
+	if perPage > 100 {
+		perPage = 100
+	}
+	offset := (page - 1) * perPage
 
-	sources, total, err := h.sourceService.ListInventorySources(inventoryID, limit, offset)
+	sources, total, err := h.sourceService.ListInventorySources(inventoryID, perPage, offset)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
 
-	page := offset/limit + 1
-
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatInventorySourcesResponse(sources), jsonapi.NewPaginationMeta(page, limit, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatInventorySourcesResponse(sources), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // Update updates an inventory source
