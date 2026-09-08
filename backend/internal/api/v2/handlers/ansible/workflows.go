@@ -4,7 +4,6 @@ package ansible
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -166,11 +165,11 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("page[number]", "0"))
-	if offset > 0 {
-		offset = (offset - 1) * limit
-	}
+	// This read page[number] into a variable named `offset` and converted in place, which
+	// arrived at the right answer but had no upper bound on page[size] - so page[size]=100000
+	// pulled the whole table in one request.
+	page, limit := jsonapi.PageParams(c, 20, 100)
+	offset := jsonapi.Offset(page, limit)
 
 	workflows, total, err := h.workflowRepo.ListByOrganization(org.ID, limit, offset)
 	if err != nil {
@@ -183,8 +182,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 		data[i] = formatWorkflowResponse(&w)
 	}
 
-	// offset was derived from a page number above, so convert it back rather than inventing one.
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(offset/max(limit, 1)+1, limit, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, limit, total))
 }
 
 // Create creates a new workflow

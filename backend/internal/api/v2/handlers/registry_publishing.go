@@ -318,7 +318,7 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 	// repository already counts the full set and this call was discarding it. Reporting that
 	// total obliges the handler to honour page[number] as well; see PageParams for why serving
 	// page 1 for every page is the worse of the two failures.
-	page, perPage := jsonapi.PageParams(c, 100)
+	page, perPage := jsonapi.PageParams(c, 100, 100)
 	modules, total, err := h.moduleRepo.List(&org.ID, "", nil, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())

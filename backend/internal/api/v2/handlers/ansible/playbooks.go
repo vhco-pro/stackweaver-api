@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -408,11 +407,7 @@ func (h *PlaybookHandler) ListPlaybooks(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	playbooks, total, err := h.playbookRepo.ListByProject(projectID, perPage, offset)
@@ -450,11 +445,7 @@ func (h *PlaybookHandler) ListPlaybooksByOrganization(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	playbooks, total, err := h.playbookRepo.ListByOrganization(org.ID, perPage, offset)
@@ -985,11 +976,7 @@ func (h *PlaybookHandler) ListTemplates(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	templates, total, err := h.templateRepo.ListByProject(projectID, perPage, offset)
@@ -1027,11 +1014,7 @@ func (h *PlaybookHandler) ListTemplatesByOrganization(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	templates, total, err := h.templateRepo.ListByOrganization(org.ID, perPage, offset)

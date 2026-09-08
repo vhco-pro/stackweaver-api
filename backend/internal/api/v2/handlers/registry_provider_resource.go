@@ -214,7 +214,7 @@ func (h *RegistryProviderResourceHandler) ListProviders(c *gin.Context) {
 	// honest total means total-pages can exceed 1, and a client that then asks for page 2 must
 	// get page 2: serving page 1 again is how the inventory-sources listing ended up returning
 	// every row twice (#761). Either both, or neither.
-	page, perPage := jsonapi.PageParams(c, 100)
+	page, perPage := jsonapi.PageParams(c, 100, 100)
 	providers, total, err := h.providerRepo.ListByOrganization(org.ID, registryName, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
 		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())

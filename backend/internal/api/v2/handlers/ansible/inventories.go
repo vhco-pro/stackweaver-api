@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -232,11 +231,7 @@ func (h *InventoryHandler) List(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	inventories, total, err := h.inventoryService.ListInventories(org.ID, perPage, offset)

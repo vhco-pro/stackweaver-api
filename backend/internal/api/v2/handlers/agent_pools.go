@@ -5,7 +5,6 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -158,11 +157,7 @@ func (h *AgentPoolHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if pageSize > 100 {
-		pageSize = 100
-	}
+	page, pageSize := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * pageSize
 	if offset < 0 {
 		offset = 0

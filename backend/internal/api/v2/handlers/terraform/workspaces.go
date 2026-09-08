@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -558,12 +557,8 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 	}
 
 	// Support TFE-style pagination: page[size] and page[number]
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	pageNumber, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	offset := (pageNumber - 1) * pageSize
+	pageNumber, pageSize := jsonapi.PageParams(c, 20, 100)
+	offset := jsonapi.Offset(pageNumber, pageSize)
 
 	// Tag filtering (data.tfe_workspace_ids). When active, we load the full accessible set and filter on
 	// effective tags in memory so pagination + totals reflect the *filtered* result; the DB can't express

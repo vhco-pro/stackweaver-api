@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -76,11 +75,7 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 	}
 
 	// Parse pagination options
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	if perPage < 1 {
 		perPage = 20
 	}

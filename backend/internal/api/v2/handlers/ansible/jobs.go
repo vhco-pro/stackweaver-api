@@ -158,11 +158,7 @@ func (h *JobHandler) ListByProject(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	jobs, total, err := h.jobService.ListJobsByProject(projectID, perPage, offset)
@@ -202,11 +198,7 @@ func (h *JobHandler) ListByOrganization(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	jobs, total, err := h.jobService.ListJobsByOrganization(org.ID, perPage, offset)
@@ -807,11 +799,7 @@ func (h *JobHandler) GetEvents(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "100"))
-	if perPage > 500 {
-		perPage = 500
-	}
+	page, perPage := jsonapi.PageParams(c, 100, 500)
 	offset := (page - 1) * perPage
 
 	events, total, err := h.jobService.GetJobEventsFiltered(id, filter, perPage, offset)

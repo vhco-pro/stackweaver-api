@@ -4,7 +4,6 @@ package ansible
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -631,11 +630,7 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 	// and applied this handler's own default of 20 instead. Parsed inline to match the sibling
 	// Ansible handlers (groups.go, jobs.go) - the shared paginate() helper is unexported and
 	// lives in the terraform package, so this one cannot reach it.
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	schedules, total, err := h.schedulerService.ListSchedules(orgID, perPage, offset)
