@@ -4,7 +4,6 @@ package terraform
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -154,19 +153,13 @@ func (h *ChangeRequestHandlerV2) authOrgManageWorkspaces(c *gin.Context) (*model
 }
 
 // paginate reads TFE-style page[number]/page[size] query params.
+//
+// This was the only hand-rolled parser in the tree that clamped both bounds, and jsonapi.PageParams
+// is that logic promoted somewhere every package can reach - it was unexported and in this one,
+// which is why fifteen other handlers grew their own version without the lower clamp (#774).
 func paginate(c *gin.Context) (page, pageSize, offset int) {
-	page, _ = strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	if page < 1 {
-		page = 1
-	}
-	pageSize, _ = strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if pageSize < 1 {
-		pageSize = 20
-	}
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	return page, pageSize, (page - 1) * pageSize
+	page, pageSize = jsonapi.PageParams(c, 20, 100)
+	return page, pageSize, jsonapi.Offset(page, pageSize)
 }
 
 // BulkActions handles POST /organizations/:name/explorer/bulk-actions. This is TFE's only documented

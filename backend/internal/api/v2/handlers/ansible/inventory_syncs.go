@@ -85,7 +85,7 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 	// which rendered every row twice. It did not bite here only because the one caller sends
 	// ?limit=50 and never pages. Reporting a true total and honouring page[number] are one
 	// feature; this endpoint had the first half without the second.
-	page, perPage := jsonapi.PageParams(c, 20)
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 
 	syncs, total, err := h.syncRepo.ListByInventory(inventoryID, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {

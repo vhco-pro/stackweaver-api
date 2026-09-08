@@ -5,7 +5,6 @@ package ansible
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -293,11 +292,7 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 	// (frontend/src/lib/pagination.ts) believed the total-pages it was told, asked for page 2,
 	// and got page 1 back because the offset it sent was never read - so the Sources tab listed
 	// every row twice and never reached the ones past the first page.
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	sources, total, err := h.sourceService.ListInventorySources(inventoryID, perPage, offset)

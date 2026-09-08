@@ -143,7 +143,7 @@ func (h *WorkflowHandler) ListWorkflowJobs(c *gin.Context) {
 	// just in a bespoke one-member block no client knows how to read; the six-member block says
 	// the same thing in the shape go-tfe and fetchAllPages already expect. Reporting it obliges
 	// the handler to honour page[number] too - see PageParams.
-	page, perPage := jsonapi.PageParams(c, 50)
+	page, perPage := jsonapi.PageParams(c, 50, 100)
 	jobs, total, err := h.workflowRepo.ListWorkflowJobsByWorkflow(workflow.ID, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workflow runs")

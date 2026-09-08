@@ -4,7 +4,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -37,14 +36,8 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 	}
 
 	// Parse pagination
-	limit := 50
-	offset := 0
-	if l, err := strconv.Atoi(c.DefaultQuery("page[size]", "50")); err == nil && l > 0 && l <= 100 {
-		limit = l
-	}
-	if p, err := strconv.Atoi(c.DefaultQuery("page[number]", "1")); err == nil && p > 0 {
-		offset = (p - 1) * limit
-	}
+	page, limit := jsonapi.PageParams(c, 50, 100)
+	offset := jsonapi.Offset(page, limit)
 
 	events, total, err := h.eventRepo.ListByOrganization(org.ID, limit, offset)
 	if err != nil {

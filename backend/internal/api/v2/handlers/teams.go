@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -395,11 +394,7 @@ func (h *TeamHandlerV2) List(c *gin.Context) {
 	}
 
 	// Parse pagination
-	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
-	if perPage > 100 {
-		perPage = 100
-	}
+	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
 	teams, total, err := h.teamRepo.List(org.ID, perPage, offset)
