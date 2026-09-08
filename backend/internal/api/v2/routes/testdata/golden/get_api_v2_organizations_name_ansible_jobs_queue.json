@@ -120,6 +120,16 @@
         },
         "type": "ansible-jobs"
       }
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": "\u003cnumber\u003e",
+        "next-page": null,
+        "page-size": "\u003cnumber\u003e",
+        "prev-page": null,
+        "total-count": "\u003cnumber\u003e",
+        "total-pages": "\u003cnumber\u003e"
+      }
+    }
   }
 }

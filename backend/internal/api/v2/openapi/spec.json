@@ -2071,6 +2071,34 @@
                 }
               }
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "string"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "string"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "string"
+                  },
+                  "total-pages": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -3672,6 +3700,34 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4609,6 +4665,34 @@
             "items": {
               "type": "object",
               "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
             }
           }
         }

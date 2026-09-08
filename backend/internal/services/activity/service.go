@@ -61,15 +61,18 @@ func (s *Service) LogActivity(ctx context.Context, action, resourceType string, 
 	return s.auditRepo.Create(auditLog)
 }
 
-// GetRecentActivities gets recent activities with optional filters
-func (s *Service) GetRecentActivities(userID *uuid.UUID, organizationID *uuid.UUID, limit int) ([]models.AuditLog, error) {
+// GetRecentActivities gets recent activities with optional filters, and how many match them.
+//
+// The repository has always counted the full filtered set; this discarded it with `_`, which is
+// why /api/v2/activities/recent could not report a total and had to be exempted from the
+// pagination contract (#773).
+func (s *Service) GetRecentActivities(userID *uuid.UUID, organizationID *uuid.UUID, limit int) ([]models.AuditLog, int64, error) {
 	filters := repository.AuditLogFilters{
 		UserID:         userID,
 		OrganizationID: organizationID,
 	}
 
-	activities, _, err := s.auditRepo.List(filters, limit, 0)
-	return activities, err
+	return s.auditRepo.List(filters, limit, 0)
 }
 
 // GetActivities gets activities with filters
