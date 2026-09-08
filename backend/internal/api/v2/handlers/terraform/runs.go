@@ -2097,8 +2097,13 @@ func (h *RunHandlerV2) GetQueue(c *gin.Context) {
 		return
 	}
 
+	// A top-N view of the queue, not a pageable collection: the caller gets the oldest `limit`
+	// and there is no page 2. The pagination block is still honest about that - one page of
+	// `limit`, and a total-count describing the whole queue - which is what tells an operator
+	// whether they are seeing all of it. Reporting a total equal to the rows returned would be
+	// the lie that made the inventory-sources listing worse than a plain truncation (#761).
 	limit := 50 // Default limit for queue
-	runs, err := h.runRepo.ListQueued(org.ID, limit)
+	runs, total, err := h.runRepo.ListQueued(org.ID, limit)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get run queue")
 		return
@@ -2110,7 +2115,7 @@ func (h *RunHandlerV2) GetQueue(c *gin.Context) {
 		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, formattedRuns)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, jsonapi.NewPaginationMeta(1, limit, total))
 }
 
 // createConfigurationVersionFromVCS creates a configuration version by cloning from VCS

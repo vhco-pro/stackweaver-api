@@ -202,7 +202,7 @@ func (h *ActivityHandlerV2) GetRecentActivities(c *gin.Context) {
 		}
 	}
 
-	activities, err := h.activityService.GetRecentActivities(&user.ID, orgID, limit)
+	activities, total, err := h.activityService.GetRecentActivities(&user.ID, orgID, limit)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -241,5 +241,9 @@ func (h *ActivityHandlerV2) GetRecentActivities(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, activitiesData)
+	// A top-N view, so one page of `limit` with a total-count describing everything that matched
+	// the filters. Note this route reports the standard six-member block while its sibling
+	// /api/v2/activities keeps the offset-style one by owner decision in #756 - the two are
+	// deliberately different and the census test records both.
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, activitiesData, jsonapi.NewPaginationMeta(1, limit, total))
 }

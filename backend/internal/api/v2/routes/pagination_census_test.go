@@ -30,16 +30,14 @@ import (
 var paginationExempt = map[string]string{
 	// #756, owner decision: this one keeps the offset-style block (limit/offset/total) it has
 	// always emitted. It is the single deliberate survivor of the pre-#756 shape.
+	//
+	// It is now the only entry here. The three top-N views that sat alongside it -
+	// /activities/recent, the Ansible jobs queue and the runs queue - were exempt because an
+	// honest total needed a COUNT that #761 had put out of scope. #773 added those counts, so
+	// they report the six-member block like everything else. A top-N view can still be honest:
+	// one page of `limit`, with a total-count describing the whole queue, which is exactly what
+	// tells an operator whether they are looking at all of it.
 	"/api/v2/activities": "keeps its offset block by owner decision in #756",
-
-	// Top-N views, not collections. Each returns "the first N" with no way to ask for more and
-	// no count of the rest, so the honest six-member block would need a COUNT query that #761
-	// put out of scope (its design turns on no COUNT being required). Reporting a total equal
-	// to the rows returned would be a lie a client cannot detect - the failure mode that made
-	// the inventory-sources bug worse than a plain truncation.
-	"/api/v2/activities/recent":                      "top-N view; a true total needs a COUNT (out of scope in #761)",
-	"/api/v2/organizations/:name/ansible/jobs/queue": "top-N view; a true total needs a COUNT (out of scope in #761)",
-	"/api/v2/organizations/:name/runs/queue":         "top-N view; a true total needs a COUNT (out of scope in #761)",
 }
 
 // The six members NewPaginationMeta produces. go-tfe reads all of them.
