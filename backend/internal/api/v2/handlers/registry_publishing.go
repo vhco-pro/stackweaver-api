@@ -242,7 +242,9 @@ func (h *RegistryPublishingHandler) DeleteModule(c *gin.Context) {
 		return
 	}
 
-	// Delete module (cascade will delete versions)
+	// The repository removes the versions and their download rows in the same transaction. It
+	// does not rely on a database cascade: AutoMigrate does not create one, so on a fresh install
+	// this used to fail with a foreign-key violation for any module that had been published.
 	if err := h.moduleRepo.Delete(module.ID); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -261,22 +263,44 @@ func (h *RegistryPublishingHandler) DeleteAllModules(c *gin.Context) {
 		return
 	}
 
-	// Get all modules for organization
-	modules, _, err := h.moduleRepo.List(&org.ID, "", nil, 1000, 0)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
-		return
-	}
+	// Drain the listing rather than taking one capped page of it. This used to load 1000 and
+	// stop, so an organization holding more kept the remainder while the caller was told the
+	// registry had been emptied - the operator's next action then rests on a false belief. A
+	// limit where the contract implies completeness is bad enough on a read; on a destructive
+	// path it is worse (#772).
+	//
+	// Deleting always removes the rows the previous page returned, so re-reading from offset 0
+	// each time is correct and cannot skip a module the way an advancing offset would. The loop
+	// terminates because every pass deletes what it read; the counter is a guard against a
+	// delete that silently fails to remove anything, which would otherwise spin forever.
+	const deleteBatch = 100
+	deleted := 0
+	for {
+		modules, _, err := h.moduleRepo.List(&org.ID, "", nil, deleteBatch, 0)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
+			return
+		}
+		if len(modules) == 0 {
+			break
+		}
 
-	// Delete all modules
-	for _, module := range modules {
-		if err := h.moduleRepo.Delete(module.ID); err != nil {
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to delete module %s: %v", module.Name, err))
+		before := deleted
+		for _, module := range modules {
+			if err := h.moduleRepo.Delete(module.ID); err != nil {
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to delete module %s: %v", module.Name, err))
+				return
+			}
+			deleted++
+		}
+		if deleted == before {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error",
+				fmt.Sprintf("Deleted %d module(s) but the listing did not shrink; aborting rather than looping", deleted))
 			return
 		}
 	}
 
-	response.Message(c, http.StatusOK, fmt.Sprintf("Deleted %d module(s)", len(modules)))
+	response.Message(c, http.StatusOK, fmt.Sprintf("Deleted %d module(s)", deleted))
 }
 
 // ListModules handles GET /api/v2/organizations/:name/registry/modules
