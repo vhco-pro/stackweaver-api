@@ -14,6 +14,16 @@
         "id": "\u003cuuid\u003e",
         "type": "tokens"
       }
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 1,
+        "prev-page": null,
+        "total-count": 1,
+        "total-pages": 1
+      }
+    }
   }
 }

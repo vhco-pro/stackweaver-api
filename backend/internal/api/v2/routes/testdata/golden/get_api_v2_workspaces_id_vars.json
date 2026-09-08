@@ -139,6 +139,16 @@
         },
         "type": "vars"
       }
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 5,
+        "prev-page": null,
+        "total-count": 5,
+        "total-pages": 1
+      }
+    }
   }
 }

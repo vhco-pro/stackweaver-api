@@ -206,7 +206,16 @@ func (h *RegistryProviderResourceHandler) ListProviders(c *gin.Context) {
 	}
 
 	registryName := c.Query("filter[registry_name]")
-	providers, _, err := h.providerRepo.ListByOrganization(org.ID, registryName, 100, 0)
+	// This one caps rows, so it cannot use NewFullPageMeta - stating a total equal to the rows
+	// returned would claim an organization has exactly 100 providers when it has more. The
+	// repository already counts the full set and this call was discarding it.
+	//
+	// Honouring page[number] is not optional once the true total is reported. A cap plus an
+	// honest total means total-pages can exceed 1, and a client that then asks for page 2 must
+	// get page 2: serving page 1 again is how the inventory-sources listing ended up returning
+	// every row twice (#761). Either both, or neither.
+	page, perPage := jsonapi.PageParams(c, 100)
+	providers, total, err := h.providerRepo.ListByOrganization(org.ID, registryName, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
 		regProvErr(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -216,7 +225,7 @@ func (h *RegistryProviderResourceHandler) ListProviders(c *gin.Context) {
 	for i := range providers {
 		data = append(data, formatRegistryProviderResponse(&providers[i]))
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetProvider handles GET /api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name.

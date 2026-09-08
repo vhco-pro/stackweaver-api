@@ -110,7 +110,7 @@ func (h *CollectionsHandler) ListPreInstalledCollections(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // ListJobCollections returns collections installed for a specific job
@@ -157,8 +157,20 @@ func (h *CollectionsHandler) ListJobCollections(c *gin.Context) {
 // GET /ansible/collections/search?q=keyword
 func (h *CollectionsHandler) SearchGalaxyCollections(c *gin.Context) {
 	// This would call the Galaxy API in a real implementation
-	// For now, return a placeholder response
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, []interface{}{}, map[string]interface{}{
-		"message": "Galaxy search not yet implemented. Browse collections at https://galaxy.ansible.com",
+	// For now, return a placeholder response. It still carries the pagination block: a client
+	// cannot tell a stub from a genuinely empty result, so "zero rows, one page" is both true
+	// and the answer that stops it guessing.
+	data := []map[string]interface{}{}
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, galaxySearchMeta{
+		PaginationMeta: jsonapi.NewFullPageMeta(len(data)),
+		Message:        "Galaxy search not yet implemented. Browse collections at https://galaxy.ansible.com",
 	})
+}
+
+// galaxySearchMeta carries the standard pagination block alongside the stub's explanatory
+// message. Typed rather than a map so the wire shape is visible to the compiler and the
+// OpenAPI generator (#760).
+type galaxySearchMeta struct {
+	jsonapi.PaginationMeta
+	Message string `json:"message"`
 }

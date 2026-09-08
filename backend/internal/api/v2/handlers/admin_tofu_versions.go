@@ -462,7 +462,7 @@ func (h *AdminTofuVersionsHandler) ListEnabled(c *gin.Context) {
 		data = append(data, formatTerraformVersion(&v))
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // filterValidArchs returns only archs with non-empty URLs.

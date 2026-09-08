@@ -172,7 +172,7 @@ func (h *JobTemplateVariableHandlerV2) ListByJobTemplate(c *gin.Context) {
 		data = append(data, h.formatVariableResponse(&v, templateID))
 	}
 
-	c.JSON(http.StatusOK, jsonapi.Document{Data: data, Links: jsonapi.SelfLink{
+	c.JSON(http.StatusOK, jsonapi.Document{Data: data, Meta: jsonapi.NewFullPageMeta(len(data)), Links: jsonapi.SelfLink{
 		Self: fmt.Sprintf("/api/v2/ansible/job-templates/%s/vars", templateIDStr),
 	}})
 }

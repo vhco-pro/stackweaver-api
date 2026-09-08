@@ -114,7 +114,7 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	jsonapi.WriteDocument(c, http.StatusOK, responseData)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, responseData, jsonapi.NewFullPageMeta(len(responseData)))
 }
 
 // Delete deletes a user-bound token

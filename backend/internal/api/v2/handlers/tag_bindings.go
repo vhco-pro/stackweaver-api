@@ -58,7 +58,10 @@ func formatTagBindings(bindings []models.TagBinding, resourceType string) jsonap
 			Attributes: TagBindingAttributes{Key: b.Key, Value: b.Value},
 		})
 	}
-	return jsonapi.Document{Data: data}
+	// Every caller lists the resource's bindings in full, so one page holding all of them is
+	// the honest block. Building it here rather than at the six call sites keeps the GET and
+	// PATCH responses identical in shape, which is what they were before.
+	return jsonapi.Document{Data: data, Meta: jsonapi.NewFullPageMeta(len(data))}
 }
 
 // tagBindingsRequest is the PATCH body - a JSON:API list of tag-bindings (go-tfe AddTagBindings).

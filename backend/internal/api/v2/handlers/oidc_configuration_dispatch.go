@@ -111,7 +111,7 @@ func (h *OIDCConfigDispatchHandler) List(c *gin.Context) {
 		data = append(data, vaultData[i])
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // Create dispatches to the provider handler named by the request's data.type.

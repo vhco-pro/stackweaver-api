@@ -100,6 +100,16 @@
         },
         "type": "team-projects"
       }
-    ]
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 4,
+        "prev-page": null,
+        "total-count": 4,
+        "total-pages": 1
+      }
+    }
   }
 }

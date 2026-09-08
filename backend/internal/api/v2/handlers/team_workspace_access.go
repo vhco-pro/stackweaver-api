@@ -228,7 +228,7 @@ func (h *TeamWorkspaceAccessHandlerV2) List(c *gin.Context) {
 		data = append(data, formatTeamWorkspaceAccessResponse(&accessList[i]))
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, data)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // Create creates team access for a workspace

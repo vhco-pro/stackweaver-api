@@ -139,7 +139,12 @@ func (h *WorkflowHandler) ListWorkflowJobs(c *gin.Context) {
 	if workflow == nil {
 		return
 	}
-	jobs, total, err := h.workflowRepo.ListWorkflowJobsByWorkflow(workflow.ID, 50, 0)
+	// This one caps rows, so it cannot use NewFullPageMeta. It already carried the true total,
+	// just in a bespoke one-member block no client knows how to read; the six-member block says
+	// the same thing in the shape go-tfe and fetchAllPages already expect. Reporting it obliges
+	// the handler to honour page[number] too - see PageParams.
+	page, perPage := jsonapi.PageParams(c, 50)
+	jobs, total, err := h.workflowRepo.ListWorkflowJobsByWorkflow(workflow.ID, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workflow runs")
 		return
@@ -148,7 +153,7 @@ func (h *WorkflowHandler) ListWorkflowJobs(c *gin.Context) {
 	for i := range jobs {
 		data = append(data, formatWorkflowJob(&jobs[i]))
 	}
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, TotalCountMeta{TotalCount: total})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetWorkflowJob returns one run with its node jobs.
