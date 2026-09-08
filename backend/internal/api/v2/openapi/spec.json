@@ -7734,17 +7734,33 @@
               }
             }
           },
-          "has_more": {
-            "type": "boolean"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "total": {
-            "type": "integer"
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
         }
       },

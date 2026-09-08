@@ -335,60 +335,6 @@ func (h *ScheduleHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, schedule)
 }
 
-// List lists schedules for an organization
-// @Summary List schedules
-// @Description List all schedules for the current organization
-// @Tags Ansible Schedules
-// @Produce json
-// @Param limit query int false "Limit" default(20)
-// @Param offset query int false "Offset" default(0)
-// @Success 200 {object} response.PaginatedResponse
-// @Failure 400 {object} response.ErrorResponse
-func (h *ScheduleHandler) List(c *gin.Context) {
-	// Get organization ID from context
-	orgIDStr, exists := c.Get("organization_id")
-	if !exists {
-		response.BadRequest(c, "Organization ID not found")
-		return
-	}
-	orgID, err := uuid.Parse(orgIDStr.(string))
-	if err != nil {
-		response.BadRequest(c, "Invalid organization ID")
-		return
-	}
-
-	// RBAC: check org-level read permission
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
-		return
-	}
-	hasPermission, err := h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, orgID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
-		return
-	}
-	if !hasPermission {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to list schedules in this organization")
-		return
-	}
-
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-
-	schedules, total, err := h.schedulerService.ListSchedules(orgID, limit, offset)
-	if err != nil {
-		response.InternalError(c, err.Error())
-		return
-	}
-
-	formatted := make([]jsonapi.Resource[ScheduleAttributes], 0, len(schedules))
-	for i := range schedules {
-		formatted = append(formatted, formatScheduleResponse(&schedules[i]))
-	}
-	response.Paginated(c, formatted, total, limit, offset)
-}
-
 // Update updates a schedule
 // @Summary Update schedule
 // @Description Update a schedule
@@ -649,9 +595,9 @@ func (h *ScheduleHandler) GetCronPresets(c *gin.Context) {
 // @Tags Ansible Schedules
 // @Produce json
 // @Param name path string true "Organization name"
-// @Param limit query int false "Limit" default(20)
-// @Param offset query int false "Offset" default(0)
-// @Success 200 {object} response.PaginatedResponse
+// @Param page[number] query int false "Page number" default(1)
+// @Param page[size] query int false "Page size" default(20)
+// @Success 200 {object} jsonapi.Document
 // @Failure 400 {object} response.ErrorResponse
 // @Router /api/v2/organizations/{name}/ansible/schedules [get]
 func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
@@ -680,10 +626,19 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	// page[number]/page[size], not limit/offset: every client builds the former (pageQuery in
+	// frontend/src/api/ansible.ts), so reading the latter silently discarded the requested size
+	// and applied this handler's own default of 20 instead. Parsed inline to match the sibling
+	// Ansible handlers (groups.go, jobs.go) - the shared paginate() helper is unexported and
+	// lives in the terraform package, so this one cannot reach it.
+	page, _ := strconv.Atoi(c.DefaultQuery("page[number]", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("page[size]", "20"))
+	if perPage > 100 {
+		perPage = 100
+	}
+	offset := (page - 1) * perPage
 
-	schedules, total, err := h.schedulerService.ListSchedules(orgID, limit, offset)
+	schedules, total, err := h.schedulerService.ListSchedules(orgID, perPage, offset)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -693,7 +648,10 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 	for i := range schedules {
 		formatted = append(formatted, formatScheduleResponse(&schedules[i]))
 	}
-	response.Paginated(c, formatted, total, limit, offset)
+	// The JSON:API envelope, not response.Paginated: fetchAllPages reads
+	// meta.pagination.total-pages and fell back to "one page" against the old top-level shape,
+	// capping the Schedules screen at 20 rows.
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatted, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // RunNow triggers immediate execution of a schedule
