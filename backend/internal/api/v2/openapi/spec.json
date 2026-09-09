@@ -11541,6 +11541,26 @@
     "/api/v2/activities": {
       "get": {
         "operationId": "get-api-v2-activities",
+        "parameters": [
+          {
+            "description": "Maximum rows to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows to skip before returning any.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -11562,6 +11582,26 @@
     "/api/v2/activities/recent": {
       "get": {
         "operationId": "get-api-v2-activities-recent",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -11583,6 +11623,26 @@
     "/api/v2/admin/terraform-versions": {
       "get": {
         "operationId": "get-api-v2-admin-terraform-versions",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -11809,6 +11869,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -11839,6 +11917,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -11923,6 +12019,26 @@
     "/api/v2/ansible/collections/pre-installed": {
       "get": {
         "operationId": "get-api-v2-ansible-collections-pre-installed",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -11944,6 +12060,26 @@
     "/api/v2/ansible/collections/search": {
       "get": {
         "operationId": "get-api-v2-ansible-collections-search",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -12467,6 +12603,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -12526,6 +12680,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -12649,6 +12821,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -12708,6 +12898,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -12980,6 +13188,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -13041,6 +13267,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -13172,6 +13416,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -13203,6 +13465,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -13233,6 +13513,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -13492,6 +13790,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -13522,6 +13838,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -14251,6 +14585,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -14310,6 +14662,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -14372,6 +14742,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -14949,6 +15337,26 @@
     "/api/v2/organizations": {
       "get": {
         "operationId": "get-api-v2-organizations",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -15079,6 +15487,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -15353,6 +15779,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -15412,6 +15856,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -15473,6 +15935,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -15533,6 +16013,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -15592,6 +16090,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -15694,6 +16210,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -15753,6 +16287,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -15876,6 +16428,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -15966,6 +16536,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -16116,6 +16704,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -16240,6 +16846,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -16300,6 +16924,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -16359,6 +17001,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -16532,6 +17192,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -16793,6 +17471,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -16961,6 +17657,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -17092,6 +17806,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -17154,6 +17886,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -17185,6 +17935,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -17215,6 +17983,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -17275,6 +18061,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -17448,6 +18252,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -17705,6 +18527,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -17987,6 +18827,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -18148,6 +19006,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -18178,6 +19054,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -18652,6 +19546,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -18682,6 +19594,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -18714,6 +19644,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -18745,6 +19693,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -18775,6 +19741,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -18835,6 +19819,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -19008,6 +20010,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -19892,6 +20912,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -20137,6 +21175,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -20756,6 +21812,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -20844,6 +21918,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -20957,6 +22049,26 @@
     "/api/v2/terraform-versions": {
       "get": {
         "operationId": "get-api-v2-terraform-versions",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -21009,6 +22121,26 @@
     "/api/v2/tokens": {
       "get": {
         "operationId": "get-api-v2-tokens",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -21236,6 +22368,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -22161,6 +23311,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -22191,6 +23359,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -22345,6 +23531,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -22375,6 +23579,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -22436,6 +23658,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -22466,6 +23706,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -22640,6 +23898,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -22700,6 +23976,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -22730,6 +24024,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -22822,6 +24134,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -22881,6 +24211,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -23054,6 +24402,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
