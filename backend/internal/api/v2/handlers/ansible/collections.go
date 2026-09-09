@@ -22,6 +22,31 @@ type CollectionInfo struct {
 	Source      string `json:"source"` // "pre-installed", "requirements.yml", "manual"
 }
 
+// CollectionAttributes is the wire shape of an ansible-collections resource.
+//
+// Deliberately not CollectionInfo, whose Description carries `omitempty`. This block was built
+// as an untyped map that always wrote "description", so reusing that tag would drop the member
+// for every collection without one - a silent wire change of exactly the kind #760 typed these
+// blocks to prevent. The member is emitted unconditionally here because it always was.
+type CollectionAttributes struct {
+	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+}
+
+// collectionResource renders one collection in the shape the handlers previously hand-rolled.
+func collectionResource(col CollectionInfo) jsonapi.Resource[CollectionAttributes] {
+	// A plain conversion: the layouts are identical and Go ignores struct tags here, which is
+	// the point - the two types exist precisely so the wire tags can differ.
+	return jsonapi.Resource[CollectionAttributes]{
+		ID:         col.Name,
+		Type:       "ansible-collections",
+		Attributes: CollectionAttributes(col),
+	}
+}
+
 // CollectionsHandler handles Galaxy collection-related endpoints
 type CollectionsHandler struct {
 	jobService  *ansible.JobService
@@ -95,19 +120,9 @@ func (h *CollectionsHandler) ListPreInstalledCollections(c *gin.Context) {
 	}
 
 	// Convert to JSON:API format
-	data := make([]map[string]interface{}, len(collections))
+	data := make([]jsonapi.Resource[CollectionAttributes], len(collections))
 	for i, col := range collections {
-		data[i] = map[string]interface{}{
-			"type": "ansible-collections",
-			"id":   col.Name,
-			"attributes": map[string]interface{}{
-				"name":        col.Name,
-				"namespace":   col.Namespace,
-				"version":     col.Version,
-				"description": col.Description,
-				"source":      col.Source,
-			},
-		}
+		data[i] = collectionResource(col)
 	}
 
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
@@ -160,7 +175,7 @@ func (h *CollectionsHandler) SearchGalaxyCollections(c *gin.Context) {
 	// For now, return a placeholder response. It still carries the pagination block: a client
 	// cannot tell a stub from a genuinely empty result, so "zero rows, one page" is both true
 	// and the answer that stops it guessing.
-	data := []map[string]interface{}{}
+	data := []jsonapi.Resource[CollectionAttributes]{}
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, galaxySearchMeta{
 		PaginationMeta: jsonapi.NewFullPageMeta(len(data)),
 		Message:        "Galaxy search not yet implemented. Browse collections at https://galaxy.ansible.com",
