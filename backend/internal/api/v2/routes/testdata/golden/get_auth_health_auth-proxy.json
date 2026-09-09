@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "path": "/auth/health/auth-proxy",
+  "status": 200,
+  "body": {
+    "backchannel_binding_active": false,
+    "production_mode": false
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/settings/2fa/verify",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Key: 'VerifyTOTPRequest.Code' Error:Field validation for 'Code' failed on the 'required' tag",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "path": "/auth/oidc/token",
+  "status": 400,
+  "body": {
+    "error": "invalid_request",
+    "error_description": "grant_type missing"
+  }
+}

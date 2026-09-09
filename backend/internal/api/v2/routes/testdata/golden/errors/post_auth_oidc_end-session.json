@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/oidc/end-session",
+  "status": 200,
+  "body": {
+    "loggedOut": true
+  }
+}

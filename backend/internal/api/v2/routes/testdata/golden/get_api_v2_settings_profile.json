@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/api/v2/settings/profile",
+  "status": 200,
+  "body": {
+    "bio": "",
+    "company": "",
+    "created_at": "\u003ctimestamp\u003e",
+    "email": "avery.diaz@example.com",
+    "id": "\u003cuuid\u003e",
+    "location": "",
+    "name": "Avery Diaz",
+    "updated_at": "\u003ctimestamp\u003e",
+    "username": "avery.diaz@example.com"
+  }
+}

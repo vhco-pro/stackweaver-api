@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/auth/orgs/by-domain",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "domain query parameter is required",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

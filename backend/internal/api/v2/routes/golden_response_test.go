@@ -52,9 +52,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	v2routes "github.com/michielvha/stackweaver/backend/internal/api/v2/routes"
+	"github.com/michielvha/stackweaver/backend/internal/api/routes"
+	v2handlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/profile"
+	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
+	"github.com/michielvha/stackweaver/backend/internal/services/totp"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/driver/postgres"
@@ -362,6 +366,89 @@ type goldenHarness struct {
 	prefixed map[string]map[string]string // path prefix -> parameter name -> value
 }
 
+// buildHarnessRouter mounts the router the SERVER mounts, not just its v2 half.
+//
+// This used to call v2routes.SetupV2Routes directly, which registered 406 of the 465 routes the
+// binary serves. Production calls routes.SetupRoutes, which registers 59 of its own - all of
+// /api/v2/settings (2FA, API keys, profile, sessions, password) and the entire /auth proxy - and
+// then delegates to SetupV2Routes for the rest.
+//
+// The consequence was not confined to this file. The manifest this harness writes is what
+// openapi-gen builds the published document from, so those 59 endpoints were absent from the
+// artifact we publish as the API's description: a consumer generating a client from it could not
+// enrol a second factor, list their API keys or change their password. They had no fixtures
+// either, so no response shape or error envelope of theirs had ever been pinned, and they were
+// invisible to every fixture-derived gate - the pagination census, the query-parameter
+// derivation, the response-typing guard's fixture half (#790).
+//
+// SetupRoutes nil-guards each service and simply omits its routes when one is absent, so the
+// services have to be real instances rather than nils. They are constructed against the Zitadel
+// coordinates in the environment; the gRPC clients they build are lazy, so construction succeeds
+// without a reachable instance and the routes register either way. A service that cannot be
+// constructed is logged and passed as nil, which loses its routes rather than the whole run - the
+// alternative is a harness that refuses to record anything at all when Zitadel is down.
+func buildHarnessRouter(t *testing.T, db *gorm.DB, authService *auth.Service) *gin.Engine {
+	t.Helper()
+
+	// The recording pass drives every route back to back from one address, which is exactly the
+	// shape the per-IP limiters exist to stop: AUTH_RATE_LIMIT defaults to 10rps/burst 20 and the
+	// /auth surface alone is 40 routes. The first pass recorded a 429 for whichever route
+	// happened to be ~21st, which is a fixture whose value depends on how many requests preceded
+	// it - it would have compared unequal on any run that ordered them differently. Raising the
+	// ceilings here keeps the recorded status a property of the endpoint rather than of its
+	// position in the run.
+	// The names are <PREFIX>_RPS / <PREFIX>_BURST - rateLimitFromEnv("AUTH_RATE_LIMIT", ...) in
+	// routes.go reads AUTH_RATE_LIMIT_RPS, not AUTH_RATE_LIMIT.
+	t.Setenv("RATE_LIMIT_RPS", "100000")
+	t.Setenv("RATE_LIMIT_BURST", "100000")
+	t.Setenv("AUTH_RATE_LIMIT_RPS", "100000")
+	t.Setenv("AUTH_RATE_LIMIT_BURST", "100000")
+
+	issuer := os.Getenv("ZITADEL_ISSUER")
+	if issuer == "" {
+		issuer = "http://localhost:8080"
+	}
+	internalAddr := os.Getenv("ZITADEL_INTERNAL_ADDR")
+	pat := os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN")
+
+	totpService, err := totp.NewService(issuer, internalAddr, pat)
+	if err != nil {
+		t.Logf("harness: TOTP service unavailable (%v); its routes will not be recorded", err)
+		totpService = nil
+	}
+	profileService, err := profile.NewService(issuer, internalAddr, pat)
+	if err != nil {
+		t.Logf("harness: profile service unavailable (%v); its routes will not be recorded", err)
+		profileService = nil
+	}
+	sessionsService, err := sessions.NewService(issuer, internalAddr, pat)
+	if err != nil {
+		t.Logf("harness: sessions service unavailable (%v); its routes will not be recorded", err)
+		sessionsService = nil
+	}
+
+	apiKeyService := apikey.NewService(
+		repository.NewAPIKeyRepository(db),
+		repository.NewOrganizationRepository(db),
+		repository.NewProjectRepository(db),
+		repository.NewTeamRepository(db),
+	)
+
+	authProxy := v2handlers.NewAuthProxy(v2handlers.AuthProxyConfig{
+		ZitadelIssuer:      issuer,
+		ZitadelInternalURL: issuer,
+		PAT:                pat,
+	})
+
+	// SetupRoutes builds its own engine with gin.Default(), which installs Recovery - the same
+	// thing the previous hand-rolled router had to add explicitly. Without it a panicking handler
+	// aborts the binary and discards every fixture recorded so far, instead of producing the 500
+	// a real client sees.
+	return routes.SetupRoutes(
+		db, authService, totpService, profileService, sessionsService, apiKeyService, nil, authProxy,
+	)
+}
+
 func setupGoldenHarness(t *testing.T) *goldenHarness {
 	t.Helper()
 	if os.Getenv("DEV_INSECURE_KEY") == "" {
@@ -424,12 +511,7 @@ func setupGoldenHarness(t *testing.T) *goldenHarness {
 	grantHarnessAccess(t, db, seedUser.ID)
 
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	// Production builds its router with gin.Default() (backend/internal/api/routes/routes.go),
-	// which installs Recovery. Without it here, a panicking handler aborts the whole binary and
-	// discards every fixture recorded so far, instead of producing the 500 a real client sees.
-	router.Use(gin.Recovery())
-	v2routes.SetupV2Routes(router, db, authService, nil)
+	router := buildHarnessRouter(t, db, authService)
 
 	return &goldenHarness{
 		db:       db,
@@ -1034,7 +1116,19 @@ func TestGoldenErrorEnvelopeComplete(t *testing.T) {
 	exempt := func(path string) bool {
 		return strings.HasPrefix(path, "/v1/") ||
 			strings.HasPrefix(path, "/v2/") || // registry download summaries share the protocol
-			strings.Contains(path, "/oauth/")
+			strings.Contains(path, "/oauth/") ||
+			// The auth proxy is deliberately not JSON:API. routes.go says so where it mounts
+			// these: "NOT under /api/v2/* - responses use Zitadel's v2 API shape, not JSON:API"
+			// (DR-5). They pass Zitadel's own error bodies through - {code, details, message},
+			// or {error, error_description} on the OIDC endpoints - because the custom login UI
+			// is written against Zitadel's shapes. Rewrapping them in a JSON:API envelope would
+			// be a breaking change to that client for the sake of a rule these routes were
+			// never under.
+			//
+			// This exemption arrived with #790, which widened the harness to mount the router
+			// production mounts rather than only its v2 half. The rule did not change; the
+			// corpus it is applied to did, so its scope had to be stated rather than implied.
+			strings.HasPrefix(path, "/auth/")
 	}
 
 	var violations []string

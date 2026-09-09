@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/auth/oidc/authorize",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "authorization request failed",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

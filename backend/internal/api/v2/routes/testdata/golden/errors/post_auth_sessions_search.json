@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/sessions/search",
+  "status": 200,
+  "body": {
+    "sessions": []
+  }
+}

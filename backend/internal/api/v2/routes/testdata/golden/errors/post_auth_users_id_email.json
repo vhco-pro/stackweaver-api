@@ -1,0 +1,16 @@
+{
+  "method": "POST",
+  "path": "/auth/users/:id/email",
+  "status": 401,
+  "body": {
+    "code": 16,
+    "details": [
+      {
+        "@type": "type.googleapis.com/zitadel.v1.ErrorDetail",
+        "id": "AUTH-toLo1",
+        "message": "invalid auth header"
+      }
+    ],
+    "message": "invalid auth header (AUTH-toLo1)"
+  }
+}

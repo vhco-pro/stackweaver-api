@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/auth/users",
+  "status": 403,
+  "body": {
+    "errors": [
+      {
+        "detail": "self-registration is disabled",
+        "status": "403",
+        "title": "Forbidden"
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "method": "HEAD",
+  "path": "/health",
+  "status": 200,
+  "body": null
+}

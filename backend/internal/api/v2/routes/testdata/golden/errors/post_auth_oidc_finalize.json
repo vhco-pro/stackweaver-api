@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/auth/oidc/finalize",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "session token is required",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}
