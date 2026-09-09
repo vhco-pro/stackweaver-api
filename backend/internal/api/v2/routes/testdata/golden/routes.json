@@ -13,6 +13,11 @@
     },
     {
       "method": "GET",
+      "path": "/.well-known/terraform.json",
+      "mutating": false
+    },
+    {
+      "method": "GET",
       "path": "/api/registry/:registry/v2/gpg-keys",
       "mutating": false
     },
@@ -579,6 +584,16 @@
     {
       "method": "POST",
       "path": "/api/v2/notification-configurations/:id/actions/verify",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/oauth/authorize",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/oauth/token",
       "mutating": true
     },
     {
@@ -1382,6 +1397,71 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/v2/settings/2fa",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/2fa/start",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/2fa/status",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/2fa/verify",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/api-keys",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/api-keys",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/settings/api-keys/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/mfa-devices",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/password",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/profile",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/settings/profile",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/sessions",
+      "mutating": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/settings/sessions/:sessionId",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
       "path": "/api/v2/state-versions/:id",
       "mutating": true
     },
@@ -1696,6 +1776,11 @@
       "mutating": true
     },
     {
+      "method": "POST",
+      "path": "/api/v2/webhooks/github",
+      "mutating": true
+    },
+    {
       "method": "DELETE",
       "path": "/api/v2/workspaces/:id",
       "mutating": true
@@ -1924,6 +2009,216 @@
       "method": "POST",
       "path": "/api/v2/zitadel/actions/idp-sync",
       "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/health/auth-proxy",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/auth/idp/complete/:intentId",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/idp/providers",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/auth/idp/start",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/auth-requests/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/authorize",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/discovery",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/end-session",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/auth/oidc/end-session",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/oidc/finalize",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/keys",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/auth/oidc/token",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/oidc/userinfo",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/orgs/by-domain",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/auth/sessions",
+      "mutating": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/auth/sessions/:id",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/sessions/:id",
+      "mutating": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/auth/sessions/:id",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/sessions/search",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/settings/branding",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/settings/legal",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/settings/lockout",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/settings/login",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/settings/password-complexity",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/settings/password-expiry",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/settings/security",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/auth/users/:id",
+      "mutating": false
+    },
+    {
+      "method": "GET",
+      "path": "/auth/users/:id/authentication_methods",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/email",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/otp-email",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/otp-sms",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/passkeys",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/passkeys/:pkId",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/password",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/password-reset",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/totp",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/totp/verify",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/u2f",
+      "mutating": true
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/u2f/:u2fId",
+      "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "mutating": false
+    },
+    {
+      "method": "HEAD",
+      "path": "/health",
+      "mutating": false
     },
     {
       "method": "GET",

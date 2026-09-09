@@ -1,0 +1,14 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/settings/api-keys/:id",
+  "status": 500,
+  "body": {
+    "errors": [
+      {
+        "detail": "failed to delete API key: record not found",
+        "status": "500",
+        "title": "Internal Server Error"
+      }
+    ]
+  }
+}

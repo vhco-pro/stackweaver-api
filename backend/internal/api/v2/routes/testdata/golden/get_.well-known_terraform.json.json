@@ -1,0 +1,24 @@
+{
+  "method": "GET",
+  "path": "/.well-known/terraform.json",
+  "status": 200,
+  "body": {
+    "login.v1": {
+      "authz": "/oauth/authorize",
+      "client": "terraform-cli",
+      "grant_types": [
+        "authz_code"
+      ],
+      "ports": [
+        10000,
+        10010
+      ],
+      "token": "/api/v2/oauth/token"
+    },
+    "modules.v1": "/v1/modules/",
+    "providers.v1": "/v1/providers/",
+    "tfe.v2": "/api/v2/",
+    "tfe.v2.1": "/api/v2/",
+    "tfe.v2.2": "/api/v2/"
+  }
+}

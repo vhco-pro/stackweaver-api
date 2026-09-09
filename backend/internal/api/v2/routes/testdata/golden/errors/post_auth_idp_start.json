@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/auth/idp/start",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "idpId is required",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	v2routes "github.com/michielvha/stackweaver/backend/internal/api/v2/routes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -72,9 +71,11 @@ func buildRealRouter(t *testing.T) *gin.Engine {
 		t.Fatalf("connect test db: %v", err)
 	}
 	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	v2routes.SetupV2Routes(r, db, nil, nil)
-	return r
+	// The full router, not just its v2 half - the same one the golden harness records and the
+	// server serves. Building only SetupV2Routes here made these tests agree with a document
+	// that was itself missing 59 routes, so neither the "covers everything" nor the "invents
+	// nothing" direction could see the gap (#790).
+	return buildHarnessRouter(t, db, nil)
 }
 
 // TestOpenAPICoversEveryRegisteredRoute is AC6.

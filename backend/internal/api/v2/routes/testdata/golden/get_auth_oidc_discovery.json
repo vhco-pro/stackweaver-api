@@ -1,0 +1,139 @@
+{
+  "method": "GET",
+  "path": "/auth/oidc/discovery",
+  "status": 200,
+  "body": {
+    "authorization_endpoint": "http://localhost/auth/oidc/authorize",
+    "backchannel_logout_session_supported": true,
+    "backchannel_logout_supported": true,
+    "claims_supported": [
+      "acr",
+      "act",
+      "amr",
+      "at_hash",
+      "aud",
+      "auth_time",
+      "azp",
+      "c_hash",
+      "client_id",
+      "email",
+      "email_verified",
+      "exp",
+      "family_name",
+      "given_name",
+      "iat",
+      "iss",
+      "locale",
+      "name",
+      "nonce",
+      "phone_number",
+      "phone_number_verified",
+      "preferred_username",
+      "scopes",
+      "sub"
+    ],
+    "code_challenge_methods_supported": [
+      "S256"
+    ],
+    "device_authorization_endpoint": "https://localhost:8080/oauth/v2/device_authorization",
+    "end_session_endpoint": "http://localhost/auth/oidc/end-session",
+    "grant_types_supported": [
+      "authorization_code",
+      "client_credentials",
+      "implicit",
+      "refresh_token",
+      "urn:ietf:params:oauth:grant-type:device_code",
+      "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    ],
+    "id_token_signing_alg_values_supported": [
+      "ES256",
+      "ES384",
+      "ES512",
+      "EdDSA",
+      "RS256",
+      "RS384",
+      "RS512"
+    ],
+    "introspection_endpoint": "https://localhost:8080/oauth/v2/introspect",
+    "introspection_endpoint_auth_methods_supported": [
+      "client_secret_basic",
+      "private_key_jwt"
+    ],
+    "introspection_endpoint_auth_signing_alg_values_supported": [
+      "RS256"
+    ],
+    "issuer": "http://localhost",
+    "jwks_uri": "http://localhost/auth/oidc/keys",
+    "request_object_signing_alg_values_supported": [
+      "RS256"
+    ],
+    "request_parameter_supported": true,
+    "request_uri_parameter_supported": false,
+    "response_modes_supported": [
+      "form_post",
+      "fragment",
+      "query"
+    ],
+    "response_types_supported": [
+      "code",
+      "id_token token",
+      "id_token"
+    ],
+    "revocation_endpoint": "https://localhost:8080/oauth/v2/revoke",
+    "revocation_endpoint_auth_methods_supported": [
+      "client_secret_basic",
+      "client_secret_post",
+      "none",
+      "private_key_jwt"
+    ],
+    "revocation_endpoint_auth_signing_alg_values_supported": [
+      "RS256"
+    ],
+    "scopes_supported": [
+      "address",
+      "email",
+      "offline_access",
+      "openid",
+      "phone",
+      "profile"
+    ],
+    "subject_types_supported": [
+      "public"
+    ],
+    "token_endpoint": "http://localhost/auth/oidc/token",
+    "token_endpoint_auth_methods_supported": [
+      "client_secret_basic",
+      "client_secret_post",
+      "none",
+      "private_key_jwt"
+    ],
+    "token_endpoint_auth_signing_alg_values_supported": [
+      "RS256"
+    ],
+    "ui_locales_supported": [
+      "ar",
+      "bg",
+      "cs",
+      "de",
+      "en",
+      "es",
+      "fr",
+      "hu",
+      "id",
+      "it",
+      "ja",
+      "ko",
+      "mk",
+      "nl",
+      "pl",
+      "pt",
+      "ro",
+      "ru",
+      "sv",
+      "tr",
+      "uk",
+      "zh"
+    ],
+    "userinfo_endpoint": "http://localhost/auth/oidc/userinfo"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/settings/2fa/start",
+  "status": 401,
+  "body": {
+    "errors": [
+      {
+        "detail": "unauthorized",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
+  }
+}

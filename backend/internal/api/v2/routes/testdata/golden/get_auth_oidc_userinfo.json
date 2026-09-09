@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "path": "/auth/oidc/userinfo",
+  "status": 401,
+  "body": {
+    "error": "access_denied",
+    "error_description": "access token invalid"
+  }
+}

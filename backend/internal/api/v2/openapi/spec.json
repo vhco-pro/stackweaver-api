@@ -3660,6 +3660,52 @@
           }
         }
       },
+      "get--well-known-terraform-json-357035": {
+        "type": "object",
+        "properties": {
+          "login.v1": {
+            "type": "object",
+            "properties": {
+              "authz": {
+                "type": "string"
+              },
+              "client": {
+                "type": "string"
+              },
+              "grant_types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "token": {
+                "type": "string"
+              }
+            }
+          },
+          "modules.v1": {
+            "type": "string"
+          },
+          "providers.v1": {
+            "type": "string"
+          },
+          "tfe.v2": {
+            "type": "string"
+          },
+          "tfe.v2.1": {
+            "type": "string"
+          },
+          "tfe.v2.2": {
+            "type": "string"
+          }
+        }
+      },
       "get-api-v2-activities-2699a0": {
         "type": "object",
         "properties": {
@@ -5060,6 +5106,53 @@
           }
         }
       },
+      "get-api-v2-settings-api-keys-6c4862": {
+        "type": "object",
+        "properties": {
+          "api_keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "get-api-v2-settings-profile-f7650d": {
+        "type": "object",
+        "properties": {
+          "bio": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "get-api-v2-task-results-id-outcomes-0445e7": {
         "type": "object",
         "properties": {
@@ -5539,6 +5632,467 @@
           }
         }
       },
+      "get-auth-health-auth-proxy-3b225d": {
+        "type": "object",
+        "properties": {
+          "backchannel_binding_active": {
+            "type": "boolean"
+          },
+          "production_mode": {
+            "type": "boolean"
+          }
+        }
+      },
+      "get-auth-idp-providers-adcc06": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-oidc-auth-requests-id-282c21": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-oidc-discovery-19247f": {
+        "type": "object",
+        "properties": {
+          "authorization_endpoint": {
+            "type": "string"
+          },
+          "backchannel_logout_session_supported": {
+            "type": "boolean"
+          },
+          "backchannel_logout_supported": {
+            "type": "boolean"
+          },
+          "claims_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "code_challenge_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "device_authorization_endpoint": {
+            "type": "string"
+          },
+          "end_session_endpoint": {
+            "type": "string"
+          },
+          "grant_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id_token_signing_alg_values_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "introspection_endpoint": {
+            "type": "string"
+          },
+          "introspection_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "introspection_endpoint_auth_signing_alg_values_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "jwks_uri": {
+            "type": "string"
+          },
+          "request_object_signing_alg_values_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "request_parameter_supported": {
+            "type": "boolean"
+          },
+          "request_uri_parameter_supported": {
+            "type": "boolean"
+          },
+          "response_modes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "response_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revocation_endpoint": {
+            "type": "string"
+          },
+          "revocation_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revocation_endpoint_auth_signing_alg_values_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subject_types_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint": {
+            "type": "string"
+          },
+          "token_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token_endpoint_auth_signing_alg_values_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ui_locales_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "userinfo_endpoint": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-oidc-end-session-ee5f9e": {
+        "type": "object",
+        "properties": {
+          "loggedOut": {
+            "type": "boolean"
+          }
+        }
+      },
+      "get-auth-oidc-keys-1193ff": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "alg": {
+                  "type": "string"
+                },
+                "e": {
+                  "type": "string"
+                },
+                "kid": {
+                  "type": "string"
+                },
+                "kty": {
+                  "type": "string"
+                },
+                "n": {
+                  "type": "string"
+                },
+                "use": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get-auth-oidc-userinfo-7516d3": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-settings-branding-58406b": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-settings-legal-fd2ce8": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-settings-lockout-8df1d0": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-settings-login-6e1460": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-settings-password-complexity-e836cc": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-settings-password-expiry-c5ddde": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-auth-settings-security-a814c5": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "get-health-428884": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "get-v1-modules-1b59d5": {
         "type": "object",
         "properties": {
@@ -5797,6 +6351,9 @@
             }
           }
         }
+      },
+      "head-health-3ad84b": {
+        "nullable": true
       },
       "inventory-sources-collection": {
         "type": "object",
@@ -7084,6 +7641,41 @@
           }
         }
       },
+      "patch-api-v2-settings-profile-06a430": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "object",
+            "properties": {
+              "bio": {
+                "type": "string"
+              },
+              "company": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "location": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "username": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "plans-response": {
         "type": "object",
         "properties": {
@@ -7175,6 +7767,193 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "post-api-v2-oauth-token-bba1e3": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "post-api-v2-webhooks-github-0fe66f": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-idp-complete-intentId-e5e263": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-oidc-end-session-e13077": {
+        "type": "object",
+        "properties": {
+          "loggedOut": {
+            "type": "boolean"
+          }
+        }
+      },
+      "post-auth-oidc-token-8565c0": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-sessions-0a2e24": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-sessions-search-0f5a16": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "post-auth-users-id-email-23776e": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-users-id-password-2c5511": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-users-id-password-reset-7b52f6": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
           }
         }
       },
@@ -11320,6 +12099,27 @@
         ]
       }
     },
+    "/.well-known/terraform.json": {
+      "get": {
+        "operationId": "get--well-known-terraform-json",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get--well-known-terraform-json-357035"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /.well-known/terraform.json",
+        "tags": [
+          ".well-known"
+        ]
+      }
+    },
     "/api/registry/{registry}/v2/gpg-keys": {
       "get": {
         "operationId": "get-api-registry-registry-v2-gpg-keys",
@@ -15153,6 +15953,48 @@
         "summary": "POST /api/v2/notification-configurations/:id/actions/verify",
         "tags": [
           "notification-configurations"
+        ]
+      }
+    },
+    "/api/v2/oauth/authorize": {
+      "post": {
+        "operationId": "post-api-v2-oauth-authorize",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /api/v2/oauth/authorize",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v2/oauth/token": {
+      "post": {
+        "operationId": "post-api-v2-oauth-token",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-api-v2-oauth-token-bba1e3"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /api/v2/oauth/token",
+        "tags": [
+          "oauth"
         ]
       }
     },
@@ -20950,6 +21792,295 @@
         ]
       }
     },
+    "/api/v2/settings/2fa": {
+      "delete": {
+        "operationId": "delete-api-v2-settings-2fa",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "DELETE /api/v2/settings/2fa",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/2fa/start": {
+      "post": {
+        "operationId": "post-api-v2-settings-2fa-start",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /api/v2/settings/2fa/start",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/2fa/status": {
+      "get": {
+        "operationId": "get-api-v2-settings-2fa-status",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /api/v2/settings/2fa/status",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/2fa/verify": {
+      "post": {
+        "operationId": "post-api-v2-settings-2fa-verify",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /api/v2/settings/2fa/verify",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/api-keys": {
+      "get": {
+        "operationId": "get-api-v2-settings-api-keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-api-v2-settings-api-keys-6c4862"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/settings/api-keys",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "post-api-v2-settings-api-keys",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /api/v2/settings/api-keys",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/api-keys/{id}": {
+      "delete": {
+        "operationId": "delete-api-v2-settings-api-keys-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-500"
+                }
+              }
+            },
+            "description": "Server Error"
+          }
+        },
+        "summary": "DELETE /api/v2/settings/api-keys/:id",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/mfa-devices": {
+      "get": {
+        "operationId": "get-api-v2-settings-mfa-devices",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /api/v2/settings/mfa-devices",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/password": {
+      "post": {
+        "operationId": "post-api-v2-settings-password",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /api/v2/settings/password",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/profile": {
+      "get": {
+        "operationId": "get-api-v2-settings-profile",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-api-v2-settings-profile-f7650d"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/settings/profile",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "operationId": "patch-api-v2-settings-profile",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/patch-api-v2-settings-profile-06a430"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "PATCH /api/v2/settings/profile",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/sessions": {
+      "get": {
+        "operationId": "get-api-v2-settings-sessions",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /api/v2/settings/sessions",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v2/settings/sessions/{sessionId}": {
+      "delete": {
+        "operationId": "delete-api-v2-settings-sessions-sessionId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "DELETE /api/v2/settings/sessions/:sessionId",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/v2/state-versions/{id}": {
       "delete": {
         "operationId": "delete-api-v2-state-versions-id",
@@ -22969,6 +24100,27 @@
         ]
       }
     },
+    "/api/v2/webhooks/github": {
+      "post": {
+        "operationId": "post-api-v2-webhooks-github",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-api-v2-webhooks-github-0fe66f"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "POST /api/v2/webhooks/github",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/api/v2/workspaces/change-requests/{id}": {
       "delete": {
         "operationId": "delete-api-v2-workspaces-change-requests-id",
@@ -24622,6 +25774,1076 @@
         "summary": "POST /api/v2/zitadel/actions/idp-sync",
         "tags": [
           "zitadel"
+        ]
+      }
+    },
+    "/auth/health/auth-proxy": {
+      "get": {
+        "operationId": "get-auth-health-auth-proxy",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-health-auth-proxy-3b225d"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /auth/health/auth-proxy",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/idp/complete/{intentId}": {
+      "post": {
+        "operationId": "post-auth-idp-complete-intentId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "intentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-idp-complete-intentId-e5e263"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /auth/idp/complete/:intentId",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/idp/providers": {
+      "get": {
+        "operationId": "get-auth-idp-providers",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-idp-providers-adcc06"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/idp/providers",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/idp/start": {
+      "post": {
+        "operationId": "post-auth-idp-start",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /auth/idp/start",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/auth-requests/{id}": {
+      "get": {
+        "operationId": "get-auth-oidc-auth-requests-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-oidc-auth-requests-id-282c21"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/oidc/auth-requests/:id",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/authorize": {
+      "get": {
+        "operationId": "get-auth-oidc-authorize",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "GET /auth/oidc/authorize",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/discovery": {
+      "get": {
+        "operationId": "get-auth-oidc-discovery",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-oidc-discovery-19247f"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /auth/oidc/discovery",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/end-session": {
+      "get": {
+        "operationId": "get-auth-oidc-end-session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-oidc-end-session-ee5f9e"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /auth/oidc/end-session",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "post-auth-oidc-end-session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-oidc-end-session-e13077"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "POST /auth/oidc/end-session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/finalize": {
+      "post": {
+        "operationId": "post-auth-oidc-finalize",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /auth/oidc/finalize",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/keys": {
+      "get": {
+        "operationId": "get-auth-oidc-keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-oidc-keys-1193ff"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /auth/oidc/keys",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/token": {
+      "post": {
+        "operationId": "post-auth-oidc-token",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-oidc-token-8565c0"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /auth/oidc/token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/oidc/userinfo": {
+      "get": {
+        "operationId": "get-auth-oidc-userinfo",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-oidc-userinfo-7516d3"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/oidc/userinfo",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/orgs/by-domain": {
+      "get": {
+        "operationId": "get-auth-orgs-by-domain",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "GET /auth/orgs/by-domain",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/sessions": {
+      "post": {
+        "operationId": "post-auth-sessions",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-sessions-0a2e24"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /auth/sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/sessions/search": {
+      "post": {
+        "operationId": "post-auth-sessions-search",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-sessions-search-0f5a16"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "POST /auth/sessions/search",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/sessions/{id}": {
+      "delete": {
+        "operationId": "delete-auth-sessions-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "DELETE /auth/sessions/:id",
+        "tags": [
+          "auth"
+        ]
+      },
+      "get": {
+        "operationId": "get-auth-sessions-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /auth/sessions/:id",
+        "tags": [
+          "auth"
+        ]
+      },
+      "patch": {
+        "operationId": "patch-auth-sessions-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "PATCH /auth/sessions/:id",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/settings/branding": {
+      "get": {
+        "operationId": "get-auth-settings-branding",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-settings-branding-58406b"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/settings/branding",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/settings/legal": {
+      "get": {
+        "operationId": "get-auth-settings-legal",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-settings-legal-fd2ce8"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/settings/legal",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/settings/lockout": {
+      "get": {
+        "operationId": "get-auth-settings-lockout",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-settings-lockout-8df1d0"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/settings/lockout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/settings/login": {
+      "get": {
+        "operationId": "get-auth-settings-login",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-settings-login-6e1460"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/settings/login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/settings/password-complexity": {
+      "get": {
+        "operationId": "get-auth-settings-password-complexity",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-settings-password-complexity-e836cc"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/settings/password-complexity",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/settings/password-expiry": {
+      "get": {
+        "operationId": "get-auth-settings-password-expiry",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-settings-password-expiry-c5ddde"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/settings/password-expiry",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/settings/security": {
+      "get": {
+        "operationId": "get-auth-settings-security",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-auth-settings-security-a814c5"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/settings/security",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users": {
+      "post": {
+        "operationId": "post-auth-users",
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}": {
+      "get": {
+        "operationId": "get-auth-users-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /auth/users/:id",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/authentication_methods": {
+      "get": {
+        "operationId": "get-auth-users-id-authentication_methods",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /auth/users/:id/authentication_methods",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/email": {
+      "post": {
+        "operationId": "post-auth-users-id-email",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-users-id-email-23776e"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /auth/users/:id/email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/otp-email": {
+      "post": {
+        "operationId": "post-auth-users-id-otp-email",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/otp-email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/otp-sms": {
+      "post": {
+        "operationId": "post-auth-users-id-otp-sms",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/otp-sms",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/passkeys": {
+      "post": {
+        "operationId": "post-auth-users-id-passkeys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/passkeys",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/passkeys/{pkId}": {
+      "post": {
+        "operationId": "post-auth-users-id-passkeys-pkId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pkId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/passkeys/:pkId",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/password": {
+      "post": {
+        "operationId": "post-auth-users-id-password",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-users-id-password-2c5511"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /auth/users/:id/password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/password-reset": {
+      "post": {
+        "operationId": "post-auth-users-id-password-reset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-users-id-password-reset-7b52f6"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /auth/users/:id/password-reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/totp": {
+      "post": {
+        "operationId": "post-auth-users-id-totp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/totp",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/totp/verify": {
+      "post": {
+        "operationId": "post-auth-users-id-totp-verify",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/totp/verify",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/u2f": {
+      "post": {
+        "operationId": "post-auth-users-id-u2f",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/u2f",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/u2f/{u2fId}": {
+      "post": {
+        "operationId": "post-auth-users-id-u2f-u2fId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "u2fId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /auth/users/:id/u2f/:u2fId",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "get-health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-health-428884"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /health",
+        "tags": [
+          "health"
+        ]
+      },
+      "head": {
+        "operationId": "head-health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/head-health-3ad84b"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "HEAD /health",
+        "tags": [
+          "health"
         ]
       }
     },

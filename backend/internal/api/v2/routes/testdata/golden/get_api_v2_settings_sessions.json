@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/settings/sessions",
+  "status": 401,
+  "body": {
+    "errors": [
+      {
+        "detail": "unauthorized: user not authenticated",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
+  }
+}

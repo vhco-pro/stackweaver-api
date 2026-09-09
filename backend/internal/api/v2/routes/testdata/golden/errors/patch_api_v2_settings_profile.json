@@ -1,0 +1,17 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/settings/profile",
+  "status": 200,
+  "body": {
+    "message": "Profile updated successfully",
+    "profile": {
+      "bio": "",
+      "company": "",
+      "email": "avery.diaz@example.com",
+      "id": "\u003cuuid\u003e",
+      "location": "",
+      "name": "Avery Diaz",
+      "username": "avery.diaz@example.com"
+    }
+  }
+}

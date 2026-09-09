@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/v2/webhooks/github",
+  "status": 200,
+  "body": {
+    "message": "Event type  ignored"
+  }
+}

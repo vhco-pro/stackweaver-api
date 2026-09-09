@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/v2/settings/api-keys",
+  "status": 200,
+  "body": {
+    "api_keys": []
+  }
+}

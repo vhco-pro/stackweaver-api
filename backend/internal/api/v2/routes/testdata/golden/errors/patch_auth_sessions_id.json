@@ -1,0 +1,14 @@
+{
+  "method": "PATCH",
+  "path": "/auth/sessions/:id",
+  "status": 403,
+  "body": {
+    "errors": [
+      {
+        "detail": "no valid session for this resource",
+        "status": "403",
+        "title": "Forbidden"
+      }
+    ]
+  }
+}
