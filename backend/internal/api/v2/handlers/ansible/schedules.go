@@ -312,7 +312,7 @@ func (h *ScheduleHandler) Get(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, schedule)
+	jsonapi.WriteDocument(c, http.StatusOK, formatScheduleResponse(schedule))
 }
 
 // Update updates a schedule
@@ -356,7 +356,7 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, schedule)
+	jsonapi.WriteDocument(c, http.StatusOK, formatScheduleResponse(schedule))
 }
 
 // Delete deletes a schedule

@@ -4087,502 +4087,6 @@
           }
         }
       },
-      "get-api-v2-ansible-schedules-schedule_id-e21675": {
-        "type": "object",
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "cron_expression": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "job_template": {
-            "type": "object",
-            "properties": {
-              "allow_callbacks": {
-                "type": "boolean"
-              },
-              "allow_simultaneous": {
-                "type": "boolean"
-              },
-              "become_enabled": {
-                "type": "boolean"
-              },
-              "created_at": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "description": {
-                "type": "string"
-              },
-              "diff_mode": {
-                "type": "boolean"
-              },
-              "disabled": {
-                "type": "boolean"
-              },
-              "extra_vars": {
-                "type": "object",
-                "additionalProperties": true
-              },
-              "forks": {
-                "type": "integer"
-              },
-              "galaxy_requirements": {
-                "type": "object",
-                "additionalProperties": true
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "inventory": {
-                "type": "object",
-                "properties": {
-                  "constructed_cache_timeout": {
-                    "type": "integer"
-                  },
-                  "created_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "last_sync_hosts_discovered": {
-                    "type": "integer"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "organization": {
-                    "type": "object",
-                    "properties": {
-                      "aggregated_commit_status_enabled": {
-                        "type": "boolean"
-                      },
-                      "allow_force_delete_workspaces": {
-                        "type": "boolean"
-                      },
-                      "ansible_adhoc_modules": {
-                        "type": "string"
-                      },
-                      "ansible_job_retention_days": {
-                        "type": "integer"
-                      },
-                      "assessments_enforced": {
-                        "type": "boolean"
-                      },
-                      "collaborator_auth_policy": {
-                        "type": "string"
-                      },
-                      "cost_estimation_enabled": {
-                        "type": "boolean"
-                      },
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "default_execution_mode": {
-                        "type": "string"
-                      },
-                      "default_tofu_version": {
-                        "type": "string"
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "email": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "send_passing_statuses_for_untriggered_speculative_plans": {
-                        "type": "boolean"
-                      },
-                      "updated_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      }
-                    }
-                  },
-                  "organization_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "type": {
-                    "type": "string"
-                  },
-                  "updated_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "variables": {
-                    "nullable": true
-                  },
-                  "vcs_branch": {
-                    "type": "string"
-                  }
-                }
-              },
-              "inventory_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "job_slice_count": {
-                "type": "integer"
-              },
-              "launch_on_webhook": {
-                "type": "boolean"
-              },
-              "name": {
-                "type": "string"
-              },
-              "playbook": {
-                "type": "object",
-                "properties": {
-                  "created_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "playbook_path": {
-                    "type": "string"
-                  },
-                  "project": {
-                    "type": "object",
-                    "properties": {
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "default_execution_mode": {
-                        "type": "string"
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "organization": {
-                        "type": "object",
-                        "properties": {
-                          "aggregated_commit_status_enabled": {
-                            "type": "boolean"
-                          },
-                          "allow_force_delete_workspaces": {
-                            "type": "boolean"
-                          },
-                          "ansible_adhoc_modules": {
-                            "type": "string"
-                          },
-                          "ansible_job_retention_days": {
-                            "type": "integer"
-                          },
-                          "assessments_enforced": {
-                            "type": "boolean"
-                          },
-                          "collaborator_auth_policy": {
-                            "type": "string"
-                          },
-                          "cost_estimation_enabled": {
-                            "type": "boolean"
-                          },
-                          "created_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "default_execution_mode": {
-                            "type": "string"
-                          },
-                          "default_tofu_version": {
-                            "type": "string"
-                          },
-                          "description": {
-                            "type": "string"
-                          },
-                          "email": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "send_passing_statuses_for_untriggered_speculative_plans": {
-                            "type": "boolean"
-                          },
-                          "updated_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        }
-                      },
-                      "organization_id": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "settings_overwritten": {
-                        "type": "boolean"
-                      },
-                      "updated_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      }
-                    }
-                  },
-                  "project_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "source_mode": {
-                    "type": "string"
-                  },
-                  "updated_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "vcs_branch": {
-                    "type": "string"
-                  }
-                }
-              },
-              "playbook_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "project": {
-                "type": "object",
-                "properties": {
-                  "created_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "default_execution_mode": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "organization": {
-                    "type": "object",
-                    "properties": {
-                      "aggregated_commit_status_enabled": {
-                        "type": "boolean"
-                      },
-                      "allow_force_delete_workspaces": {
-                        "type": "boolean"
-                      },
-                      "ansible_adhoc_modules": {
-                        "type": "string"
-                      },
-                      "ansible_job_retention_days": {
-                        "type": "integer"
-                      },
-                      "assessments_enforced": {
-                        "type": "boolean"
-                      },
-                      "collaborator_auth_policy": {
-                        "type": "string"
-                      },
-                      "cost_estimation_enabled": {
-                        "type": "boolean"
-                      },
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "default_execution_mode": {
-                        "type": "string"
-                      },
-                      "default_tofu_version": {
-                        "type": "string"
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "email": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "send_passing_statuses_for_untriggered_speculative_plans": {
-                        "type": "boolean"
-                      },
-                      "updated_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      }
-                    }
-                  },
-                  "organization_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "settings_overwritten": {
-                    "type": "boolean"
-                  },
-                  "updated_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                }
-              },
-              "project_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "schedule_enabled": {
-                "type": "boolean"
-              },
-              "timeout_seconds": {
-                "type": "integer"
-              },
-              "updated_at": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "verbosity": {
-                "type": "integer"
-              }
-            }
-          },
-          "job_template_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "organization": {
-            "type": "object",
-            "properties": {
-              "aggregated_commit_status_enabled": {
-                "type": "boolean"
-              },
-              "allow_force_delete_workspaces": {
-                "type": "boolean"
-              },
-              "ansible_adhoc_modules": {
-                "type": "string"
-              },
-              "ansible_job_retention_days": {
-                "type": "integer"
-              },
-              "assessments_enforced": {
-                "type": "boolean"
-              },
-              "collaborator_auth_policy": {
-                "type": "string"
-              },
-              "cost_estimation_enabled": {
-                "type": "boolean"
-              },
-              "created_at": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "default_execution_mode": {
-                "type": "string"
-              },
-              "default_tofu_version": {
-                "type": "string"
-              },
-              "description": {
-                "type": "string"
-              },
-              "email": {
-                "type": "string"
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "name": {
-                "type": "string"
-              },
-              "send_passing_statuses_for_untriggered_speculative_plans": {
-                "type": "boolean"
-              },
-              "speculative_plan_management_enabled": {
-                "type": "boolean"
-              },
-              "updated_at": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "user_tokens_enabled": {
-                "type": "boolean"
-              }
-            }
-          },
-          "organization_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "run_count": {
-            "type": "integer"
-          },
-          "status": {
-            "type": "string"
-          },
-          "timezone": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "get-api-v2-ansible-workflows-id-edges-555fc9": {
         "type": "object",
         "properties": {
@@ -9337,6 +8841,97 @@
                     "type": "integer"
                   }
                 }
+              }
+            }
+          }
+        }
+      },
+      "schedules-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "cron-expression": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "schedule-type": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "job-template": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
               }
             }
           }
@@ -14966,7 +14561,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-ansible-schedules-schedule_id-e21675"
+                  "$ref": "#/components/schemas/schedules-response"
                 }
               }
             },
