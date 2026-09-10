@@ -66,16 +66,6 @@ type UpdateScheduleRequest struct {
 }
 
 // Create creates a new schedule
-// @Summary Create schedule
-// @Description Create a new schedule
-// @Tags Ansible Schedules
-// @Accept json
-// @Produce json
-// @Param request body CreateScheduleRequest true "Schedule details"
-// @Success 201 {object} models.AnsibleSchedule
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/organizations/{name}/ansible/schedules [post]
 func (h *ScheduleHandler) Create(c *gin.Context) {
 	var req CreateScheduleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -293,15 +283,6 @@ func formatScheduleResponse(schedule *models.AnsibleSchedule) jsonapi.Resource[S
 }
 
 // Get retrieves a schedule by ID
-// @Summary Get schedule
-// @Description Get a schedule by ID
-// @Tags Ansible Schedules
-// @Produce json
-// @Param id path string true "Schedule ID"
-// @Success 200 {object} models.AnsibleSchedule
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 404 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{id} [get]
 func (h *ScheduleHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
@@ -335,17 +316,6 @@ func (h *ScheduleHandler) Get(c *gin.Context) {
 }
 
 // Update updates a schedule
-// @Summary Update schedule
-// @Description Update a schedule
-// @Tags Ansible Schedules
-// @Accept json
-// @Produce json
-// @Param id path string true "Schedule ID"
-// @Param request body UpdateScheduleRequest true "Update details"
-// @Success 200 {object} models.AnsibleSchedule
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 404 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{id} [patch]
 func (h *ScheduleHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
@@ -390,14 +360,6 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 }
 
 // Delete deletes a schedule
-// @Summary Delete schedule
-// @Description Delete a schedule
-// @Tags Ansible Schedules
-// @Param id path string true "Schedule ID"
-// @Success 204
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{id} [delete]
 func (h *ScheduleHandler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
@@ -435,14 +397,6 @@ func (h *ScheduleHandler) Delete(c *gin.Context) {
 }
 
 // Enable enables a schedule
-// @Summary Enable schedule
-// @Description Enable a schedule
-// @Tags Ansible Schedules
-// @Param id path string true "Schedule ID"
-// @Success 200 {object} response.MessageResponse
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{schedule_id}/actions/enable [post]
 func (h *ScheduleHandler) Enable(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
@@ -480,14 +434,6 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 }
 
 // Disable disables a schedule
-// @Summary Disable schedule
-// @Description Disable a schedule
-// @Tags Ansible Schedules
-// @Param id path string true "Schedule ID"
-// @Success 200 {object} response.MessageResponse
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{schedule_id}/actions/disable [post]
 func (h *ScheduleHandler) Disable(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
@@ -525,14 +471,6 @@ func (h *ScheduleHandler) Disable(c *gin.Context) {
 }
 
 // ValidateCron validates a cron expression and returns the next run time
-// @Summary Validate cron expression
-// @Description Validate a cron expression and return the next run time
-// @Tags Ansible Schedules
-// @Accept json
-// @Produce json
-// @Param request body ValidateCronRequest true "Cron expression"
-// @Success 200 {object} ValidateCronResponse
-// @Failure 400 {object} response.ErrorResponse
 func (h *ScheduleHandler) ValidateCron(c *gin.Context) {
 	var req ValidateCronRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -579,26 +517,11 @@ type ValidateCronResponse struct {
 }
 
 // GetCronPresets returns the available cron presets
-// @Summary Get cron presets
-// @Description Get available cron expression presets
-// @Tags Ansible Schedules
-// @Produce json
-// @Success 200 {object} map[string]string
 func (h *ScheduleHandler) GetCronPresets(c *gin.Context) {
 	c.JSON(http.StatusOK, models.CronPresets)
 }
 
 // ListByOrganization lists schedules for an organization by name
-// @Summary List schedules by organization
-// @Description List all schedules for an organization by name
-// @Tags Ansible Schedules
-// @Produce json
-// @Param name path string true "Organization name"
-// @Param page[number] query int false "Page number" default(1)
-// @Param page[size] query int false "Page size" default(20)
-// @Success 200 {object} jsonapi.Document
-// @Failure 400 {object} response.ErrorResponse
-// @Router /api/v2/organizations/{name}/ansible/schedules [get]
 func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 	// Get organization by name from URL param
 	orgName := c.Param("name")
@@ -650,14 +573,6 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 }
 
 // RunNow triggers immediate execution of a schedule
-// @Summary Run schedule now
-// @Description Trigger immediate execution of a schedule
-// @Tags Ansible Schedules
-// @Param id path string true "Schedule ID"
-// @Success 200 {object} response.MessageResponse
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/schedules/{id}/actions/run-now [post]
 func (h *ScheduleHandler) RunNow(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {

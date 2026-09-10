@@ -137,17 +137,6 @@ type UpdateInventorySourceRequest struct {
 }
 
 // Create creates a new inventory source
-// @Summary Create inventory source
-// @Description Create a new dynamic inventory source
-// @Tags Ansible Inventory Sources
-// @Accept json
-// @Produce json
-// @Param id path string true "Inventory ID"
-// @Param request body CreateInventorySourceRequest true "Inventory source details"
-// @Success 201 {object} models.AnsibleInventorySource
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/inventories/{id}/sources [post]
 func (h *InventorySourceHandler) Create(c *gin.Context) {
 	// Get inventory_id from path parameter (route: /ansible/inventories/:id/sources)
 	inventoryIDStr := c.Param("id")
@@ -234,15 +223,6 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 }
 
 // Get retrieves an inventory source by ID
-// @Summary Get inventory source
-// @Description Get an inventory source by ID
-// @Tags Ansible Inventory Sources
-// @Produce json
-// @Param id path string true "Inventory Source ID"
-// @Success 200 {object} models.AnsibleInventorySource
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 404 {object} response.ErrorResponse
-// @Router /api/v2/ansible/inventory-sources/{id} [get]
 func (h *InventorySourceHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
@@ -259,16 +239,6 @@ func (h *InventorySourceHandler) Get(c *gin.Context) {
 }
 
 // List lists inventory sources for an inventory
-// @Summary List inventory sources
-// @Description List all inventory sources for a given inventory
-// @Tags Ansible Inventory Sources
-// @Produce json
-// @Param id path string true "Inventory ID"
-// @Param page[number] query int false "Page number" default(1)
-// @Param page[size] query int false "Page size" default(20)
-// @Success 200 {object} jsonapi.Document
-// @Failure 400 {object} response.ErrorResponse
-// @Router /api/v2/ansible/inventories/{id}/sources [get]
 func (h *InventorySourceHandler) List(c *gin.Context) {
 	// Get inventory_id from path parameter (route: /ansible/inventories/:id/sources)
 	inventoryIDStr := c.Param("id")
@@ -305,17 +275,6 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 }
 
 // Update updates an inventory source
-// @Summary Update inventory source
-// @Description Update an inventory source
-// @Tags Ansible Inventory Sources
-// @Accept json
-// @Produce json
-// @Param id path string true "Inventory Source ID"
-// @Param request body UpdateInventorySourceRequest true "Update details"
-// @Success 200 {object} models.AnsibleInventorySource
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 404 {object} response.ErrorResponse
-// @Router /api/v2/ansible/inventory-sources/{id} [patch]
 func (h *InventorySourceHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
@@ -378,14 +337,6 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 }
 
 // Delete deletes an inventory source
-// @Summary Delete inventory source
-// @Description Delete an inventory source
-// @Tags Ansible Inventory Sources
-// @Param id path string true "Inventory Source ID"
-// @Success 204
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/inventory-sources/{id} [delete]
 func (h *InventorySourceHandler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
@@ -406,15 +357,6 @@ func (h *InventorySourceHandler) Delete(c *gin.Context) {
 }
 
 // Sync triggers a sync for an inventory source
-// @Summary Sync inventory source
-// @Description Trigger a sync for an inventory source
-// @Tags Ansible Inventory Sources
-// @Produce json
-// @Param id path string true "Inventory Source ID"
-// @Success 200 {object} ansible.SyncResult
-// @Failure 400 {object} response.ErrorResponse
-// @Failure 500 {object} response.ErrorResponse
-// @Router /api/v2/ansible/inventory-sources/{source_id}/actions/sync [post]
 func (h *InventorySourceHandler) Sync(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
