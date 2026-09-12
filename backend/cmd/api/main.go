@@ -201,24 +201,16 @@ func main() {
 		logger.Warnf("Failed to drop NOT NULL on ansible_jobs.playbook_id: %v", err)
 	}
 
-	// AUD-020: users.email must allow multiple "no email" (empty-string) users. The original full
-	// UNIQUE index on email rejected a second empty email, which forced identity-hijack and
-	// row-deletion workarounds in user provisioning. Replace it with a PARTIAL unique index that
-	// only constrains non-empty emails, so any number of email-less users can coexist. Idempotent:
-	// the legacy full index is replaced once, then the partial index is left in place.
-	var emailIdxDef string
-	if err := db.Raw("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_users_email'").Scan(&emailIdxDef).Error; err != nil {
-		logger.Warnf("Failed to inspect idx_users_email: %v", err)
-	} else if emailIdxDef != "" && !strings.Contains(emailIdxDef, "WHERE") {
-		// Legacy full unique index - drop it so the partial index below replaces it.
-		if err := db.Exec("DROP INDEX IF EXISTS idx_users_email").Error; err != nil {
-			logger.Warnf("Failed to drop legacy idx_users_email: %v", err)
-		} else {
-			logger.Info("Dropped legacy full unique idx_users_email; recreating as partial (WHERE email <> '')")
-		}
-	}
-	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email) WHERE email <> ''").Error; err != nil {
-		logger.Warnf("Failed to create partial unique idx_users_email: %v", err)
+	// users.email is unique case-insensitively, and only for non-empty values. The step lives in
+	// core/models so this and the integration tests drive the same code (AUD-020 for the partial
+	// half, #798 for the case-insensitive half - see models.EnsureEmailUniqueness). Conflicting
+	// rows are reported rather than fatal: an installation that already holds two spellings of one
+	// address must still boot, and the membership duplicate-email guard covers it meanwhile.
+	if conflicts, err := models.EnsureEmailUniqueness(db); err != nil {
+		logger.Warnf("Failed to ensure case-insensitive email uniqueness: %v", err)
+	} else if len(conflicts) > 0 {
+		logger.Warnf("users.email uniqueness stays case-sensitive: %d address(es) are held by more "+
+			"than one user row and need reconciling first: %s", len(conflicts), strings.Join(conflicts, ", "))
 	}
 
 	// AUD-150: one-time backfill for the new variable_sets.global column. Legacy rows encoded the TFE
