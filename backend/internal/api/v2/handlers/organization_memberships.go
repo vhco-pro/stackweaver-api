@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,8 +21,26 @@ import (
 	"gorm.io/gorm"
 )
 
+// OrganizationMembershipRepository is the subset of `repository.OrganizationRepository` this
+// handler depends on. Defined as an interface for the same reason as `auth.UserLookup`, so a test
+// can substitute the repository without a live database - here, to break one method: the
+// duplicate-email guard's failure branch cannot be staged from outside otherwise, since org
+// resolution and the RBAC check both run against the database before the guard is reached, so a
+// broken connection never gets that far. The concrete repo satisfies it implicitly. Keep it to the
+// methods this file actually calls.
+type OrganizationMembershipRepository interface {
+	AddMember(orgID, userID uuid.UUID) error
+	DeleteMemberByID(memberID uuid.UUID) error
+	GetByID(id uuid.UUID) (*models.Organization, error)
+	GetByName(name string) (*models.Organization, error)
+	GetMember(orgID, userID uuid.UUID) (*models.OrganizationMember, error)
+	GetMemberByEmail(orgID uuid.UUID, email string) (*models.OrganizationMember, error)
+	GetMemberByID(memberID uuid.UUID) (*models.OrganizationMember, error)
+	ListMembers(orgID uuid.UUID, limit, offset int, emails []string, status string, query string) ([]models.OrganizationMember, int64, error)
+}
+
 type OrganizationMembershipHandlerV2 struct {
-	orgRepo     *repository.OrganizationRepository
+	orgRepo     OrganizationMembershipRepository
 	userRepo    *repository.UserRepository
 	teamRepo    *repository.TeamRepository
 	authService *auth.Service
@@ -29,7 +48,7 @@ type OrganizationMembershipHandlerV2 struct {
 }
 
 func NewOrganizationMembershipHandlerV2(
-	orgRepo *repository.OrganizationRepository,
+	orgRepo OrganizationMembershipRepository,
 	userRepo *repository.UserRepository,
 	teamRepo *repository.TeamRepository,
 	authService *auth.Service,
@@ -240,17 +259,21 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Check for duplicate email in organization (case-insensitive) before creating user
-	// This prevents creating duplicate placeholder users for the same email
-	allMembers, _, err := h.orgRepo.ListMembers(org.ID, 1000, 0, nil, "", "")
-	if err == nil {
-		for _, member := range allMembers {
-			if member.User.Email != "" && strings.EqualFold(member.User.Email, email) {
-				// Found existing membership with this email (case-insensitive match)
-				jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("User with email '%s' is already a member of this organization", member.User.Email))
-				return
-			}
-		}
+	// Refuse an email that already belongs to a member of this organization, matched
+	// case-insensitively, before resolving or creating any user. One bounded lookup, not a scan of
+	// a page of members: bounded by a magic number, this check silently stopped firing in an
+	// organization larger than the page, which is exactly where a duplicate hurts (#798).
+	switch existing, err := h.orgRepo.GetMemberByEmail(org.ID, email); {
+	case err == nil:
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("User with email '%s' is already a member of this organization", existing.User.Email))
+		return
+	case !errors.Is(err, gorm.ErrRecordNotFound):
+		// Never fall through on an unexpected failure. The previous version ran the whole check
+		// under `if err == nil`, so a database error skipped it and went on to create the
+		// membership - the same silent outcome as the row cap, by a different trigger.
+		logger.Debugf("OrganizationMembership Create - Duplicate-email lookup failed: %v", err)
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check for an existing organization membership")
+		return
 	}
 
 	// Get user by email - try exact match first, then case-insensitive
