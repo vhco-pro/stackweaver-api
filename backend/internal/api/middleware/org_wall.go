@@ -169,65 +169,131 @@ func OrgResolutionWall(resolver OrgResolver) gin.HandlerFunc {
 			return
 		}
 
-		switch kind {
-		case models.APIKeyKindOrg:
-			boundVal, ok := c.Get("token_org_id")
-			boundOrg, _ := boundVal.(uuid.UUID)
-			if !ok || boundOrg != targetOrg {
-				logger.Warnf("org-wall: org-bound token (org %s) blocked from org %s on %s", boundOrg, targetOrg, fullPath)
-				denyWall(c, http.StatusForbidden, "this token is scoped to a different organization")
-				return
-			}
-			// Token-side scope enforcement: a read-only token may not perform
-			// a mutating request even within its own org. Only enforced when
-			// the token carries an org-level scope; project/team-scoped tokens
-			// are deferred to per-handler checks (the wall cannot match the
-			// resource to the scoped project/team here).
-			if !scopeAllowsMethod(c, targetOrg) {
-				logger.Warnf("org-wall: org-bound token scope denies %s on %s (org %s)", c.Request.Method, fullPath, targetOrg)
-				denyWall(c, http.StatusForbidden, "this token's scope does not permit this action")
-				return
-			}
-		case models.APIKeyKindUser:
-			userVal, ok := c.Get("user_id")
-			userID, _ := userVal.(uuid.UUID)
-			if !ok {
-				denyWall(c, http.StatusForbidden, "token is not associated with a user")
-				return
-			}
-			member, memberErr := resolver.UserInOrg(userID, targetOrg)
-			if memberErr != nil || !member {
-				logger.Warnf("org-wall: user-bound token (user %s) blocked from org %s on %s", userID, targetOrg, fullPath)
-				denyWall(c, http.StatusForbidden, "you are not a member of this organization")
-				return
-			}
-			// tfe_organization user_tokens_enabled: an org may disable user-bound
-			// tokens entirely. Org owners stay exempt (anti-lockout - without an
-			// org token yet, a locked org would be unrecoverable). Fail closed on
-			// lookup errors, consistent with the wall's posture.
-			restricted, restrictErr := resolver.OrgDisallowsUserTokens(targetOrg)
-			if restrictErr != nil {
-				logger.Warnf("org-wall: user-tokens policy lookup failed for org %s on %s: %v", targetOrg, fullPath, restrictErr)
-				denyWall(c, http.StatusForbidden, "unable to verify this organization's token policy")
-				return
-			}
-			if restricted {
-				owner, ownerErr := resolver.UserIsOrgOwner(userID, targetOrg)
-				if ownerErr != nil || !owner {
-					logger.Warnf("org-wall: user-bound token (user %s) denied - user tokens disabled for org %s on %s", userID, targetOrg, fullPath)
-					denyWall(c, http.StatusForbidden, "user tokens are disabled for this organization")
-					return
-				}
-			}
-		default:
-			denyWall(c, http.StatusForbidden, "unrecognized token kind")
+		if !authorizeResolvedOrg(c, resolver, kind, targetOrg, fullPath) {
 			return
 		}
-
-		// Cache the resolved org for downstream handlers.
-		c.Set("resolved_org_id", targetOrg)
 		c.Next()
 	}
+}
+
+// AuthorizeBodyResolvedOrg applies the same per-kind authorization the wall performs,
+// to a target organization the HANDLER resolved for itself.
+//
+// It exists for routes classified agnostic() because their target org is carried in the
+// request body or a query filter rather than the URL, which the wall reads path params
+// from and therefore cannot resolve. Those routes skip the wall entirely - both the
+// org-binding comparison and scopeAllowsMethod - so without this call the handler's
+// own RBAC check is the ONLY authorization, and RBAC answers "may this user do this?"
+// rather than "may this token do this?". An org-bound token then reaches every
+// organization its human owner belongs to (#806).
+//
+// Call it once the handler knows which resource the request targets, and BEFORE the
+// handler's RBAC check. It writes the error response and returns false when the caller
+// is not entitled; a true return means the caller may proceed to the normal per-user
+// authorization.
+//
+// resolve is invoked only for api-key identities, so the org lookup costs nothing on the
+// browser path. Pass one of the OrgResolver's By*ID methods, which is the same chain the
+// wall would have walked had the id been in the URL. A resolve error is reported as 404
+// rather than 403, matching the wall: the response must not disclose that a resource
+// exists in another tenant.
+//
+// Non-token identities (JWT, session) return true untouched: the wall never governs
+// them and this helper must not start.
+func AuthorizeBodyResolvedOrg(c *gin.Context, resolver OrgResolver, resolve func(OrgResolver) (uuid.UUID, error)) bool {
+	kindVal, isToken := c.Get("token_kind")
+	if !isToken {
+		return true
+	}
+	kind, _ := kindVal.(string)
+
+	if resolver == nil {
+		// Fail closed. A handler wired without a resolver cannot authorize a token,
+		// and silently allowing it would reintroduce exactly the gap this closes.
+		logger.Warnf("org-wall: no resolver wired for %s %s - denying api-key access", c.Request.Method, c.FullPath())
+		denyWall(c, http.StatusForbidden, "this token may not access this endpoint")
+		return false
+	}
+
+	targetOrg, err := resolve(resolver)
+	if err != nil {
+		denyWall(c, http.StatusNotFound, "resource not found")
+		return false
+	}
+	return authorizeResolvedOrg(c, resolver, kind, targetOrg, c.FullPath())
+}
+
+// authorizeResolvedOrg authorizes an already-resolved target org against the request's
+// api-key identity, by token kind:
+//
+//   - org-bound token  → the target org MUST equal the token's bound org, and the
+//     token's scope must permit the request's method. A mismatch is denied outright;
+//     there is deliberately no fallback to the key owner's RBAC, which is exactly the
+//     escalation authorizeQueueDepth documents having fixed for one route.
+//   - user-bound token → the user MUST be a member of the target org, subject to the
+//     org's user_tokens_enabled policy with the owner anti-lockout carve-out.
+//
+// It writes the error response and returns false on denial. On success it caches the
+// org as resolved_org_id for downstream handlers.
+func authorizeResolvedOrg(c *gin.Context, resolver OrgResolver, kind string, targetOrg uuid.UUID, fullPath string) bool {
+	switch kind {
+	case models.APIKeyKindOrg:
+		boundVal, ok := c.Get("token_org_id")
+		boundOrg, _ := boundVal.(uuid.UUID)
+		if !ok || boundOrg != targetOrg {
+			logger.Warnf("org-wall: org-bound token (org %s) blocked from org %s on %s", boundOrg, targetOrg, fullPath)
+			denyWall(c, http.StatusForbidden, "this token is scoped to a different organization")
+			return false
+		}
+		// Token-side scope enforcement: a read-only token may not perform
+		// a mutating request even within its own org. Only enforced when
+		// the token carries an org-level scope; project/team-scoped tokens
+		// are deferred to per-handler checks (the wall cannot match the
+		// resource to the scoped project/team here).
+		if !scopeAllowsMethod(c, targetOrg) {
+			logger.Warnf("org-wall: org-bound token scope denies %s on %s (org %s)", c.Request.Method, fullPath, targetOrg)
+			denyWall(c, http.StatusForbidden, "this token's scope does not permit this action")
+			return false
+		}
+	case models.APIKeyKindUser:
+		userVal, ok := c.Get("user_id")
+		userID, _ := userVal.(uuid.UUID)
+		if !ok {
+			denyWall(c, http.StatusForbidden, "token is not associated with a user")
+			return false
+		}
+		member, memberErr := resolver.UserInOrg(userID, targetOrg)
+		if memberErr != nil || !member {
+			logger.Warnf("org-wall: user-bound token (user %s) blocked from org %s on %s", userID, targetOrg, fullPath)
+			denyWall(c, http.StatusForbidden, "you are not a member of this organization")
+			return false
+		}
+		// tfe_organization user_tokens_enabled: an org may disable user-bound
+		// tokens entirely. Org owners stay exempt (anti-lockout - without an
+		// org token yet, a locked org would be unrecoverable). Fail closed on
+		// lookup errors, consistent with the wall's posture.
+		restricted, restrictErr := resolver.OrgDisallowsUserTokens(targetOrg)
+		if restrictErr != nil {
+			logger.Warnf("org-wall: user-tokens policy lookup failed for org %s on %s: %v", targetOrg, fullPath, restrictErr)
+			denyWall(c, http.StatusForbidden, "unable to verify this organization's token policy")
+			return false
+		}
+		if restricted {
+			owner, ownerErr := resolver.UserIsOrgOwner(userID, targetOrg)
+			if ownerErr != nil || !owner {
+				logger.Warnf("org-wall: user-bound token (user %s) denied - user tokens disabled for org %s on %s", userID, targetOrg, fullPath)
+				denyWall(c, http.StatusForbidden, "user tokens are disabled for this organization")
+				return false
+			}
+		}
+	default:
+		denyWall(c, http.StatusForbidden, "unrecognized token kind")
+		return false
+	}
+
+	// Cache the resolved org for downstream handlers.
+	c.Set("resolved_org_id", targetOrg)
+	return true
 }
 
 // scopeAllowsMethod reports whether the org-bound token in context may perform

@@ -191,15 +191,23 @@ var wallRegistry = map[string]routeEntry{
 	// --- team access (workspace) ---
 	// Collection routes carry team+workspace in the body and are validated
 	// by the handler; the wall treats them as agnostic.
+	// Target arrives in the body (POST) or filter[workspace][id] (GET); both handlers
+	// call AuthorizeBodyResolvedOrg themselves (#806).
 	"/api/v2/team-workspaces":                                     agnostic(),
 	"/api/v2/team-workspaces/:id":                                 resource("id", rTeamWorkspaceAccess),
 	"/api/v2/workspaces/:id/relationships/team-access":            resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/relationships/team-access/:access_id": resource("access_id", rTeamWorkspaceAccess),
-	"/api/v2/team-projects":                                       agnostic(),
-	"/api/v2/team-projects/:id":                                   resource("id", rTeamProjectAccess),
+	// Target arrives in the body (POST) or filter[project][id] (GET); both handlers
+	// call AuthorizeBodyResolvedOrg themselves (#806).
+	"/api/v2/team-projects":     agnostic(),
+	"/api/v2/team-projects/:id": resource("id", rTeamProjectAccess),
 
 	// --- runs ---
-	// POST /runs carries the workspace in the body; validated by handler.
+	// POST /runs carries the workspace in the body, which the wall cannot read, so the
+	// handler owes the check instead: RunHandlerV2.Create calls AuthorizeBodyResolvedOrg
+	// before its RBAC checks. "validated by handler" used to be aspirational here - the
+	// handler authorized only the key OWNER's RBAC, so an org-bound token reached every
+	// org its owner belonged to (#806). Do not drop that call.
 	"/api/v2/runs":                           agnostic(),
 	"/api/v2/runs/:id":                       resource("id", rRun),
 	"/api/v2/runs/:id/plan":                  resource("id", rRun),

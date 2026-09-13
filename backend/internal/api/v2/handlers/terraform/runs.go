@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -50,6 +51,9 @@ type RunHandlerV2 struct {
 	cryptoSvc         *crypto.CryptoService // decrypts sensitive output values at rest (#95); nil = disabled
 	taskStageRepo     *repository.TaskStageRepository
 	taskResultRepo    *repository.TaskResultRepository
+	// orgResolver answers the org wall's membership questions for POST /runs, whose
+	// target org arrives in the request body and so is invisible to the wall (#806).
+	orgResolver middleware.OrgResolver
 }
 
 func NewRunHandlerV2(
@@ -69,6 +73,7 @@ func NewRunHandlerV2(
 	cryptoSvc *crypto.CryptoService,
 	taskStageRepo *repository.TaskStageRepository,
 	taskResultRepo *repository.TaskResultRepository,
+	orgResolver middleware.OrgResolver,
 ) *RunHandlerV2 {
 	return &RunHandlerV2{
 		runRepo:           runRepo,
@@ -87,6 +92,7 @@ func NewRunHandlerV2(
 		cryptoSvc:         cryptoSvc,
 		taskStageRepo:     taskStageRepo,
 		taskResultRepo:    taskResultRepo,
+		orgResolver:       orgResolver,
 	}
 }
 
@@ -490,15 +496,27 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 	}
 }
 
+// runReportsChanges reports whether a run's operation and status are ones for which a
+// has-changes answer is meaningful at all. Destroy runs are included - a destroy plan has
+// real changes (resources to destroy), and go-tfe clients (tfe_workspace_run) gate on
+// has-changes to decide whether to confirm the apply; excluding destroy made every destroy
+// run report has-changes=false and hang the provider waiting for a "planned and finished"
+// no-op status.
+//
+// Shared by hasChanges, which reads the plan document in Go, and by the workspace list,
+// which gets the document half evaluated in PostgreSQL (#808). One definition so the two
+// cannot answer differently for the same run.
+func runReportsChanges(op models.RunOperation, status models.RunStatus) bool {
+	if op != models.RunOperationPlanOnly && op != models.RunOperationPlanAndApply && op != models.RunOperationDestroy {
+		return false
+	}
+	return status == models.RunStatusPlanned || status == models.RunStatusCompleted
+}
+
 // hasChanges determines if the run has changes based on plan output
 // Matches TFE behavior: checks the resource_changes array in Terraform plan JSON
 func hasChanges(run *models.Run) bool {
-	// Check if this is a plan operation that has completed. Destroy runs are included - a destroy plan
-	// has real changes (resources to destroy), and go-tfe clients (tfe_workspace_run) gate on has-changes
-	// to decide whether to confirm the apply; excluding destroy made every destroy run report
-	// has-changes=false and hang the provider waiting for a "planned and finished" no-op status.
-	if (run.Operation != models.RunOperationPlanOnly && run.Operation != models.RunOperationPlanAndApply && run.Operation != models.RunOperationDestroy) ||
-		(run.Status != models.RunStatusPlanned && run.Status != models.RunStatusCompleted) {
+	if !runReportsChanges(run.Operation, run.Status) {
 		return false
 	}
 
@@ -611,6 +629,18 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
+		return
+	}
+
+	// Token-side authorization (#806). This route is org-wall-agnostic because the
+	// workspace arrives in the body, so the wall resolved no org and enforced nothing -
+	// neither the token's org binding nor its scope. The RBAC checks below authorize the
+	// key's OWNER, not the key, so without this an org-A-bound token creates runs in any
+	// org-B workspace its owner can reach. Must run before the RBAC checks, and must not
+	// fall through to them on failure.
+	if !middleware.AuthorizeBodyResolvedOrg(c, h.orgResolver, func(r middleware.OrgResolver) (uuid.UUID, error) {
+		return r.ByWorkspaceID(workspaceID)
+	}) {
 		return
 	}
 

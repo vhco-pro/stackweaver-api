@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -21,6 +22,9 @@ type TeamProjectAccessHandlerV2 struct {
 	orgRepo     *repository.OrganizationRepository
 	authService *auth.Service
 	rbacService *rbac.Service
+	// orgResolver answers the org wall's questions for the TFE-shaped routes whose
+	// target arrives in the body or a filter param rather than the URL (#806).
+	orgResolver middleware.OrgResolver
 }
 
 func NewTeamProjectAccessHandlerV2(
@@ -29,6 +33,7 @@ func NewTeamProjectAccessHandlerV2(
 	orgRepo *repository.OrganizationRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	orgResolver middleware.OrgResolver,
 ) *TeamProjectAccessHandlerV2 {
 	return &TeamProjectAccessHandlerV2{
 		teamRepo:    teamRepo,
@@ -36,6 +41,7 @@ func NewTeamProjectAccessHandlerV2(
 		orgRepo:     orgRepo,
 		authService: authService,
 		rbacService: rbacService,
+		orgResolver: orgResolver,
 	}
 }
 
@@ -246,6 +252,17 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 		return
 	}
 
+	// Token-side authorization (#806). The TFE shape of this route carries its target in
+	// the request body / a filter param, so the wall classified it agnostic and resolved
+	// no org - neither the token's org binding nor its scope was checked. The
+	// authorization below answers "may this USER do this?", so without this an
+	// org-A-bound token reaches any org-B its owner belongs to.
+	if !middleware.AuthorizeBodyResolvedOrg(c, h.orgResolver, func(middleware.OrgResolver) (uuid.UUID, error) {
+		return org.ID, nil
+	}) {
+		return
+	}
+
 	// Reading team access is gated on organization membership, not team-management
 	// permission - see teamAccessVisible in team_access_visibility.go for the TFE rule
 	// this implements. Writes below remain admin-only.
@@ -374,6 +391,17 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
+		return
+	}
+
+	// Token-side authorization (#806). The TFE shape of this route carries its target in
+	// the request body / a filter param, so the wall classified it agnostic and resolved
+	// no org - neither the token's org binding nor its scope was checked. The
+	// authorization below answers "may this USER do this?", so without this an
+	// org-A-bound token reaches any org-B its owner belongs to.
+	if !middleware.AuthorizeBodyResolvedOrg(c, h.orgResolver, func(middleware.OrgResolver) (uuid.UUID, error) {
+		return org.ID, nil
+	}) {
 		return
 	}
 

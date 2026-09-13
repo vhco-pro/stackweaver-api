@@ -675,7 +675,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 	if err != nil {
 		// Non-fatal: log and continue without run data
 		logger.Warnf("Failed to batch-fetch latest runs for workspace list: %v", err)
-		latestRuns = map[string]*models.Run{}
+		latestRuns = map[string]*repository.LatestRunSummary{}
 	}
 
 	var included []any
@@ -887,7 +887,12 @@ func parseJSONStringList(raw string) []string {
 // formatRunForInclusion formats a run as a lightweight JSON:API resource for sideloading
 // in the workspace list response. Includes only the attributes the frontend needs for
 // workspace cards: status, operation, plan-only, has-changes, timestamps.
-func formatRunForInclusion(run *models.Run) jsonapi.Resource[IncludedRunAttributes] {
+//
+// It takes a LatestRunSummary rather than a models.Run because the list deliberately never
+// loads plan_output (#808): has-changes is the only thing that needed the document, and
+// PostgreSQL evaluates that half now. The operation/status half stays here, in the same
+// runReportsChanges the full hasChanges uses.
+func formatRunForInclusion(run *repository.LatestRunSummary) jsonapi.Resource[IncludedRunAttributes] {
 	planOnly := run.Operation == models.RunOperationPlanOnly
 
 	attrs := IncludedRunAttributes{
@@ -897,7 +902,7 @@ func formatRunForInclusion(run *models.Run) jsonapi.Resource[IncludedRunAttribut
 		PlanOnly:    planOnly,
 		CreatedAt:   run.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   run.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		HasChanges:  hasChanges(run),
+		HasChanges:  run.PlanIndicatesChanges && runReportsChanges(run.Operation, run.Status),
 		Permissions: IncludedRunPermissions{CanApply: !planOnly && run.Status == models.RunStatusPlanned},
 	}
 	if run.CompletedAt != nil {
