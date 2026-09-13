@@ -26,6 +26,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -104,6 +105,7 @@ func setupRunAuthzFixture(t *testing.T) *runAuthzFixture {
 	h := NewRunHandlerV2(
 		repository.NewRunRepository(db), repository.NewWorkspaceRepository(db), orgRepo, authService,
 		nil, repository.NewConfigurationVersionRepository(db), nil, nil, nil, nil, rbacService, nil, nil, nil, nil, nil,
+		middleware.NewDBOrgResolver(db),
 	)
 
 	gin.SetMode(gin.TestMode)

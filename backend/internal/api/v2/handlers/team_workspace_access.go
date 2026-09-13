@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -21,6 +22,9 @@ type TeamWorkspaceAccessHandlerV2 struct {
 	orgRepo       *repository.OrganizationRepository
 	authService   *auth.Service
 	rbacService   *rbac.Service
+	// orgResolver answers the org wall's questions for the TFE-shaped routes whose
+	// target arrives in the body or a filter param rather than the URL (#806).
+	orgResolver middleware.OrgResolver
 }
 
 func NewTeamWorkspaceAccessHandlerV2(
@@ -30,6 +34,7 @@ func NewTeamWorkspaceAccessHandlerV2(
 	orgRepo *repository.OrganizationRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	orgResolver middleware.OrgResolver,
 ) *TeamWorkspaceAccessHandlerV2 {
 	return &TeamWorkspaceAccessHandlerV2{
 		teamRepo:      teamRepo,
@@ -38,6 +43,7 @@ func NewTeamWorkspaceAccessHandlerV2(
 		orgRepo:       orgRepo,
 		authService:   authService,
 		rbacService:   rbacService,
+		orgResolver:   orgResolver,
 	}
 }
 
@@ -189,6 +195,17 @@ func (h *TeamWorkspaceAccessHandlerV2) List(c *gin.Context) {
 		return
 	}
 
+	// Token-side authorization (#806). The TFE shape of this route carries its target in
+	// the request body / a filter param, so the wall classified it agnostic and resolved
+	// no org - neither the token's org binding nor its scope was checked. The
+	// authorization below answers "may this USER do this?", so without this an
+	// org-A-bound token reaches any org-B its owner belongs to.
+	if !middleware.AuthorizeBodyResolvedOrg(c, h.orgResolver, func(middleware.OrgResolver) (uuid.UUID, error) {
+		return org.ID, nil
+	}) {
+		return
+	}
+
 	// Verify user has access to the organization (team-based)
 	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
 	if err != nil || !inOrg {
@@ -299,6 +316,17 @@ func (h *TeamWorkspaceAccessHandlerV2) Create(c *gin.Context) {
 	org, err := h.orgRepo.GetByID(project.OrganizationID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve organization")
+		return
+	}
+
+	// Token-side authorization (#806). The TFE shape of this route carries its target in
+	// the request body / a filter param, so the wall classified it agnostic and resolved
+	// no org - neither the token's org binding nor its scope was checked. The
+	// authorization below answers "may this USER do this?", so without this an
+	// org-A-bound token reaches any org-B its owner belongs to.
+	if !middleware.AuthorizeBodyResolvedOrg(c, h.orgResolver, func(middleware.OrgResolver) (uuid.UUID, error) {
+		return org.ID, nil
+	}) {
 		return
 	}
 

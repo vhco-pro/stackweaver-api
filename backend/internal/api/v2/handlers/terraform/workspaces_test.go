@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 )
 
 func TestFormatWorkspaceResponse_ResourceCount(t *testing.T) {
@@ -175,7 +176,7 @@ func TestFormatWorkspaceResponse_CanForceDelete(t *testing.T) {
 }
 
 func TestFormatRunForInclusion_Basic(t *testing.T) {
-	run := &models.Run{
+	run := &repository.LatestRunSummary{
 		ID:          "run-abc123",
 		WorkspaceID: "ws-test",
 		Status:      "applied",

@@ -67,7 +67,11 @@ func SetupV2Routes(
 	// target organization and enforce that an org-bound token may only act
 	// within its bound org, and a user-bound token only within orgs the
 	// user belongs to. JWT/session identities pass straight through.
-	v2.Use(middleware.OrgResolutionWall(middleware.NewDBOrgResolver(db)))
+	// One resolver instance, shared by the wall and by the handlers behind
+	// agnostic() routes whose target org arrives in the body rather than the URL
+	// and which therefore owe the same check themselves (#806).
+	orgResolver := middleware.NewDBOrgResolver(db)
+	v2.Use(middleware.OrgResolutionWall(orgResolver))
 
 	// Shared AES-256-GCM service for encryption at rest (#95): state objects, sensitive
 	// output values, and VCS connection tokens all encrypt under the single ENCRYPTION_KEY.
@@ -133,8 +137,8 @@ func SetupV2Routes(
 	projectHandler := handlers.NewProjectHandlerV2(projectRepo, orgRepo, teamRepo, agentPoolRepo, tagBindingRepo, authService, activityService, rbacService)
 	tagBindingHandler := handlers.NewTagBindingHandlerV2(tagBindingRepo, projectRepo, workspaceRepo, orgRepo, authService, rbacService)
 	teamHandler := handlers.NewTeamHandlerV2(teamRepo, orgRepo, authService, rbacService)
-	teamWorkspaceAccessHandler := handlers.NewTeamWorkspaceAccessHandlerV2(teamRepo, workspaceRepo, projectRepo, orgRepo, authService, rbacService)
-	teamProjectAccessHandler := handlers.NewTeamProjectAccessHandlerV2(teamRepo, projectRepo, orgRepo, authService, rbacService)
+	teamWorkspaceAccessHandler := handlers.NewTeamWorkspaceAccessHandlerV2(teamRepo, workspaceRepo, projectRepo, orgRepo, authService, rbacService, orgResolver)
+	teamProjectAccessHandler := handlers.NewTeamProjectAccessHandlerV2(teamRepo, projectRepo, orgRepo, authService, rbacService, orgResolver)
 	workspaceHandler := terraformHandlers.NewWorkspaceHandlerV2(workspaceRepo, projectRepo, orgRepo, vcsConnectionRepo, teamRepo, agentPoolRepo, runRepo, authService, activityService, rbacService, vcsRegistry, db)
 
 	// User repository for organization memberships
@@ -524,7 +528,7 @@ func SetupV2Routes(
 	stateResourceRepo := repository.NewStateVersionResourceRepository(db)
 	taskStageRepo := repository.NewTaskStageRepository(db)
 	taskResultRepo := repository.NewTaskResultRepository(db)
-	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo, stateOutputRepo, atRestCrypto, taskStageRepo, taskResultRepo)
+	runHandler = terraformHandlers.NewRunHandlerV2(runRepo, workspaceRepo, orgRepo, authService, storageClient, configVersionRepo, vcsConnectionRepo, vcsRegistry, logBufferService, phaseStateRepo, rbacService, stateVersionRepo, stateOutputRepo, atRestCrypto, taskStageRepo, taskResultRepo, orgResolver)
 
 	// Terraform Runs (TFE-compatible)
 	// TFE expects: /api/v2/runs/:id
