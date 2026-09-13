@@ -217,7 +217,7 @@ type TeamWithWorkspaceAccess struct {
 // (tfe_team_notification_configuration applies "to all workspaces that the configured team has access
 // to").
 //
-// Access is a UNION of four independent sources, and there is no table to join for it:
+// Access is a UNION of four independent sources, and there is no table whose rows ARE the answer:
 //
 //  1. the owners team, which bypasses permission checks by name
 //  2. org-wide access (TeamOrganizationAccess manage/read workspaces), which reaches EVERY workspace
@@ -229,13 +229,19 @@ type TeamWithWorkspaceAccess struct {
 // setups. The per-leg permission mapping is delegated to the same helpers the permission checks use, so
 // this cannot drift from what access actually means.
 //
+// There is no table to join for the verdict, but there is one to narrow by: a team that is not named
+// owners and holds no access row at all cannot reach anything. So the database returns the candidates
+// (ListWithAnyAccess) and the mapping below still decides. This used to ask List for a page of 1000
+// and treat it as the whole organization, which silently dropped teams past the thousandth by name in
+// exactly the installations large enough to care (#800).
+//
 // Note leg 2 is deliberately broad: a team with org-wide read is notified about every change request in
 // the organization. That is TFE's semantics, not an accident.
 func (s *Service) ListTeamsWithWorkspaceAccess(orgID, projectID uuid.UUID, workspaceID string) ([]TeamWithWorkspaceAccess, error) {
 	if s.teamRepo == nil {
 		return nil, fmt.Errorf("team repository not available")
 	}
-	teams, _, err := s.teamRepo.List(orgID, 1000, 0)
+	teams, err := s.teamRepo.ListWithAnyAccess(orgID, projectID, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list teams: %w", err)
 	}
@@ -287,36 +293,47 @@ func (s *Service) GetTeamAccessForAnsibleTemplate(orgID, projectID uuid.UUID) ([
 	if s.teamRepo == nil {
 		return nil, fmt.Errorf("team repository not available")
 	}
-	teams, _, err := s.teamRepo.List(orgID, 1000, 0)
+	// Candidates only, then the same mapping as before - see ListTeamsWithWorkspaceAccess for why the
+	// verdict stays in Go. This path has no workspace leg, so it passes an empty workspace id.
+	teams, err := s.teamRepo.ListWithAnyAccess(orgID, projectID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list teams: %w", err)
 	}
 	result := make([]TeamAnsibleTemplateAccess, 0, len(teams))
 	for i := range teams {
-		team := &teams[i]
-		perms := map[Permission]bool{}
-		if team.OrganizationAccess != nil {
-			for perm := range s.getPermissionsFromOrganizationAccess(team.OrganizationAccess) {
-				perms[perm] = true
-			}
-		}
-		if projectAccess, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && projectAccess != nil {
-			for perm := range s.getPermissionsFromProjectAccess(projectAccess, ResourceTypeAnsibleJobTemplate) {
-				perms[perm] = true
-			}
-		}
-		access := TeamAnsibleTemplateAccess{
-			TeamID:   team.ID,
-			TeamName: team.Name,
-			Read:     perms[PermissionAnsibleJobTemplateRead],
-			Write:    perms[PermissionAnsibleJobTemplateWrite],
-			Execute:  perms[PermissionAnsibleJobExecute],
-		}
+		access := s.ansibleTemplateAccessFor(&teams[i], projectID)
 		if access.Read || access.Write || access.Execute {
 			result = append(result, access)
 		}
 	}
 	return result, nil
+}
+
+// ansibleTemplateAccessFor maps one team's access rows to its permissions on an ansible job template
+// in the given project. Two legs, and no owners bypass - unlike the workspace path above, which is
+// why the two cannot share a predicate.
+//
+// Extracted so the differential test for #800 can compute the expected answer with the same code the
+// production path uses, rather than a second copy of the mapping that would drift from it.
+func (s *Service) ansibleTemplateAccessFor(team *models.Team, projectID uuid.UUID) TeamAnsibleTemplateAccess {
+	perms := map[Permission]bool{}
+	if team.OrganizationAccess != nil {
+		for perm := range s.getPermissionsFromOrganizationAccess(team.OrganizationAccess) {
+			perms[perm] = true
+		}
+	}
+	if projectAccess, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && projectAccess != nil {
+		for perm := range s.getPermissionsFromProjectAccess(projectAccess, ResourceTypeAnsibleJobTemplate) {
+			perms[perm] = true
+		}
+	}
+	return TeamAnsibleTemplateAccess{
+		TeamID:   team.ID,
+		TeamName: team.Name,
+		Read:     perms[PermissionAnsibleJobTemplateRead],
+		Write:    perms[PermissionAnsibleJobTemplateWrite],
+		Execute:  perms[PermissionAnsibleJobExecute],
+	}
 }
 
 // getPermissionsFromOrganizationAccess extracts all permissions from team organization access

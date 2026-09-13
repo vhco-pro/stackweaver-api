@@ -5,7 +5,6 @@ package terraform
 import (
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,17 +16,6 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/runtask"
 )
-
-// isDuplicateKey detects a unique-constraint violation. gorm only translates to ErrDuplicatedKey
-// when TranslateError is enabled (it is not here), so match the pg error text, like
-// ansible/playbook_discovery.go does.
-func isDuplicateKey(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "SQLSTATE 23505") || strings.Contains(msg, "duplicate key value")
-}
 
 // RunTaskHandlerV2 serves organization run tasks (tfe_organization_run_task, JSON:API type "tasks"):
 // external HTTP services that receive signed webhooks at run stage boundaries. The
@@ -284,7 +272,7 @@ func (h *RunTaskHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.repo.Create(t); err != nil {
-		if isDuplicateKey(err) {
+		if repository.IsUniqueViolation(err) {
 			taskError(c, http.StatusUnprocessableEntity, "Invalid Attribute", "a run task with this name already exists in the organization")
 			return
 		}
@@ -420,7 +408,7 @@ func (h *RunTaskHandlerV2) Update(c *gin.Context) {
 	}
 
 	if err := h.repo.Update(t); err != nil {
-		if isDuplicateKey(err) {
+		if repository.IsUniqueViolation(err) {
 			taskError(c, http.StatusUnprocessableEntity, "Invalid Attribute", "a run task with this name already exists in the organization")
 			return
 		}

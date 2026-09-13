@@ -340,6 +340,16 @@ func (h *OrganizationMembershipHandlerV2) Create(c *gin.Context) {
 
 	// Create membership (no role - roles are deprecated, permissions come from team memberships)
 	if err := h.orgRepo.AddMember(org.ID, targetUser.ID); err != nil {
+		// A concurrent invite for the same address can win the insert between the guard above and
+		// this write. OrganizationMember is unique on (organization_id, user_id), so the loser gets
+		// a constraint violation - and the caller's request was a duplicate, which is 409, not an
+		// internal error. The status matches the guard deliberately: which request won a race the
+		// caller cannot observe must not change what it is told
+		// (docs/internal/guidelines/api/duplicate-and-conflict-status-codes.md).
+		if repository.IsUniqueViolation(err) {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("User with email '%s' is already a member of this organization", email))
+			return
+		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create organization membership")
 		return
 	}

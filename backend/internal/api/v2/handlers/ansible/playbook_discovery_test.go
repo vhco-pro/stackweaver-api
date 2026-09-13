@@ -3,11 +3,8 @@
 package ansible
 
 import (
-	"errors"
 	"reflect"
 	"testing"
-
-	"gorm.io/gorm"
 )
 
 func TestFilterPlaybookFiles(t *testing.T) {
@@ -108,23 +105,6 @@ func TestPlaybookNameCandidates_RequestedNameShortCircuits(t *testing.T) {
 	for _, c := range got {
 		if c == "deploy (playbooks)" {
 			t.Error("requested name must not fall back to derived candidates")
-		}
-	}
-}
-
-func TestIsDuplicateKeyErr(t *testing.T) {
-	cases := []struct {
-		err  error
-		want bool
-	}{
-		{nil, false},
-		{gorm.ErrDuplicatedKey, true},
-		{errors.New(`ERROR: duplicate key value violates unique constraint "idx_project_playbook" (SQLSTATE 23505)`), true},
-		{errors.New("connection refused"), false},
-	}
-	for _, tc := range cases {
-		if got := isDuplicateKeyErr(tc.err); got != tc.want {
-			t.Errorf("isDuplicateKeyErr(%v) = %v, want %v", tc.err, got, tc.want)
 		}
 	}
 }

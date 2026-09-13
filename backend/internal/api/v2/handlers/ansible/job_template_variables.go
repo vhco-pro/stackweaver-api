@@ -239,8 +239,12 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.templateVariableRepo.Create(variable); err != nil {
-		// Check for duplicate key error
-		if err.Error() == "pq: duplicate key value violates unique constraint \"idx_job_template_key\"" {
+		// This used to compare the error for exact equality against a lib/pq-style message naming
+		// idx_job_template_key. The driver here is pgx (gorm.io/driver/postgres), whose text has a
+		// different prefix and a trailing sqlstate, so the comparison never matched: the branch was
+		// dead and a duplicate key answered 500. One shared detector now, which is the point of
+		// #800's consolidation.
+		if repository.IsUniqueViolation(err) {
 			jsonapi.WriteError(c, http.StatusConflict, jsonapi.TitleConflict, "Variable with this key already exists")
 			return
 		}

@@ -281,6 +281,40 @@ func TestOrganizationMembershipDuplicateGuard(t *testing.T) {
 		}
 	})
 
+	// #800 AC5: a concurrent invite that wins the insert race leaves the loser reporting a
+	// duplicate, not an internal error. The seam makes the race stageable: the stub tells the guard
+	// there is no member and creates the membership before the handler writes.
+	t.Run("losing the insert race reports a duplicate", func(t *testing.T) {
+		racer := &models.User{
+			ID:             uuid.New(),
+			ZitadelSubject: "dupguard-racer-" + sfx,
+			Email:          fmt.Sprintf("dupguard-racer-%s@example.test", sfx),
+		}
+		if err := db.Create(racer).Error; err != nil {
+			t.Fatalf("seed the racer user: %v", err)
+		}
+		t.Cleanup(func() {
+			db.Delete(&models.OrganizationMember{}, "user_id = ?", racer.ID)
+			db.Delete(&models.User{}, "id = ?", racer.ID)
+		})
+
+		router := newRouter(racingMemberByEmail{
+			OrganizationMembershipRepository: orgRepo,
+			db:                               db,
+			userID:                           racer.ID,
+		})
+		code, body := invite(router, racer.Email)
+		if code != http.StatusConflict {
+			t.Fatalf("invite that loses the insert race: got %d, want 409 - body %s", code, body)
+		}
+		if detail := detailOf(t, body); !strings.Contains(detail, racer.Email) {
+			t.Errorf("detail %q does not name the address", detail)
+		}
+		if n := countMembershipsFor(t, racer.Email); n != 1 {
+			t.Fatalf("the race left %d memberships for one address, want 1", n)
+		}
+	})
+
 	// AC4: a failing duplicate lookup refuses the request instead of skipping the check. The guard
 	// used to run under `if err == nil`, so a database error on the listing silently proceeded to
 	// create the membership.
@@ -306,4 +340,35 @@ type failingMemberByEmail struct {
 
 func (failingMemberByEmail) GetMemberByEmail(uuid.UUID, string) (*models.OrganizationMember, error) {
 	return nil, fmt.Errorf("simulated database failure")
+}
+
+// racingMemberByEmail reproduces the insert race. The window is narrow and specific: between the
+// handler's GetMember check and its AddMember write, which is where a concurrent invite's row
+// lands. So the winner is created from inside GetMember, which then reports not-found exactly as it
+// would have a moment earlier - and AddMember goes on to violate idx_org_user.
+//
+// Creating it from GetMemberByEmail instead does NOT stage this: the handler would find the row at
+// its own GetMember check and answer from there, never reaching the write. The first version of this
+// test did that, returned 409 from the wrong branch, and was caught only because the assertion
+// checks the detail rather than the status alone.
+type racingMemberByEmail struct {
+	OrganizationMembershipRepository
+	db     *gorm.DB
+	userID uuid.UUID
+}
+
+func (r racingMemberByEmail) GetMemberByEmail(uuid.UUID, string) (*models.OrganizationMember, error) {
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (r racingMemberByEmail) GetMember(orgID, userID uuid.UUID) (*models.OrganizationMember, error) {
+	if userID == r.userID {
+		if err := r.db.Create(&models.OrganizationMember{
+			ID: uuid.New(), OrganizationID: orgID, UserID: r.userID,
+		}).Error; err != nil {
+			return nil, err
+		}
+		return nil, gorm.ErrRecordNotFound
+	}
+	return r.OrganizationMembershipRepository.GetMember(orgID, userID)
 }
