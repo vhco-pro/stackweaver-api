@@ -193,7 +193,7 @@ func (h *WorkspaceRunTaskHandlerV2) Create(c *gin.Context) {
 		Stages:           stages,
 	}
 	if err := h.repo.Create(wt); err != nil {
-		if isDuplicateKey(err) {
+		if repository.IsUniqueViolation(err) {
 			taskError(c, http.StatusUnprocessableEntity, "Invalid Attribute", "this task is already attached to the workspace")
 			return
 		}

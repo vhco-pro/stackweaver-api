@@ -15,7 +15,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
-	"gorm.io/gorm"
+	corerepo "github.com/michielvha/stackweaver/core/repository"
 )
 
 // maxBulkImportEntries caps a single bulk-import request.
@@ -114,20 +114,6 @@ func playbookNameCandidates(filePath, repository, requested string) []string {
 		candidates = append(candidates, fmt.Sprintf("%s-%d", stem, i))
 	}
 	return candidates
-}
-
-// isDuplicateKeyErr reports whether err is a unique-constraint violation.
-// gorm only translates to ErrDuplicatedKey when TranslateError is enabled, so
-// the Postgres SQLSTATE is matched as a fallback.
-func isDuplicateKeyErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if err == gorm.ErrDuplicatedKey {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "SQLSTATE 23505") || strings.Contains(msg, "duplicate key value")
 }
 
 // enqueueInitialSync marks a VCS-backed playbook as syncing and enqueues its
@@ -335,7 +321,9 @@ func (h *PlaybookHandler) importOnePlaybook(
 			h.enqueueInitialSync(playbook)
 			return playbook, true, nil
 		}
-		if !isDuplicateKeyErr(err) {
+		// corerepo, not repository: this function's `repository` parameter is a VCS repo name and
+		// would shadow the package.
+		if !corerepo.IsUniqueViolation(err) {
 			return nil, false, err
 		}
 		lastErr = err
