@@ -964,6 +964,34 @@ func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFi
 // against the seeded data would make every later fixture depend on test ordering.
 var safeMethods = map[string]bool{http.MethodGet: true, http.MethodHead: true}
 
+// skipIfAuthUpstreamUnreachable skips a comparison whose recorded response encodes a reachable
+// Zitadel while this environment has none.
+//
+// The /auth/* routes forward to the IdP, so what they return describes the IdP's answer rather than
+// Stackweaver's behaviour: with Zitadel up they record 401 "unauthenticated"; with it absent the
+// proxy cannot connect and answers 502. The CI Integration Tests job runs postgres and redis as its
+// only services (.github/workflows/ci.yml), so it can never reproduce the recorded shape - and it
+// broke main for three days after #790 widened the corpus to include them, because a path-filtered
+// job skipped on every frontend-only commit in between and hid it.
+//
+// The fixtures stay: openapi_coverage_test.go requires every registered route to have an operation,
+// and dropping them would reopen exactly the hole #790 closed. What changes is that an unreachable
+// upstream SKIPS the comparison rather than failing it, which is the same distinction the tfe-compat
+// harness draws - an environment that cannot answer has demonstrated nothing, and recording that as
+// a regression is a lie about the code under test.
+//
+// It is a shared helper because there are TWO comparators over the same corpus: TestGoldenResponses
+// and TestGoldenErrorEnvelope. 4d741616 guarded only the first, so the second kept failing on the
+// same seven routes for the same reason - a fix applied to one of two duplicated paths, which is the
+// trap CLAUDE.md names explicitly.
+func skipIfAuthUpstreamUnreachable(t *testing.T, path string, got, want int) {
+	t.Helper()
+	if strings.HasPrefix(path, "/auth/") && got == http.StatusBadGateway && want != http.StatusBadGateway {
+		t.Skipf("auth upstream unreachable (got 502, fixture records %d) - "+
+			"these routes proxy to Zitadel, which this environment does not provide", want)
+	}
+}
+
 func TestGoldenResponses(t *testing.T) {
 	h := setupGoldenHarness(t)
 
@@ -1012,26 +1040,7 @@ func TestGoldenResponses(t *testing.T) {
 				t.Fatalf("parse fixture %s: %v", path, err)
 			}
 
-			// The auth proxy's recorded responses encode a reachable Zitadel.
-			//
-			// These routes forward to the IdP, so what they return describes the IdP's answer, not
-			// Stackweaver's behaviour: with Zitadel up they record 401 "unauthenticated"; with it
-			// absent the proxy cannot connect and answers 502. The CI Integration Tests job runs
-			// with postgres as its only service (.github/workflows/ci.yml), so it can never
-			// reproduce the recorded shape - and it broke main for three days after #790 widened
-			// the corpus to include them, because a path-filtered job skipped on every
-			// frontend-only commit in between and hid it.
-			//
-			// The fixtures stay: openapi_coverage_test.go requires every registered route to have
-			// an operation, and dropping them would reopen exactly the hole #790 closed. What
-			// changes is that an unreachable upstream SKIPS the comparison rather than failing it,
-			// which is the same distinction the tfe-compat harness draws - an environment that
-			// cannot answer has demonstrated nothing, and recording that as a regression is a lie
-			// about the code under test.
-			if strings.HasPrefix(rt.Path, "/auth/") && got.Status == http.StatusBadGateway && want.Status != http.StatusBadGateway {
-				t.Skipf("auth upstream unreachable (got 502, fixture records %d) - "+
-					"these routes proxy to Zitadel, which this environment does not provide", want.Status)
-			}
+			skipIfAuthUpstreamUnreachable(t, rt.Path, got.Status, want.Status)
 
 			if got.Status != want.Status {
 				t.Errorf("status changed: got %d, want %d", got.Status, want.Status)
@@ -1362,6 +1371,9 @@ func TestGoldenErrorEnvelope(t *testing.T) {
 			if err := json.Unmarshal(raw, &want); err != nil {
 				t.Fatalf("parse fixture %s: %v", path, err)
 			}
+
+			skipIfAuthUpstreamUnreachable(t, rt.Path, got.Status, want.Status)
+
 			if got.Status != want.Status {
 				t.Errorf("status changed: got %d, want %d", got.Status, want.Status)
 			}
