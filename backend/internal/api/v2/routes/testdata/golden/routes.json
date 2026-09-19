@@ -452,6 +452,16 @@
       "mutating": true
     },
     {
+      "method": "GET",
+      "path": "/api/v2/ansible/schedules/cron-presets",
+      "mutating": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ansible/schedules/validate-cron",
+      "mutating": true
+    },
+    {
       "method": "DELETE",
       "path": "/api/v2/ansible/workflow-edges/:id",
       "mutating": true

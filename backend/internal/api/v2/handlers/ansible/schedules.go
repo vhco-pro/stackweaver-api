@@ -470,16 +470,23 @@ func (h *ScheduleHandler) Disable(c *gin.Context) {
 	response.Message(c, http.StatusOK, "Schedule disabled")
 }
 
-// ValidateCron validates a cron expression and returns the next run time
+// ValidateCron validates a cron expression and returns the next run time.
+//
+// Errors go out through jsonapi.WriteError rather than the flat response.BadRequest helper the
+// rest of this file uses. That is not a style preference: TestGoldenErrorEnvelopeComplete
+// asserts every recorded error response carries the JSON:API `errors` array, and the sibling
+// schedule routes only satisfy it by accident - they take a path parameter, so an error fixture
+// 404s on the lookup before reaching the handler body. This route has no path parameter, so its
+// bind failure is the response that actually gets recorded.
 func (h *ScheduleHandler) ValidateCron(c *gin.Context) {
 	var req ValidateCronRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	if err := h.schedulerService.ValidateCronExpression(req.CronExpression); err != nil {
-		response.BadRequest(c, "Invalid cron expression: "+err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid cron expression: "+err.Error())
 		return
 	}
 
@@ -490,7 +497,7 @@ func (h *ScheduleHandler) ValidateCron(c *gin.Context) {
 
 	nextRun, err := h.schedulerService.GetNextRunTime(req.CronExpression, timezone)
 	if err != nil {
-		response.BadRequest(c, "Error calculating next run time: "+err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Error calculating next run time: "+err.Error())
 		return
 	}
 

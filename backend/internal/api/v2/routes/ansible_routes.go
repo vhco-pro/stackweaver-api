@@ -509,6 +509,16 @@ func SetupAnsibleRoutes(
 	// GET/PATCH/DELETE /api/v2/ansible/schedules/:id
 	schedules := v2.Group("/ansible/schedules")
 	{
+		// Cron utility endpoints. These are static segments that sit alongside the
+		// `/:schedule_id` wildcard below, so gin's tree has to prefer the literal match -
+		// it does, but only because they are registered here. Before #721 they were not
+		// registered at all, and `GET /ansible/schedules/cron-presets` fell through to
+		// Get() with "cron-presets" parsed as a schedule ID, answering
+		// `400 {"error":"Invalid schedule ID"}` rather than 404. Keep them above the
+		// wildcard so that relationship stays legible.
+		schedules.POST("/validate-cron", scheduleHandler.ValidateCron)
+		schedules.GET("/cron-presets", scheduleHandler.GetCronPresets)
+
 		schedules.GET("/:schedule_id", scheduleHandler.Get)
 		schedules.PATCH("/:schedule_id", scheduleHandler.Update)
 		schedules.DELETE("/:schedule_id", scheduleHandler.Delete)

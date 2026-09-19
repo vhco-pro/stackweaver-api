@@ -1,0 +1,22 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/schedules/cron-presets",
+  "status": 200,
+  "body": {
+    "daily_6am": "0 6 * * *",
+    "daily_midnight": "0 0 * * *",
+    "daily_noon": "0 12 * * *",
+    "every_12_hours": "0 */12 * * *",
+    "every_15_minutes": "*/15 * * * *",
+    "every_2_hours": "0 */2 * * *",
+    "every_30_minutes": "*/30 * * * *",
+    "every_6_hours": "0 */6 * * *",
+    "every_hour": "0 * * * *",
+    "monthly_15th": "0 0 15 * *",
+    "monthly_first_day": "0 0 1 * *",
+    "weekdays_9am": "0 9 * * 1-5",
+    "weekends_10am": "0 10 * * 0,6",
+    "weekly_monday_6am": "0 6 * * 1",
+    "weekly_sunday_midnight": "0 0 * * 0"
+  }
+}
