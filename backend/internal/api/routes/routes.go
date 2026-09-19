@@ -114,10 +114,6 @@ func SetupRoutes(
 	// Setup v2 API routes
 	v2routes.SetupV2Routes(r, db, authService, githubAppManager)
 
-	// API v1
-	v1 := r.Group("/api/v1")
-	v1.Use(middleware.AuthMiddleware(authService))
-
 	// Settings endpoints (v2)
 	settings := r.Group("/api/v2/settings")
 	settings.Use(middleware.AuthMiddleware(authService))

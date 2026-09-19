@@ -15,7 +15,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"github.com/michielvha/stackweaver/core/services/variable"
+	varsvc "github.com/michielvha/stackweaver/core/services/variable" // aliased: local `variable` models shadow the package name throughout this file
 	"gorm.io/gorm"
 )
 
@@ -33,7 +33,7 @@ type VariableSetHandlerV2 struct {
 	jobTemplateRepo         *repository.AnsibleJobTemplateRepository
 	authService             *auth.Service
 	rbacService             *rbac.Service
-	variableService         *variable.Service
+	variableService         *varsvc.Service
 }
 
 func NewVariableSetHandlerV2(
@@ -45,7 +45,7 @@ func NewVariableSetHandlerV2(
 	jobTemplateRepo *repository.AnsibleJobTemplateRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
-	variableService *variable.Service,
+	variableService *varsvc.Service,
 ) *VariableSetHandlerV2 {
 	return &VariableSetHandlerV2{
 		variableSetRepo:         variableSetRepo,
@@ -62,7 +62,7 @@ func NewVariableSetHandlerV2(
 
 // encryptVarsetValue encrypts a variable-set variable's value in place when it is
 // sensitive, setting the Encrypted flag - mirroring the workspace-variable path
-// (variable.Service.CreateVariable). Non-sensitive values are stored verbatim with
+// (varsvc.Service.CreateVariable). Non-sensitive values are stored verbatim with
 // Encrypted=false. When no variable service is configured the value is left as-is so
 // callers degrade to the previous (plaintext) behavior rather than erroring; in
 // production the encryption key fails loud at startup (AUD-013), so this never triggers.
@@ -79,6 +79,22 @@ func (h *VariableSetHandlerV2) encryptVarsetValue(v *models.VariableSetVariable)
 	v.Value = enc
 	v.Encrypted = true
 	return nil
+}
+
+// storedPlaintext returns a variable-set variable's value as the tfvars writers will eventually
+// see it, decrypting when it is held encrypted at rest. Mirrors the workspace-variable helper of
+// the same name: the ciphertext of an empty string is not itself empty, so a naive emptiness
+// check would miss the sensitive-and-HCL case. An undecryptable value is returned as-is, which
+// reads as non-empty and so cannot block an otherwise valid edit.
+func (h *VariableSetHandlerV2) storedPlaintext(v *models.VariableSetVariable) string {
+	if !v.Encrypted || h.variableService == nil {
+		return v.Value
+	}
+	plaintext, err := h.variableService.Decrypt(v.Value)
+	if err != nil {
+		return v.Value
+	}
+	return plaintext
 }
 
 // authorizeVarset gates the caller (already resolved from the context) against a
@@ -1249,8 +1265,10 @@ type CreateVariableSetVariableRequestV2 struct {
 	Data struct {
 		Type       string `json:"type" binding:"required"` // Must be "vars"
 		Attributes struct {
-			Key         string `json:"key" binding:"required"`
-			Value       string `json:"value" binding:"required"`
+			Key string `json:"key" binding:"required"`
+			// Value carries no `required` binding (#674) - see CreateVariableRequestV2 for why an
+			// empty value is legitimate and where the HCL combination is rejected instead.
+			Value       string `json:"value"`
 			Description string `json:"description,omitempty"`
 			Category    string `json:"category,omitempty"`  // "terraform" or "env", defaults to "terraform"
 			HCL         bool   `json:"hcl,omitempty"`       // Defaults to false
@@ -1459,6 +1477,14 @@ func (h *VariableSetHandlerV2) CreateVariableSetVariable(c *gin.Context) {
 		return
 	}
 
+	// #674: empty values are allowed, except alongside the HCL flag - see
+	// varsvc.IncompleteHCLValue for what that combination writes into the generated tfvars.
+	if varsvc.IncompleteHCLValue(attrs.HCL, attrs.Value) {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			"An HCL variable cannot have an empty value - it would render as an incomplete assignment in the generated tfvars. Unset hcl, or supply a value.")
+		return
+	}
+
 	variable := &models.VariableSetVariable{
 		VariableSetID: variableSetID,
 		Key:           attrs.Key,
@@ -1597,6 +1623,22 @@ func (h *VariableSetHandlerV2) UpdateVariableSetVariable(c *gin.Context) {
 	}
 	if attrs.HCL != nil {
 		variable.HCL = *attrs.HCL
+	}
+	// #674: reject the HCL-plus-empty combination against the state this request would leave
+	// behind, not just against an incoming empty value - setting hcl on a variable that is
+	// already empty reaches it just as well. Unlike the workspace handler, this one takes the
+	// value as a pointer, so an explicit "" is a real request to clear it and is checked
+	// directly; a nil (or masked, AUD-105) value leaves the stored one in place.
+	if variable.HCL {
+		resultingValue := h.storedPlaintext(variable)
+		if attrs.Value != nil && *attrs.Value != maskedValue {
+			resultingValue = *attrs.Value
+		}
+		if varsvc.IncompleteHCLValue(variable.HCL, resultingValue) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+				"An HCL variable cannot have an empty value - it would render as an incomplete assignment in the generated tfvars. Supply a value in the same request, or leave hcl unset.")
+			return
+		}
 	}
 	// Resolve the final sensitivity before touching the value so it is encrypted correctly.
 	if attrs.Sensitive != nil {
