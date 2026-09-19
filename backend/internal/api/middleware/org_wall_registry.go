@@ -269,8 +269,6 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name":                             orgByName(),
 	"/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name/versions/:version/platforms": orgByName(),
 	"/api/v2/registry-providers/:id":                                                                                      resource("id", rRegistryProvider),
-	"/api/v2/organizations/:name/registry/gpg-keys":                                                                       orgByName(),
-	"/api/v2/organizations/:name/registry/gpg-keys/:key_id":                                                               orgByName(),
 
 	// --- runner agent control plane (api-key auth from runner agents) ---
 	// These routes carry their own enforcement (AUD-001): /register requires an

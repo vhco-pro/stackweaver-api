@@ -22,7 +22,7 @@ import (
 // and distinguishes providers by the JSON:API `data.type` on create and by the ID prefix on the by-id
 // routes. This handler owns those routes and delegates to the per-provider handler:
 //   - create:  by `data.type`  (azure-oidc-configurations | aws-oidc-configurations | gcp-oidc-configurations)
-//   - by-id:   by ID prefix    (azoidc- | awsoidc- | gcpoidc-)
+//   - by-id:   by ID prefix    (azoidc- | awsoidc- | gcpoidc- | vaultoidc-)
 //   - list:    merged across all providers for the organization.
 type OIDCConfigDispatchHandler struct {
 	azure       *AzureOIDCConfigurationHandlerV2

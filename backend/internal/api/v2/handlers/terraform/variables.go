@@ -12,7 +12,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"github.com/michielvha/stackweaver/core/services/variable"
+	varsvc "github.com/michielvha/stackweaver/core/services/variable" // aliased: handlers here use a local `variable` for the model, which would shadow the package name
 )
 
 type VariableHandlerV2 struct {
@@ -22,7 +22,7 @@ type VariableHandlerV2 struct {
 	projectRepo     *repository.ProjectRepository
 	authService     *auth.Service
 	rbacService     *rbac.Service
-	variableService *variable.Service
+	variableService *varsvc.Service
 }
 
 func NewVariableHandlerV2(
@@ -30,7 +30,7 @@ func NewVariableHandlerV2(
 	workspaceRepo *repository.WorkspaceRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
-	variableService *variable.Service,
+	variableService *varsvc.Service,
 ) *VariableHandlerV2 {
 	return &VariableHandlerV2{
 		variableRepo:    variableRepo,
@@ -126,14 +126,35 @@ type CreateVariableRequestV2 struct {
 	Data struct {
 		Type       string `json:"type"` // Must be "vars"
 		Attributes struct {
-			Key         string `json:"key" binding:"required"`
-			Value       string `json:"value" binding:"required"`
+			Key string `json:"key" binding:"required"`
+			// Value carries no `required` binding (#674): an empty value is legitimate - `KEY=`
+			// is ordinary .env content and TFE accepts it. The HCL combination is rejected in
+			// the handler instead, where a specific reason can be given.
+			Value       string `json:"value"`
 			Description string `json:"description,omitempty"`
 			Category    string `json:"category,omitempty"`  // "terraform" or "env", defaults to "terraform"
 			HCL         bool   `json:"hcl,omitempty"`       // Defaults to false
 			Sensitive   bool   `json:"sensitive,omitempty"` // Defaults to false
 		} `json:"attributes"`
 	} `json:"data"`
+}
+
+// storedPlaintext returns the variable's value as the tfvars writers will eventually see it,
+// decrypting when it is held encrypted at rest. A sensitive variable stores ciphertext, and the
+// ciphertext of an empty string is not itself empty, so an emptiness check that skipped this
+// would wave through exactly the sensitive-and-HCL case it is meant to catch.
+//
+// An undecryptable value is returned as-is on purpose: it is certainly not the empty string, so
+// the caller treats it as non-empty and a decryption hiccup cannot block an otherwise valid edit.
+func (h *VariableHandlerV2) storedPlaintext(v *models.Variable) string {
+	if !v.Encrypted || h.variableService == nil {
+		return v.Value
+	}
+	plaintext, err := h.variableService.Decrypt(v.Value)
+	if err != nil {
+		return v.Value
+	}
+	return plaintext
 }
 
 // UpdateVariableRequestV2 uses JSON:API format (TFE-compatible)
@@ -304,6 +325,17 @@ func (h *VariableHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
+	// #674: an empty value is allowed - `KEY=` is ordinary .env content and TFE accepts it - but
+	// not in combination with the HCL flag, which would write an unfinished `key = ` into the
+	// generated tfvars. 422 rather than the 400 its neighbours use: the payload is well-formed
+	// and only its meaning is rejected, which is the split the duplicate-and-conflict guideline
+	// draws. (The surrounding 400s predate that guideline.)
+	if varsvc.IncompleteHCLValue(attrs.HCL, attrs.Value) {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			"An HCL variable cannot have an empty value - it would render as an incomplete assignment in the generated tfvars. Unset hcl, or supply a value.")
+		return
+	}
+
 	// Check if variable with same key already exists
 	existing, _ := h.variableRepo.GetByWorkspaceAndKey(workspaceID, attrs.Key)
 	if existing != nil {
@@ -466,6 +498,16 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 	}
 	if attrs.HCL != nil {
 		variable.HCL = *attrs.HCL
+	}
+	// #674: the create path refuses an empty value on an HCL variable, but the same state is
+	// reachable by flipping hcl on a variable that is already empty, so the flag has to be
+	// checked against the resulting value rather than only against an incoming one. Only the
+	// no-new-value case can be empty here: attrs.Value is this handler's "was it supplied?"
+	// sentinel, so a non-empty one has already overwritten the stored value above (#815).
+	if attrs.Value == "" && varsvc.IncompleteHCLValue(variable.HCL, h.storedPlaintext(variable)) {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			"An HCL variable cannot have an empty value - it would render as an incomplete assignment in the generated tfvars. Supply a value in the same request, or leave hcl unset.")
+		return
 	}
 	// AUD-044: when the sensitivity flag flips but no new value was supplied, reconcile the
 	// stored value's encryption state so the Encrypted flag always tracks how the value is

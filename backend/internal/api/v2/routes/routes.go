@@ -541,7 +541,7 @@ func SetupV2Routes(
 		tfRuns.GET("/:id/logs", runHandler.GetLogs)               // Generic endpoint (backward compatible)
 		tfRuns.GET("/:id/logs/plan", runHandler.GetPlanLogs)      // Explicit plan logs endpoint
 		tfRuns.GET("/:id/logs/apply", runHandler.GetApplyLogs)    // Explicit apply logs endpoint
-		tfRuns.GET("/:id/task-stages", runHandler.ListTaskStages) // TFE run-tasks: Stackweaver has none → empty list
+		tfRuns.GET("/:id/task-stages", runHandler.ListTaskStages) // real stages from taskStageRepo since #556
 		tfRuns.POST("/:id/actions/apply", runHandler.Apply)
 		tfRuns.POST("/:id/actions/cancel", runHandler.Cancel)
 		tfRuns.POST("/:id/actions/discard", runHandler.Discard)
