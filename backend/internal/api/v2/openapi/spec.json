@@ -4087,6 +4087,56 @@
           }
         }
       },
+      "get-api-v2-ansible-schedules-cron-presets-421f7e": {
+        "type": "object",
+        "properties": {
+          "daily_6am": {
+            "type": "string"
+          },
+          "daily_midnight": {
+            "type": "string"
+          },
+          "daily_noon": {
+            "type": "string"
+          },
+          "every_12_hours": {
+            "type": "string"
+          },
+          "every_15_minutes": {
+            "type": "string"
+          },
+          "every_2_hours": {
+            "type": "string"
+          },
+          "every_30_minutes": {
+            "type": "string"
+          },
+          "every_6_hours": {
+            "type": "string"
+          },
+          "every_hour": {
+            "type": "string"
+          },
+          "monthly_15th": {
+            "type": "string"
+          },
+          "monthly_first_day": {
+            "type": "string"
+          },
+          "weekdays_9am": {
+            "type": "string"
+          },
+          "weekends_10am": {
+            "type": "string"
+          },
+          "weekly_monday_6am": {
+            "type": "string"
+          },
+          "weekly_sunday_midnight": {
+            "type": "string"
+          }
+        }
+      },
       "get-api-v2-ansible-workflows-id-edges-555fc9": {
         "type": "object",
         "properties": {
@@ -14511,6 +14561,48 @@
         "summary": "POST /api/v2/ansible/playbooks/:id/actions/sync",
         "tags": [
           "ansible/playbooks"
+        ]
+      }
+    },
+    "/api/v2/ansible/schedules/cron-presets": {
+      "get": {
+        "operationId": "get-api-v2-ansible-schedules-cron-presets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-api-v2-ansible-schedules-cron-presets-421f7e"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/ansible/schedules/cron-presets",
+        "tags": [
+          "ansible/schedules"
+        ]
+      }
+    },
+    "/api/v2/ansible/schedules/validate-cron": {
+      "post": {
+        "operationId": "post-api-v2-ansible-schedules-validate-cron",
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /api/v2/ansible/schedules/validate-cron",
+        "tags": [
+          "ansible/schedules"
         ]
       }
     },

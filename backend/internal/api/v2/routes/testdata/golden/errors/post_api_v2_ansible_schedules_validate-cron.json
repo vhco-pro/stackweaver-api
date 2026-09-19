@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/schedules/validate-cron",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "Key: 'ValidateCronRequest.CronExpression' Error:Field validation for 'CronExpression' failed on the 'required' tag",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

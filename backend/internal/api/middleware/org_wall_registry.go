@@ -372,6 +372,18 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/ansible/schedules/:schedule_id/actions/enable":  resource("schedule_id", rAnsibleSchedule),
 	"/api/v2/ansible/schedules/:schedule_id/actions/disable": resource("schedule_id", rAnsibleSchedule),
 	"/api/v2/ansible/schedules/:schedule_id/actions/run-now": resource("schedule_id", rAnsibleSchedule),
+	// Cron utilities carry no org-scoped data: GetCronPresets returns a static map and
+	// ValidateCron only parses the submitted expression, so there is nothing to resolve an
+	// org from and nothing for the wall to protect. Same shape as /api/v2/ping.
+	//
+	// validate-cron is a POST, which puts it in the shape #806 flagged - agnostic() plus a
+	// mutating verb - but not in its class. That escalation is about handlers that resolve an
+	// org-scoped resource named in the body and then authorize it through the key owner's RBAC,
+	// so a narrowly-scoped token reaches every org its owner belongs to. This handler resolves
+	// nothing, authorizes nothing and mutates nothing: the response is a pure function of the
+	// submitted string, so there is no wider reach for a token to borrow.
+	"/api/v2/ansible/schedules/cron-presets":  agnostic(),
+	"/api/v2/ansible/schedules/validate-cron": agnostic(),
 
 	// --- ansible: collections (global) ---
 	"/api/v2/ansible/collections/pre-installed": agnostic(),
