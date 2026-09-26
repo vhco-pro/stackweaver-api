@@ -15,6 +15,12 @@ import (
 	varsvc "github.com/michielvha/stackweaver/core/services/variable" // aliased: handlers here use a local `variable` for the model, which would shadow the package name
 )
 
+// maskedVariableValue is the placeholder every read path returns for a sensitive value - the
+// real value is never sent to clients (TFE-compatible). Update compares against it so a client
+// that round-trips a masked read does not overwrite the real secret with bullets (AUD-105). It
+// mirrors maskedValue in the variable-set handler, which lives in a different package.
+const maskedVariableValue = "••••••••"
+
 type VariableHandlerV2 struct {
 	variableRepo    *repository.VariableRepository
 	workspaceRepo   *repository.WorkspaceRepository
@@ -81,7 +87,7 @@ func (h *VariableHandlerV2) formatVariableResponse(variable *models.Variable, wo
 	// TFE spec: Sensitive variable values must be masked in API responses
 	value := variable.Value
 	if variable.Sensitive {
-		value = "••••••••"
+		value = maskedVariableValue
 	}
 
 	configurable := jsonapi.ToOne(workspaceID, "workspaces")
@@ -159,17 +165,21 @@ func (h *VariableHandlerV2) storedPlaintext(v *models.Variable) string {
 
 // UpdateVariableRequestV2 uses JSON:API format (TFE-compatible)
 // Reference: https://developer.hashicorp.com/terraform/enterprise/api-docs/workspace-variables#update-variables
+//
+// Every attribute is a pointer so an omitted field (nil, left unchanged) is distinguishable from
+// an explicit empty one (#815): a description or value can be cleared by sending "". TFE draws the
+// same distinction, and go-tfe's VariableUpdateOptions sends pointers for all of these.
 type UpdateVariableRequestV2 struct {
 	Data struct {
 		ID         string `json:"id"`   // Variable ID
 		Type       string `json:"type"` // Must be "vars"
 		Attributes struct {
-			Key         string `json:"key,omitempty"`
-			Value       string `json:"value,omitempty"`
-			Description string `json:"description,omitempty"`
-			Category    string `json:"category,omitempty"`
-			HCL         *bool  `json:"hcl,omitempty"`
-			Sensitive   *bool  `json:"sensitive,omitempty"`
+			Key         *string `json:"key,omitempty"`
+			Value       *string `json:"value,omitempty"`
+			Description *string `json:"description,omitempty"`
+			Category    *string `json:"category,omitempty"`
+			HCL         *bool   `json:"hcl,omitempty"`
+			Sensitive   *bool   `json:"sensitive,omitempty"`
 		} `json:"attributes"`
 	} `json:"data"`
 }
@@ -450,28 +460,40 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 
 	attrs := req.Data.Attributes
 
+	// #815: nil means "not supplied, leave it alone"; an explicit "" is a real request to clear
+	// the field. AUD-105: a value equal to the mask means the client round-tripped a masked read
+	// (the SPA and the TFE provider resubmit whole resources when editing an unrelated field), so
+	// it is treated as not supplied rather than written over the real secret.
+	newValue := attrs.Value
+	if newValue != nil && *newValue == maskedVariableValue {
+		newValue = nil
+	}
+
 	// Determine if variable should be sensitive after update
 	willBeSensitive := variable.Sensitive
 	if attrs.Sensitive != nil {
 		willBeSensitive = *attrs.Sensitive
 	}
 
-	// Update fields if provided
-	if attrs.Key != "" {
+	if attrs.Key != nil {
+		if *attrs.Key == "" {
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "key cannot be empty")
+			return
+		}
 		// Check if new key conflicts with existing variable
-		if attrs.Key != variable.Key {
-			existing, _ := h.variableRepo.GetByWorkspaceAndKey(workspaceID, attrs.Key)
+		if *attrs.Key != variable.Key {
+			existing, _ := h.variableRepo.GetByWorkspaceAndKey(workspaceID, *attrs.Key)
 			if existing != nil {
 				jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Variable with this key already exists in this workspace")
 				return
 			}
 		}
-		variable.Key = attrs.Key
+		variable.Key = *attrs.Key
 	}
-	if attrs.Value != "" {
+	if newValue != nil {
 		// Encrypt value if sensitive
 		if willBeSensitive && h.variableService != nil {
-			encryptedValue, err := h.variableService.Encrypt(attrs.Value)
+			encryptedValue, err := h.variableService.Encrypt(*newValue)
 			if err != nil {
 				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to encrypt variable: %v", err))
 				return
@@ -479,32 +501,35 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 			variable.Value = encryptedValue
 			variable.Encrypted = true
 		} else {
-			variable.Value = attrs.Value
+			variable.Value = *newValue
 			// If changing from sensitive to non-sensitive, clear encryption
 			if !willBeSensitive {
 				variable.Encrypted = false
 			}
 		}
 	}
-	if attrs.Description != "" {
-		variable.Description = attrs.Description
+	if attrs.Description != nil {
+		variable.Description = *attrs.Description
 	}
-	if attrs.Category != "" {
-		if attrs.Category != "terraform" && attrs.Category != "env" {
+	if attrs.Category != nil {
+		if *attrs.Category != "terraform" && *attrs.Category != "env" {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "category must be 'terraform' or 'env'")
 			return
 		}
-		variable.Category = attrs.Category
+		variable.Category = *attrs.Category
 	}
 	if attrs.HCL != nil {
 		variable.HCL = *attrs.HCL
 	}
-	// #674: the create path refuses an empty value on an HCL variable, but the same state is
-	// reachable by flipping hcl on a variable that is already empty, so the flag has to be
-	// checked against the resulting value rather than only against an incoming one. Only the
-	// no-new-value case can be empty here: attrs.Value is this handler's "was it supplied?"
-	// sentinel, so a non-empty one has already overwritten the stored value above (#815).
-	if attrs.Value == "" && varsvc.IncompleteHCLValue(variable.HCL, h.storedPlaintext(variable)) {
+	// #674: the create path refuses an empty value on an HCL variable, and the same state is
+	// reachable here two ways - clearing the value of an HCL variable, or flipping hcl on a
+	// variable that is already empty - so the check runs against the resulting variable: the
+	// incoming value when one was supplied, the decrypted stored one otherwise.
+	resultingValue := h.storedPlaintext(variable)
+	if newValue != nil {
+		resultingValue = *newValue
+	}
+	if varsvc.IncompleteHCLValue(variable.HCL, resultingValue) {
 		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
 			"An HCL variable cannot have an empty value - it would render as an incomplete assignment in the generated tfvars. Supply a value in the same request, or leave hcl unset.")
 		return
@@ -514,8 +539,9 @@ func (h *VariableHandlerV2) Update(c *gin.Context) {
 	// actually stored. Previously a sensitive→non-sensitive toggle left the value as ciphertext
 	// with Encrypted=true while unmasking it, desyncing the flags (and a non-sensitive→sensitive
 	// toggle left a "sensitive" value in cleartext). A new-value update already sets encryption
-	// correctly above, so this only handles the value-unchanged case.
-	if attrs.Sensitive != nil && *attrs.Sensitive != variable.Sensitive && attrs.Value == "" && h.variableService != nil {
+	// correctly above, so this only handles the value-unchanged case, which includes a
+	// round-tripped mask.
+	if attrs.Sensitive != nil && *attrs.Sensitive != variable.Sensitive && newValue == nil && h.variableService != nil {
 		switch {
 		case *attrs.Sensitive && !variable.Encrypted:
 			// non-sensitive → sensitive: encrypt the existing plaintext at rest.

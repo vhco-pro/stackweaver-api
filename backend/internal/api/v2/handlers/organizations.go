@@ -694,6 +694,7 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		newAnsibleAdHocModules = req.Data.Attributes.AnsibleAdHocModules
 	}
 
+	previousName := org.Name
 	if newName != "" {
 		// Check if new name conflicts with existing organization
 		if newName != org.Name {
@@ -743,7 +744,13 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		}
 	}
 
-	if err := h.orgRepo.Update(org); err != nil {
+	// AUD-109: a rename passes the same permanent-reservation check as Create, so an
+	// org cannot be renamed onto a deleted org's name; same 422 as Create.
+	if err := h.orgRepo.UpdateWithRename(org, previousName); err != nil {
+		if errors.Is(err, repository.ErrOrganizationNameReserved) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "Organization name is reserved and cannot be reused")
+			return
+		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update organization")
 		return
 	}
@@ -756,7 +763,7 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		}
 		activityCtx.OrganizationID = &org.ID
 		changes := map[string]interface{}{}
-		if newName != "" && newName != org.Name {
+		if org.Name != previousName {
 			changes["name"] = newName
 		}
 		if newDescription != "" {

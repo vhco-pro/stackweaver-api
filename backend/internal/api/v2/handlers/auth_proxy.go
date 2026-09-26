@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -304,7 +305,11 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 	// can't poison the discovery doc / IdP redirect URLs.
 	seen := map[string]bool{}
 	addHost := func(raw string) {
-		if h := normalizeHost(hostFromURLOrHost(raw)); h != "" && !seen[h] {
+		h := normalizeHost(hostFromURLOrHost(raw))
+		if h == "" && strings.TrimSpace(raw) != "" {
+			logger.Warnf("auth proxy: ignoring trusted-host entry %q - not a valid host[:port]", raw)
+		}
+		if h != "" && !seen[h] {
 			seen[h] = true
 			p.trustedHosts = append(p.trustedHosts, h)
 		}
@@ -624,17 +629,102 @@ func hostFromURLOrHost(s string) string {
 	return s
 }
 
-// normalizeHost lowercases a host and strips any :port so allowlist membership
-// is compared on the host alone.
-func normalizeHost(h string) string {
-	h = strings.ToLower(strings.TrimSpace(h))
-	if h == "" {
+// parseAuthority splits a Host-header style value into a lowercased host and an
+// optional port, and reports whether the value is a plain authority: a DNS name or
+// IP literal, optionally followed by a numeric port in 1-65535. Anything else is
+// rejected, including userinfo, paths, queries and fragments (AUD-113). A bare
+// net.SplitHostPort is not enough on its own: it splits on the last colon without
+// validating either side, so `localhost:1@evil.attacker.com` came back as host
+// `localhost`, passed the allowlist, and the raw value was then written into the
+// discovery doc, where a URL parser reads `evil.attacker.com` as the host.
+func parseAuthority(v string) (host, port string, ok bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" {
+		return "", "", false
+	}
+	switch {
+	case strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]"):
+		host = v[1 : len(v)-1] // bracketed IPv6 literal, no port
+	case strings.HasPrefix(v, "[") || strings.Count(v, ":") == 1:
+		var err error
+		if host, port, err = net.SplitHostPort(v); err != nil {
+			return "", "", false
+		}
+		if !validPort(port) {
+			return "", "", false
+		}
+	case strings.Contains(v, ":"):
+		host = v // bare IPv6 literal, validated below
+	default:
+		host = v
+	}
+	if strings.HasPrefix(v, "[") && !strings.Contains(host, ":") {
+		return "", "", false // brackets are only for IPv6 literals
+	}
+	if strings.Contains(host, ":") {
+		if ip := net.ParseIP(host); ip == nil || ip.To4() != nil {
+			return "", "", false
+		}
+		return host, port, true
+	}
+	if !validHostname(host) {
+		return "", "", false
+	}
+	return host, port, true
+}
+
+// validPort reports whether p is a decimal port number in 1-65535.
+func validPort(p string) bool {
+	n, err := strconv.Atoi(p)
+	return err == nil && n >= 1 && n <= 65535 && strconv.Itoa(n) == p
+}
+
+// validHostname reports whether h is a dot-separated DNS name (or IPv4 literal)
+// made only of letters, digits, hyphens and underscores (the last for Docker
+// service names), with no empty label.
+func validHostname(h string) bool {
+	if h == "" || len(h) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(h, ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		for _, r := range label {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// canonicalHost returns v rebuilt from its validated parts (lowercased host,
+// IPv6 bracketed, port kept), or "" when v is not a plain authority. Only this
+// rebuilt value may be written into a public URL, never the raw header.
+func canonicalHost(v string) string {
+	host, port, ok := parseAuthority(v)
+	if !ok {
 		return ""
 	}
-	if host, _, err := net.SplitHostPort(h); err == nil {
-		return host
+	if port != "" {
+		return net.JoinHostPort(host, port)
 	}
-	return h
+	if strings.Contains(host, ":") {
+		return "[" + host + "]"
+	}
+	return host
+}
+
+// normalizeHost lowercases a host and strips any :port so allowlist membership
+// is compared on the host alone. It returns "" for anything that is not a plain
+// authority, so a malformed value can never match an allowlist entry.
+func normalizeHost(h string) string {
+	host, _, ok := parseAuthority(h)
+	if !ok {
+		return ""
+	}
+	return host
 }
 
 // isTrustedHost reports whether host may be advertised in a public URL. With no
@@ -662,27 +752,45 @@ func (p *AuthProxy) isTrustedHost(host string) bool {
 // AUD-113/AUD-071: a forwarding-header (or Host) value is only honored when it is on the
 // configured trusted-host allowlist - otherwise it is a forgeable input and we fall back to
 // the configured canonical host (p.trustedHosts[0]) so a direct attacker request cannot steer
-// the discovery doc / IdP redirect URLs to an attacker-controlled host.
+// the discovery doc / IdP redirect URLs to an attacker-controlled host. The value
+// returned is always rebuilt by canonicalHost from its validated parts, never the
+// raw header, so a value that merely normalizes to a trusted host cannot smuggle
+// anything else into the URL.
 func (p *AuthProxy) getPublicHost(c *gin.Context) string {
 	for _, header := range []string{
 		"X-Zitadel-Public-Host",
 		"X-Zitadel-Forward-Host",
 		"X-Forwarded-Host",
 	} {
-		if v := c.GetHeader(header); v != "" && p.isTrustedHost(v) {
+		if v := canonicalHost(c.GetHeader(header)); v != "" && p.isTrustedHost(v) {
 			return v
 		}
 	}
-	if p.isTrustedHost(c.Request.Host) {
-		return c.Request.Host
+	if v := canonicalHost(c.Request.Host); v != "" && p.isTrustedHost(v) {
+		return v
 	}
-	// Nothing presented a trusted host - return the configured canonical host
-	// rather than an attacker-controlled one. (Only reachable once an allowlist
-	// is configured; unconfigured dev trusts all and never lands here.)
+	// Nothing presented a valid trusted host - return the configured canonical
+	// host rather than an attacker-controlled one.
 	if len(p.trustedHosts) > 0 {
 		return p.trustedHosts[0]
 	}
-	return c.Request.Host
+	// Unconfigured dev with a missing or malformed Host: an empty host is better
+	// than echoing an unvalidated value into a URL.
+	return ""
+}
+
+// forwardedScheme returns the leftmost X-Forwarded-Proto value when it is http or
+// https, and "" otherwise. The header used to be concatenated verbatim in front
+// of "://", so a forged value such as `https://evil.attacker.com/#` rewrote the
+// whole origin of the discovery doc even with a trusted host (AUD-113).
+func forwardedScheme(c *gin.Context) string {
+	first, _, _ := strings.Cut(c.GetHeader("X-Forwarded-Proto"), ",")
+	switch scheme := strings.ToLower(strings.TrimSpace(first)); scheme {
+	case "http", "https":
+		return scheme
+	default:
+		return ""
+	}
 }
 
 // getPublicBaseURL returns the scheme+host for the current request.
@@ -694,8 +802,10 @@ func (p *AuthProxy) getPublicHost(c *gin.Context) string {
 //     header first the discovery doc / IdP successUrl land on the wrong
 //     scheme and the SPA redirect chain breaks.
 //  2. Direct TLS on the request (TLS == nil → http, else https).
+//
+// A header value other than http or https is ignored (falls through to 2).
 func (p *AuthProxy) getPublicBaseURL(c *gin.Context) string {
-	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+	if proto := forwardedScheme(c); proto != "" {
 		return proto + "://" + p.getPublicHost(c)
 	}
 	scheme := "https"

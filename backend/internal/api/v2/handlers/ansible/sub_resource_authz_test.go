@@ -23,6 +23,7 @@
 package ansible
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -48,6 +49,11 @@ type ansibleAuthzFixture struct {
 	groupID     string
 	sourceID    string
 	templateID  string
+	// outsiderHostID is a host in org B's own inventory, on which the outsider
+	// holds write - the foothold for the AUD-100 cross-tenant group injection.
+	outsiderHostID string
+	inventoryRepo  *repository.AnsibleInventoryRepository
+	db             *gorm.DB
 }
 
 func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
@@ -77,14 +83,18 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 	outsider := &models.User{ID: uuid.New(), ZitadelSubject: "ans-out-" + sfx, Email: "ans-out-" + sfx + "@test.local"}
 	ownersTeam := &models.Team{ID: uuid.New(), OrganizationID: orgA.ID, Name: "owners"}
 	projA := &models.Project{ID: uuid.New(), OrganizationID: orgA.ID, Name: "projA-" + sfx}
+	outsiderTeam := &models.Team{ID: uuid.New(), OrganizationID: orgB.ID, Name: "owners"}
+	projB := &models.Project{ID: uuid.New(), OrganizationID: orgB.ID, Name: "projB-" + sfx}
 
 	adminAccess := "admin" // cascades ansible read+write to the project's resources
 	seed := []interface{}{
-		orgA, orgB, owner, outsider, ownersTeam, projA,
+		orgA, orgB, owner, outsider, ownersTeam, projA, outsiderTeam, projB,
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgA.ID, UserID: owner.ID},
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgB.ID, UserID: outsider.ID},
 		&models.TeamMember{ID: uuid.New(), TeamID: ownersTeam.ID, UserID: owner.ID},
 		&models.TeamProjectAccess{ID: uuid.New(), TeamID: ownersTeam.ID, ProjectID: projA.ID, Access: &adminAccess},
+		&models.TeamMember{ID: uuid.New(), TeamID: outsiderTeam.ID, UserID: outsider.ID},
+		&models.TeamProjectAccess{ID: uuid.New(), TeamID: outsiderTeam.ID, ProjectID: projB.ID, Access: &adminAccess},
 	}
 	for _, obj := range seed {
 		if err := db.Create(obj).Error; err != nil {
@@ -122,6 +132,17 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	// The outsider's own inventory + host in org B (they hold write on it).
+	inventoryB, err := inventoryService.CreateInventory(
+		orgB.ID, &projB.ID, "invb-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "",
+	)
+	if err != nil {
+		t.Fatalf("create inventory B: %v", err)
+	}
+	hostB, err := inventoryService.CreateHost(inventoryB.ID, "hostb-"+sfx, "", "10.6.6.6", 22, models.InventoryVariables{}, true)
+	if err != nil {
+		t.Fatalf("create host B: %v", err)
+	}
 	source, err := sourceService.CreateInventorySource(inventory.ID, "src-"+sfx, "", models.InventorySourceTypeCustom, nil, models.InventorySourceConfig{})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
@@ -146,14 +167,15 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 		db.Where("job_template_id = ?", template.ID).Delete(&models.AnsibleJobTemplateVariable{})
 		db.Where("id = ?", template.ID).Delete(&models.AnsibleJobTemplate{})
 		db.Where("id = ?", playbook.ID).Delete(&models.AnsiblePlaybook{})
+		db.Exec("DELETE FROM ansible_inventory_host_groups WHERE ansible_inventory_host_id IN ?", []uuid.UUID{host.ID, hostB.ID})
 		db.Where("inventory_id = ?", inventory.ID).Delete(&models.AnsibleInventorySource{})
-		db.Where("inventory_id = ?", inventory.ID).Delete(&models.AnsibleInventoryHost{})
+		db.Where("inventory_id IN ?", []uuid.UUID{inventory.ID, inventoryB.ID}).Delete(&models.AnsibleInventoryHost{})
 		db.Where("inventory_id = ?", inventory.ID).Delete(&models.AnsibleInventoryGroup{})
-		db.Where("id = ?", inventory.ID).Delete(&models.AnsibleInventory{})
-		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamProjectAccess{})
-		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamMember{})
-		db.Where("id = ?", ownersTeam.ID).Delete(&models.Team{})
-		db.Where("id = ?", projA.ID).Delete(&models.Project{})
+		db.Where("id IN ?", []uuid.UUID{inventory.ID, inventoryB.ID}).Delete(&models.AnsibleInventory{})
+		db.Where("team_id IN ?", []uuid.UUID{ownersTeam.ID, outsiderTeam.ID}).Delete(&models.TeamProjectAccess{})
+		db.Where("team_id IN ?", []uuid.UUID{ownersTeam.ID, outsiderTeam.ID}).Delete(&models.TeamMember{})
+		db.Where("id IN ?", []uuid.UUID{ownersTeam.ID, outsiderTeam.ID}).Delete(&models.Team{})
+		db.Where("id IN ?", []uuid.UUID{projA.ID, projB.ID}).Delete(&models.Project{})
 		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.OrganizationMember{})
 		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.Organization{})
 		db.Where("id IN ?", []uuid.UUID{owner.ID, outsider.ID}).Delete(&models.User{})
@@ -178,6 +200,8 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 	router.GET("/ansible/inventories/:id/hosts", hostHandler.List)
 	router.GET("/ansible/hosts/:id", hostHandler.Get)
 	router.DELETE("/ansible/hosts/:id", hostHandler.Delete)
+	router.POST("/ansible/hosts/:id/groups/:group_id", hostHandler.AddToGroup)
+	router.DELETE("/ansible/hosts/:id/groups/:group_id", hostHandler.RemoveFromGroup)
 	router.GET("/ansible/groups/:id", groupHandler.Get)
 	router.GET("/ansible/inventory-sources/:source_id", sourceHandler.Get)
 	router.POST("/ansible/inventory-sources/:source_id/sync", sourceHandler.Sync)
@@ -192,6 +216,10 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 		groupID:     group.ID.String(),
 		sourceID:    source.ID.String(),
 		templateID:  template.ID.String(),
+
+		outsiderHostID: hostB.ID.String(),
+		inventoryRepo:  inventoryRepo,
+		db:             db,
 	}
 }
 
@@ -250,5 +278,66 @@ func TestAnsibleSubResourceAuthz_OwnerAllowed(t *testing.T) {
 		if code := ansAuthzReq(t, f, http.MethodGet, p, f.owner.ID); code != http.StatusOK {
 			t.Fatalf("owner GET %s = %d, want 200", p, code)
 		}
+	}
+}
+
+// hostGroupMemberships counts join rows linking host to group.
+func hostGroupMemberships(t *testing.T, f *ansibleAuthzFixture, hostID, groupID string) int64 {
+	t.Helper()
+	var n int64
+	if err := f.db.Table("ansible_inventory_host_groups").
+		Where("ansible_inventory_host_id = ? AND ansible_inventory_group_id = ?", hostID, groupID).
+		Count(&n).Error; err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	return n
+}
+
+// TestAnsibleSubResourceAuthz_HostGroupCrossInventory is the AUD-100 residual:
+// AddToGroup/RemoveFromGroup authorized only the host, so an outsider with write
+// on their OWN host could attach it to (or detach a host from) another tenant's
+// group by naming the foreign group's UUID. The group must belong to the host's
+// inventory; otherwise the endpoint answers 404 and writes nothing.
+func TestAnsibleSubResourceAuthz_HostGroupCrossInventory(t *testing.T) {
+	f := setupAnsibleSubResourceAuthz(t)
+
+	crossPath := "/ansible/hosts/" + f.outsiderHostID + "/groups/" + f.groupID
+	if code := ansAuthzReq(t, f, http.MethodPost, crossPath, f.outsider.ID); code != http.StatusNotFound {
+		t.Fatalf("outsider POST own host into foreign group = %d, want 404", code)
+	}
+	if n := hostGroupMemberships(t, f, f.outsiderHostID, f.groupID); n != 0 {
+		t.Fatalf("outsider host was injected into the foreign group (%d join rows)", n)
+	}
+	if code := ansAuthzReq(t, f, http.MethodDelete, crossPath, f.outsider.ID); code != http.StatusNotFound {
+		t.Fatalf("outsider DELETE own host from foreign group = %d, want 404", code)
+	}
+
+	// The legitimate same-inventory path still works for the owner.
+	ownPath := "/ansible/hosts/" + f.hostID + "/groups/" + f.groupID
+	if code := ansAuthzReq(t, f, http.MethodPost, ownPath, f.owner.ID); code != http.StatusNoContent {
+		t.Fatalf("owner POST host into own group = %d, want 204", code)
+	}
+	if n := hostGroupMemberships(t, f, f.hostID, f.groupID); n != 1 {
+		t.Fatalf("owner membership rows = %d, want 1", n)
+	}
+	if code := ansAuthzReq(t, f, http.MethodDelete, ownPath, f.owner.ID); code != http.StatusNoContent {
+		t.Fatalf("owner DELETE host from own group = %d, want 204", code)
+	}
+	if n := hostGroupMemberships(t, f, f.hostID, f.groupID); n != 0 {
+		t.Fatalf("owner membership rows after delete = %d, want 0", n)
+	}
+
+	// The repository refuses a cross-inventory pair on its own, for any caller
+	// that reaches it without going through the handler.
+	outsiderHost := uuid.MustParse(f.outsiderHostID)
+	group := uuid.MustParse(f.groupID)
+	if err := f.inventoryRepo.AddHostToGroup(outsiderHost, group); !errors.Is(err, repository.ErrHostGroupInventoryMismatch) {
+		t.Fatalf("repo AddHostToGroup cross-inventory err = %v, want ErrHostGroupInventoryMismatch", err)
+	}
+	if err := f.inventoryRepo.RemoveHostFromGroup(outsiderHost, group); !errors.Is(err, repository.ErrHostGroupInventoryMismatch) {
+		t.Fatalf("repo RemoveHostFromGroup cross-inventory err = %v, want ErrHostGroupInventoryMismatch", err)
+	}
+	if n := hostGroupMemberships(t, f, f.outsiderHostID, f.groupID); n != 0 {
+		t.Fatalf("repo guard let the cross-inventory association through (%d join rows)", n)
 	}
 }

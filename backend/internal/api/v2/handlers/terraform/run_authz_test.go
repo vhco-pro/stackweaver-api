@@ -36,10 +36,12 @@ import (
 )
 
 type runAuthzFixture struct {
-	router   *gin.Engine
-	runID    string
-	owner    *models.User // org A owners team
-	outsider *models.User // org B only
+	router      *gin.Engine
+	runID       string
+	workspaceID string       // org A workspace holding runID
+	orgName     string       // org A
+	owner       *models.User // org A owners team
+	outsider    *models.User // org B only
 }
 
 func setupRunAuthzFixture(t *testing.T) *runAuthzFixture {
@@ -124,8 +126,11 @@ func setupRunAuthzFixture(t *testing.T) *runAuthzFixture {
 	router.POST("/runs/:id/actions/cancel", h.Cancel)
 	router.POST("/runs/:id/actions/discard", h.Discard)
 	router.POST("/runs/:id/actions/force-execute", h.ForceExecute)
+	router.GET("/organizations/:name/runs", h.ListByOrganization)
+	router.GET("/organizations/:name/runs/queue", h.GetQueue)
+	router.GET("/workspaces/:id/runs", h.ListByWorkspace)
 
-	return &runAuthzFixture{router: router, runID: runA.ID, owner: owner, outsider: outsider}
+	return &runAuthzFixture{router: router, runID: runA.ID, workspaceID: wsA.ID, orgName: orgA.Name, owner: owner, outsider: outsider}
 }
 
 func runAuthzReq(t *testing.T, f *runAuthzFixture, method, path string, asUser uuid.UUID) int {
@@ -176,5 +181,32 @@ func TestRunAuthz_OwnerAllowedRead(t *testing.T) {
 	f := setupRunAuthzFixture(t)
 	if code := runAuthzReq(t, f, http.MethodGet, "/runs/"+f.runID, f.owner.ID); code != http.StatusOK {
 		t.Fatalf("owner GET run = %d, want 200", code)
+	}
+}
+
+// TestRunAuthz_RunListings covers the AUD-010 residual: the run listings (GET
+// /organizations/:name/runs, .../runs/queue and /workspaces/:id/runs) listed runs
+// with no membership or run-read check, so any JWT caller read another tenant's
+// run history. A non-member now gets 403, anonymous 401, an unknown org 404, and
+// a member still lists with 200.
+func TestRunAuthz_RunListings(t *testing.T) {
+	f := setupRunAuthzFixture(t)
+	for _, p := range []string{
+		"/organizations/" + f.orgName + "/runs",
+		"/organizations/" + f.orgName + "/runs/queue",
+		"/workspaces/" + f.workspaceID + "/runs",
+	} {
+		if code := runAuthzReq(t, f, http.MethodGet, p, f.outsider.ID); code != http.StatusForbidden {
+			t.Fatalf("outsider GET %s = %d, want 403", p, code)
+		}
+		if code := runAuthzReq(t, f, http.MethodGet, p, uuid.Nil); code != http.StatusUnauthorized {
+			t.Fatalf("anon GET %s = %d, want 401", p, code)
+		}
+		if code := runAuthzReq(t, f, http.MethodGet, p, f.owner.ID); code != http.StatusOK {
+			t.Fatalf("owner GET %s = %d, want 200", p, code)
+		}
+	}
+	if code := runAuthzReq(t, f, http.MethodGet, "/organizations/no-such-org-"+uuid.NewString()[:8]+"/runs", f.owner.ID); code != http.StatusNotFound {
+		t.Fatalf("owner GET unknown org runs = %d, want 404", code)
 	}
 }

@@ -4,6 +4,7 @@ package terraform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,13 +13,25 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
 )
+
+// driftRunStore is the part of the run repository a drift check needs.
+type driftRunStore interface {
+	ListByWorkspace(workspaceID string, limit, offset int) ([]models.Run, int64, error)
+	Create(run *models.Run) error
+}
+
+// driftConfigVersionStore is the part of the configuration version repository a drift check needs.
+type driftConfigVersionStore interface {
+	GetLatestByWorkspaceID(workspaceID string) (*models.ConfigurationVersion, error)
+}
 
 // DriftDetectionService handles scheduled drift detection runs
 type DriftDetectionService struct {
 	workspaceRepo     *repository.WorkspaceRepository
-	runRepo           *repository.RunRepository
-	configVersionRepo *repository.ConfigurationVersionRepository
+	runRepo           driftRunStore
+	configVersionRepo driftConfigVersionStore
 
 	cronParser    cron.Parser
 	mu            sync.RWMutex
@@ -201,18 +214,37 @@ func (s *DriftDetectionService) executeDriftCheck(ctx context.Context, workspace
 		}
 	}
 
+	// A drift check plans the workspace's current configuration against its state, so the run
+	// needs the latest configuration version (issue #819). Without one the runner extracts
+	// nothing and plans an empty directory, which reports every managed resource for destruction
+	// instead of detecting drift. Same "latest configuration version" rule the run-create handler
+	// and run triggers use.
+	configVersion, err := s.configVersionRepo.GetLatestByWorkspaceID(workspace.ID)
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && configVersion == nil) {
+		logger.Infof("Workspace %s has no configuration version, skipping drift check", workspace.ID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("getting latest configuration version: %w", err)
+	}
+	if configVersion.Status != models.ConfigurationVersionStatusUploaded {
+		logger.Infof("Workspace %s latest configuration version %s is %s (not uploaded), skipping drift check",
+			workspace.ID, configVersion.ID, configVersion.Status)
+		return nil
+	}
+	configVersionID := configVersion.ID
+
 	// Create a plan-only run for drift detection
-	// Note: We don't create a configuration version - drift detection runs use the current state
 	run := &models.Run{
 		WorkspaceID:            workspace.ID,
-		ConfigurationVersionID: nil, // Drift detection doesn't use config version
+		ConfigurationVersionID: &configVersionID,
 		CreatedBy:              nil, // System-triggered
 		Status:                 models.RunStatusPending,
 		Operation:              models.RunOperationPlanOnly, // Plan-only run for drift detection
 	}
 
 	if err := s.runRepo.Create(run); err != nil {
-		return fmt.Errorf("failed to create drift detection run: %w", err)
+		return fmt.Errorf("creating drift detection run: %w", err)
 	}
 
 	logger.Infof("Created drift detection run %s for workspace %s", run.ID, workspace.ID)
