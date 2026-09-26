@@ -264,7 +264,7 @@
                 "type": "object",
                 "properties": {
                   "count": {
-                    "type": "string"
+                    "type": "integer"
                   },
                   "executions": {
                     "type": "array",
@@ -279,7 +279,7 @@
                           "type": "string"
                         },
                         "duration_seconds": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "id": {
                           "type": "string",
@@ -349,7 +349,7 @@
                           "type": "object",
                           "properties": {
                             "count": {
-                              "type": "string"
+                              "type": "integer"
                             },
                             "label": {
                               "type": "string"
@@ -363,7 +363,7 @@
                           "type": "object",
                           "properties": {
                             "count": {
-                              "type": "string"
+                              "type": "integer"
                             },
                             "label": {
                               "type": "string"
@@ -372,7 +372,7 @@
                         }
                       },
                       "total": {
-                        "type": "string"
+                        "type": "integer"
                       }
                     }
                   },
@@ -380,54 +380,54 @@
                     "type": "object",
                     "properties": {
                       "avg_duration_seconds": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "canceled": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "duration_samples": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "failed": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "p95_duration_seconds": {
-                        "type": "string"
+                        "type": "number"
                       },
                       "pending": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "previous": {
                         "type": "object",
                         "properties": {
                           "avg_duration_seconds": {
-                            "type": "string"
+                            "type": "integer"
                           },
                           "failed": {
-                            "type": "string"
+                            "type": "integer"
                           },
                           "succeeded": {
-                            "type": "string"
+                            "type": "integer"
                           },
                           "success_rate": {
                             "nullable": true
                           },
                           "total": {
-                            "type": "string"
+                            "type": "integer"
                           }
                         }
                       },
                       "running": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "succeeded": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "success_rate": {
-                        "type": "string"
+                        "type": "number"
                       },
                       "total": {
-                        "type": "string"
+                        "type": "integer"
                       }
                     }
                   },
@@ -437,28 +437,28 @@
                       "type": "object",
                       "properties": {
                         "activity": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "date": {
                           "type": "string"
                         },
                         "jobs_failed": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "jobs_other": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "jobs_succeeded": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "runs_failed": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "runs_other": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "runs_succeeded": {
-                          "type": "string"
+                          "type": "integer"
                         }
                       }
                     }
@@ -498,19 +498,19 @@
                     "type": "object",
                     "properties": {
                       "inventories": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "job_templates": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "playbooks": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "projects": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "workspaces": {
-                        "type": "string"
+                        "type": "integer"
                       }
                     }
                   },
@@ -518,13 +518,13 @@
                     "type": "object",
                     "properties": {
                       "jobs": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "runs": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "total": {
-                        "type": "string"
+                        "type": "integer"
                       }
                     }
                   },
@@ -532,54 +532,54 @@
                     "type": "object",
                     "properties": {
                       "avg_duration_seconds": {
-                        "type": "string"
+                        "type": "number"
                       },
                       "canceled": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "duration_samples": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "failed": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "p95_duration_seconds": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "pending": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "previous": {
                         "type": "object",
                         "properties": {
                           "avg_duration_seconds": {
-                            "type": "string"
+                            "type": "integer"
                           },
                           "failed": {
-                            "type": "string"
+                            "type": "integer"
                           },
                           "succeeded": {
-                            "type": "string"
+                            "type": "integer"
                           },
                           "success_rate": {
                             "nullable": true
                           },
                           "total": {
-                            "type": "string"
+                            "type": "integer"
                           }
                         }
                       },
                       "running": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "succeeded": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "success_rate": {
-                        "type": "string"
+                        "type": "number"
                       },
                       "total": {
-                        "type": "string"
+                        "type": "integer"
                       }
                     }
                   },
@@ -589,19 +589,20 @@
                       "type": "object",
                       "properties": {
                         "avg_duration_seconds": {
-                          "type": "string"
+                          "type": "object",
+                          "additionalProperties": true
                         },
                         "failed": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "job_count": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "succeeded": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "success_rate": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "template_id": {
                           "type": "string",
@@ -619,22 +620,24 @@
                       "type": "object",
                       "properties": {
                         "avg_duration_seconds": {
-                          "type": "string"
+                          "type": "object",
+                          "additionalProperties": true
                         },
                         "failed": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "project_name": {
                           "type": "string"
                         },
                         "run_count": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "succeeded": {
-                          "type": "string"
+                          "type": "integer"
                         },
                         "success_rate": {
-                          "type": "string"
+                          "type": "object",
+                          "additionalProperties": true
                         },
                         "workspace_id": {
                           "type": "string"
@@ -649,7 +652,7 @@
                     "type": "object",
                     "properties": {
                       "days": {
-                        "type": "string"
+                        "type": "integer"
                       },
                       "since": {
                         "type": "string",
