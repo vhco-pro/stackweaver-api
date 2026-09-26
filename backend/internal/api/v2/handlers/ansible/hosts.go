@@ -3,6 +3,7 @@
 package ansible
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -267,12 +268,12 @@ func (h *HostHandler) AddToGroup(c *gin.Context) {
 		return
 	}
 
-	if _, ok := h.authorizeHost(c, hostID, true); !ok {
+	if !h.authorizeHostGroup(c, hostID, groupID) {
 		return
 	}
 
 	if err := h.inventoryService.AddHostToGroup(hostID, groupID); err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		writeHostGroupError(c, err)
 		return
 	}
 
@@ -296,16 +297,46 @@ func (h *HostHandler) RemoveFromGroup(c *gin.Context) {
 		return
 	}
 
-	if _, ok := h.authorizeHost(c, hostID, true); !ok {
+	if !h.authorizeHostGroup(c, hostID, groupID) {
 		return
 	}
 
 	if err := h.inventoryService.RemoveHostFromGroup(hostID, groupID); err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		writeHostGroupError(c, err)
 		return
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// authorizeHostGroup gates a host-group membership change (AUD-100). The caller
+// needs write on the host's inventory, and the group must belong to that same
+// inventory. Authorizing the host alone let a caller with write on their own host
+// inject it into (or remove it from) another tenant's group by naming that
+// group's UUID. A group outside the host's inventory answers 404 exactly like a
+// missing group, so the endpoint is not an existence oracle for foreign groups.
+func (h *HostHandler) authorizeHostGroup(c *gin.Context, hostID, groupID uuid.UUID) bool {
+	host, ok := h.authorizeHost(c, hostID, true)
+	if !ok {
+		return false
+	}
+	group, err := h.inventoryService.GetGroup(groupID)
+	if err != nil || group.InventoryID != host.InventoryID {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Group not found")
+		return false
+	}
+	return true
+}
+
+// writeHostGroupError maps a host-group association error to its response. The
+// repository's cross-inventory guard backs up authorizeHostGroup, so it answers
+// with the same 404.
+func writeHostGroupError(c *gin.Context, err error) {
+	if errors.Is(err, repository.ErrHostGroupInventoryMismatch) {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Group not found")
+		return
+	}
+	jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 }
 
 // formatHostResponse formats a host for JSON:API response

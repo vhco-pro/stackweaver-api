@@ -1860,6 +1860,26 @@ func (h *RunHandlerV2) ListByWorkspace(c *gin.Context) {
 		return
 	}
 
+	// AUD-010: a workspace's run history is a run read, so it takes the same
+	// run-read permission authorizeRun enforces per run. JWT and session
+	// identities bypass the org-resolution wall, so without this any
+	// authenticated caller listed another tenant's runs by workspace ID.
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return
+	}
+	workspace, err := h.workspaceRepo.GetByID(workspaceID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
+		return
+	}
+	allowed, err := h.rbacService.CheckRunPermission(c.Request.Context(), user.ID, workspace.ID, workspace.ProjectID, "read")
+	if err != nil || !allowed {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read runs in this workspace")
+		return
+	}
+
 	page, perPage := pagination.Parse(c, 20)
 	if perPage > 100 {
 		perPage = 100
@@ -2084,14 +2104,43 @@ func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
 	c.Status(http.StatusAccepted)
 }
 
+// authorizeOrgRunList resolves the :name organization and gates the org-scoped
+// run listings on the caller belonging to it (AUD-010). Both listings return runs
+// from every workspace in the org, so without this any authenticated JWT caller
+// could read another tenant's run history and queue by org name: JWT and session
+// identities pass straight through the org-resolution wall. API-key identities
+// were already authorized against this org by the wall (the routes are
+// classified orgByName: an org-bound token must be bound to it, a user-bound
+// token's owner must be a member), so they are not re-checked here; re-checking
+// an org-bound token via its creator's membership would break the token once its
+// creator leaves the org. Writes 401/403/404 and returns false when refused.
+func (h *RunHandlerV2) authorizeOrgRunList(c *gin.Context) (*models.Organization, bool) {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return nil, false
+	}
+	org, err := h.orgRepo.GetByName(c.Param("name"))
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+		return nil, false
+	}
+	if _, isToken := c.Get("token_kind"); isToken {
+		return org, true
+	}
+	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	if err != nil || !inOrg {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
+		return nil, false
+	}
+	return org, true
+}
+
 // ListByOrganization lists runs for an organization (TFE-compatible)
 // GET /api/v2/organizations/:name/runs
 func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
-	orgName := c.Param("name")
-
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+	org, ok := h.authorizeOrgRunList(c)
+	if !ok {
 		return
 	}
 
@@ -2119,11 +2168,8 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 // GetQueue returns the run queue for an organization (TFE-compatible)
 // GET /api/v2/organizations/:name/runs/queue
 func (h *RunHandlerV2) GetQueue(c *gin.Context) {
-	orgName := c.Param("name")
-
-	org, err := h.orgRepo.GetByName(orgName)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+	org, ok := h.authorizeOrgRunList(c)
+	if !ok {
 		return
 	}
 
