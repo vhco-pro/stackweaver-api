@@ -126,23 +126,35 @@ var goldenExclusions = map[string]string{
 // change to production code for a test's benefit and is not obviously worth it.
 //
 // Blanking numbers alone turned out to be incomplete for the same reason, one layer down. The
-// analytics daily series labels each bucket with a calendar date ("2026-09-06"), which is a
-// string, so blankNumbers left it pinned and the fixture failed on the next calendar day with
-// the whole window shifted by one entry - exactly the spurious diff this list exists to
-// prevent. Whole-string dates are therefore blanked too, and only whole-string ones: a date
-// embedded in a seeded name ("baseline-compliance - 2026-08-23 11:01") comes from the pinned
-// seed clock, is stable, and stays pinned.
+// dashboard series can label entries with a calendar date, which is a string, so blankNumbers
+// would leave it pinned and the fixture would fail on the next calendar day. Whole-string dates
+// are therefore blanked too, and only whole-string ones.
+//
+// Blanking fixes value drift but not membership drift, and the analytics routes proved it. Their
+// seeded executions carry names like "baseline-compliance - 2026-08-23 11:01", which are stable,
+// but the handler's default window is the 30 days ending at the server's now, so the pinned
+// history slid out of it a day at a time and the fixtures failed from 2026-09-22 with rows missing
+// (#821). Those routes accept an explicit window, so goldenQueries pins it to goldenSeedInstant
+// and they are no longer listed here: their numbers are pinned too. Prefer that fix for any route
+// that takes its time bounds as parameters.
 var timeSensitiveRoutes = map[string]string{
-	"GET /api/v2/dashboard/stats":                          "counts runs and jobs per calendar month",
-	"GET /api/v2/dashboard/operations":                     "counts live operations by status",
-	"GET /api/v2/organizations/:name/analytics":            "aggregates over a rolling window",
-	"GET /api/v2/organizations/:name/analytics/executions": "aggregates over a rolling window",
-	"GET /api/v2/organizations/:name/ansible/jobs":         "job status depends on elapsed time",
-	"GET /api/v2/organizations/:name/ansible/jobs/queue":   "queue contents depend on elapsed time",
-	"GET /api/v2/ansible/jobs/:id":                         "job status depends on elapsed time",
-	"GET /api/v2/organizations/:name/runs":                 "run status depends on elapsed time",
-	"GET /api/v2/organizations/:name/workspaces":           "carries each workspace's latest-run status",
-	"GET /api/v2/workspaces/:id/runs":                      "run status depends on elapsed time",
+	"GET /api/v2/dashboard/stats":                        "counts runs and jobs per calendar month",
+	"GET /api/v2/dashboard/operations":                   "counts live operations by status",
+	"GET /api/v2/organizations/:name/ansible/jobs":       "job status depends on elapsed time",
+	"GET /api/v2/organizations/:name/ansible/jobs/queue": "queue contents depend on elapsed time",
+	"GET /api/v2/ansible/jobs/:id":                       "job status depends on elapsed time",
+	"GET /api/v2/organizations/:name/runs":               "run status depends on elapsed time",
+	"GET /api/v2/organizations/:name/workspaces":         "carries each workspace's latest-run status",
+	"GET /api/v2/workspaces/:id/runs":                    "run status depends on elapsed time",
+}
+
+// goldenQueries pins the query string of routes whose time bounds are request parameters, so the
+// window is a function of the seed rather than of the wall clock. The analytics handlers derive
+// since (30 days back) and the previous comparison period from until, so pinning until alone
+// fixes membership, ordering, daily buckets and the previous-period block.
+var goldenQueries = map[string]string{
+	"GET /api/v2/organizations/:name/analytics":            "until=" + goldenSeedInstant,
+	"GET /api/v2/organizations/:name/analytics/executions": "until=" + goldenSeedInstant,
 }
 
 // calendarDateRe matches a value that is entirely a calendar date, the label form the
@@ -930,7 +942,11 @@ func (h *goldenHarness) captureError(t *testing.T, method, routePath string) gol
 
 func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFixture {
 	t.Helper()
-	req := httptest.NewRequest(method, h.buildPath(routePath), nil)
+	target := h.buildPath(routePath)
+	if q, ok := goldenQueries[method+" "+routePath]; ok {
+		target += "?" + q
+	}
+	req := httptest.NewRequest(method, target, nil)
 	req.Header.Set("Authorization", "Bearer "+h.token)
 	req.Header.Set("Content-Type", "application/vnd.api+json")
 	rec := httptest.NewRecorder()
@@ -1258,6 +1274,11 @@ func TestGoldenExclusionsAreLive(t *testing.T) {
 	for key := range timeSensitiveRoutes {
 		if !registered[key] {
 			stale = append(stale, key+"  (timeSensitiveRoutes)")
+		}
+	}
+	for key := range goldenQueries {
+		if !registered[key] {
+			stale = append(stale, key+"  (goldenQueries)")
 		}
 	}
 	sort.Strings(stale)
