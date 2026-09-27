@@ -226,6 +226,10 @@ type AuthProxy struct {
 	// construction from PublicAPIBaseURL/PublicFrontendURL/ZitadelIssuer +
 	// TrustedForwardHosts. Empty → trust all (unconfigured dev behavior).
 	trustedHosts []string
+
+	// userReadyTimeout bounds how long CreateUser waits for Zitadel's read
+	// side to report a freshly created user as active. See waitForUserActive.
+	userReadyTimeout time.Duration
 }
 
 // decoyOrgIDEntry is the value stored in the bounded LRU. Round 25
@@ -294,6 +298,7 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 			},
 		},
 		settingsCache:      newSettingsCache(),
+		userReadyTimeout:   defaultUserReadyTimeout,
 		LoginNameLimiter:   middleware.NewLoginNameRateLimiter(lockoutThreshold, lockoutWindow),
 		decoySecret:        secret,
 		decoyOrgIDsEntries: make(map[string]*list.Element),
@@ -2814,7 +2819,58 @@ func (p *AuthProxy) CreateUser(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "failed to create user with identity provider")
 		return
 	}
+	if statusCode >= 200 && statusCode < 300 {
+		var created struct {
+			UserID string `json:"userId"`
+		}
+		if json.Unmarshal(respBody, &created) == nil && created.UserID != "" {
+			if err := p.waitForUserActive(c.Request.Context(), created.UserID); err != nil {
+				logger.Warnf("Created user %s but it is not yet active on the read side: %v", created.UserID, err)
+			}
+		}
+	}
 	c.Data(statusCode, "application/json", respBody)
+}
+
+// defaultUserReadyTimeout is how long CreateUser waits for a new user to be
+// readable and active. Zitadel projects writes asynchronously; under load the
+// lag has been observed past one second.
+const defaultUserReadyTimeout = 5 * time.Second
+
+// waitForUserActive blocks until Zitadel's read side reports userID as
+// USER_STATE_ACTIVE, or the timeout passes.
+//
+// Zitadel is event-sourced: POST /v2/users/human returns once the events are
+// written, but every later read (session checks, the token endpoint's user
+// lookup) goes through projections that catch up asynchronously. A caller that
+// creates a user and immediately signs it in races those projections and sees
+// "User could not be found" or "Errors.User.NotActive" at whichever step reads
+// first. Waiting here gives every caller read-your-write semantics once,
+// instead of each step retrying its own read.
+func (p *AuthProxy) waitForUserActive(ctx context.Context, userID string) error {
+	ctx, cancel := context.WithTimeout(ctx, p.userReadyTimeout)
+	defer cancel()
+
+	delay := 50 * time.Millisecond
+	for {
+		body, status, err := p.proxyJSON(ctx, http.MethodGet, "/v2/users/"+userID, nil)
+		if err == nil && status == http.StatusOK {
+			var got struct {
+				User struct {
+					State string `json:"state"`
+				} `json:"user"`
+			}
+			if json.Unmarshal(body, &got) == nil && got.User.State == "USER_STATE_ACTIVE" {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for user %s to become active: %w", userID, ctx.Err())
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, 400*time.Millisecond)
+	}
 }
 
 // PasswordReset handles POST /auth/users/:id/password-reset.
