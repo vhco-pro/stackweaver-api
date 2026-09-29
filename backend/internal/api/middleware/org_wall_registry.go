@@ -123,8 +123,9 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/agent-pools/:id":                 resource("id", rAgentPool),
 	"/api/v2/agent-pools/:id/agents":          resource("id", rAgentPool),
 
-	"/api/v2/agent-pools/:id/authentication-tokens": resource("id", rAgentPool),
-	"/api/v2/authentication-tokens/:id":             resource("id", rAuthToken),
+	"/api/v2/agent-pools/:id/authentication-tokens":    resource("id", rAgentPool),
+	"/api/v2/authentication-tokens/:id":                resource("id", rAuthToken),
+	"/api/v2/authentication-tokens/:id/actions/rotate": resource("id", rAuthToken),
 
 	// --- OIDC configurations ---
 	"/api/v2/organizations/:name/oidc-configurations": orgByName(),

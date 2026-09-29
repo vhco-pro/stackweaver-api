@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/services/ansiblefiles"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -500,8 +502,12 @@ func (h *VCSConnectionHandlerV2) ListYamlFiles(c *gin.Context) {
 	jsonapi.WriteDocument(c, http.StatusOK, files)
 }
 
-// ListInventoryFiles lists all inventory files (.ini, .yaml, .yml, .json) in a repository
-// GET /api/v2/vcs-connections/:id/repositories/:owner/:repo/inventory-files
+// ListInventoryFiles lists the inventory candidate files in a repository: the
+// .ini, .yaml, .yml and .json files outside conventional non-inventory
+// locations (playbooks, roles, group_vars/host_vars, CI and tooling files), see
+// ansiblefiles.Inventories. The optional path query parameter scopes the
+// listing to a repository directory.
+// GET /api/v2/vcs-connections/:id/repositories/:owner/:repo/inventory-files?ref=&path=
 func (h *VCSConnectionHandlerV2) ListInventoryFiles(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -524,7 +530,7 @@ func (h *VCSConnectionHandlerV2) ListInventoryFiles(c *gin.Context) {
 		return
 	}
 
-	files, err := provider.ListFiles(c.Request.Context(), connection, owner, repo, ref, []string{".ini", ".yaml", ".yml", ".json"})
+	files, err := listInventoryCandidates(c.Request.Context(), provider, connection, owner, repo, ref, c.Query("path"))
 	if err != nil {
 		if isNotImplemented(err) {
 			jsonapi.WriteError(c, http.StatusNotImplemented, "Not Implemented", fmt.Sprintf("Inventory file listing is not yet supported for %s", connection.Provider))
@@ -535,4 +541,28 @@ func (h *VCSConnectionHandlerV2) ListInventoryFiles(c *gin.Context) {
 	}
 
 	jsonapi.WriteDocument(c, http.StatusOK, files)
+}
+
+// inventoryExtensions are the file types ansible-inventory parses through its
+// ini and yaml plugins (the yaml plugin also reads .json).
+var inventoryExtensions = []string{".ini", ".yaml", ".yml", ".json"}
+
+// fileLister is the part of a VCS provider the inventory listing needs.
+type fileLister interface {
+	ListFiles(ctx context.Context, conn *models.VCSConnection, owner, repo, ref string, extensions []string) ([]string, error)
+}
+
+// listInventoryCandidates lists a repository's inventory-extension files and
+// narrows them to inventory candidates under scopePath.
+func listInventoryCandidates(ctx context.Context, lister fileLister, conn *models.VCSConnection, owner, repo, ref, scopePath string) ([]string, error) {
+	files, err := lister.ListFiles(ctx, conn, owner, repo, ref, inventoryExtensions)
+	if err != nil {
+		return nil, err
+	}
+	candidates := ansiblefiles.Inventories(files, scopePath)
+	if candidates == nil {
+		// Encode an empty listing as [] rather than null.
+		candidates = []string{}
+	}
+	return candidates, nil
 }

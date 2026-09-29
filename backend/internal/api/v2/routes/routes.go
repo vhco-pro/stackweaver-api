@@ -836,6 +836,9 @@ func SetupV2Routes(
 	v2.GET("/agent-pools/:id/authentication-tokens", agentTokenHandler.List)
 	v2.GET("/authentication-tokens/:id", agentTokenHandler.ReadByID)
 	v2.DELETE("/authentication-tokens/:id", agentTokenHandler.DeleteByID)
+	// Stackweaver extension (TFE has no agent-token rotate): mint a replacement and keep the old
+	// token valid for a grace window so running agents switch over without a registration gap.
+	v2.POST("/authentication-tokens/:id/actions/rotate", agentTokenHandler.Rotate)
 
 	// VCS Connections
 	vcsConnectionHandler := handlers.NewVCSConnectionHandlerV2(vcsConnectionRepo, orgRepo, authService, vcsRegistry, rbacService)
