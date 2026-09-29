@@ -492,17 +492,31 @@ func (s *Service) DeleteTeamToken(teamID uuid.UUID) error {
 // through the normal api-key path; the runner registration handler enforces that a runner presenting
 // it may only join AgentPoolID. description (required by the provider) is stored as the key name.
 func (s *Service) CreateAgentToken(userID, poolID, orgID uuid.UUID, description string) (*models.APIKey, string, error) {
+	apiKey, key, err := newAgentToken(userID, poolID, orgID, description)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("failed to create agent token: %w", err)
+	}
+
+	return apiKey, key, nil
+}
+
+// newAgentToken builds (but does not store) an agent token record and returns it with its plaintext.
+func newAgentToken(userID, poolID, orgID uuid.UUID, description string) (*models.APIKey, string, error) {
 	key, err := GenerateAPIKey()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to generate agent token: %w", err)
+		return nil, "", fmt.Errorf("generating agent token: %w", err)
 	}
 
 	keyHash, err := HashKey(key)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to hash agent token: %w", err)
+		return nil, "", fmt.Errorf("hashing agent token: %w", err)
 	}
 
-	apiKey := &models.APIKey{
+	return &models.APIKey{
 		UserID:         userID,
 		Name:           description,
 		Kind:           models.APIKeyKindOrg,
@@ -512,13 +526,42 @@ func (s *Service) CreateAgentToken(userID, poolID, orgID uuid.UUID, description 
 		OrganizationID: &orgID,
 		AgentPoolID:    &poolID,
 		IsAgentToken:   true,
+	}, key, nil
+}
+
+// Agent token rotation grace window bounds. The default gives an operator a working day to roll
+// the new token out to every agent; the cap keeps a "rotated" credential from living on for
+// weeks, which would defeat the point of rotating it.
+const (
+	DefaultAgentTokenRotationGrace = 24 * time.Hour
+	MaxAgentTokenRotationGrace     = 7 * 24 * time.Hour
+)
+
+// RotateAgentToken replaces the agent token old with a new token for the same pool and
+// description, returning the new record and its plaintext (shown once). The old token keeps
+// authenticating for grace, so agents can be moved to the new token without a registration gap,
+// and is rejected afterwards; a zero grace retires it immediately. The old token's expiry is
+// never extended, so rotating an already-rotated token does not prolong it.
+//
+// Rotation is a Stackweaver extension: the TFE agent-token API has no rotate action.
+func (s *Service) RotateAgentToken(userID uuid.UUID, old *models.APIKey, grace time.Duration) (*models.APIKey, string, error) {
+	if !old.IsAgentToken || old.AgentPoolID == nil || old.OrganizationID == nil {
+		return nil, "", fmt.Errorf("rotating key %s: not an agent token", old.ID)
+	}
+	if grace < 0 || grace > MaxAgentTokenRotationGrace {
+		return nil, "", fmt.Errorf("rotating agent token %s: grace period %s outside 0..%s", old.ID, grace, MaxAgentTokenRotationGrace)
 	}
 
-	if err := s.apiKeyRepo.Create(apiKey); err != nil {
-		return nil, "", fmt.Errorf("failed to create agent token: %w", err)
+	replacement, key, err := newAgentToken(userID, *old.AgentPoolID, *old.OrganizationID, old.Name)
+	if err != nil {
+		return nil, "", err
 	}
-
-	return apiKey, key, nil
+	// UTC because expires_at is a timestamp without time zone; every writer must agree on the
+	// zone for the VerifyAPIKey comparison to mean anything.
+	if err := s.apiKeyRepo.RotateAgentToken(old.ID, replacement, time.Now().UTC().Add(grace)); err != nil {
+		return nil, "", fmt.Errorf("rotating agent token %s: %w", old.ID, err)
+	}
+	return replacement, key, nil
 }
 
 // ListAgentTokens returns a pool's agent registration tokens (metadata only, no plaintext).

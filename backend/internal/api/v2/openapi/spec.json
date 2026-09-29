@@ -15391,6 +15391,37 @@
         ]
       }
     },
+    "/api/v2/authentication-tokens/{id}/actions/rotate": {
+      "post": {
+        "operationId": "post-api-v2-authentication-tokens-id-actions-rotate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/authentication-tokens/:id/actions/rotate",
+        "tags": [
+          "authentication-tokens"
+        ]
+      }
+    },
     "/api/v2/configuration-versions/{id}": {
       "get": {
         "operationId": "get-api-v2-configuration-versions-id",

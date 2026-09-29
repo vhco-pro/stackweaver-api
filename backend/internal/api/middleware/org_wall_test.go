@@ -222,6 +222,44 @@ func TestOrgWall_OrgBoundCrossOrgDenied(t *testing.T) {
 	}
 }
 
+// TestOrgWall_AgentTokenRotateIsOrgResolved pins the rotate action's classification: it resolves
+// the token's org (never agnostic), so a key bound to another org is denied at the wall and a
+// read-only or runner-registration key cannot mint a replacement credential.
+func TestOrgWall_AgentTokenRotateIsOrgResolved(t *testing.T) {
+	const route = "/api/v2/authentication-tokens/:id/actions/rotate"
+	if entry, ok := wallRegistry[route]; !ok || entry.agnostic || entry.param != "id" {
+		t.Fatalf("rotate route must be resource-classified on :id, got %+v (present=%v)", entry, ok)
+	}
+	org, other := uuid.New(), uuid.New()
+	cases := []struct {
+		name     string
+		boundOrg uuid.UUID
+		scope    string
+		want     int
+	}{
+		{"same-org write key", org, "write", http.StatusOK},
+		{"cross-org write key", other, "write", http.StatusForbidden},
+		{"same-org read key", org, "read", http.StatusForbidden},
+		{"same-org runner:register key", org, "runner:register", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code := runWall(t, wallTestCase{
+				route:      route,
+				reqPath:    "/api/v2/authentication-tokens/" + uuid.NewString() + "/actions/rotate",
+				method:     http.MethodPost,
+				tokenKind:  models.APIKeyKindOrg,
+				tokenOrgID: &tc.boundOrg,
+				apiKey:     orgKey(tc.boundOrg, tc.scope),
+				resolver:   &fakeResolver{org: org},
+			})
+			if code != tc.want {
+				t.Fatalf("got %d, want %d", code, tc.want)
+			}
+		})
+	}
+}
+
 func TestOrgWall_ResolveNotFoundReturns404(t *testing.T) {
 	boundOrg := uuid.New()
 	code := runWall(t, wallTestCase{

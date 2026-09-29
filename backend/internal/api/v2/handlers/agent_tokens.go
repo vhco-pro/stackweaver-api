@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -95,6 +96,7 @@ func agentTokenResource(key *models.APIKey, token string) jsonapi.Resource[Agent
 	attrs := AgentTokenAttributes{
 		CreatedAt:   key.CreatedAt,
 		LastUsedAt:  key.LastUsedAt,
+		ExpiredAt:   key.ExpiresAt,
 		Description: key.Name,
 	}
 	if token != "" {
@@ -197,6 +199,88 @@ func (h *AgentTokenHandlerV2) DeleteByID(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// agentTokenRotateRequest is the optional body of the rotate action. GracePeriodHours is how long
+// the old token keeps working; nil means apikey.DefaultAgentTokenRotationGrace.
+type agentTokenRotateRequest struct {
+	Data struct {
+		Attributes struct {
+			GracePeriodHours *int `json:"grace-period-hours"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
+// errGracePeriodRange is the validation error for a grace window outside the allowed bounds.
+var errGracePeriodRange = errors.New("grace-period-hours must be between 0 and 168")
+
+// rotateGrace reads the grace window from the optional rotate body. An absent body or attribute
+// selects the default; a value outside 0..MaxAgentTokenRotationGrace is a validation error.
+func rotateGrace(c *gin.Context) (time.Duration, error) {
+	if c.Request.ContentLength == 0 {
+		return apikey.DefaultAgentTokenRotationGrace, nil
+	}
+	var req agentTokenRotateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return 0, err
+	}
+	hours := req.Data.Attributes.GracePeriodHours
+	if hours == nil {
+		return apikey.DefaultAgentTokenRotationGrace, nil
+	}
+	if *hours < 0 || time.Duration(*hours)*time.Hour > apikey.MaxAgentTokenRotationGrace {
+		return 0, errGracePeriodRange
+	}
+	return time.Duration(*hours) * time.Hour, nil
+}
+
+// agentTokenRotateMeta names the token a rotation retired and when it stops working.
+type agentTokenRotateMeta struct {
+	RotatedFrom          string     `json:"rotated-from"`
+	RotatedFromExpiredAt *time.Time `json:"rotated-from-expired-at"`
+}
+
+// Rotate replaces an agent token: it mints a new token for the same pool and description, returns
+// its plaintext once, and schedules the old token to expire after the grace window so running
+// agents can be switched over without a registration gap. It is a Stackweaver extension (the TFE
+// agent-token API has no rotate action), so it adds a route rather than altering a TFE one. The
+// document's meta names the retired token and its expiry.
+// POST /api/v2/authentication-tokens/:id/actions/rotate
+func (h *AgentTokenHandlerV2) Rotate(c *gin.Context) {
+	old, ok := h.resolveTokenByID(c)
+	if !ok {
+		return
+	}
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonAPIError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return
+	}
+	grace, err := rotateGrace(c)
+	if err != nil {
+		jsonAPIError(c, http.StatusUnprocessableEntity, "Invalid Attribute", err.Error())
+		return
+	}
+
+	key, token, err := h.apiKeyService.RotateAgentToken(user.ID, old, grace)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonAPIError(c, http.StatusNotFound, "Not Found", "Agent token not found")
+			return
+		}
+		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to rotate agent token")
+		return
+	}
+
+	retired, err := h.apiKeyService.GetAgentToken(old.ID)
+	if err != nil {
+		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to read rotated agent token")
+		return
+	}
+	jsonapi.WriteDocumentMeta(c, http.StatusCreated, agentTokenResource(key, token), agentTokenRotateMeta{
+		RotatedFrom:          retired.ID.String(),
+		RotatedFromExpiredAt: retired.ExpiresAt,
+	})
 }
 
 // resolveTokenByID loads the agent token named by the :id path param and enforces manage-agent-pools

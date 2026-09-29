@@ -7,80 +7,19 @@ import (
 	"fmt"
 	"net/http"
 	"path"
-	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/services/ansiblefiles"
 	"github.com/michielvha/stackweaver/core/models"
 	corerepo "github.com/michielvha/stackweaver/core/repository"
 )
 
 // maxBulkImportEntries caps a single bulk-import request.
 const maxBulkImportEntries = 200
-
-// playbookExcludedDirs are conventional Ansible (and CI) directory names that
-// never contain playbooks; a YAML file under any of these segments is hidden
-// from playbook discovery.
-var playbookExcludedDirs = map[string]struct{}{
-	"roles": {}, "group_vars": {}, "host_vars": {}, "vars": {}, "tasks": {},
-	"handlers": {}, "templates": {}, "files": {}, "defaults": {}, "meta": {},
-	"collections": {}, "inventories": {}, "inventory": {}, "molecule": {},
-	"library": {}, "filter_plugins": {}, "module_utils": {}, "plugins": {},
-	"test": {}, "tests": {}, ".github": {}, ".gitlab": {}, ".git": {},
-}
-
-// playbookExcludedFiles are well-known YAML files that are never playbooks.
-var playbookExcludedFiles = map[string]struct{}{
-	"requirements.yml": {}, "requirements.yaml": {},
-	"galaxy.yml": {}, "galaxy.yaml": {},
-	".gitlab-ci.yml": {}, ".travis.yml": {}, "azure-pipelines.yml": {},
-	"docker-compose.yml": {}, "docker-compose.yaml": {},
-}
-
-// filterPlaybookFiles narrows a repository file listing down to playbook
-// candidates: YAML files under scopePath (when set), excluding conventional
-// non-playbook directories, hidden files, and well-known non-playbook YAML.
-// The result is sorted for stable output.
-func filterPlaybookFiles(paths []string, scopePath string) []string {
-	scopePath = strings.Trim(scopePath, "/")
-	var out []string
-	for _, p := range paths {
-		p = strings.TrimPrefix(p, "/")
-		if scopePath != "" && !strings.HasPrefix(p, scopePath+"/") && p != scopePath {
-			continue
-		}
-		base := path.Base(p)
-		lowerBase := strings.ToLower(base)
-		if !strings.HasSuffix(lowerBase, ".yml") && !strings.HasSuffix(lowerBase, ".yaml") {
-			continue
-		}
-		if strings.HasPrefix(base, ".") || strings.HasPrefix(lowerBase, "docker-compose.") {
-			continue
-		}
-		if _, excluded := playbookExcludedFiles[lowerBase]; excluded {
-			continue
-		}
-		dir := path.Dir(p)
-		excluded := false
-		if dir != "." {
-			for _, seg := range strings.Split(dir, "/") {
-				if _, ok := playbookExcludedDirs[strings.ToLower(seg)]; ok {
-					excluded = true
-					break
-				}
-			}
-		}
-		if excluded {
-			continue
-		}
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
-}
 
 // playbookNameCandidates returns deterministic name candidates for a playbook
 // derived from its file path: the filename stem, then disambiguated with the
@@ -252,7 +191,7 @@ func (h *PlaybookHandler) ListPlaybookFiles(c *gin.Context) {
 		return
 	}
 
-	candidates := filterPlaybookFiles(files, scopePath)
+	candidates := ansiblefiles.Playbooks(files, scopePath)
 
 	registered, err := h.findRegisteredPlaybooks(dc.conn.ID, uuid.Nil, repository, branch)
 	if err != nil {

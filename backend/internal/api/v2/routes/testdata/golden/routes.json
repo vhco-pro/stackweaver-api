@@ -552,6 +552,11 @@
       "mutating": false
     },
     {
+      "method": "POST",
+      "path": "/api/v2/authentication-tokens/:id/actions/rotate",
+      "mutating": true
+    },
+    {
       "method": "GET",
       "path": "/api/v2/configuration-versions/:id",
       "mutating": false

@@ -653,10 +653,13 @@ type OrgTokenAttributes struct {
 	Token      string     `json:"token,omitempty"`
 }
 
-// AgentTokenAttributes stores its description as the key name and has no expiry member.
+// AgentTokenAttributes stores its description as the key name. TFE agent tokens have no expiry;
+// ExpiredAt is a Stackweaver extension set only on a token retired by rotation, and is omitted
+// otherwise so a never-rotated token keeps the exact TFE shape.
 type AgentTokenAttributes struct {
 	CreatedAt   time.Time  `json:"created-at"`
 	LastUsedAt  *time.Time `json:"last-used-at"`
+	ExpiredAt   *time.Time `json:"expired-at,omitempty"`
 	Description string     `json:"description"`
 	Token       string     `json:"token,omitempty"`
 }
