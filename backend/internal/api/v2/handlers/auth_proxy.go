@@ -2811,6 +2811,17 @@ func (p *AuthProxy) CreateUser(c *gin.Context) {
 			delete(email, "sendCode")
 			email["returnCode"] = map[string]any{}
 		}
+	} else {
+		// Email mode: this endpoint is anonymous, so a caller-supplied `returnCode` would hand the
+		// verification code to whoever asked, and `isVerified: true` would mark an address verified
+		// that nobody proved they own. Strip both from email and phone so Zitadel falls back to its
+		// default branch and delivers the code itself.
+		for _, key := range []string{"email", "phone"} {
+			if contact, ok := reqBody[key].(map[string]any); ok {
+				delete(contact, "returnCode")
+				delete(contact, "isVerified")
+			}
+		}
 	}
 
 	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/users/human", reqBody)
@@ -2890,8 +2901,12 @@ func (p *AuthProxy) PasswordReset(c *gin.Context) {
 	// In return_code mode, set top-level returnCode as empty object (DR-6).
 	// CRITICAL: password_reset uses "returnCode": {} (empty object), NOT boolean true.
 	// Using boolean true causes Zitadel to silently fall back to email delivery.
+	// In email mode, strip any caller-supplied selector instead: this endpoint is anonymous, so a
+	// `returnCode` from the request body would hand the reset code to whoever asked.
 	if p.config.NotificationMode == NotificationModeReturnCode {
 		reqBody["returnCode"] = map[string]any{}
+	} else {
+		delete(reqBody, "returnCode")
 	}
 
 	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/users/"+userID+"/password_reset", reqBody)
