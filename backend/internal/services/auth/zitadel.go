@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/michielvha/logger"
@@ -276,7 +277,14 @@ type UserInfo struct {
 	FamilyName string
 	Subject    string
 	Groups     []string // SSO group IDs from external IdP (via Zitadel Actions)
+	// EmailVerified is true only when Zitadel affirmatively says the email is verified. Its
+	// userinfo omits email_verified when false, so an absent claim is unverified (#829 D5).
+	EmailVerified bool
 }
+
+// userInfoTimeout bounds the userinfo call, which runs on the request path of every JWT
+// request; a hung Zitadel must fail the request instead of holding it open.
+var userInfoTimeout = 5 * time.Second
 
 // ExtractUserInfo extracts user information from token claims
 // Uses the raw claims map to extract custom Zitadel fields (email, name, etc.)
@@ -284,50 +292,43 @@ type UserInfo struct {
 // internalAddr and hostOverride are optional: when set, the UserInfo call is routed
 // through the internal K8s service address (plain HTTP) instead of the external issuer
 // URL, avoiding TLS certificate trust issues with corporate/private CAs.
-func ExtractUserInfo(ctx context.Context, claims *oidc.AccessTokenClaims, claimsMap map[string]interface{}, issuer, tokenString string, httpClient *http.Client, internalAddr, hostOverride string) *UserInfo {
+func ExtractUserInfo(ctx context.Context, claims *oidc.AccessTokenClaims, claimsMap map[string]interface{}, issuer, tokenString string, httpClient *http.Client, internalAddr, hostOverride string) (*UserInfo, error) {
 	info := &UserInfo{
 		Subject: claims.Subject,
 		ID:      claims.Subject,
 	}
 
 	if claimsMap == nil {
-		return info
+		return info, nil
 	}
 
-	// Extract email
-	var emailFound bool
 	if email, ok := claimsMap["email"].(string); ok && email != "" {
 		info.Email = email
-		emailFound = true
 	}
+	verifiedClaim, hasVerifiedClaim := claimsMap["email_verified"].(bool)
+	info.EmailVerified = hasVerifiedClaim && verifiedClaim
 
-	// If email is missing, call UserInfo endpoint (standard OIDC practice)
+	// Zitadel access tokens carry neither email nor email_verified, so in practice userinfo is
+	// asked on every request. Its failure is an error: the caller fails closed instead of
+	// treating the user as unverified (or, worse, as verified).
 	var userInfoData map[string]interface{}
-	if !emailFound && issuer != "" && tokenString != "" && httpClient != nil {
-		userInfoData = fetchUserInfoFromEndpoint(ctx, issuer, tokenString, httpClient, internalAddr, hostOverride)
-		if userInfoData != nil {
-			// Try email field
-			if email, ok := userInfoData["email"].(string); ok && email != "" {
-				info.Email = email
-				emailFound = true
-				logger.Debugf("ExtractUserInfo - Email retrieved from UserInfo endpoint for Subject=%s", claims.Subject)
-			}
+	if (info.Email == "" || !hasVerifiedClaim) && issuer != "" && tokenString != "" && httpClient != nil {
+		var err error
+		userInfoData, err = fetchUserInfoFromEndpoint(ctx, issuer, tokenString, httpClient, internalAddr, hostOverride)
+		if err != nil {
+			return nil, fmt.Errorf("fetching userinfo for %q: %w", claims.Subject, err)
 		}
-		if !emailFound {
-			// Debug: log available claims to diagnose
-			keys := make([]string, 0, len(claimsMap))
-			for k := range claimsMap {
-				keys = append(keys, k)
-			}
-			logger.Debugf("ExtractUserInfo - Email not found in token claims or UserInfo. Subject=%s, Available keys: %v", claims.Subject, keys)
+		if email, ok := userInfoData["email"].(string); ok && email != "" && info.Email == "" {
+			info.Email = email
+			logger.Debugf("ExtractUserInfo - Email retrieved from UserInfo endpoint for Subject=%s", claims.Subject)
 		}
-	} else if !emailFound {
-		// Debug: log available claims to diagnose
-		keys := make([]string, 0, len(claimsMap))
-		for k := range claimsMap {
-			keys = append(keys, k)
+		if !hasVerifiedClaim {
+			verified, _ := userInfoData["email_verified"].(bool)
+			info.EmailVerified = verified
 		}
-		logger.Debugf("ExtractUserInfo - Email not found in token claims. Subject=%s, Available keys: %v", claims.Subject, keys)
+	}
+	if info.Email == "" {
+		logger.Debugf("ExtractUserInfo - Email not found in token claims or UserInfo. Subject=%s, Available keys: %v", claims.Subject, getClaimKeys(claimsMap))
 	}
 
 	// Extract name (full name) - Zitadel uses "name" field
@@ -384,7 +385,7 @@ func ExtractUserInfo(ctx context.Context, claims *oidc.AccessTokenClaims, claims
 		logger.Infof("ExtractUserInfo - No sso_groups claim found in JWT for Subject=%s (available claims: %v)", claims.Subject, getClaimKeys(claimsMap))
 	}
 
-	return info
+	return info, nil
 }
 
 // getClaimKeys returns the keys from a claims map for diagnostic logging.
@@ -402,7 +403,7 @@ func getClaimKeys(m map[string]interface{}) []string {
 // as the Host header for Zitadel tenant routing.  This mirrors the JWKS fetch
 // pattern and avoids TLS certificate trust issues with corporate/private CAs.
 // Returns the parsed JSON response or nil on error.
-func fetchUserInfoFromEndpoint(ctx context.Context, issuer, tokenString string, httpClient *http.Client, internalAddr, hostOverride string) map[string]interface{} {
+func fetchUserInfoFromEndpoint(ctx context.Context, issuer, tokenString string, httpClient *http.Client, internalAddr, hostOverride string) (map[string]interface{}, error) {
 	// Zitadel UserInfo endpoint: /oidc/v1/userinfo (from defaults.yaml)
 	var userInfoURL string
 	if internalAddr != "" {
@@ -411,10 +412,11 @@ func fetchUserInfoFromEndpoint(ctx context.Context, issuer, tokenString string, 
 		userInfoURL = issuer + "/oidc/v1/userinfo"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", userInfoURL, nil)
+	ctx, cancel := context.WithTimeout(ctx, userInfoTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, userInfoURL, http.NoBody)
 	if err != nil {
-		logger.Warnf("Failed to create UserInfo request: %v", err)
-		return nil
+		return nil, fmt.Errorf("building userinfo request: %w", err)
 	}
 
 	// When using an internal address, set the Host header so Zitadel can identify
@@ -429,8 +431,7 @@ func fetchUserInfoFromEndpoint(ctx context.Context, issuer, tokenString string, 
 
 	resp, err := httpClient.Do(req) //nolint:gosec // G704: URL is the operator-configured Zitadel UserInfo endpoint, not user-controlled
 	if err != nil {
-		logger.Warnf("Failed to call UserInfo endpoint: %v", err)
-		return nil
+		return nil, fmt.Errorf("calling userinfo: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -439,15 +440,12 @@ func fetchUserInfoFromEndpoint(ctx context.Context, issuer, tokenString string, 
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Warnf("UserInfo endpoint returned status %d", resp.StatusCode)
-		return nil
+		return nil, fmt.Errorf("calling userinfo: status %d", resp.StatusCode)
 	}
 
 	var userInfo map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
-		logger.Warnf("Failed to decode UserInfo response: %v", err)
-		return nil
+		return nil, fmt.Errorf("decoding userinfo: %w", err)
 	}
-
-	return userInfo
+	return userInfo, nil
 }

@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -35,6 +36,24 @@ const (
 	NotificationModeReturnCode NotificationMode = "return_code"
 	NotificationModeEmail      NotificationMode = "email"
 )
+
+// ParseNotificationMode reads STACKWEAVER_NOTIFICATION_MODE and fails closed. Unset or empty
+// means email in every mode, so no deployment hands auth codes to the browser by accident.
+// return_code is accepted only outside production (release false): it returns verification
+// and reset codes to whoever asked, which is safe on a developer machine and nowhere else.
+func ParseNotificationMode(raw string, release bool) (NotificationMode, error) {
+	switch strings.TrimSpace(raw) {
+	case "", string(NotificationModeEmail):
+		return NotificationModeEmail, nil
+	case string(NotificationModeReturnCode):
+		if release {
+			return "", fmt.Errorf("STACKWEAVER_NOTIFICATION_MODE %q is not allowed with GIN_MODE=release: it returns auth codes to anonymous callers; configure SMTP and use \"email\" (see the self-hosting email documentation)", raw)
+		}
+		return NotificationModeReturnCode, nil
+	default:
+		return "", fmt.Errorf("STACKWEAVER_NOTIFICATION_MODE %q is not a valid mode: use \"email\" or, on a development machine only, \"return_code\"", raw)
+	}
+}
 
 // SessionCookieName is the name of the httpOnly cookie that stores Zitadel session entries.
 const SessionCookieName = "sessions"
@@ -497,7 +516,8 @@ func (p *AuthProxy) IsBackchannelRevoked(sid string) bool {
 //
 //	{
 //	  "backchannel_binding_active": bool,  // true iff p.config.ClientID is non-empty (R24-8)
-//	  "production_mode": bool              // mirrors p.config.IsProduction
+//	  "production_mode": bool,             // mirrors p.config.IsProduction
+//	  "notification_mode": string          // "email" or "return_code" (#829)
 //	}
 //
 // Intentionally NOT a health check in the liveness/readiness sense - it
@@ -508,6 +528,7 @@ func (p *AuthProxy) HealthAuthProxy(c *gin.Context) {
 	c.JSON(http.StatusOK, BackchannelStatusResponse{
 		BackchannelBindingActive: p.config.ClientID != "",
 		ProductionMode:           p.config.IsProduction,
+		NotificationMode:         p.config.NotificationMode,
 	})
 }
 
@@ -1635,29 +1656,8 @@ func (p *AuthProxy) shouldFakeUnknownUser(c *gin.Context, reqBody map[string]any
 	// for up to 15 minutes - exactly the leak we're closing. The cost
 	// is one extra Zitadel call per unknown-user 404, gated by the
 	// per-IP rate limiter (so attacker-volume is bounded).
-	body, status, err := p.proxyJSON(c.Request.Context(), http.MethodGet, "/v2/settings/login", nil)
-	if err != nil || status != http.StatusOK {
-		return false
-	}
-	// settings response is wrapped in `{"settings": {...}}` -
-	// unwrap before checking. Same shape as settingsProxy.
-	var wrapper struct {
-		Settings json.RawMessage `json:"settings"`
-	}
-	var raw []byte
-	if err := json.Unmarshal(body, &wrapper); err == nil && len(wrapper.Settings) > 0 {
-		raw = wrapper.Settings
-	}
-	if len(raw) == 0 {
-		return false
-	}
-	var policy struct {
-		IgnoreUnknownUsernames bool `json:"ignoreUnknownUsernames"`
-	}
-	if err := json.Unmarshal(raw, &policy); err != nil {
-		return false
-	}
-	return policy.IgnoreUnknownUsernames
+	fields, err := p.loginSettings(c.Request.Context(), "")
+	return err == nil && fields.IgnoreUnknownUsernames
 }
 
 // buildDecoySessionResponse synthesizes a Zitadel-shaped createSession
@@ -2756,70 +2756,164 @@ func (p *AuthProxy) ListIdpProviders(c *gin.Context) {
 // --- User Management Proxy (A6) ---
 
 // CreateUser handles POST /auth/users.
-// registrationAllowed reports whether the Zitadel login policy permits self-registration
-// (`allowRegister: true`). It reads the live policy via the admin PAT and returns true ONLY
-// when registration is affirmatively allowed - a disabled policy, or any error reading it,
-// yields false so the public registration endpoint fails closed (AUD-120). The cache is
-// deliberately bypassed for the same reason as shouldFakeUnknownUser: the policy only changes
-// on rare operator action, and a stale allow would keep the bypass open.
-func (p *AuthProxy) registrationAllowed(c *gin.Context) bool {
-	body, status, err := p.proxyJSON(c.Request.Context(), http.MethodGet, "/v2/settings/login", nil)
-	if err != nil || status != http.StatusOK {
-		return false
+// loginPolicyFields is the subset of Zitadel's login settings the proxy decides on.
+type loginPolicyFields struct {
+	AllowRegister          bool `json:"allowRegister"`
+	AllowDomainDiscovery   bool `json:"allowDomainDiscovery"`
+	IgnoreUnknownUsernames bool `json:"ignoreUnknownUsernames"`
+}
+
+// loginSettings reads the login policy, uncached, for orgID, or without an org context when
+// orgID is empty, which Zitadel resolves to the login-service user's own org. Every caller makes
+// a security decision on the answer, and a stale cached allow would keep a bypass open, so this
+// never reads the settings cache.
+func (p *AuthProxy) loginSettings(ctx context.Context, orgID string) (loginPolicyFields, error) {
+	path := "/v2/settings/login"
+	if orgID != "" {
+		path += "?ctx.orgId=" + url.QueryEscape(orgID)
 	}
-	// The settings response is wrapped in `{"settings": {...}}` - unwrap before checking.
+	body, status, err := p.proxyJSON(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return loginPolicyFields{}, fmt.Errorf("reading login settings: %w", err)
+	}
+	if status != http.StatusOK {
+		return loginPolicyFields{}, fmt.Errorf("reading login settings: status %d", status)
+	}
+	// The settings response is wrapped in `{"settings": {...}}`.
 	var wrapper struct {
 		Settings json.RawMessage `json:"settings"`
 	}
 	if err := json.Unmarshal(body, &wrapper); err != nil || len(wrapper.Settings) == 0 {
-		return false
+		return loginPolicyFields{}, errors.New("reading login settings: missing settings envelope")
 	}
-	var policy struct {
-		AllowRegister bool `json:"allowRegister"`
+	var fields loginPolicyFields
+	if err := json.Unmarshal(wrapper.Settings, &fields); err != nil {
+		return loginPolicyFields{}, fmt.Errorf("decoding login settings: %w", err)
 	}
-	if err := json.Unmarshal(wrapper.Settings, &policy); err != nil {
-		return false
+	return fields, nil
+}
+
+// registrationAllowed reports whether the login policy of orgID (empty: the login-service
+// user's org) permits self-registration. Any error reading it yields false, so the public
+// registration endpoint fails closed (AUD-120).
+func (p *AuthProxy) registrationAllowed(ctx context.Context, orgID string) bool {
+	fields, err := p.loginSettings(ctx, orgID)
+	return err == nil && fields.AllowRegister
+}
+
+// errUnresolvableOrg means the registration body named an org the proxy cannot pin down.
+var errUnresolvableOrg = errors.New("the organization in the registration request cannot be resolved")
+
+// resolveRegistrationOrg returns the org a registration would create the user in (#829 D4), so
+// the gate checks the same org Zitadel creates in. A body without `organization` returns "" (the
+// login-service user's org, Zitadel's default). An `orgDomain` is resolved to exactly one active
+// org whose primary domain it is (a primary domain is always verified), and the body is rewritten
+// to that `orgId`, so the domain cannot resolve differently at creation. Anything else is
+// errUnresolvableOrg.
+func (p *AuthProxy) resolveRegistrationOrg(ctx context.Context, body map[string]any) (string, error) {
+	raw, present := body["organization"]
+	if !present {
+		return "", nil
 	}
-	return policy.AllowRegister
+	org, ok := raw.(map[string]any)
+	if !ok {
+		return "", errUnresolvableOrg
+	}
+	orgID, _ := org["orgId"].(string)
+	orgDomain, _ := org["orgDomain"].(string)
+	orgID, orgDomain = strings.TrimSpace(orgID), strings.ToLower(strings.TrimSpace(orgDomain))
+	switch {
+	case orgID != "" && orgDomain == "" && len(org) == 1:
+		return orgID, nil
+	case orgDomain != "" && orgID == "" && len(org) == 1:
+		id, err := p.orgByPrimaryDomain(ctx, orgDomain)
+		if err != nil {
+			return "", err
+		}
+		body["organization"] = map[string]any{"orgId": id}
+		return id, nil
+	default:
+		return "", errUnresolvableOrg
+	}
+}
+
+// orgByPrimaryDomain finds the single active org whose primary domain is domain.
+func (p *AuthProxy) orgByPrimaryDomain(ctx context.Context, domain string) (string, error) {
+	query := map[string]any{"queries": []map[string]any{{"domainQuery": map[string]any{
+		"domain": domain, "method": "TEXT_QUERY_METHOD_EQUALS",
+	}}}}
+	respBody, status, err := p.proxyJSON(ctx, http.MethodPost, "/v2/organizations/_search", query)
+	if err != nil || status != http.StatusOK {
+		return "", errUnresolvableOrg
+	}
+	var parsed struct {
+		Result []struct {
+			ID            string `json:"id"`
+			State         string `json:"state"`
+			PrimaryDomain string `json:"primaryDomain"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", errUnresolvableOrg
+	}
+	var match string
+	for _, o := range parsed.Result {
+		if o.State != "ORGANIZATION_STATE_ACTIVE" || !strings.EqualFold(o.PrimaryDomain, domain) {
+			continue
+		}
+		if match != "" {
+			return "", errUnresolvableOrg
+		}
+		match = o.ID
+	}
+	if match == "" {
+		return "", errUnresolvableOrg
+	}
+	return match, nil
 }
 
 func (p *AuthProxy) CreateUser(c *gin.Context) {
 	// AUD-120: this endpoint is on the unauthenticated /auth surface and forwards to Zitadel
 	// with the admin PAT. Honor the operator's login policy - without this an operator who
 	// disabled self-registration is bypassed (bounded only by the per-IP rate limiter).
-	if !p.registrationAllowed(c) {
-		respondError(c, http.StatusForbidden, "self-registration is disabled")
-		return
-	}
-
+	//
+	// #829 D4: the policy checked is the one of the org the user would be created in, so a caller
+	// cannot pass a permissive org for the check and create the user in a closed one.
 	var reqBody map[string]any
 	if err := c.ShouldBindJSON(&reqBody); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	// In return_code mode, inject email.returnCode (DR-6).
-	// SetHumanEmail.verification is a Zitadel proto `oneof` - only ONE branch
-	// (returnCode | sendCode | isVerified) may be set per message. Register.tsx
-	// pre-fills `isVerified: false` for email-mode parity, so we strip the
-	// other branches before injecting returnCode; otherwise Zitadel's
-	// unmarshaller rejects the message with "oneof … verification is already
-	// set".
-	if p.config.NotificationMode == NotificationModeReturnCode {
-		if email, ok := reqBody["email"].(map[string]any); ok {
-			delete(email, "isVerified")
-			delete(email, "sendCode")
-			email["returnCode"] = map[string]any{}
+	if intentID, intentToken, ok := intentFields(reqBody); ok {
+		// #829 D5 (Q8, Q9): an SSO account comes only from an IdP login the proxy redeems with
+		// Zitadel. It bypasses the allowRegister gate, because the IdP being offered for login
+		// with user creation allowed is the operator's consent.
+		body, status, msg := p.registrationFromIntent(c.Request.Context(), intentID, intentToken)
+		if status != 0 {
+			respondError(c, status, msg)
+			return
 		}
+		reqBody = body
 	} else {
-		// Email mode: this endpoint is anonymous, so a caller-supplied `returnCode` would hand the
-		// verification code to whoever asked, and `isVerified: true` would mark an address verified
-		// that nobody proved they own. Strip both from email and phone so Zitadel falls back to its
-		// default branch and delivers the code itself.
-		for _, key := range []string{"email", "phone"} {
-			if contact, ok := reqBody[key].(map[string]any); ok {
-				delete(contact, "returnCode")
-				delete(contact, "isVerified")
+		orgID, err := p.resolveRegistrationOrg(c.Request.Context(), reqBody)
+		if err != nil || !p.registrationAllowed(c.Request.Context(), orgID) {
+			respondError(c, http.StatusForbidden, "self-registration is disabled")
+			return
+		}
+
+		// #829 AC7: this endpoint is anonymous, so only allowlisted fields reach Zitadel. A
+		// caller-supplied returnCode would hand over the verification code, isVerified would
+		// verify an address nobody proved they own, a sendCode.urlTemplate would point the
+		// verification link at the caller's host, and idpLinks, hashedPassword, totpSecret or
+		// metadata would attach identity data. The email object keeps only the address, so
+		// Zitadel's default branch delivers the code itself.
+		reqBody = allowlistedRegistration(reqBody)
+
+		// In return_code mode (development only), inject email.returnCode (DR-6). The
+		// verification branch of SetHumanEmail is a proto oneof; the allowlist removed the others.
+		if p.config.NotificationMode == NotificationModeReturnCode {
+			if email, ok := reqBody["email"].(map[string]any); ok {
+				email["returnCode"] = map[string]any{}
 			}
 		}
 	}
@@ -2884,6 +2978,171 @@ func (p *AuthProxy) waitForUserActive(ctx context.Context, userID string) error 
 	}
 }
 
+// intentFields returns the IdP intent a registration body names, if it names one.
+func intentFields(body map[string]any) (id, token string, ok bool) {
+	id, _ = body["idpIntentId"].(string)
+	token, _ = body["idpIntentToken"].(string)
+	id, token = strings.TrimSpace(id), strings.TrimSpace(token)
+	return id, token, id != "" || token != ""
+}
+
+// registrationFromIntent builds the user to create from a redeemed IdP intent (#829 D5). The
+// whole user comes from Zitadel's own `addHumanUser` suggestion; nothing from the request body is
+// used, so a caller cannot pair their own IdP login with someone else's email, links or org. It
+// returns a non-zero status and message when the intent must not create a user. Retrieving an
+// intent does not consume it; the SPA's later createSession idpIntent check does.
+func (p *AuthProxy) registrationFromIntent(ctx context.Context, intentID, intentToken string) (map[string]any, int, string) {
+	if intentID == "" || intentToken == "" {
+		return nil, http.StatusForbidden, "the identity provider login could not be confirmed"
+	}
+	respBody, status, err := p.proxyJSON(ctx, http.MethodPost, "/v2/idp_intents/"+url.PathEscape(intentID), map[string]any{"idpIntentToken": intentToken})
+	if err != nil || status != http.StatusOK {
+		return nil, http.StatusForbidden, "the identity provider login could not be confirmed"
+	}
+	var intent struct {
+		UserID         string `json:"userId"`
+		IDPInformation struct {
+			IDPID    string `json:"idpId"`
+			UserName string `json:"userName"`
+		} `json:"idpInformation"`
+		AddHumanUser map[string]any `json:"addHumanUser"`
+	}
+	if err := json.Unmarshal(respBody, &intent); err != nil {
+		return nil, http.StatusForbidden, "the identity provider login could not be confirmed"
+	}
+	if intent.UserID != "" {
+		return nil, http.StatusConflict, "this identity provider account is already linked to a user; sign in instead"
+	}
+	if !p.idpAllowsCreation(ctx, intent.IDPInformation.IDPID) {
+		return nil, http.StatusForbidden, "this identity provider does not allow creating accounts"
+	}
+	email, _ := intent.AddHumanUser["email"].(map[string]any)
+	address, _ := email["email"].(string)
+	if strings.TrimSpace(address) == "" {
+		return nil, http.StatusUnprocessableEntity, "the identity provider did not supply an email address"
+	}
+	exists, err := p.userWithEmailExists(ctx, address)
+	if err != nil {
+		return nil, http.StatusBadGateway, "failed to check for an existing account"
+	}
+	if exists {
+		return nil, http.StatusConflict, "an account with this email already exists; sign in with your password first"
+	}
+
+	body := map[string]any{"email": map[string]any{"email": address, "isVerified": true}}
+	for _, key := range []string{"username", "profile", "idpLinks"} {
+		if v, ok := intent.AddHumanUser[key]; ok {
+			body[key] = v
+		}
+	}
+	// Zitadel requires IDPLink.userName (1-200 characters) but leaves it out of the suggestion
+	// for some IdP types; fill it from the IdP's user name, else the email.
+	linkName := intent.IDPInformation.UserName
+	if linkName == "" {
+		linkName = address
+	}
+	if links, ok := body["idpLinks"].([]any); ok {
+		for _, l := range links {
+			if link, ok := l.(map[string]any); ok {
+				if name, _ := link["userName"].(string); strings.TrimSpace(name) == "" {
+					link["userName"] = linkName
+				}
+			}
+		}
+	}
+	return body, 0, ""
+}
+
+// idpAllowsCreation reports whether idpID is offered for login and allowed to create users, in
+// the login-service user's org, which is where an intent-bound user is created.
+func (p *AuthProxy) idpAllowsCreation(ctx context.Context, idpID string) bool {
+	if idpID == "" {
+		return false
+	}
+	respBody, status, err := p.proxyJSON(ctx, http.MethodGet, "/v2/settings/login/idps?creationAllowed=true", nil)
+	if err != nil || status != http.StatusOK {
+		return false
+	}
+	var list struct {
+		IdentityProviders []struct {
+			ID string `json:"id"`
+		} `json:"identityProviders"`
+	}
+	if err := json.Unmarshal(respBody, &list); err != nil {
+		return false
+	}
+	for _, idp := range list.IdentityProviders {
+		if idp.ID == idpID {
+			return true
+		}
+	}
+	return false
+}
+
+// userWithEmailExists reports whether any user already has this email (#829 Q13).
+func (p *AuthProxy) userWithEmailExists(ctx context.Context, address string) (bool, error) {
+	query := map[string]any{"queries": []map[string]any{{"emailQuery": map[string]any{
+		"emailAddress": address, "method": "TEXT_QUERY_METHOD_EQUALS_IGNORE_CASE",
+	}}}}
+	respBody, status, err := p.proxyJSON(ctx, http.MethodPost, "/v2/users", query)
+	if err != nil {
+		return false, fmt.Errorf("searching users by email: %w", err)
+	}
+	if status != http.StatusOK {
+		return false, fmt.Errorf("searching users by email: status %d", status)
+	}
+	var found struct {
+		Result []json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &found); err != nil {
+		return false, fmt.Errorf("decoding the user search: %w", err)
+	}
+	return len(found.Result) > 0, nil
+}
+
+// allowlistedRegistration keeps the registration fields the SPA sends (Register.tsx): username,
+// the names, the email address, the chosen password, and the organization (already resolved to
+// an orgId by resolveRegistrationOrg). Everything else is dropped.
+func allowlistedRegistration(in map[string]any) map[string]any {
+	out := map[string]any{}
+	if v, ok := in["username"].(string); ok && v != "" {
+		out["username"] = v
+	}
+	if profile := pickFields(in["profile"], "givenName", "familyName", "displayName"); profile != nil {
+		out["profile"] = profile
+	}
+	if email, ok := in["email"].(map[string]any); ok {
+		if addr, ok := email["email"].(string); ok {
+			out["email"] = map[string]any{"email": addr}
+		}
+	}
+	if password := pickFields(in["password"], "password", "changeRequired"); password != nil {
+		out["password"] = password
+	}
+	if org, ok := in["organization"]; ok {
+		out["organization"] = org
+	}
+	return out
+}
+
+// pickFields returns the named keys of an object, or nil when it is not an object or has none.
+func pickFields(v any, keys ...string) map[string]any {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := map[string]any{}
+	for _, k := range keys {
+		if val, ok := obj[k]; ok {
+			out[k] = val
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // PasswordReset handles POST /auth/users/:id/password-reset.
 // This endpoint is public but rate-limited per DR-4.
 func (p *AuthProxy) PasswordReset(c *gin.Context) {
@@ -2893,20 +3152,15 @@ func (p *AuthProxy) PasswordReset(c *gin.Context) {
 		return
 	}
 
-	var reqBody map[string]any
-	if err := c.ShouldBindJSON(&reqBody); err != nil {
-		reqBody = make(map[string]any)
-	}
-
-	// In return_code mode, set top-level returnCode as empty object (DR-6).
+	// #829 AC7: the body is built here, never taken from the anonymous caller. A caller-supplied
+	// returnCode would hand over the reset code, and a sendLink.urlTemplate would point the
+	// genuine reset mail's link at the caller's host. In email mode Zitadel's default sends its
+	// own link; in return_code mode (development only) the code is returned (DR-6).
 	// CRITICAL: password_reset uses "returnCode": {} (empty object), NOT boolean true.
 	// Using boolean true causes Zitadel to silently fall back to email delivery.
-	// In email mode, strip any caller-supplied selector instead: this endpoint is anonymous, so a
-	// `returnCode` from the request body would hand the reset code to whoever asked.
+	reqBody := map[string]any{}
 	if p.config.NotificationMode == NotificationModeReturnCode {
 		reqBody["returnCode"] = map[string]any{}
-	} else {
-		delete(reqBody, "returnCode")
 	}
 
 	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/users/"+userID+"/password_reset", reqBody)
@@ -3474,29 +3728,8 @@ func (p *AuthProxy) orgAllowsDomainDiscovery(ctx context.Context, orgID string) 
 	if orgID == "" {
 		return false
 	}
-	body, status, err := p.proxyJSON(ctx, http.MethodGet, "/v2/settings/login?ctx.orgId="+url.QueryEscape(orgID), nil)
-	if err != nil || status != http.StatusOK {
-		return false
-	}
-	// Unwrap the `{"settings": {...}}` envelope, same shape as
-	// shouldFakeUnknownUser uses.
-	var wrapper struct {
-		Settings json.RawMessage `json:"settings"`
-	}
-	var raw []byte
-	if err := json.Unmarshal(body, &wrapper); err == nil && len(wrapper.Settings) > 0 {
-		raw = wrapper.Settings
-	}
-	if len(raw) == 0 {
-		return false
-	}
-	var policy struct {
-		AllowDomainDiscovery bool `json:"allowDomainDiscovery"`
-	}
-	if err := json.Unmarshal(raw, &policy); err != nil {
-		return false
-	}
-	return policy.AllowDomainDiscovery
+	fields, err := p.loginSettings(ctx, orgID)
+	return err == nil && fields.AllowDomainDiscovery
 }
 
 // LookupOrgByDomain handles GET /auth/orgs/by-domain?domain=<domain>.
@@ -3735,8 +3968,9 @@ func (p *AuthProxy) fetchSessionUserID(ctx context.Context, sessionID string) st
 
 // BackchannelStatusResponse reports the back-channel logout binding state.
 type BackchannelStatusResponse struct {
-	BackchannelBindingActive bool `json:"backchannel_binding_active"`
-	ProductionMode           bool `json:"production_mode"`
+	BackchannelBindingActive bool             `json:"backchannel_binding_active"`
+	ProductionMode           bool             `json:"production_mode"`
+	NotificationMode         NotificationMode `json:"notification_mode"`
 }
 
 // LoggedOutResponse acknowledges a logout.

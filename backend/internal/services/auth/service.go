@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -63,6 +65,67 @@ type Service struct {
 	verifier      *ZitadelVerifier
 	issuer        string
 	clientID      string
+	verified      verifiedCache
+}
+
+// ErrEmailNotVerified means the account has an email address Zitadel has not verified. Such an
+// account does not reach the platform (#829 D5): it gets no users row and claims no invitation.
+var ErrEmailNotVerified = errors.New("the account's email address is not verified")
+
+// ErrIdentityUnavailable means Zitadel could not be asked about the account, and there is no
+// recent verified result to fall back on. The request fails closed.
+var ErrIdentityUnavailable = errors.New("the identity provider could not be reached")
+
+// verifiedCache remembers subjects Zitadel recently reported as verified, until their token
+// expires (#829 Q14), so a brief Zitadel outage does not cut off users who were already in.
+type verifiedCache struct {
+	mu    sync.Mutex
+	until map[string]time.Time
+}
+
+const verifiedCacheMax = 10000
+
+func (v *verifiedCache) mark(subject string, until time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.until == nil || len(v.until) >= verifiedCacheMax {
+		v.until = make(map[string]time.Time) // bounded: start over rather than grow without limit
+	}
+	v.until[subject] = until
+}
+
+func (v *verifiedCache) has(subject string, now time.Time) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return now.Before(v.until[subject])
+}
+
+// userFromJWT is the one place a verified JWT becomes a platform user, shared by
+// AuthenticateMiddleware and GetUserFromToken (#829 D5). It refuses an account whose email is
+// unverified before any users row is written, so an invitation placeholder for that address stays
+// unclaimed until the person verifies. Accounts without an email (machine users) are not subject
+// to the check: they cannot self-register or claim an invitation. When Zitadel cannot be reached,
+// a subject verified within its token's lifetime proceeds and any other fails closed.
+func (s *Service) userFromJWT(ctx context.Context, claims *oidc.AccessTokenClaims, claimsMap map[string]interface{}, tokenString string) (*models.User, *UserInfo, error) {
+	info, err := ExtractUserInfo(ctx, claims, claimsMap, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
+	switch {
+	case err != nil:
+		if !s.verified.has(claims.Subject, time.Now()) {
+			return nil, nil, fmt.Errorf("%w: %w", ErrIdentityUnavailable, err)
+		}
+		logger.Warnf("auth: %v; using the cached verified state for %s", err, claims.Subject)
+		info = &UserInfo{Subject: claims.Subject, ID: claims.Subject}
+	case info.Email != "" && !info.EmailVerified:
+		return nil, info, ErrEmailNotVerified
+	case info.Email != "":
+		s.verified.mark(claims.Subject, claims.GetExpiration())
+	}
+
+	user, err := s.userRepo.GetOrCreateByZitadelSubject(info.Subject, info.Email, info.Name)
+	if err != nil {
+		return nil, info, fmt.Errorf("getting or creating the user for %q: %w", info.Subject, err)
+	}
+	return user, info, nil
 }
 
 // NewService constructs the auth service with the production repos.
@@ -140,7 +203,7 @@ func (s *Service) GetUserFromContext(c *gin.Context) (*models.User, error) {
 // GetUserFromToken authenticates a token and returns the user
 // Supports programmatic tokens (tfe- prefix, both org-bound and
 // user-bound api_keys) and JWT tokens (Zitadel).
-func (s *Service) GetUserFromToken(tokenString string) (*models.User, error) {
+func (s *Service) GetUserFromToken(ctx context.Context, tokenString string) (*models.User, error) {
 	// Programmatic tokens carry the "tfe-" prefix (Terraform Cloud
 	// compatible). Both org-bound and user-bound tokens are api_keys,
 	// so a single api-key lookup resolves them.
@@ -171,27 +234,14 @@ func (s *Service) GetUserFromToken(tokenString string) (*models.User, error) {
 		return nil, errors.New("authentication service not initialized")
 	}
 
-	// Verify JWT token (need context for verification)
-	ctx := context.Background()
 	claims, claimsMap, err := s.verifier.VerifyToken(ctx, tokenString)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
-
-	// Extract user info from claims (using raw claims map for custom Zitadel fields)
-	// If email is missing, fallback to UserInfo endpoint (standard OIDC)
-	userInfo := ExtractUserInfo(ctx, claims, claimsMap, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
-
-	// Get or create user in database by Zitadel subject
-	user, err := s.userRepo.GetOrCreateByZitadelSubject(
-		userInfo.Subject,
-		userInfo.Email,
-		userInfo.Name,
-	)
+	user, _, err := s.userFromJWT(ctx, claims, claimsMap, tokenString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get or create user: %w", err)
+		return nil, err
 	}
-
 	return user, nil
 }
 
@@ -211,7 +261,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			tokenFromQuery := c.Query("token")
 			if tokenFromQuery != "" {
 				// Authenticate using token from query parameter
-				user, err := s.GetUserFromToken(tokenFromQuery)
+				user, err := s.GetUserFromToken(c.Request.Context(), tokenFromQuery)
 				if err == nil {
 					c.Set("user_id", user.ID)
 					c.Set("user_email", user.Email)
@@ -335,24 +385,24 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Extract user info from claims (using raw claims map for custom Zitadel fields)
-		// If email is missing, fallback to UserInfo endpoint (standard OIDC)
-		userInfo := ExtractUserInfo(c.Request.Context(), claims, claimsMap, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
-
-		logger.Infof("Auth: Subject=%s Email=%s Groups=%v", userInfo.Subject, userInfo.Email, userInfo.Groups)
-
-		// Get or create user in database by Zitadel subject
-		// This ensures users are automatically created on first authentication
-		user, err := s.userRepo.GetOrCreateByZitadelSubject(
-			userInfo.Subject,
-			userInfo.Email,
-			userInfo.Name,
-		)
-		if err != nil {
+		user, userInfo, err := s.userFromJWT(c.Request.Context(), claims, claimsMap, tokenString)
+		switch {
+		case errors.Is(err, ErrEmailNotVerified):
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "verify your email address to continue")
+			c.Abort()
+			return
+		case errors.Is(err, ErrIdentityUnavailable):
+			logger.Warnf("auth: %v", err)
+			jsonapi.WriteError(c, http.StatusServiceUnavailable, "Service Unavailable", "the identity provider could not be reached; try again shortly")
+			c.Abort()
+			return
+		case err != nil:
+			logger.Errorf("auth: %v", err)
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to get or create user")
 			c.Abort()
 			return
 		}
+		logger.Infof("Auth: Subject=%s Email=%s Groups=%v", userInfo.Subject, userInfo.Email, userInfo.Groups)
 
 		// Store local user UUID in context (not Zitadel subject)
 		c.Set("user_id", user.ID)
@@ -446,8 +496,9 @@ func (s *Service) FetchUserInfoPicture(ctx context.Context, c *gin.Context) stri
 		return ""
 	}
 
-	userInfoData := fetchUserInfoFromEndpoint(ctx, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
-	if userInfoData == nil {
+	userInfoData, err := fetchUserInfoFromEndpoint(ctx, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
+	if err != nil {
+		logger.Warnf("auth: %v", err)
 		return ""
 	}
 

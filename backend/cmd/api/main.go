@@ -858,13 +858,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// #829: parse the notification mode whether or not the auth proxy is enabled, so a typo or a
+	// production return_code fails at startup instead of silently changing how codes are sent.
+	notificationMode, err := handlers.ParseNotificationMode(os.Getenv("STACKWEAVER_NOTIFICATION_MODE"), isProduction)
+	if err != nil {
+		logger.Errorf("startup: %v", err)
+		os.Exit(1)
+	}
+
 	var authProxy *handlers.AuthProxy
 	if loginServicePAT != "" {
 		zitadelInternalURL := "http://" + zitadelInternalAddr
-		notificationMode := handlers.NotificationModeReturnCode
-		if mode := os.Getenv("STACKWEAVER_NOTIFICATION_MODE"); mode == "email" {
-			notificationMode = handlers.NotificationModeEmail
-		}
 		// F-sec-5/6 lockout - env-overridable so prod / staging / dev
 		// can each pick a sensible threshold. The defaults inside
 		// NewAuthProxy (5 attempts in 15 min) cover the common case;

@@ -116,7 +116,7 @@ func TestGetUserFromToken_APIKeyTokenSucceeds(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
-	got, err := svc.GetUserFromToken(validToken)
+	got, err := svc.GetUserFromToken(context.Background(), validToken)
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestGetUserFromToken_NonTFEPrefixSkipsAPIKey(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
-	_, err := svc.GetUserFromToken("eyJhbGciOi...not-a-tfe-token")
+	_, err := svc.GetUserFromToken(context.Background(), "eyJhbGciOi...not-a-tfe-token")
 	if err == nil {
 		t.Fatal("non-tfe token without JWT verifier must return an error")
 	}
@@ -166,7 +166,7 @@ func TestGetUserFromToken_APIKeyMissingServiceFailsCleanly(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	// Deliberately do NOT call SetAPIKeyService - apiKeyService stays nil.
 
-	_, err := svc.GetUserFromToken("tfe-something")
+	_, err := svc.GetUserFromToken(context.Background(), "tfe-something")
 	if err == nil {
 		t.Fatal("missing api-key service must error, not silently succeed")
 	}
@@ -183,7 +183,7 @@ func TestGetUserFromToken_UnknownTFETokenIsTerminal(t *testing.T) {
 	svc := NewServiceWithLookups(&mockUserRepo{})
 	svc.SetAPIKeyService(apiKey)
 
-	_, err := svc.GetUserFromToken("tfe-revoked-or-unknown")
+	_, err := svc.GetUserFromToken(context.Background(), "tfe-revoked-or-unknown")
 	if err == nil || !strings.Contains(err.Error(), "invalid or revoked API token") {
 		t.Fatalf("want terminal invalid-or-revoked error, got: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestGetUserFromToken_APIKeyValidButOrphanedUser(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
-	got, err := svc.GetUserFromToken("tfe-validkey-orphanuser")
+	got, err := svc.GetUserFromToken(context.Background(), "tfe-validkey-orphanuser")
 	if err == nil {
 		t.Fatalf("orphaned-key case must return an error, got user: %+v", got)
 	}

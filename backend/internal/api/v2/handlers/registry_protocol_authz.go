@@ -43,7 +43,7 @@ func registryCaller(c *gin.Context, authService *auth.Service) *models.User {
 	if token == "" {
 		return nil
 	}
-	user, err := authService.GetUserFromToken(token)
+	user, err := authService.GetUserFromToken(c.Request.Context(), token)
 	if err != nil || user == nil {
 		return nil
 	}

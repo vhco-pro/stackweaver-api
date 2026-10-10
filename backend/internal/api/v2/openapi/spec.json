@@ -5195,6 +5195,9 @@
           "backchannel_binding_active": {
             "type": "boolean"
           },
+          "notification_mode": {
+            "type": "string"
+          },
           "production_mode": {
             "type": "boolean"
           }
