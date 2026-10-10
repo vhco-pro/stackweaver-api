@@ -4,6 +4,7 @@
   "status": 200,
   "body": {
     "backchannel_binding_active": false,
+    "notification_mode": "",
     "production_mode": false
   }
 }

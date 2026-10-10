@@ -3104,3 +3104,24 @@ func TestAllowPostLogoutRedirect_RejectsBackslashAndProtocolRelative(t *testing.
 		})
 	}
 }
+
+// TestHealthAuthProxy_ReportsNotificationMode: #829 AC5. The config probe reports the active
+// notification mode so a deployment can be checked for email mode without reading its env.
+func TestHealthAuthProxy_ReportsNotificationMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, mode := range []NotificationMode{NotificationModeEmail, NotificationModeReturnCode} {
+		proxy := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: "http://unused", PAT: "pat", NotificationMode: mode})
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/health/auth-proxy", http.NoBody)
+		proxy.HealthAuthProxy(c)
+
+		var body map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decoding health response: %v", err)
+		}
+		if got := body["notification_mode"]; got != string(mode) {
+			t.Errorf("notification_mode = %v, want %q (body %s)", got, mode, w.Body.String())
+		}
+	}
+}

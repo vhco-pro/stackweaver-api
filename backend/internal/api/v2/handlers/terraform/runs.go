@@ -1413,7 +1413,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		if uid, ok := verifyLogToken(tokenFromQuery, c.Param("id")); ok {
 			c.Set("user_id", uid)
 		} else {
-			user, err := h.authService.GetUserFromToken(tokenFromQuery)
+			user, err := h.authService.GetUserFromToken(c.Request.Context(), tokenFromQuery)
 			if err != nil {
 				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Invalid token")
 				return
@@ -1548,7 +1548,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 	// TFE-compatible: Support token in query parameter (for Terraform CLI log-read-url)
 	tokenFromQuery := c.Query("token")
 	if tokenFromQuery != "" {
-		user, err := h.authService.GetUserFromToken(tokenFromQuery)
+		user, err := h.authService.GetUserFromToken(c.Request.Context(), tokenFromQuery)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Invalid token")
 			return
@@ -1633,7 +1633,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 	// TFE-compatible: Support token in query parameter (for Terraform CLI log-read-url)
 	tokenFromQuery := c.Query("token")
 	if tokenFromQuery != "" {
-		user, err := h.authService.GetUserFromToken(tokenFromQuery)
+		user, err := h.authService.GetUserFromToken(c.Request.Context(), tokenFromQuery)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Invalid token")
 			return
