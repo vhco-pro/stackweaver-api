@@ -45,36 +45,8 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	// Check format parameter
-	format := c.DefaultQuery("format", "")
-
-	if format == "simple" {
-		// Simple JSON format for frontend
-		data := make([]WebhookEventSimple, len(events))
-		for i, event := range events {
-			data[i] = WebhookEventSimple{
-				ID:           event.ID.String(),
-				EventType:    event.EventType,
-				Provider:     event.Provider,
-				Repository:   event.Repository,
-				Branch:       event.Branch,
-				Commit:       event.Commit,
-				Status:       event.Status,
-				ResponseCode: event.ResponseCode,
-				Message:      event.Message,
-				DeliveredAt:  event.DeliveredAt,
-				ProcessedAt:  event.ProcessedAt,
-			}
-		}
-		jsonapi.WriteDocumentMeta(c, http.StatusOK, data, WebhookEventSimpleMeta{
-			Total:      total,
-			PageSize:   limit,
-			PageNumber: (offset / limit) + 1,
-		})
-		return
-	}
-
-	// JSON:API format
+	// One projection: webhook-events resources with the standard pagination block. No query
+	// parameter selects another shape; an unknown parameter is ignored.
 	data := make([]jsonapi.Resource[WebhookEventAttributes], len(events))
 	for i, event := range events {
 		data[i] = jsonapi.Resource[WebhookEventAttributes]{

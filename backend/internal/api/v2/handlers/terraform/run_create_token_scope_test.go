@@ -36,10 +36,12 @@ import (
 
 type runCreateScopeFixture struct {
 	router    *gin.Engine
+	db        *gorm.DB // for cases that need rows of their own; cleanup stays row-scoped
 	runRepo   *repository.RunRepository
 	orgA      uuid.UUID // holds the workspace
 	orgB      uuid.UUID // the token is bound here
 	ownerID   uuid.UUID // admin in org A, member of org B
+	projectA  uuid.UUID // the workspace's project, in org A
 	workspace string    // lives in org A
 }
 
@@ -112,8 +114,13 @@ func setupRunCreateScope(t *testing.T) *runCreateScopeFixture {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		// Seed the context the way AuthMiddleware does for an api-key request.
-		c.Set("user_id", owner.ID)
+		// Seed the context the way AuthMiddleware does for an api-key request. The caller is
+		// the fixture's owner unless a case names another user.
+		userID := owner.ID
+		if id, err := uuid.Parse(c.GetHeader("X-Test-User")); err == nil {
+			userID = id
+		}
+		c.Set("user_id", userID)
 		if kind := c.GetHeader("X-Test-Token-Kind"); kind != "" {
 			c.Set("token_kind", kind)
 		}
@@ -127,8 +134,8 @@ func setupRunCreateScope(t *testing.T) *runCreateScopeFixture {
 	router.POST("/api/v2/runs", h.Create)
 
 	return &runCreateScopeFixture{
-		router: router, runRepo: runRepo,
-		orgA: orgA.ID, orgB: orgB.ID, ownerID: owner.ID, workspace: wsA.ID,
+		router: router, db: db, runRepo: runRepo,
+		orgA: orgA.ID, orgB: orgB.ID, ownerID: owner.ID, projectA: projA.ID, workspace: wsA.ID,
 	}
 }
 

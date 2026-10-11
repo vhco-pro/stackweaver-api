@@ -287,6 +287,22 @@
           "sha": "",
           "url": "",
           "usage": 0,
+          "version": "1.11.14"
+        },
+        "id": "\u003cid\u003e",
+        "type": "terraform-versions"
+      },
+      {
+        "attributes": {
+          "archs": [],
+          "beta": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "deprecated": false,
+          "enabled": true,
+          "official": true,
+          "sha": "",
+          "url": "",
+          "usage": 0,
           "version": "1.11.2"
         },
         "id": "\u003cid\u003e",
@@ -496,6 +512,70 @@
           "url": "",
           "usage": 0,
           "version": "1.12.5"
+        },
+        "id": "\u003cid\u003e",
+        "type": "terraform-versions"
+      },
+      {
+        "attributes": {
+          "archs": [],
+          "beta": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "deprecated": false,
+          "enabled": true,
+          "official": true,
+          "sha": "",
+          "url": "",
+          "usage": 0,
+          "version": "1.12.6"
+        },
+        "id": "\u003cid\u003e",
+        "type": "terraform-versions"
+      },
+      {
+        "attributes": {
+          "archs": [],
+          "beta": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "deprecated": false,
+          "enabled": true,
+          "official": true,
+          "sha": "",
+          "url": "",
+          "usage": 0,
+          "version": "1.12.7"
+        },
+        "id": "\u003cid\u003e",
+        "type": "terraform-versions"
+      },
+      {
+        "attributes": {
+          "archs": [],
+          "beta": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "deprecated": false,
+          "enabled": true,
+          "official": true,
+          "sha": "",
+          "url": "",
+          "usage": 0,
+          "version": "1.13.0"
+        },
+        "id": "\u003cid\u003e",
+        "type": "terraform-versions"
+      },
+      {
+        "attributes": {
+          "archs": [],
+          "beta": false,
+          "created-at": "\u003ctimestamp\u003e",
+          "deprecated": false,
+          "enabled": true,
+          "official": true,
+          "sha": "",
+          "url": "",
+          "usage": 0,
+          "version": "1.13.1"
         },
         "id": "\u003cid\u003e",
         "type": "terraform-versions"
@@ -1017,9 +1097,9 @@
       "pagination": {
         "current-page": 1,
         "next-page": null,
-        "page-size": 63,
+        "page-size": 68,
         "prev-page": null,
-        "total-count": 63,
+        "total-count": 68,
         "total-pages": 1
       }
     }

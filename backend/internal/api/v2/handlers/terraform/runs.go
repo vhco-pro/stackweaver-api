@@ -6,6 +6,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
@@ -96,40 +98,119 @@ func NewRunHandlerV2(
 	}
 }
 
+// runsType is the JSON:API resource type a run-create document must carry.
+const runsType = "runs"
+
+// RunCreateAttributes holds the go-tfe RunCreateOptions attributes this endpoint acts on. The
+// three intent attributes are the whole vocabulary: is-destroy, plan-only (a speculative run
+// that cannot be applied) and auto-apply (apply without a manual confirmation). An attribute the
+// struct does not declare is ignored, as on Terraform Enterprise.
+type RunCreateAttributes struct {
+	IsDestroy *bool  `json:"is-destroy,omitempty"`
+	Message   string `json:"message,omitempty"`
+	AutoApply *bool  `json:"auto-apply,omitempty"`
+	PlanOnly  *bool  `json:"plan-only,omitempty"`
+}
+
+// CreateRunRequestV2 is the JSON:API document go-tfe marshals for RunCreateOptions. `data` is
+// the only top-level member and it is required.
+//
+// The relationship data members are structs, not pointers, on purpose: go-tfe marshals a nil
+// configuration version as `"configuration-version": {"data": null}`, and a null decoded into a
+// struct leaves it zero, so "no configuration version" and "an absent relationship" read the same.
 type CreateRunRequestV2 struct {
-	Data struct {
-		Type       string `json:"type"`
-		Attributes struct {
-			IsDestroy          *bool  `json:"is-destroy,omitempty"`
-			Message            string `json:"message,omitempty"`
-			AutoApplyAfterPlan *bool  `json:"auto-apply-after-plan,omitempty"` // For UI "Plan and Apply" runs
-			// go-tfe RunCreateOptions wire fields (what any go-tfe client actually sends, e.g.
-			// tfe_workspace_run). auto-apply = apply without manual confirmation; plan-only = speculative
-			// run that cannot be applied. Neither auto-apply-after-plan nor a top-level operation exist on
-			// the go-tfe wire, so without these a normal go-tfe run resolved to a non-applyable plan-only.
-			AutoApply *bool `json:"auto-apply,omitempty"`
-			PlanOnly  *bool `json:"plan-only,omitempty"`
-		} `json:"attributes,omitempty"`
+	Data *struct {
+		Type          string              `json:"type"`
+		Attributes    RunCreateAttributes `json:"attributes"`
 		Relationships struct {
 			Workspace struct {
 				Data struct {
 					ID   string `json:"id"`
 					Type string `json:"type"`
 				} `json:"data"`
-			} `json:"workspace,omitempty"`
+			} `json:"workspace"`
 			ConfigurationVersion struct {
 				Data struct {
 					ID   string `json:"id"`
 					Type string `json:"type"`
 				} `json:"data"`
-			} `json:"configuration-version,omitempty"`
-		} `json:"relationships,omitempty"`
-	} `json:"data,omitempty"`
-	// Legacy format support (for backward compatibility)
-	WorkspaceID            string  `json:"workspace_id"`
-	ConfigurationVersionID *string `json:"configuration_version_id,omitempty"` // Format: cv-{16-char-id}
-	Operation              string  `json:"operation"`
-	AutoApplyAfterPlan     *bool   `json:"auto_apply_after_plan,omitempty"` // Legacy format
+			} `json:"configuration-version"`
+		} `json:"relationships"`
+	} `json:"data" binding:"required"`
+}
+
+// retiredRunKeys are the four top-level members this endpoint used to accept beside `data`.
+//
+// They are rejected rather than ignored, which is the one place the endpoint is stricter than
+// Terraform Enterprise (TFE ignores unknown members). The reason is the hybrid body: a caller
+// that still sends `operation` beside a valid document relied on it to choose between an
+// applyable and a speculative run, and dropping it silently would change what the run does. A
+// 400 that names the keys is the better failure.
+//
+// The members are json.RawMessage so that presence is what is detected, whatever the value:
+// `"operation": null` is still a caller on the old shape.
+type retiredRunKeys struct {
+	WorkspaceID            json.RawMessage `json:"workspace_id"`
+	ConfigurationVersionID json.RawMessage `json:"configuration_version_id"`
+	Operation              json.RawMessage `json:"operation"`
+	AutoApplyAfterPlan     json.RawMessage `json:"auto_apply_after_plan"`
+}
+
+func (k *retiredRunKeys) present() bool {
+	return k.WorkspaceID != nil || k.ConfigurationVersionID != nil || k.Operation != nil || k.AutoApplyAfterPlan != nil
+}
+
+// destroyPlansNotAllowedDetail is what a destroy run answers on a workspace whose
+// allow-destroy-plan setting is off (see Create).
+const destroyPlansNotAllowedDetail = "Destroy plans are not allowed on this workspace: its allow-destroy-plan " +
+	"setting is off. Turn the setting on to queue a destroy run."
+
+const retiredRunKeysDetail = "top-level fields are not accepted: workspace_id, configuration_version_id, " +
+	"operation, auto_apply_after_plan; use data.attributes and data.relationships"
+
+// decodeCreateRunRequest reads the run-create body and checks its shape, before anything is
+// looked up. On a rejection it writes the 400 itself and returns false.
+//
+// The body is read once and decoded twice from the same bytes: once for the retired keys and
+// once into the request. Order matters for the caller on the old shape, who gets the most
+// specific message available: retired keys first (even beside a valid document), then a missing
+// `data`, then `data.type`, then the workspace relationship.
+func decodeCreateRunRequest(c *gin.Context) (*CreateRunRequestV2, bool) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "request body could not be read")
+		return nil, false
+	}
+
+	var retired retiredRunKeys
+	if err := json.Unmarshal(raw, &retired); err != nil {
+		// Empty, malformed, or not a JSON object: not a document of any kind.
+		jsonapi.WriteDocumentRequired(c, runsType)
+		return nil, false
+	}
+	if retired.present() {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, retiredRunKeysDetail)
+		return nil, false
+	}
+
+	var req CreateRunRequestV2
+	if err := binding.JSON.BindBody(raw, &req); err != nil {
+		if req.Data == nil {
+			jsonapi.WriteDocumentRequired(c, runsType)
+			return nil, false
+		}
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+		return nil, false
+	}
+	if req.Data.Type != runsType {
+		jsonapi.WriteWrongType(c, runsType, req.Data.Type)
+		return nil, false
+	}
+	if req.Data.Relationships.Workspace.Data.ID == "" {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "a workspace relationship is required")
+		return nil, false
+	}
+	return &req, true
 }
 
 // resolveEffectiveAgentPool resolves which agent pool a run dispatches to, walking TFE's execution
@@ -175,58 +256,25 @@ func resolveEffectiveAgentPool(workspace *models.Workspace) *uuid.UUID {
 	return workspace.AgentPoolID
 }
 
-// resolveRunOperation maps a bound run-create request to a run operation and the two apply-intent
-// flags, honoring go-tfe's real RunCreateOptions wire attributes (is-destroy, plan-only, auto-apply)
-// with the frontend/legacy `operation` + `auto-apply-after-plan` as fallbacks.
+// resolveRunOperation maps the go-tfe intent attributes to a run operation and the per-run
+// auto-apply intent.
 //
-//   - operation           - the resolved run operation (plan-only cannot be applied).
-//   - autoApplyAfterPlan   - the "this is a plan-and-apply run" marker (frontend/legacy field).
-//   - perRunAutoApply      - go-tfe `auto-apply: true`: apply without a manual confirm (fire-and-forget).
-//   - legacyOperation      - the caller used the removed "plan"/"apply" operation and must be rejected.
+//   - operation       - the resolved run operation (plan-only cannot be applied).
+//   - perRunAutoApply - `auto-apply: true`: apply without a manual confirmation.
 //
-// Precedence: is-destroy wins, then a speculative plan-only, then any go-tfe run (auto-apply present)
-// is an APPLYABLE plan-and-apply. Without the plan-only/auto-apply arms a normal go-tfe run fell
-// through to the auto-apply-after-plan fallback and became a non-applyable plan-only, breaking
-// tfe_workspace_run and every go-tfe caller.
-func resolveRunOperation(req *CreateRunRequestV2) (operation models.RunOperation, autoApplyAfterPlan bool, perRunAutoApply bool, legacyOperation bool) {
-	if req.Data.Attributes.AutoApply != nil {
-		perRunAutoApply = *req.Data.Attributes.AutoApply
-	}
+// Precedence: is-destroy wins, then a speculative plan-only; everything else is a plan-and-apply
+// run that waits at `planned` for confirmation. That default is Terraform Enterprise's: a run
+// created with only a workspace is applyable, and speculative runs opt in with plan-only.
+func resolveRunOperation(attrs *RunCreateAttributes) (operation models.RunOperation, perRunAutoApply bool) {
+	perRunAutoApply = attrs.AutoApply != nil && *attrs.AutoApply
 	switch {
-	case req.Data.Attributes.AutoApplyAfterPlan != nil:
-		autoApplyAfterPlan = *req.Data.Attributes.AutoApplyAfterPlan
-	case req.AutoApplyAfterPlan != nil:
-		autoApplyAfterPlan = *req.AutoApplyAfterPlan
-	}
-
-	switch {
-	case req.Data.Attributes.IsDestroy != nil && *req.Data.Attributes.IsDestroy:
-		operation = models.RunOperationDestroy
-	case req.Data.Attributes.PlanOnly != nil && *req.Data.Attributes.PlanOnly:
-		// go-tfe `plan-only: true` - a speculative run that cannot be applied.
-		operation = models.RunOperationPlanOnly
-	case req.Data.Attributes.AutoApply != nil:
-		// A go-tfe client sent `auto-apply` (present, true OR false) without is-destroy/plan-only - a
-		// normal, APPLYABLE run (waits at `planned` for confirmation). auto-apply:true additionally
-		// auto-applies server-side (perRunAutoApply).
-		operation = models.RunOperationPlanAndApply
-	case req.Operation == "plan-and-apply":
-		operation = models.RunOperationPlanAndApply
-	case req.Operation == "plan-only":
-		operation = models.RunOperationPlanOnly
-	case req.Operation == "destroy":
-		operation = models.RunOperationDestroy
-	case req.Operation == "plan" || req.Operation == "apply":
-		legacyOperation = true
+	case attrs.IsDestroy != nil && *attrs.IsDestroy:
+		return models.RunOperationDestroy, perRunAutoApply
+	case attrs.PlanOnly != nil && *attrs.PlanOnly:
+		return models.RunOperationPlanOnly, perRunAutoApply
 	default:
-		// Frontend/legacy fallback: auto-apply-after-plan decides applyable vs plan-only.
-		if autoApplyAfterPlan {
-			operation = models.RunOperationPlanAndApply
-		} else {
-			operation = models.RunOperationPlanOnly
-		}
+		return models.RunOperationPlanAndApply, perRunAutoApply
 	}
-	return operation, autoApplyAfterPlan, perRunAutoApply, legacyOperation
 }
 
 // formatRunResponse formats a run in TFE-compatible JSON:API format
@@ -590,40 +638,27 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	var req CreateRunRequestV2
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	req, ok := decodeCreateRunRequest(c)
+	if !ok {
 		return
 	}
 
-	// Parse workspace ID (support both JSON:API format and legacy format)
-	var workspaceID string
-	switch {
-	case req.Data.Relationships.Workspace.Data.ID != "":
-		workspaceID = req.Data.Relationships.Workspace.Data.ID
-	case req.WorkspaceID != "":
-		workspaceID = req.WorkspaceID
-	default:
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Workspace ID is required")
-		return
-	}
-
-	// Parse configuration version ID (optional)
+	// The workspace and the optional configuration version come from their relationships only.
+	// go-tfe marshals a nil configuration version as {"data": null}, which reads as "none".
+	workspaceID := req.Data.Relationships.Workspace.Data.ID
 	var configVersionID *string
 	if req.Data.Relationships.ConfigurationVersion.Data.ID != "" {
 		configVersionID = &req.Data.Relationships.ConfigurationVersion.Data.ID
-	} else if req.ConfigurationVersionID != nil {
-		configVersionID = req.ConfigurationVersionID
 	}
 
-	// Determine operation type + apply intents from the request (see resolveRunOperation). Honors
-	// go-tfe's wire attributes (is-destroy, plan-only, auto-apply) with the frontend/legacy
-	// operation + auto-apply-after-plan as fallbacks.
-	operation, autoApplyAfterPlan, perRunAutoApply, legacyOperation := resolveRunOperation(&req)
-	if legacyOperation {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Legacy 'plan' and 'apply' operations are no longer supported. Use 'plan-only' or 'plan-and-apply' instead.")
-		return
-	}
+	// Resolve the run's intent from go-tfe's attributes alone (see resolveRunOperation).
+	operation, perRunAutoApply := resolveRunOperation(&req.Data.Attributes)
+	// AutoApplyAfterPlan is the stored "this run has an apply phase" marker, not an instruction to
+	// apply: the agent finalize path (runner_agent.go) only considers auto-apply for a run that
+	// carries it. Every plan-and-apply and destroy run created here is applyable, so every one of
+	// them carries it, whatever the caller sent; whether the run then applies without
+	// confirmation is decided by AutoApply and the workspace's VCS auto-apply setting.
+	applyable := operation != models.RunOperationPlanOnly
 
 	// Verify workspace exists and get it
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
@@ -683,6 +718,24 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	// If locked, new runs cannot be created until user unlocks it
 	if workspace.Locked {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is locked. Unlock the workspace to create new runs.")
+		return
+	}
+
+	// The workspace's allow-destroy-plan setting says whether destroy plans can be queued on it
+	// (TFE's `allow-destroy-plan` workspace attribute, default true). It is enforced here and
+	// only here: this handler is the single place a destroy run is created.
+	//
+	// The position is deliberate. It comes after the workspace lookup, the token's organization
+	// binding, the RBAC checks and the lock check, so a caller who may not create runs here still
+	// gets the 404 or 403 it always got and learns nothing about the setting, and a locked
+	// workspace still answers 409. It keys on the resolved operation, not on the `is-destroy`
+	// attribute, so it follows whatever resolveRunOperation decides is a destroy.
+	//
+	// No primary source states the status or body Terraform Enterprise answers with. The 422 and
+	// its wording are ours: 422 is what this API uses for a well-formed request that a resource's
+	// own rule refuses.
+	if operation == models.RunOperationDestroy && !workspace.AllowDestroyPlan {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", destroyPlansNotAllowedDetail)
 		return
 	}
 
@@ -755,29 +808,23 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		}
 	}
 
-	// TFE-compatible: Extract auto_apply_after_plan from request
-	// This flag indicates if a UI "Plan and Apply" run should be applicable after completion
-	// - false: "Plan only" run (plan-only, cannot be applied)
-	// - true: "Plan and Apply" run (not plan-only, can be applied after completion)
-	// operation, autoApplyAfterPlan and perRunAutoApply were resolved above via resolveRunOperation.
-	logger.Infof("Run creation: operation=%s auto_apply_after_plan=%v auto_apply=%v", operation, autoApplyAfterPlan, perRunAutoApply)
+	logger.Infof("Run creation: operation=%s applyable=%v auto_apply=%v", operation, applyable, perRunAutoApply)
 
 	// TFE execution-settings inheritance, resolved at run time down the chain
 	// workspace -> project (tfe_project_settings) -> organization (tfe_organization_default_settings).
 	// The most specific level that actually specifies settings wins.
 	effectiveAgentPoolID := resolveEffectiveAgentPool(workspace)
 
-	// TFE-compatible: All runs follow 2-phase process (plan, then confirm apply)
-	// UI "Plan and Apply" is just a regular plan run - user will see plan output and click "Apply Plan" button
-	// Only VCS push events can auto-apply (if workspace.AutoApply is enabled)
-	// CLI runs should NEVER auto-apply (they're just for preview)
+	// TFE-compatible: every run plans first. A plan-and-apply or destroy run then waits at `planned`
+	// for a confirmation, unless the caller sent `auto-apply: true` (AutoApply) or the run came
+	// from a VCS push in a workspace with auto-apply on. A plan-only run has no apply phase.
 	run := &models.Run{
 		WorkspaceID:            workspaceID,
 		ConfigurationVersionID: configVersionID,
 		CreatedBy:              &user.ID,
 		Status:                 models.RunStatusPending,
 		Operation:              operation,
-		AutoApplyAfterPlan:     autoApplyAfterPlan,   // TFE-compatible: Used to determine plan-only vs applicable
+		AutoApplyAfterPlan:     applyable,            // the "has an apply phase" marker; see above
 		AutoApply:              perRunAutoApply,      // go-tfe `auto-apply`: apply without manual confirmation
 		AgentPoolID:            effectiveAgentPoolID, // workspace pool, or the inherited project default
 	}

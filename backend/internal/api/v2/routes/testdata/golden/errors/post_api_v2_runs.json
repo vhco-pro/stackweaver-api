@@ -5,7 +5,7 @@
   "body": {
     "errors": [
       {
-        "detail": "Workspace ID is required",
+        "detail": "request body must be a JSON:API document: {\"data\": {\"type\": \"runs\", \"attributes\": {...}}}",
         "status": "400",
         "title": "Bad Request"
       }
