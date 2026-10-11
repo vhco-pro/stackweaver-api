@@ -1304,8 +1304,18 @@
     },
     {
       "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/events",
+      "mutating": true
+    },
+    {
+      "method": "POST",
       "path": "/api/v2/runner/jobs/:id/output",
       "mutating": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runner/jobs/:id/playbook-snapshot",
+      "mutating": false
     },
     {
       "method": "POST",

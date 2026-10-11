@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -61,6 +64,10 @@ type RunnerAgentHandler struct {
 	// State object access (encryption at rest) - optional, injected after creation.
 	// Routes self-hosted-runner state reads/writes through the encrypt/decrypt chokepoint.
 	stateService *state.Service
+	// syncRequester queues a playbook sync when a cached-mode job reaches an agent
+	// before the playbook has a snapshot. Optional: when nil the run still clones, the
+	// snapshot is just not repaired for the next run.
+	syncRequester *ansible.PlaybookSyncRequester
 	// Redis log buffer - optional, injected after creation. When set, agent job output streams
 	// through Redis (O(1) APPEND) instead of the O(n²) read-modify-write on object storage
 	// (AUD-028), and is copied to MinIO once at completion.
@@ -100,6 +107,7 @@ func NewRunnerAgentHandlerWithRepos(
 	cryptoService *crypto.CryptoService,
 	variableService *variable.Service,
 	storageClient storage.Client,
+	syncRequester *ansible.PlaybookSyncRequester,
 	db *gorm.DB,
 ) *RunnerAgentHandler {
 	return &RunnerAgentHandler{
@@ -117,6 +125,7 @@ func NewRunnerAgentHandlerWithRepos(
 		cryptoService:     cryptoService,
 		variableService:   variableService,
 		storageClient:     storageClient,
+		syncRequester:     syncRequester,
 		db:                db,
 	}
 }
@@ -760,6 +769,96 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 	response.Status(c, http.StatusOK, "received")
 }
 
+// JobEventRequest is the request body for a job event a runner records itself, as
+// opposed to the ansible-playbook output it streams through JobOutput.
+type JobEventRequest struct {
+	Event  string `json:"event"`
+	Task   string `json:"task"`
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+	Failed bool   `json:"failed"`
+}
+
+// runnerJobEvents is the closed set of events a runner may record through JobEvents:
+// the playbook-preparation rows the platform runner writes straight to the database.
+// Everything else, in particular the runner_on_* and v2_playbook_on_stats rows that
+// drive host counters and the task tree, is derived server-side from the streamed
+// output and must not be forgeable through this endpoint.
+var runnerJobEvents = []string{
+	"galaxy_cache_seeded",
+	"galaxy_install",
+	"galaxy_install_failed",
+	"galaxy_install_complete",
+	"playbook_source",
+}
+
+// maxJobEventTaskLen is the width of AnsibleJobEvent.Task.
+const maxJobEventTaskLen = 500
+
+// JobEvents records a playbook-preparation event for an Ansible job on behalf of the
+// self-hosted runner executing it. The row takes the job's next counter, so it stays
+// in sequence with the output streamed through JobOutput.
+// POST /api/v2/runner/jobs/:id/events
+func (h *RunnerAgentHandler) JobEvents(c *gin.Context) {
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+
+	var req JobEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+
+	if h.ansibleJobRepo == nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotImplemented, "Job events not configured")
+		return
+	}
+
+	job, err := h.ansibleJobRepo.GetByID(jobID)
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
+		return
+	}
+	// AUD-001: only the runner that owns the job may write its events.
+	if !h.authorizeRunnerForAnsibleJob(c, job, true) {
+		return
+	}
+
+	// The task column holds maxJobEventTaskLen characters; a longer one would fail the
+	// insert and read as a server error when it is the caller's.
+	if utf8.RuneCountInString(req.Task) > maxJobEventTaskLen {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			fmt.Sprintf("task is longer than %d characters", maxJobEventTaskLen))
+		return
+	}
+
+	if !slices.Contains(runnerJobEvents, req.Event) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request",
+			fmt.Sprintf("event %q cannot be recorded by a runner; allowed: %s", req.Event, strings.Join(runnerJobEvents, ", ")))
+		return
+	}
+
+	event := &models.AnsibleJobEvent{
+		JobID:     jobID,
+		Event:     req.Event,
+		Task:      req.Task,
+		Stdout:    req.Stdout,
+		Stderr:    req.Stderr,
+		Failed:    req.Failed,
+		Timestamp: time.Now().UTC(),
+	}
+	if err := h.ansibleJobRepo.CreateEventNextCounter(event); err != nil {
+		logger.Errorf("Failed to store %s event for job %s: %v", req.Event, jobID, err)
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+
+	response.Status(c, http.StatusOK, "received")
+}
+
 // parseAndStoreAgentEvent parses a JSONL event from a self-hosted runner and stores it
 func (h *RunnerAgentHandler) parseAndStoreAgentEvent(jobID uuid.UUID, eventData map[string]interface{}, rawLine string) {
 	// AUD-063: the counter is assigned atomically at insert time by CreateEventNextCounter below,
@@ -1352,7 +1451,26 @@ type JobArtifactsResponse struct {
 	// to a file and exposes via GOOGLE_APPLICATION_CREDENTIALS.
 	GCPServiceAccount string            `json:"gcp_service_account,omitempty"`
 	JobConfig         *AnsibleJobConfig `json:"job_config,omitempty"`
-	VCS               *VCSArtifact      `json:"vcs,omitempty"`
+	// VCS is the token-embedded clone URL. It is set only when the runner has to
+	// clone: a fresh playbook, or a cached one that has no snapshot yet.
+	VCS *VCSArtifact `json:"vcs,omitempty"`
+	// ProjectID namespaces the runner's Galaxy cache, one cache per project.
+	ProjectID string `json:"project_id,omitempty"`
+	// PlaybookSource tells the runner where a VCS-backed playbook's files come from.
+	// Absent for ad hoc jobs and playbooks without a VCS connection.
+	PlaybookSource *PlaybookSourceArtifact `json:"playbook_source,omitempty"`
+}
+
+// PlaybookSourceArtifact is a VCS-backed playbook's source mode as resolved for one job.
+// Mode "cached" with CapturedAt set means the runner downloads the snapshot from
+// /runner/jobs/:id/playbook-snapshot and no VCS artifact is sent. Mode "cached" without
+// CapturedAt means no snapshot exists yet: the runner clones this once and a sync has
+// been queued. Mode "fresh" means the runner clones.
+type PlaybookSourceArtifact struct {
+	Mode       string     `json:"mode"` // "cached" or "fresh"
+	Commit     string     `json:"commit,omitempty"`
+	CapturedAt *time.Time `json:"captured_at,omitempty"`
+	SizeBytes  int64      `json:"size_bytes,omitempty"`
 }
 
 // VaultArtifact is one decrypted vault password for the runner.
@@ -1389,6 +1507,215 @@ type AnsibleJobConfig struct {
 	BecomeEnabled  bool   `json:"become_enabled"`
 	DiffMode       bool   `json:"diff_mode"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"` // kills the run when exceeded (0 = none)
+}
+
+// runnerCapabilitiesHeader is how a runner announces, on the artifacts request, what it
+// can do: a comma-separated list of capability tokens. It is sent per request rather
+// than stored at registration, so it is true for the exact binary making the call.
+const runnerCapabilitiesHeader = "X-Stackweaver-Runner-Capabilities"
+
+// runnerCapabilityPlaybookSnapshot is announced by a runner that honours playbook_source:
+// it downloads a cached playbook's snapshot instead of cloning. A runner that does not
+// announce it can only clone, so it is sent the clone URL and nothing else changes for it.
+const runnerCapabilityPlaybookSnapshot = "playbook-snapshot"
+
+// runnerCapabilities returns the set of capabilities the calling runner announced.
+func runnerCapabilities(c *gin.Context) map[string]bool {
+	announced := map[string]bool{}
+	for token := range strings.SplitSeq(c.GetHeader(runnerCapabilitiesHeader), ",") {
+		if token = strings.ToLower(strings.TrimSpace(token)); token != "" {
+			announced[token] = true
+		}
+	}
+	return announced
+}
+
+// isVCSBacked reports whether a playbook's files come from a repository. Only such
+// playbooks have a source mode.
+func isVCSBacked(playbook *models.AnsiblePlaybook) bool {
+	return playbook.VCSConnectionID != nil && playbook.VCSRepository != ""
+}
+
+// playbookSourceMode resolves a VCS-backed playbook's source mode exactly as the
+// platform runner does: an empty mode counts as cached.
+func playbookSourceMode(playbook *models.AnsiblePlaybook) string {
+	if playbook.SourceMode == models.PlaybookSourceModeFresh {
+		return models.PlaybookSourceModeFresh
+	}
+	return models.PlaybookSourceModeCached
+}
+
+// resolvePlaybookSource decides how a self-hosted runner obtains a VCS-backed playbook.
+//
+//   - fresh: the runner clones, so it gets the clone URL.
+//   - cached with a snapshot: the runner downloads the snapshot. No clone URL is sent,
+//     because a runner has no reason to hold a token-embedded URL it will not use.
+//   - cached without a snapshot: a self-hosted runner cannot build one (it has no object
+//     storage), so this run clones and a sync is queued to repair the cache for the next.
+func (h *RunnerAgentHandler) resolvePlaybookSource(ctx context.Context, playbook *models.AnsiblePlaybook) (*PlaybookSourceArtifact, *VCSArtifact) {
+	mode := playbookSourceMode(playbook)
+	source := &PlaybookSourceArtifact{Mode: mode}
+	if mode == models.PlaybookSourceModeFresh {
+		return source, h.playbookVCSArtifact(ctx, playbook)
+	}
+
+	if h.playbookSnapshotExists(ctx, playbook) {
+		source.Commit = playbook.CachedCommit
+		source.CapturedAt = playbook.CachedAt
+		source.SizeBytes = playbook.CachedSizeBytes
+		return source, nil
+	}
+
+	// Resolve the clone URL before queueing the sync: Request rewrites the sync status
+	// on the playbook, and the artifact must not depend on that write succeeding.
+	vcsArtifact := h.playbookVCSArtifact(ctx, playbook)
+	if h.syncRequester != nil {
+		if err := h.syncRequester.Request(ctx, playbook); err != nil {
+			logger.Warnf("Playbook %s has no snapshot and a sync could not be queued (this run clones regardless): %v", playbook.ID, err)
+		}
+	}
+	return source, vcsArtifact
+}
+
+// playbookSnapshotExists reports whether a cached playbook has a snapshot a runner can
+// download: the metadata says one was captured and the object is not missing from
+// storage. The object is probed by opening it and closing it straight away.
+func (h *RunnerAgentHandler) playbookSnapshotExists(ctx context.Context, playbook *models.AnsiblePlaybook) bool {
+	if playbook.CachedAt == nil || h.storageClient == nil {
+		return false
+	}
+	stream, err := h.storageClient.GetStream(ctx, ansible.PlaybookSnapshotKey(playbook.ID))
+	if errors.Is(err, storage.ErrNotFound) {
+		return false
+	}
+	if err != nil {
+		// Not provably missing. Treat the snapshot as present: the download reports the
+		// real failure, instead of this silently turning a cached run into a clone.
+		logger.Warnf("Playbook %s: probing the cached snapshot failed: %v", playbook.ID, err)
+		return true
+	}
+	if closeErr := stream.Close(); closeErr != nil {
+		logger.Warnf("Playbook %s: closing the snapshot probe failed: %v", playbook.ID, closeErr)
+	}
+	return true
+}
+
+// playbookVCSArtifact builds the clone instructions for a VCS-backed playbook: a fresh
+// token from the provider registry embedded in the clone URL. It returns nil when the
+// connection or a clone URL cannot be resolved.
+func (h *RunnerAgentHandler) playbookVCSArtifact(ctx context.Context, playbook *models.AnsiblePlaybook) *VCSArtifact {
+	var vcsConn models.VCSConnection
+	if err := h.db.First(&vcsConn, "id = ?", playbook.VCSConnectionID).Error; err != nil {
+		return nil
+	}
+	if h.vcsRegistry == nil {
+		return nil
+	}
+	provider, err := h.vcsRegistry.GetProvider(&vcsConn)
+	if err != nil {
+		return nil
+	}
+	accessToken, _ := provider.GetFreshToken(ctx, &vcsConn)
+	repoURL := provider.BuildCloneURL(&vcsConn, accessToken, playbook.VCSRepository)
+	if repoURL == "" {
+		return nil
+	}
+	branch := playbook.VCSBranch
+	if branch == "" {
+		branch = "main"
+	}
+	return &VCSArtifact{RepoURL: repoURL, Branch: branch, Repository: playbook.VCSRepository}
+}
+
+// playbookSnapshotStreamTimeout bounds one snapshot response. It matches the time the
+// runner allows itself for the download (see downloadPlaybookSnapshot in the
+// ansible-runner), so neither side gives up before the other.
+const playbookSnapshotStreamTimeout = 10 * time.Minute
+
+// GetPlaybookSnapshot streams the cached snapshot of a job's playbook to the self-hosted
+// runner executing it. A runner reaches nothing but this API, so the object is proxied
+// from storage rather than handed out as a presigned storage URL.
+// GET /api/v2/runner/jobs/:id/playbook-snapshot
+func (h *RunnerAgentHandler) GetPlaybookSnapshot(c *gin.Context) {
+	jobID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
+		return
+	}
+	if h.ansibleJobRepo == nil || h.playbookRepo == nil || h.storageClient == nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotImplemented, "Playbook snapshots not configured")
+		return
+	}
+
+	job, err := h.ansibleJobRepo.GetByID(jobID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return
+	}
+	// Same binding as the artifacts endpoint (AUD-001): a runner in the job's
+	// organization and pool, and once the job is claimed only the assignee.
+	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
+		return
+	}
+	if refuseFinishedAnsibleJob(c, job) {
+		return
+	}
+
+	if job.PlaybookID == nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "this job has no playbook")
+		return
+	}
+	playbook, err := h.playbookRepo.GetByID(*job.PlaybookID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "playbook not found")
+		return
+	}
+	if !isVCSBacked(playbook) {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook has no VCS repository, so it has no snapshot")
+		return
+	}
+	if playbookSourceMode(playbook) == models.PlaybookSourceModeFresh {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook's source mode is fresh: it is cloned, not served from a snapshot")
+		return
+	}
+	if playbook.CachedAt == nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook has no snapshot yet")
+		return
+	}
+
+	stream, err := h.storageClient.GetStream(c.Request.Context(), ansible.PlaybookSnapshotKey(playbook.ID))
+	if errors.Is(err, storage.ErrNotFound) {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook has no snapshot yet")
+		return
+	}
+	if err != nil {
+		logger.Errorf("Failed to open the snapshot of playbook %s for job %s: %v", playbook.ID, job.ID, err)
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	defer func() { _ = stream.Close() }()
+
+	// The server's write timeout is sized for JSON responses and would cut a large
+	// snapshot on a slow link every time. Give this one response the same budget the
+	// runner gives the download. A writer that cannot move its deadline (a test
+	// recorder) keeps the server default, which is all it had before.
+	if err := http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(playbookSnapshotStreamTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		logger.Warnf("Could not extend the write deadline for the snapshot of playbook %s: %v", playbook.ID, err)
+	}
+
+	// No Content-Length: the size in the playbook metadata can lag a sync that replaced
+	// the object after the row was read, and the stream does not expose the object's
+	// size. Without it the response is sent chunked.
+	c.Header("Content-Type", "application/gzip")
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, stream); err != nil {
+		// The status line is already out; all that is left is to say why the body is short.
+		logger.Warnf("Streaming the snapshot of playbook %s to job %s was cut short: %v", playbook.ID, job.ID, err)
+	}
 }
 
 // GetJobStatus returns the current run/job status so the agent can poll for cancellation.
@@ -1478,6 +1805,15 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
 		return
 	}
+	if refuseFinishedAnsibleJob(c, job) {
+		return
+	}
+
+	// A runner that announces playbook-snapshot gets the playbook-source contract:
+	// project_id, playbook_source, and a clone URL only when this run clones. One that
+	// does not (a runner built before the capability existed) can only clone, so it gets
+	// the response it has always got, with no new fields and no side effects.
+	snapshotCapable := runnerCapabilities(c)[runnerCapabilityPlaybookSnapshot]
 
 	response := JobArtifactsResponse{
 		JobID:   job.ID.String(),
@@ -1493,6 +1829,9 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 			TimeoutSeconds: job.TimeoutSeconds,
 		},
 	}
+	if snapshotCapable {
+		response.ProjectID = job.ProjectID.String()
+	}
 
 	// Ad hoc jobs have no playbook: ship the generated transient playbook as
 	// content; the agent writes it into the job workspace and runs it.
@@ -1505,38 +1844,19 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		}
 	}
 
-	// Get playbook info and VCS details for the runner to clone the repo.
+	// Get playbook info, and for a VCS-backed playbook decide where this job's files
+	// come from: the cached snapshot or a clone.
 	if h.playbookRepo != nil && job.PlaybookID != nil {
 		playbook, err := h.playbookRepo.GetByID(*job.PlaybookID)
 		if err == nil {
 			response.PlaybookPath = playbook.PlaybookPath
-
-			// Include VCS info so agent can clone the repository
-			if playbook.VCSConnectionID != nil && playbook.VCSRepository != "" {
-				var vcsConn models.VCSConnection
-				if err := h.db.First(&vcsConn, "id = ?", playbook.VCSConnectionID).Error; err == nil {
-					branch := playbook.VCSBranch
-					if branch == "" {
-						branch = "main"
-					}
-
-					// Get a fresh token and build the clone URL via the provider registry.
-					var repoURL string
-					if h.vcsRegistry != nil {
-						if provider, err := h.vcsRegistry.GetProvider(&vcsConn); err == nil {
-							accessToken, _ := provider.GetFreshToken(c.Request.Context(), &vcsConn)
-							repoURL = provider.BuildCloneURL(&vcsConn, accessToken, playbook.VCSRepository)
-						}
-					}
-
-					if repoURL != "" {
-						response.VCS = &VCSArtifact{
-							RepoURL:    repoURL,
-							Branch:     branch,
-							Repository: playbook.VCSRepository,
-						}
-					}
-				}
+			switch {
+			case !isVCSBacked(playbook):
+			case snapshotCapable:
+				response.PlaybookSource, response.VCS = h.resolvePlaybookSource(c.Request.Context(), playbook)
+			default:
+				// Clone URL only, whatever the source mode: no snapshot probe, no sync.
+				response.VCS = h.playbookVCSArtifact(c.Request.Context(), playbook)
 			}
 		}
 	}

@@ -20,21 +20,9 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/ansible"
 	vcs "github.com/michielvha/stackweaver/core/services/vcs"
 )
-
-// PlaybookSyncMessage represents a request to sync a playbook from VCS
-type PlaybookSyncMessage struct {
-	PlaybookID uuid.UUID `json:"playbook_id"`
-	// CloneURL is a pre-authenticated, token-embedded clone URL resolved by the
-	// API at enqueue time. When set, the runner clones with it directly and does
-	// not need its own VCS OAuth credentials to refresh tokens. Empty falls back
-	// to the runner resolving the URL from the DB (legacy behaviour).
-	CloneURL string `json:"clone_url,omitempty"`
-	// Branch is the branch to clone, carried alongside CloneURL so the runner does
-	// not need to re-read it from the DB on the pre-resolved path.
-	Branch string `json:"branch,omitempty"`
-}
 
 // PlaybookHandler handles Ansible playbook API endpoints
 type PlaybookHandler struct {
@@ -49,6 +37,9 @@ type PlaybookHandler struct {
 	queue             queue.Queue
 	vcsRegistry       *vcs.ProviderRegistry
 	vcsConnectionRepo *repository.VCSConnectionRepository
+	// syncRequester builds the playbook sync message; the runner control plane shares
+	// it, so both describe a sync to the worker the same way.
+	syncRequester *ansible.PlaybookSyncRequester
 	// credentialRepo backs the template multi-credential endpoints (wired via
 	// SetCredentialRepo).
 	credentialRepo *repository.AnsibleCredentialRepository
@@ -83,6 +74,7 @@ func NewPlaybookHandler(
 		queue:             redisQueue,
 		vcsRegistry:       vcsRegistry,
 		vcsConnectionRepo: vcsConnectionRepo,
+		syncRequester:     ansible.NewPlaybookSyncRequester(vcsRegistry, vcsConnectionRepo, playbookRepo, redisQueue),
 	}
 }
 
@@ -137,34 +129,6 @@ func generateHostConfigKey() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
-}
-
-// buildPlaybookSyncMessage builds the queue message for a VCS playbook sync. It
-// resolves a fresh, token-embedded clone URL server-side (where the VCS OAuth
-// credentials live) so the runner never needs those credentials and never has to
-// refresh tokens itself. Resolution is best-effort: on any failure the message is
-// returned without a CloneURL and the runner falls back to resolving from the DB.
-func (h *PlaybookHandler) buildPlaybookSyncMessage(ctx context.Context, playbook *models.AnsiblePlaybook) PlaybookSyncMessage {
-	msg := PlaybookSyncMessage{PlaybookID: playbook.ID}
-	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || playbook.VCSConnectionID == nil || playbook.VCSRepository == "" {
-		return msg
-	}
-	conn, err := h.vcsConnectionRepo.GetByID(*playbook.VCSConnectionID)
-	if err != nil {
-		logger.Warnf("Playbook %s: failed to load VCS connection for clone-URL pre-resolution: %v", playbook.ID, err)
-		return msg
-	}
-	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, playbook.VCSRepository)
-	if err != nil {
-		logger.Warnf("Playbook %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", playbook.ID, err)
-		return msg
-	}
-	msg.CloneURL = cloneURL
-	msg.Branch = playbook.VCSBranch
-	if msg.Branch == "" {
-		msg.Branch = "main"
-	}
-	return msg
 }
 
 // maybeRegisterADOWebhook registers Azure DevOps service hook subscriptions for a specific repo
@@ -926,8 +890,8 @@ func (h *PlaybookHandler) SyncPlaybook(c *gin.Context) {
 
 	// Queue sync job
 	if h.queue != nil {
-		syncMsg := h.buildPlaybookSyncMessage(context.Background(), playbook)
-		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
+		syncMsg := h.syncRequester.Message(context.Background(), playbook)
+		if err := h.queue.Enqueue(context.Background(), ansible.PlaybookSyncQueue, syncMsg); err != nil {
 			// Revert status on queue failure
 			playbook.LastSyncStatus = "failed"
 			playbook.LastSyncError = "Failed to queue sync job: " + err.Error()
