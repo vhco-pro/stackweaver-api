@@ -49,7 +49,7 @@
         "speculative-enabled": true,
         "structured-run-output-enabled": true,
         "tag-names": [],
-        "terraform-version": "1.12.5",
+        "terraform-version": "1.13.1",
         "trigger-patterns": [],
         "trigger-prefixes": [],
         "updated-at": "\u003ctimestamp\u003e",

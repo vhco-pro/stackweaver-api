@@ -5,9 +5,9 @@
   "body": {
     "errors": [
       {
-        "detail": "Name must be between 1 and 200 characters",
+        "detail": "request body must be a JSON:API document: {\"data\": {\"type\": \"organizations\", \"attributes\": {...}}}",
         "status": "400",
-        "title": "Validation Error"
+        "title": "Bad Request"
       }
     ]
   }

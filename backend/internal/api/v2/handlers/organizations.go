@@ -103,19 +103,22 @@ func applyOrgPolicyAttributes(org *models.Organization, attrs *OrganizationAttri
 	return "", true
 }
 
-// CreateOrganizationRequestV2 supports both simple JSON and JSON:API format
-// Simple: { "name": "...", "description": "..." }
-// JSON:API: { "data": { "type": "organizations", "attributes": { "name": "...", "email": "..." } } }
-type CreateOrganizationRequestV2 struct {
-	// Simple format fields
-	Name        string `json:"name"`
-	Description string `json:"description"`
+// organizationsType is the JSON:API resource type both organization request documents must carry.
+const organizationsType = "organizations"
 
-	// JSON:API format
+// CreateOrganizationRequestV2 is the JSON:API document go-tfe marshals for
+// OrganizationCreateOptions:
+//
+//	{"data": {"type": "organizations", "attributes": {"name": "...", "email": "..."}}}
+//
+// `data` is the only top-level member and it is required. Nothing in the tree rejects unknown
+// JSON members, so without the binding tag a flat body would bind silently to zero values and
+// reach the handler as an organization with no name.
+type CreateOrganizationRequestV2 struct {
 	Data *struct {
 		Type       string                 `json:"type"`
 		Attributes OrganizationAttributes `json:"attributes"`
-	} `json:"data"`
+	} `json:"data" binding:"required"`
 }
 
 // orgRelationships captures the relationships an organization update may carry.
@@ -133,18 +136,16 @@ type orgRelationships struct {
 	} `json:"default-agent-pool,omitempty"`
 }
 
-// UpdateOrganizationRequestV2 supports both simple JSON and JSON:API format
+// UpdateOrganizationRequestV2 is the JSON:API document go-tfe marshals for
+// OrganizationUpdateOptions: the same primary type as create, every attribute optional, and
+// default-agent-pool as a relationship. `data` is required for the reason given on
+// CreateOrganizationRequestV2.
 type UpdateOrganizationRequestV2 struct {
-	// Simple format fields
-	Name        string `json:"name"`
-	Description string `json:"description"`
-
-	// JSON:API format
 	Data *struct {
 		Type          string                 `json:"type"`
 		Attributes    OrganizationAttributes `json:"attributes"`
 		Relationships *orgRelationships      `json:"relationships,omitempty"`
-	} `json:"data"`
+	} `json:"data" binding:"required"`
 }
 
 // OrganizationPermissions is the static permission surface every organization reports.
@@ -465,33 +466,31 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 
 	var req CreateOrganizationRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// A body without `data` (flat, empty, or not an object at all) gets the sentence that
+		// names the expected document; gin's validator text names a Go struct field instead.
+		if req.Data == nil {
+			jsonapi.WriteDocumentRequired(c, organizationsType)
+			return
+		}
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if req.Data.Type != organizationsType {
+		jsonapi.WriteWrongType(c, organizationsType, req.Data.Type)
+		return
+	}
 
-	// Extract fields from either format (JSON:API or simple)
-	name := req.Name
-	description := req.Description
-	email := ""
+	attrs := &req.Data.Attributes
+	name := attrs.Name
+	description := attrs.Description // a Stackweaver extension; go-tfe neither sends nor reads it
+	email := attrs.Email
 	collaboratorAuthPolicy := "password" // Default per TFE spec
 	costEstimationEnabled := true        // Default per TFE spec
-
-	if req.Data != nil {
-		if req.Data.Attributes.Name != "" {
-			name = req.Data.Attributes.Name
-		}
-		if req.Data.Attributes.Description != "" {
-			description = req.Data.Attributes.Description
-		}
-		if req.Data.Attributes.Email != "" {
-			email = req.Data.Attributes.Email
-		}
-		if req.Data.Attributes.CollaboratorAuthPolicy != "" {
-			collaboratorAuthPolicy = req.Data.Attributes.CollaboratorAuthPolicy
-		}
-		if req.Data.Attributes.CostEstimationEnabled != nil {
-			costEstimationEnabled = *req.Data.Attributes.CostEstimationEnabled
-		}
+	if attrs.CollaboratorAuthPolicy != "" {
+		collaboratorAuthPolicy = attrs.CollaboratorAuthPolicy
+	}
+	if attrs.CostEstimationEnabled != nil {
+		costEstimationEnabled = *attrs.CostEstimationEnabled
 	}
 
 	// Validate collaborator auth policy
@@ -522,11 +521,9 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 
 	// tfe_organization policy flags (the stock provider creates with name+email only and PATCHes
 	// the rest, but the wire contract accepts them on create too).
-	if req.Data != nil {
-		if detail, ok := applyOrgPolicyAttributes(org, &req.Data.Attributes); !ok {
-			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
-			return
-		}
+	if detail, ok := applyOrgPolicyAttributes(org, attrs); !ok {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
+		return
 	}
 
 	if err := h.orgRepo.Create(org); err != nil {
@@ -659,40 +656,31 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
+	// The body is read only after the caller is authorised, so an outsider learns nothing about
+	// what this endpoint accepts: a 403 always wins over a 400.
 	var req UpdateOrganizationRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if req.Data == nil {
+			jsonapi.WriteDocumentRequired(c, organizationsType)
+			return
+		}
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-
-	// Extract fields from either format (JSON:API or simple)
-	newName := req.Name
-	newDescription := req.Description
-	newEmail := ""
-	newCollaboratorAuthPolicy := ""
-	var newCostEstimationEnabled *bool
-	var newDefaultTerraformVersion *string
-	var newAnsibleJobRetentionDays *int
-	var newAnsibleAdHocModules *string
-
-	if req.Data != nil {
-		if req.Data.Attributes.Name != "" {
-			newName = req.Data.Attributes.Name
-		}
-		if req.Data.Attributes.Description != "" {
-			newDescription = req.Data.Attributes.Description
-		}
-		if req.Data.Attributes.Email != "" {
-			newEmail = req.Data.Attributes.Email
-		}
-		if req.Data.Attributes.CollaboratorAuthPolicy != "" {
-			newCollaboratorAuthPolicy = req.Data.Attributes.CollaboratorAuthPolicy
-		}
-		newCostEstimationEnabled = req.Data.Attributes.CostEstimationEnabled
-		newDefaultTerraformVersion = req.Data.Attributes.DefaultTerraformVersion
-		newAnsibleJobRetentionDays = req.Data.Attributes.AnsibleJobRetentionDays
-		newAnsibleAdHocModules = req.Data.Attributes.AnsibleAdHocModules
+	if req.Data.Type != organizationsType {
+		jsonapi.WriteWrongType(c, organizationsType, req.Data.Type)
+		return
 	}
+
+	attrs := &req.Data.Attributes
+	newName := attrs.Name
+	newDescription := attrs.Description
+	newEmail := attrs.Email
+	newCollaboratorAuthPolicy := attrs.CollaboratorAuthPolicy
+	newCostEstimationEnabled := attrs.CostEstimationEnabled
+	newDefaultTerraformVersion := attrs.DefaultTerraformVersion
+	newAnsibleJobRetentionDays := attrs.AnsibleJobRetentionDays
+	newAnsibleAdHocModules := attrs.AnsibleAdHocModules
 
 	previousName := org.Name
 	if newName != "" {
@@ -732,16 +720,14 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	}
 
 	// tfe_organization_default_settings: the org-wide execution defaults.
-	if req.Data != nil {
-		if detail, ok := h.applyOrgDefaultSettings(org, req.Data.Attributes.DefaultExecutionMode, req.Data.Relationships); !ok {
-			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
-			return
-		}
-		// tfe_organization policy flags (pointer semantics: only supplied attributes change).
-		if detail, ok := applyOrgPolicyAttributes(org, &req.Data.Attributes); !ok {
-			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
-			return
-		}
+	if detail, ok := h.applyOrgDefaultSettings(org, attrs.DefaultExecutionMode, req.Data.Relationships); !ok {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
+		return
+	}
+	// tfe_organization policy flags (pointer semantics: only supplied attributes change).
+	if detail, ok := applyOrgPolicyAttributes(org, attrs); !ok {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
+		return
 	}
 
 	// AUD-109: a rename passes the same permanent-reservation check as Create, so an

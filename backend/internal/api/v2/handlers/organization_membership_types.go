@@ -684,32 +684,8 @@ type UserTokenListAttributes struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
-// WebhookEventSimple is the ?format=simple projection of a webhook delivery: a flat
-// snake_case row the settings page renders directly, not a JSON:API resource.
-type WebhookEventSimple struct {
-	ID           string     `json:"id"`
-	EventType    string     `json:"event_type"`
-	Provider     string     `json:"provider"`
-	Repository   string     `json:"repository"`
-	Branch       string     `json:"branch"`
-	Commit       string     `json:"commit"`
-	Status       string     `json:"status"`
-	ResponseCode int        `json:"response_code"`
-	Message      string     `json:"message"`
-	DeliveredAt  time.Time  `json:"delivered_at"`
-	ProcessedAt  *time.Time `json:"processed_at"`
-}
-
-// WebhookEventSimpleMeta is the simple projection's meta block. #756 recorded this as a
-// deliberate exception: the member names are total/page_size/page_number, not the
-// standard pagination block.
-type WebhookEventSimpleMeta struct {
-	Total      int64 `json:"total"`
-	PageSize   int   `json:"page_size"`
-	PageNumber int   `json:"page_number"`
-}
-
-// WebhookEventAttributes is the JSON:API projection of the same delivery.
+// WebhookEventAttributes is the attribute block of a webhook-events resource: one delivery
+// received from a VCS provider.
 type WebhookEventAttributes struct {
 	EventType    string     `json:"event-type"`
 	Provider     string     `json:"provider"`

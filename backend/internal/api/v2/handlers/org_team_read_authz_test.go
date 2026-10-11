@@ -135,12 +135,26 @@ func TestOrgTeamReadAuthz(t *testing.T) {
 		body   string
 		want   int
 	}
+	// The smallest body the update endpoint accepts: a JSON:API document that changes nothing.
+	const emptyOrgDoc = `{"data":{"type":"organizations","attributes":{}}}`
+
 	cases := []row{
 		// AUD-151 - Organizations.Update
+		//
+		// The denied rows keep sending "{}" on purpose: it is not a JSON:API document, so a 403 or
+		// 401 here also pins that the caller is rejected BEFORE the body is looked at (#844). An
+		// outsider must not be able to tell a valid body from an invalid one.
 		{"151 outsider update", http.MethodPatch, "/organizations/" + orgA.Name, outsider.ID, "{}", http.StatusForbidden},
 		{"151 plain-member update", http.MethodPatch, "/organizations/" + orgA.Name, member.ID, "{}", http.StatusForbidden},
 		{"151 anon update", http.MethodPatch, "/organizations/" + orgA.Name, uuid.Nil, "{}", http.StatusUnauthorized},
-		{"151 owner update", http.MethodPatch, "/organizations/" + orgA.Name, owner.ID, "{}", http.StatusOK},
+		// This row sent "{}" and expected 200 until #844 made the endpoint JSON:API only, which
+		// turns "{}" into a 400. The row pins WHO may update, not what a body may omit, so it now
+		// sends the minimal document; the rows below pin the body rule for the same caller.
+		{"151 owner update", http.MethodPatch, "/organizations/" + orgA.Name, owner.ID, emptyOrgDoc, http.StatusOK},
+		{"151 owner update, empty object", http.MethodPatch, "/organizations/" + orgA.Name, owner.ID, "{}", http.StatusBadRequest},
+		{"151 owner update, flat body", http.MethodPatch, "/organizations/" + orgA.Name, owner.ID, `{"description":"x"}`, http.StatusBadRequest},
+		{"151 owner update, wrong type", http.MethodPatch, "/organizations/" + orgA.Name, owner.ID, `{"data":{"type":"workspaces","attributes":{}}}`, http.StatusBadRequest},
+		{"151 outsider update, valid document", http.MethodPatch, "/organizations/" + orgA.Name, outsider.ID, emptyOrgDoc, http.StatusForbidden},
 
 		// AUD-152 - OrganizationMembership.GetByID (member's own org-A membership row)
 		{"152 outsider read", http.MethodGet, "/organization-memberships/" + memberMembership.ID.String(), outsider.ID, "", http.StatusForbidden},
