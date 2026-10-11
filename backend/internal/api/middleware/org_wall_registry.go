@@ -295,6 +295,11 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/runner/jobs/:id/state":       agnostic(),
 	"/api/v2/runner/jobs/:id/artifacts":   agnostic(),
 	"/api/v2/runner/jobs/:id/status":      agnostic(),
+	// Playbook preparation for self-hosted Ansible agents: the job-event channel and the
+	// cached-snapshot download. Same reasoning as artifacts/output above: RunnerAuth
+	// admits only a runner-scoped token and the handler binds the job to that runner.
+	"/api/v2/runner/jobs/:id/events":            agnostic(),
+	"/api/v2/runner/jobs/:id/playbook-snapshot": agnostic(),
 
 	// --- ansible: inventories ---
 	"/api/v2/organizations/:name/ansible/inventories":           orgByName(),

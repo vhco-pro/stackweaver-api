@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -121,7 +122,14 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJob(c *gin.Context, job *m
 		writeRunnerForbidden(c, "job belongs to a different organization")
 		return false
 	}
-	if poolID != nil && *poolID != runner.AgentPoolID {
+	// A job without an agent pool runs on the platform runner, which works from the
+	// queue and the database and never calls this API. No self-hosted runner has any
+	// business with it, so the pool must be set and must be the runner's own.
+	if poolID == nil {
+		writeRunnerForbidden(c, "job is not assigned to an agent pool")
+		return false
+	}
+	if *poolID != runner.AgentPoolID {
 		writeRunnerForbidden(c, "job is assigned to a different agent pool")
 		return false
 	}
@@ -133,5 +141,31 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJob(c *gin.Context, job *m
 		writeRunnerForbidden(c, "job is not reserved by this runner")
 		return false
 	}
+	return true
+}
+
+// finishedAnsibleJobStatuses are the terminal statuses of an Ansible job.
+var finishedAnsibleJobStatuses = []models.AnsibleJobStatus{
+	models.AnsibleJobStatusSuccessful,
+	models.AnsibleJobStatusFailed,
+	models.AnsibleJobStatusCanceled,
+	models.AnsibleJobStatusError,
+}
+
+// ansibleJobFinished reports whether a job has reached a terminal status.
+func ansibleJobFinished(job *models.AnsibleJob) bool {
+	return slices.Contains(finishedAnsibleJobStatuses, job.Status)
+}
+
+// refuseFinishedAnsibleJob guards the endpoints that hand a runner what it needs to
+// prepare a job: the artifacts (decrypted credentials, minted tokens) and the playbook
+// snapshot. A finished job has nothing left to prepare, so neither is served again. It
+// deliberately does not guard the write endpoints: output, events and the completion
+// call can legitimately arrive around the moment a job turns terminal.
+func refuseFinishedAnsibleJob(c *gin.Context, job *models.AnsibleJob) bool {
+	if !ansibleJobFinished(job) {
+		return false
+	}
+	writeRunnerForbidden(c, "job has finished; its artifacts and playbook snapshot are no longer served")
 	return true
 }

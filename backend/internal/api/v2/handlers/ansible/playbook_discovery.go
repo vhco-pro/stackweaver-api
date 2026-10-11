@@ -16,6 +16,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/ansiblefiles"
 	"github.com/michielvha/stackweaver/core/models"
 	corerepo "github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/ansible"
 )
 
 // maxBulkImportEntries caps a single bulk-import request.
@@ -67,8 +68,8 @@ func (h *PlaybookHandler) enqueueInitialSync(playbook *models.AnsiblePlaybook) {
 	if err := h.playbookRepo.Update(playbook); err != nil {
 		logger.Warnf("Failed to update playbook sync status: %v", err)
 	}
-	syncMsg := h.buildPlaybookSyncMessage(context.Background(), playbook)
-	if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
+	syncMsg := h.syncRequester.Message(context.Background(), playbook)
+	if err := h.queue.Enqueue(context.Background(), ansible.PlaybookSyncQueue, syncMsg); err != nil {
 		playbook.LastSyncStatus = "pending"
 		playbook.LastSyncError = "Auto-sync failed to queue: " + err.Error()
 		if updateErr := h.playbookRepo.Update(playbook); updateErr != nil {

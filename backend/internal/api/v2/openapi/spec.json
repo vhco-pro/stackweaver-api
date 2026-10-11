@@ -20868,6 +20868,37 @@
         ]
       }
     },
+    "/api/v2/runner/jobs/{id}/events": {
+      "post": {
+        "operationId": "post-api-v2-runner-jobs-id-events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /api/v2/runner/jobs/:id/events",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
     "/api/v2/runner/jobs/{id}/output": {
       "post": {
         "operationId": "post-api-v2-runner-jobs-id-output",
@@ -20894,6 +20925,37 @@
           }
         },
         "summary": "POST /api/v2/runner/jobs/:id/output",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v2/runner/jobs/{id}/playbook-snapshot": {
+      "get": {
+        "operationId": "get-api-v2-runner-jobs-id-playbook-snapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /api/v2/runner/jobs/:id/playbook-snapshot",
         "tags": [
           "runner"
         ]

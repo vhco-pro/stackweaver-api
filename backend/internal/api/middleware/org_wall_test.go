@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -619,5 +620,40 @@ func TestOrgWall_UserTokensEnabledAllowsUserBound(t *testing.T) {
 	})
 	if code != http.StatusOK {
 		t.Fatalf("user token with user-tokens enabled: got %d, want 200", code)
+	}
+}
+
+// TestOrgWall_RunnerPlaybookPreparationRoutesAreAgnostic pins the two runner control-plane
+// routes a self-hosted Ansible agent needs to prepare a playbook. The wall fails closed, so
+// an unclassified route would 403 every runner token before RunnerAuth or the handler's
+// org/pool/assignment binding ever ran, and no browser test would notice.
+func TestOrgWall_RunnerPlaybookPreparationRoutesAreAgnostic(t *testing.T) {
+	const jobID = "0b2f6c1e-8a51-4a37-9a0e-6f1d3c2b4a59"
+	tests := []struct {
+		route  string
+		method string
+	}{
+		{"/api/v2/runner/jobs/:id/events", http.MethodPost},
+		{"/api/v2/runner/jobs/:id/playbook-snapshot", http.MethodGet},
+	}
+	for _, tt := range tests {
+		t.Run(tt.route, func(t *testing.T) {
+			if entry, ok := wallRegistry[tt.route]; !ok || !entry.agnostic {
+				t.Errorf("wallRegistry[%q] = %+v (present=%v), want an agnostic entry", tt.route, entry, ok)
+			}
+			org := uuid.New()
+			code := runWall(t, wallTestCase{
+				route:      tt.route,
+				reqPath:    strings.Replace(tt.route, ":id", jobID, 1),
+				method:     tt.method,
+				tokenKind:  models.APIKeyKindOrg,
+				tokenOrgID: &org,
+				resolver:   &fakeResolver{},
+				wantStatus: http.StatusOK,
+			})
+			if code != http.StatusOK {
+				t.Errorf("api-key caller on %s %s: got %d, want 200 (the request must reach the handler)", tt.method, tt.route, code)
+			}
+		})
 	}
 }

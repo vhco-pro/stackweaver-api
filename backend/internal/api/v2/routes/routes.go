@@ -1313,11 +1313,21 @@ func SetupV2Routes(
 	// Initialize inventory service for generating proper Ansible inventory content
 	runnerInventoryService := ansible.NewInventoryService(ansibleInventoryRepo, orgRepo)
 
+	// A cached-mode job that reaches a self-hosted runner before its playbook has a
+	// snapshot clones once, and the artifacts endpoint queues a sync to repair the cache.
+	// Assign the queue on success only: a nil *RedisQueue stored in a queue.Queue is a
+	// typed-nil that passes != nil checks and panics on Enqueue.
+	var playbookSyncQueue queue.Queue
+	if ansibleRedisQueue != nil {
+		playbookSyncQueue = ansibleRedisQueue
+	}
+	playbookSyncRequester := ansible.NewPlaybookSyncRequester(vcsRegistry, vcsConnectionRepo, ansiblePlaybookRepo, playbookSyncQueue)
+
 	runnerAgentHandler := handlers.NewRunnerAgentHandlerWithRepos(
 		runnerRepo, runnerJobExecRepo, agentPoolRepo, tokenAPIKeyService,
 		ansibleJobRepo, ansiblePlaybookRepo, ansibleInventoryRepo,
 		ansibleCredentialRepo, ansibleConfigRepo, runnerInventoryService, vcsRegistry, runnerCryptoSvc,
-		variableService, storageClient, db,
+		variableService, storageClient, playbookSyncRequester, db,
 	)
 
 	// Wire OIDC workload identity services for self-hosted runners
@@ -1360,9 +1370,15 @@ func SetupV2Routes(
 			runnerAuthed.POST("/deregister", runnerAgentHandler.Deregister)
 			runnerAuthed.POST("/jobs/:id/start", runnerAgentHandler.JobStart)
 			runnerAuthed.POST("/jobs/:id/output", runnerAgentHandler.JobOutput)
+			// Playbook-preparation events (Galaxy install, source banner). The body is
+			// capped so a runner cannot push arbitrarily large stdout/stderr into the
+			// events table.
+			runnerAuthed.POST("/jobs/:id/events", middleware.MaxBodyBytes(1<<20), runnerAgentHandler.JobEvents)
 			runnerAuthed.POST("/jobs/:id/complete", runnerAgentHandler.JobComplete)
 			runnerAuthed.POST("/jobs/:id/state", runnerAgentHandler.UploadState)
 			runnerAuthed.GET("/jobs/:id/artifacts", runnerAgentHandler.GetJobArtifacts)
+			// The cached snapshot of the job's playbook, streamed from object storage.
+			runnerAuthed.GET("/jobs/:id/playbook-snapshot", runnerAgentHandler.GetPlaybookSnapshot)
 			runnerAuthed.GET("/jobs/:id/status", runnerAgentHandler.GetJobStatus)
 		}
 	}
