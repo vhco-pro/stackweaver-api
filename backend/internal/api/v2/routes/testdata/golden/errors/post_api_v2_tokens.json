@@ -1,17 +1,14 @@
 {
   "method": "POST",
   "path": "/api/v2/tokens",
-  "status": 201,
+  "status": 403,
   "body": {
-    "data": {
-      "attributes": {
-        "created_at": "\u003ctimestamp\u003e",
-        "description": "",
-        "expires_at": null,
-        "token": "\u003ctoken\u003e"
-      },
-      "id": "\u003cuuid\u003e",
-      "type": "tokens"
-    }
+    "errors": [
+      {
+        "detail": "this endpoint requires an interactive sign-in and cannot be used with an API token",
+        "status": "403",
+        "title": "Forbidden"
+      }
+    ]
   }
 }

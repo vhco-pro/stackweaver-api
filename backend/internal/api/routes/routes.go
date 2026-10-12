@@ -114,9 +114,12 @@ func SetupRoutes(
 	// Setup v2 API routes
 	v2routes.SetupV2Routes(r, db, authService, githubAppManager)
 
-	// Settings endpoints (v2)
+	// Settings endpoints (v2). This is the signed-in person's own account: every handler below
+	// acts on whoever AuthMiddleware resolved, and a token resolves to its owner with none of
+	// its own limits. The group sits outside the org wall, so InteractiveOnly is what keeps a
+	// token from minting itself wider keys here.
 	settings := r.Group("/api/v2/settings")
-	settings.Use(middleware.AuthMiddleware(authService))
+	settings.Use(middleware.AuthMiddleware(authService), middleware.InteractiveOnly())
 	{
 		// 2FA Settings (only if TOTP service is available)
 		if totpService != nil {
@@ -173,8 +176,10 @@ func setupOAuthLoginRoutes(r *gin.Engine, authService *auth.Service, apiKeyServi
 
 	oauthHandler := v2handlers.NewOAuthLoginHandler(apiKeyService, authService, redisQueue.Client())
 
-	// MintCode requires the SPA Bearer session; Token is public (PKCE + code).
-	r.POST("/api/v2/oauth/authorize", middleware.AuthMiddleware(authService), oauthHandler.MintCode)
+	// MintCode requires the SPA Bearer session; Token is public (PKCE + code). InteractiveOnly
+	// is what makes "requires the SPA session" true: the code MintCode stores becomes a
+	// user-bound token at Token, so a caller holding only an org-bound key must not get one.
+	r.POST("/api/v2/oauth/authorize", middleware.AuthMiddleware(authService), middleware.InteractiveOnly(), oauthHandler.MintCode)
 	r.POST("/api/v2/oauth/token", oauthHandler.Token)
 }
 

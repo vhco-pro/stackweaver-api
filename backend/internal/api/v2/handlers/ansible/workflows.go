@@ -77,6 +77,26 @@ type CreateWorkflowRequest struct {
 	} `json:"data"`
 }
 
+// UpdateWorkflowRequest is the PATCH document of a workflow. Every attribute is a pointer because
+// absent and zero mean different things here: an attribute the document leaves out is not
+// touched, one it carries is stored, the empty string and false included.
+type UpdateWorkflowRequest struct {
+	Data struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Name                 *string `json:"name"`
+			Description          *string `json:"description"`
+			AllowSimultaneous    *bool   `json:"allow-simultaneous"`
+			AskVariablesOnLaunch *bool   `json:"ask-variables-on-launch"`
+			AskInventoryOnLaunch *bool   `json:"ask-inventory-on-launch"`
+			AskLimitOnLaunch     *bool   `json:"ask-limit-on-launch"`
+			ExtraVars            *string `json:"extra-vars"`
+			Limit                *string `json:"limit"`
+			SurveyEnabled        *bool   `json:"survey-enabled"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
 type CreateNodeRequest struct {
 	Data struct {
 		Type       string `json:"type"`
@@ -112,6 +132,35 @@ type CreateNodeRequest struct {
 			} `json:"credential"`
 		} `json:"relationships"`
 	} `json:"data"`
+}
+
+// UpdateNodeRequest is the PATCH document of a workflow node, with the same pointer rule as
+// UpdateWorkflowRequest. It carries the attributes a node can change after it is created; its
+// type, identifier, approval settings and relationships are set by CreateNodeRequest only.
+type UpdateNodeRequest struct {
+	Data struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			PositionX              *float64 `json:"position-x"`
+			PositionY              *float64 `json:"position-y"`
+			ExtraVars              *string  `json:"extra-vars"`
+			Limit                  *string  `json:"limit"`
+			Tags                   *string  `json:"tags"`
+			SkipTags               *string  `json:"skip-tags"`
+			Verbosity              *int     `json:"verbosity"`
+			AllParentsMustConverge *bool    `json:"all-parents-must-converge"`
+		} `json:"attributes"`
+	} `json:"data"`
+}
+
+// extraVarsColumn turns the `extra-vars` attribute, a JSON object travelling as a string, into
+// the value its jsonb column stores. The empty string clears the variables: it becomes the empty
+// object, which is what a row created without any holds.
+func extraVarsColumn(attr string) datatypes.JSON {
+	if attr == "" {
+		return datatypes.JSON("{}")
+	}
+	return datatypes.JSON(attr)
 }
 
 type CreateEdgeRequest struct {
@@ -363,23 +412,39 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 		return
 	}
 
-	var req CreateWorkflowRequest
+	var req UpdateWorkflowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
-	workflow.Name = req.Data.Attributes.Name
-	workflow.Description = req.Data.Attributes.Description
-	workflow.AllowSimultaneous = req.Data.Attributes.AllowSimultaneous
-	workflow.AskVariablesOnLaunch = req.Data.Attributes.AskVariablesOnLaunch
-	workflow.AskInventoryOnLaunch = req.Data.Attributes.AskInventoryOnLaunch
-	workflow.AskLimitOnLaunch = req.Data.Attributes.AskLimitOnLaunch
-	workflow.Limit = req.Data.Attributes.Limit
-	workflow.SurveyEnabled = req.Data.Attributes.SurveyEnabled
-
-	if req.Data.Attributes.ExtraVars != "" {
-		workflow.ExtraVars = datatypes.JSON([]byte(req.Data.Attributes.ExtraVars))
+	attrs := req.Data.Attributes
+	if attrs.Name != nil {
+		workflow.Name = *attrs.Name
+	}
+	if attrs.Description != nil {
+		workflow.Description = *attrs.Description
+	}
+	if attrs.AllowSimultaneous != nil {
+		workflow.AllowSimultaneous = *attrs.AllowSimultaneous
+	}
+	if attrs.AskVariablesOnLaunch != nil {
+		workflow.AskVariablesOnLaunch = *attrs.AskVariablesOnLaunch
+	}
+	if attrs.AskInventoryOnLaunch != nil {
+		workflow.AskInventoryOnLaunch = *attrs.AskInventoryOnLaunch
+	}
+	if attrs.AskLimitOnLaunch != nil {
+		workflow.AskLimitOnLaunch = *attrs.AskLimitOnLaunch
+	}
+	if attrs.ExtraVars != nil {
+		workflow.ExtraVars = extraVarsColumn(*attrs.ExtraVars)
+	}
+	if attrs.Limit != nil {
+		workflow.Limit = *attrs.Limit
+	}
+	if attrs.SurveyEnabled != nil {
+		workflow.SurveyEnabled = *attrs.SurveyEnabled
 	}
 
 	if err := h.workflowRepo.Update(workflow); err != nil {
@@ -626,22 +691,36 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 		return
 	}
 
-	var req CreateNodeRequest
+	var req UpdateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
 		return
 	}
 
-	node.PositionX = req.Data.Attributes.PositionX
-	node.PositionY = req.Data.Attributes.PositionY
-	node.Limit = req.Data.Attributes.Limit
-	node.Tags = req.Data.Attributes.Tags
-	node.SkipTags = req.Data.Attributes.SkipTags
-	node.Verbosity = req.Data.Attributes.Verbosity
-	node.AllParentsMustConverge = req.Data.Attributes.AllParentsMustConverge
-
-	if req.Data.Attributes.ExtraVars != "" {
-		node.ExtraVars = datatypes.JSON([]byte(req.Data.Attributes.ExtraVars))
+	attrs := req.Data.Attributes
+	if attrs.PositionX != nil {
+		node.PositionX = *attrs.PositionX
+	}
+	if attrs.PositionY != nil {
+		node.PositionY = *attrs.PositionY
+	}
+	if attrs.ExtraVars != nil {
+		node.ExtraVars = extraVarsColumn(*attrs.ExtraVars)
+	}
+	if attrs.Limit != nil {
+		node.Limit = *attrs.Limit
+	}
+	if attrs.Tags != nil {
+		node.Tags = *attrs.Tags
+	}
+	if attrs.SkipTags != nil {
+		node.SkipTags = *attrs.SkipTags
+	}
+	if attrs.Verbosity != nil {
+		node.Verbosity = *attrs.Verbosity
+	}
+	if attrs.AllParentsMustConverge != nil {
+		node.AllParentsMustConverge = *attrs.AllParentsMustConverge
 	}
 
 	if err := h.workflowRepo.UpdateNode(node); err != nil {

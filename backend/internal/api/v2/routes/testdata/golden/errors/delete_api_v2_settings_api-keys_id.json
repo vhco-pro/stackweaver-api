@@ -1,13 +1,13 @@
 {
   "method": "DELETE",
   "path": "/api/v2/settings/api-keys/:id",
-  "status": 500,
+  "status": 403,
   "body": {
     "errors": [
       {
-        "detail": "failed to delete API key: record not found",
-        "status": "500",
-        "title": "Internal Server Error"
+        "detail": "this endpoint requires an interactive sign-in and cannot be used with an API token",
+        "status": "403",
+        "title": "Forbidden"
       }
     ]
   }

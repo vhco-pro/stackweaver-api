@@ -1,13 +1,13 @@
 {
   "method": "GET",
   "path": "/api/v2/settings/sessions",
-  "status": 401,
+  "status": 403,
   "body": {
     "errors": [
       {
-        "detail": "unauthorized: user not authenticated",
-        "status": "401",
-        "title": "Unauthorized"
+        "detail": "this endpoint requires an interactive sign-in and cannot be used with an API token",
+        "status": "403",
+        "title": "Forbidden"
       }
     ]
   }

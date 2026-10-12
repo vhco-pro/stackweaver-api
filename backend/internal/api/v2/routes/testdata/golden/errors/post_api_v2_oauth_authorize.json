@@ -1,13 +1,13 @@
 {
   "method": "POST",
   "path": "/api/v2/oauth/authorize",
-  "status": 400,
+  "status": 403,
   "body": {
     "errors": [
       {
-        "detail": "Unsupported client_id",
-        "status": "400",
-        "title": "Bad Request"
+        "detail": "this endpoint requires an interactive sign-in and cannot be used with an API token",
+        "status": "403",
+        "title": "Forbidden"
       }
     ]
   }

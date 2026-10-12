@@ -427,6 +427,14 @@ type goldenHarness struct {
 // invisible to every fixture-derived gate - the pagination census, the query-parameter
 // derivation, the response-typing guard's fixture half (#790).
 //
+// What the /api/v2/settings fixtures pin is the refusal, not the handlers, and the same goes for
+// /api/v2/tokens and POST /api/v2/oauth/authorize. The harness authenticates with an API token,
+// and those surfaces admit only an interactive sign-in (middleware.InteractiveOnly), so all
+// seventeen of their routes record the guard's 403. That is a true response for a token caller
+// and it keeps the routes in the manifest and the published document, but it says nothing about
+// the bodies the settings pages receive: recording those needs a Zitadel-signed JWT, which this
+// harness has no way to mint.
+//
 // SetupRoutes nil-guards each service and simply omits its routes when one is absent, so the
 // services have to be real instances rather than nils. They are constructed against the Zitadel
 // coordinates in the environment; the gRPC clients they build are lazy, so construction succeeds

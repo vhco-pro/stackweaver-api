@@ -4663,53 +4663,6 @@
           }
         }
       },
-      "get-api-v2-settings-api-keys-6c4862": {
-        "type": "object",
-        "properties": {
-          "api_keys": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
-          }
-        }
-      },
-      "get-api-v2-settings-profile-f7650d": {
-        "type": "object",
-        "properties": {
-          "bio": {
-            "type": "string"
-          },
-          "company": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "email": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "location": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "username": {
-            "type": "string"
-          }
-        }
-      },
       "get-api-v2-task-results-id-outcomes-0445e7": {
         "type": "object",
         "properties": {
@@ -7195,41 +7148,6 @@
                 "additionalProperties": true
               },
               "type": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      },
-      "patch-api-v2-settings-profile-06a430": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "profile": {
-            "type": "object",
-            "properties": {
-              "bio": {
-                "type": "string"
-              },
-              "company": {
-                "type": "string"
-              },
-              "email": {
-                "type": "string"
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "location": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "username": {
                 "type": "string"
               }
             }
@@ -10322,108 +10240,6 @@
               },
               "id": {
                 "type": "string"
-              },
-              "type": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      },
-      "tokens-collection": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "attributes": {
-                  "type": "object",
-                  "properties": {
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "description": {
-                      "type": "string"
-                    },
-                    "expires_at": {
-                      "nullable": true
-                    },
-                    "last_used_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
-                },
-                "id": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "type": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "meta": {
-            "type": "object",
-            "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "tokens-response": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "attributes": {
-                "type": "object",
-                "properties": {
-                  "created_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "expires_at": {
-                    "nullable": true
-                  },
-                  "token": {
-                    "type": "string"
-                  }
-                }
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
               },
               "type": {
                 "type": "string"
@@ -15684,15 +15500,15 @@
       "post": {
         "operationId": "post-api-v2-oauth-authorize",
         "responses": {
-          "400": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-400"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Bad Request"
+            "description": "Forbidden"
           }
         },
         "summary": "POST /api/v2/oauth/authorize",
@@ -21582,15 +21398,15 @@
       "delete": {
         "operationId": "delete-api-v2-settings-2fa",
         "responses": {
-          "401": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-401"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "Forbidden"
           }
         },
         "summary": "DELETE /api/v2/settings/2fa",
@@ -21603,15 +21419,15 @@
       "post": {
         "operationId": "post-api-v2-settings-2fa-start",
         "responses": {
-          "401": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-401"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "Forbidden"
           }
         },
         "summary": "POST /api/v2/settings/2fa/start",
@@ -21624,15 +21440,15 @@
       "get": {
         "operationId": "get-api-v2-settings-2fa-status",
         "responses": {
-          "401": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-401"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "Forbidden"
           }
         },
         "summary": "GET /api/v2/settings/2fa/status",
@@ -21645,15 +21461,15 @@
       "post": {
         "operationId": "post-api-v2-settings-2fa-verify",
         "responses": {
-          "400": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-400"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Bad Request"
+            "description": "Forbidden"
           }
         },
         "summary": "POST /api/v2/settings/2fa/verify",
@@ -21666,15 +21482,15 @@
       "get": {
         "operationId": "get-api-v2-settings-api-keys",
         "responses": {
-          "200": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-settings-api-keys-6c4862"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Success"
+            "description": "Forbidden"
           }
         },
         "summary": "GET /api/v2/settings/api-keys",
@@ -21685,15 +21501,15 @@
       "post": {
         "operationId": "post-api-v2-settings-api-keys",
         "responses": {
-          "400": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-400"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Bad Request"
+            "description": "Forbidden"
           }
         },
         "summary": "POST /api/v2/settings/api-keys",
@@ -21716,15 +21532,15 @@
           }
         ],
         "responses": {
-          "500": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-500"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Server Error"
+            "description": "Forbidden"
           }
         },
         "summary": "DELETE /api/v2/settings/api-keys/:id",
@@ -21737,15 +21553,15 @@
       "get": {
         "operationId": "get-api-v2-settings-mfa-devices",
         "responses": {
-          "401": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-401"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "Forbidden"
           }
         },
         "summary": "GET /api/v2/settings/mfa-devices",
@@ -21758,15 +21574,15 @@
       "post": {
         "operationId": "post-api-v2-settings-password",
         "responses": {
-          "400": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-400"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Bad Request"
+            "description": "Forbidden"
           }
         },
         "summary": "POST /api/v2/settings/password",
@@ -21779,15 +21595,15 @@
       "get": {
         "operationId": "get-api-v2-settings-profile",
         "responses": {
-          "200": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-settings-profile-f7650d"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Success"
+            "description": "Forbidden"
           }
         },
         "summary": "GET /api/v2/settings/profile",
@@ -21798,15 +21614,15 @@
       "patch": {
         "operationId": "patch-api-v2-settings-profile",
         "responses": {
-          "200": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/patch-api-v2-settings-profile-06a430"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Success"
+            "description": "Forbidden"
           }
         },
         "summary": "PATCH /api/v2/settings/profile",
@@ -21819,15 +21635,15 @@
       "get": {
         "operationId": "get-api-v2-settings-sessions",
         "responses": {
-          "401": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-401"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "Forbidden"
           }
         },
         "summary": "GET /api/v2/settings/sessions",
@@ -21850,15 +21666,15 @@
           }
         ],
         "responses": {
-          "401": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-401"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "Forbidden"
           }
         },
         "summary": "DELETE /api/v2/settings/sessions/:sessionId",
@@ -23038,36 +22854,16 @@
     "/api/v2/tokens": {
       "get": {
         "operationId": "get-api-v2-tokens",
-        "parameters": [
-          {
-            "description": "Which page to return, 1-based.",
-            "in": "query",
-            "name": "page[number]",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
-            "in": "query",
-            "name": "page[size]",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
         "responses": {
-          "200": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/tokens-collection"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Success"
+            "description": "Forbidden"
           }
         },
         "summary": "GET /api/v2/tokens",
@@ -23078,15 +22874,15 @@
       "post": {
         "operationId": "post-api-v2-tokens",
         "responses": {
-          "201": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/tokens-response"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Success"
+            "description": "Forbidden"
           }
         },
         "summary": "POST /api/v2/tokens",
@@ -23109,15 +22905,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "403": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/error-403"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Forbidden"
           }
         },
         "summary": "DELETE /api/v2/tokens/:id",
