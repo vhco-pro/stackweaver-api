@@ -73,7 +73,7 @@ func (h *VCSAppInstallationHandlerV2) postUntriggeredPassingStatuses(ctx context
 		if ws.VCSConnectionID == nil || ws.VCSRepository == "" {
 			continue
 		}
-		vcsConn, err := h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+		vcsConn, err := h.workspaceConnection(&ws)
 		if err != nil || vcsConn == nil || vcsConn.InstallationID == "" {
 			continue
 		}
@@ -106,7 +106,7 @@ func (h *VCSAppInstallationHandlerV2) postUntriggeredPassingStatusesADO(ctx cont
 		if ws.VCSConnectionID == nil || ws.VCSRepository == "" {
 			continue
 		}
-		vcsConn, err := h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+		vcsConn, err := h.workspaceConnection(&ws)
 		if err != nil || vcsConn == nil {
 			continue
 		}

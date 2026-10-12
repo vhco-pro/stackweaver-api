@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 )
 
 // The two run-task download surfaces: the machine-readable plan JSON (webhook payload's
@@ -47,6 +48,22 @@ func TaskTokenGate(match func(c *gin.Context, taskResultID, runID string) bool, 
 		c.Set(taskTokenContextKey, trID)
 		final(c)
 		c.Abort()
+	}
+}
+
+// TaskTokenMatchesConfigurationVersion is the TaskTokenGate match of the configuration version
+// download: a run-task token authorizes only its own run's configuration version (the `:id` path
+// parameter), and only when that version belongs to the run's workspace. A run row stored before
+// a run create checked may name a configuration version uploaded to another workspace, and the
+// token of such a run downloads nothing.
+func TaskTokenMatchesConfigurationVersion(runRepo *repository.RunRepository, configVersionRepo *repository.ConfigurationVersionRepository) func(c *gin.Context, taskResultID, runID string) bool {
+	return func(c *gin.Context, _, runID string) bool {
+		run, err := runRepo.GetByID(runID)
+		if err != nil || run.ConfigurationVersionID == nil || *run.ConfigurationVersionID != c.Param("id") {
+			return false
+		}
+		_, err = configVersionRepo.GetByIDForWorkspace(*run.ConfigurationVersionID, run.WorkspaceID)
+		return err == nil
 	}
 }
 

@@ -323,7 +323,7 @@ func (h *PlaybookHandler) BulkImportPlaybooks(c *gin.Context) {
 
 	if created > 0 {
 		// Webhook registration is per-repository, not per-playbook: once per import.
-		h.maybeRegisterADOWebhook(&dc.conn.ID, req.Repository)
+		h.maybeRegisterADOWebhook(dc.conn, req.Repository)
 	}
 
 	jsonapi.WriteDocument(c, http.StatusOK, BulkImportResponse{
@@ -383,14 +383,14 @@ func (h *PlaybookHandler) FindOrCreatePlaybook(c *gin.Context) {
 	}
 	if wasCreated {
 		// Webhook registration is per-repository: once per request, not per loop.
-		h.maybeRegisterADOWebhook(&dc.conn.ID, req.Repository)
+		h.maybeRegisterADOWebhook(dc.conn, req.Repository)
 	}
 
 	status := http.StatusOK
 	if wasCreated {
 		status = http.StatusCreated
 	}
-	jsonapi.WriteDocumentMeta(c, status, formatPlaybookResponse(playbook), FindOrCreateMeta{Created: wasCreated})
+	jsonapi.WriteDocumentMeta(c, status, h.playbookResponse(c.Request.Context(), playbook), FindOrCreateMeta{Created: wasCreated})
 }
 
 // resolveProjectForOrg parses and validates an optional project ID against the

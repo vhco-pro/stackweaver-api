@@ -55,6 +55,13 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
+	// Registered first, so it runs after every row cleanup a caller registers; see
+	// setupAuthzTestDB for why the pool is closed.
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 
 	// Run migrations. The RBAC tables are included because AUD-123 gates the /v1 module
 	// read endpoints on org membership (orgRepo.UserInOrg reads organization_members AND

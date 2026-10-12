@@ -478,10 +478,19 @@ func TestAnsibleErrorEnvelope(t *testing.T) {
 			`{"data":{"attributes":{"module":"errenv_forbidden"}}}`, 400, badRequest,
 			"Module errenv_forbidden is not in the organization's ad hoc module allowlist",
 		},
+		// The detail was "inventory does not belong to this organization" until #916: this
+		// caller may run commands in the other organization's project too, so the request got
+		// past the permission check and the job service refused it with that sentence. A caller
+		// without that permission got a 403, and an identifier that names nothing a 500, so
+		// the three answers told a caller which project identifiers are real. The handler now
+		// holds the project to the inventory's organization before the permission check, with
+		// one answer; TestAdHocReferents_ProjectReadsAsNotFound pins that it is the same for an
+		// unknown identifier. The service keeps its own sentence for a relaunch, which
+		// TestLaunchAdHoc_InvalidInput pins in core.
 		{
 			"ad hoc: project of another organization", http.MethodPost, "/ansible/inventories/" + f.inventoryID + "/actions/run-command",
 			`{"data":{"attributes":{"module":"ping","project-id":"` + f.otherProjectID + `"}}}`, 400, badRequest,
-			"inventory does not belong to this organization",
+			"Project not found in this organization",
 		},
 		{"ad hoc: modules of a missing organization", http.MethodGet, "/organizations/errenv-no-such-org/ansible/adhoc-modules", "", 404, notFound, "Organization not found"},
 

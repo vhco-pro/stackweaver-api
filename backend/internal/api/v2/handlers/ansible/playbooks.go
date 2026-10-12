@@ -138,8 +138,12 @@ func generateHostConfigKey() (string, error) {
 
 // maybeRegisterADOWebhook registers Azure DevOps service hook subscriptions for a specific repo
 // in a background goroutine. Silently skips if not ADO, no webhook base URL, or wrong repo format.
-func (h *PlaybookHandler) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath string) {
-	if connID == nil || repoPath == "" || h.vcsRegistry == nil || h.vcsConnectionRepo == nil {
+//
+// It takes the connection, not its identifier: the registration is made with the connection's
+// token, so the caller hands over a connection it has already held to the playbook's
+// organization (vcsConnectionAccepted, storedVCSConnection, resolveDiscoveryContext).
+func (h *PlaybookHandler) maybeRegisterADOWebhook(conn *models.VCSConnection, repoPath string) {
+	if conn == nil || conn.Provider != models.VCSProviderAzureDevOps || repoPath == "" || h.vcsRegistry == nil {
 		return
 	}
 	webhookBaseURL := os.Getenv("STACKWEAVER_WEBHOOK_BASE_URL")
@@ -150,11 +154,7 @@ func (h *PlaybookHandler) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath st
 	if len(parts) != 2 {
 		return
 	}
-	go func(id uuid.UUID, projectName, repoName string) {
-		conn, err := h.vcsConnectionRepo.GetByID(id)
-		if err != nil || conn.Provider != models.VCSProviderAzureDevOps {
-			return
-		}
+	go func(projectName, repoName string) {
 		provider, err := h.vcsRegistry.GetProvider(conn)
 		if err != nil {
 			return
@@ -163,7 +163,42 @@ func (h *PlaybookHandler) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath st
 		if rErr := provider.RegisterWebhooksForRepo(bgCtx, conn, webhookBaseURL, projectName, repoName); rErr != nil {
 			logger.Warnf("Failed to register ADO webhooks for ansible playbook repo %s/%s: %v", projectName, repoName, rErr)
 		}
-	}(*connID, parts[0], parts[1])
+	}(parts[0], parts[1])
+}
+
+// vcsConnectionAccepted loads the VCS connection a playbook of the project is about to name, and
+// answers the request when the playbook may not name it. It reports whether the handler may go
+// on to store the identifier.
+//
+// The rule is ansible.PlaybookVCSConnection, the one every later use of the stored identifier
+// applies again. A connection of another organization gets the same 400 as one that does not
+// exist.
+func (h *PlaybookHandler) vcsConnectionAccepted(c *gin.Context, projectID, connectionID uuid.UUID) (*models.VCSConnection, bool) {
+	if h.vcsConnectionRepo == nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "VCS connection validation unavailable")
+		return nil, false
+	}
+	scope := h.vcsConnectionRepo.OrganizationScope().WithContext(c.Request.Context())
+	conn, err := ansible.PlaybookVCSConnection(scope, projectID, connectionID)
+	if !referentsAccepted(c, err, "Failed to check the VCS connection") {
+		return nil, false
+	}
+	return conn, true
+}
+
+// storedVCSConnection loads the connection a stored playbook names, for a use that follows a
+// write which did not change it. It is nil when the playbook names none or names one outside its
+// organization, which a row stored before the write path checked may.
+func (h *PlaybookHandler) storedVCSConnection(ctx context.Context, playbook *models.AnsiblePlaybook) *models.VCSConnection {
+	if playbook.VCSConnectionID == nil || h.vcsConnectionRepo == nil {
+		return nil
+	}
+	scope := h.vcsConnectionRepo.OrganizationScope().WithContext(ctx)
+	conn, err := ansible.PlaybookVCSConnection(scope, playbook.ProjectID, *playbook.VCSConnectionID)
+	if err != nil {
+		return nil
+	}
+	return conn
 }
 
 // CreatePlaybookRequest represents the request to create a playbook
@@ -385,7 +420,7 @@ func (h *PlaybookHandler) ListPlaybooks(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatPlaybooksResponse(playbooks), jsonapi.NewPaginationMeta(page, perPage, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, h.playbooksResponse(c.Request.Context(), playbooks), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // ListPlaybooksByOrganization lists all playbooks for an organization
@@ -423,7 +458,7 @@ func (h *PlaybookHandler) ListPlaybooksByOrganization(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatPlaybooksResponse(playbooks), jsonapi.NewPaginationMeta(page, perPage, total))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, h.playbooksResponse(c.Request.Context(), playbooks), jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // GetPlaybook retrieves a playbook by ID
@@ -465,7 +500,7 @@ func (h *PlaybookHandler) GetPlaybook(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, formatPlaybookResponse(playbook))
+	jsonapi.WriteDocument(c, http.StatusOK, h.playbookResponse(c.Request.Context(), playbook))
 }
 
 // CreatePlaybook creates a new playbook
@@ -524,13 +559,21 @@ func (h *PlaybookHandler) CreatePlaybook(c *gin.Context) {
 		playbook.VCSBranch = "main"
 	}
 
-	// Parse VCS connection ID (required for playbook creation)
+	// Parse VCS connection ID (required for playbook creation). The connection must belong to
+	// the playbook's organization: everything that later syncs or runs the playbook clones
+	// with it.
+	var vcsConn *models.VCSConnection
 	if req.Data.Relationships.VCSConnection.Data != nil {
 		vid, err := uuid.Parse(req.Data.Relationships.VCSConnection.Data.ID)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 			return
 		}
+		conn, ok := h.vcsConnectionAccepted(c, projectID, vid)
+		if !ok {
+			return
+		}
+		vcsConn = conn
 		playbook.VCSConnectionID = &vid
 	}
 
@@ -540,9 +583,9 @@ func (h *PlaybookHandler) CreatePlaybook(c *gin.Context) {
 	}
 
 	// Register ADO webhooks if this playbook is linked to an Azure DevOps repository
-	h.maybeRegisterADOWebhook(playbook.VCSConnectionID, playbook.VCSRepository)
+	h.maybeRegisterADOWebhook(vcsConn, playbook.VCSRepository)
 
-	jsonapi.WriteDocument(c, http.StatusCreated, formatPlaybookResponse(playbook))
+	jsonapi.WriteDocument(c, http.StatusCreated, h.playbookResponse(c.Request.Context(), playbook))
 }
 
 // CreatePlaybookByOrganization creates a new playbook (org-scoped, TFE-compatible pattern)
@@ -619,13 +662,21 @@ func (h *PlaybookHandler) CreatePlaybookByOrganization(c *gin.Context) {
 		playbook.VCSBranch = "main"
 	}
 
-	// Parse VCS connection ID (required for playbook creation)
+	// Parse VCS connection ID (required for playbook creation). The connection must belong to
+	// the playbook's organization: everything that later syncs or runs the playbook clones
+	// with it.
+	var vcsConn *models.VCSConnection
 	if req.Data.Relationships.VCSConnection.Data != nil {
 		vid, err := uuid.Parse(req.Data.Relationships.VCSConnection.Data.ID)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 			return
 		}
+		conn, ok := h.vcsConnectionAccepted(c, projectID, vid)
+		if !ok {
+			return
+		}
+		vcsConn = conn
 		playbook.VCSConnectionID = &vid
 	}
 
@@ -635,12 +686,12 @@ func (h *PlaybookHandler) CreatePlaybookByOrganization(c *gin.Context) {
 	}
 
 	// Register ADO webhooks if this playbook is linked to an Azure DevOps repository
-	h.maybeRegisterADOWebhook(playbook.VCSConnectionID, playbook.VCSRepository)
+	h.maybeRegisterADOWebhook(vcsConn, playbook.VCSRepository)
 
 	// Auto-trigger sync for VCS-backed playbooks
 	h.enqueueInitialSync(playbook)
 
-	jsonapi.WriteDocument(c, http.StatusCreated, formatPlaybookResponse(playbook))
+	jsonapi.WriteDocument(c, http.StatusCreated, h.playbookResponse(c.Request.Context(), playbook))
 }
 
 // UpdatePlaybook updates a playbook
@@ -707,18 +758,26 @@ func (h *PlaybookHandler) UpdatePlaybook(c *gin.Context) {
 		playbook.SourceMode = normalizeSourceMode(*req.Data.Attributes.SourceMode)
 	}
 
-	// Handle VCS connection relationship update
+	// Handle VCS connection relationship update. The loaded connection is replaced together
+	// with its identifier: the playbook came from GetByID with the connection attached, and a
+	// save writes the attached row's identifier back over the one set here.
 	if req.Data.Relationships.VCSConnection.Data != nil {
 		if req.Data.Relationships.VCSConnection.Data.ID == "" {
 			// Explicitly setting to null
 			playbook.VCSConnectionID = nil
+			playbook.VCSConnection = nil
 		} else {
 			vid, err := uuid.Parse(req.Data.Relationships.VCSConnection.Data.ID)
 			if err != nil {
 				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid VCS connection ID")
 				return
 			}
+			conn, ok := h.vcsConnectionAccepted(c, playbook.ProjectID, vid)
+			if !ok {
+				return
+			}
 			playbook.VCSConnectionID = &vid
+			playbook.VCSConnection = conn
 		}
 	}
 
@@ -727,10 +786,12 @@ func (h *PlaybookHandler) UpdatePlaybook(c *gin.Context) {
 		return
 	}
 
-	// Register ADO webhooks if this playbook is linked to an Azure DevOps repository
-	h.maybeRegisterADOWebhook(playbook.VCSConnectionID, playbook.VCSRepository)
+	// Register ADO webhooks if this playbook is linked to an Azure DevOps repository. The
+	// connection is loaded again within the playbook's organization: an update that does not
+	// change it must not register with a connection the playbook may not use.
+	h.maybeRegisterADOWebhook(h.storedVCSConnection(c.Request.Context(), playbook), playbook.VCSRepository)
 
-	jsonapi.WriteDocument(c, http.StatusOK, formatPlaybookResponse(playbook))
+	jsonapi.WriteDocument(c, http.StatusOK, h.playbookResponse(c.Request.Context(), playbook))
 }
 
 // DeletePlaybook deletes a playbook
@@ -909,7 +970,7 @@ func (h *PlaybookHandler) SyncPlaybook(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocument(c, http.StatusAccepted, formatPlaybookResponse(playbook))
+	jsonapi.WriteDocument(c, http.StatusAccepted, h.playbookResponse(c.Request.Context(), playbook))
 }
 
 // ListTemplates lists all job templates for a project
@@ -1592,13 +1653,18 @@ func (h *PlaybookHandler) DeleteTemplate(c *gin.Context) {
 }
 
 // formatPlaybookResponse formats a playbook for JSON:API response
-func formatPlaybookResponse(playbook *models.AnsiblePlaybook) jsonapi.Resource[PlaybookAttributes] {
-	// Derive VCS provider and account name from the preloaded VCSConnection
+//
+// conn is the connection the response describes by its provider and account name, or nil for
+// none. It is the caller's to supply and is not taken from the association the playbook was
+// loaded with: that association is whatever row the playbook names, and a playbook row stored
+// before a write checked its connection may name one of another organization. A handler
+// supplies the connection held to the playbook's organization (PlaybookHandler.playbookResponse).
+func formatPlaybookResponse(playbook *models.AnsiblePlaybook, conn *models.VCSConnection) jsonapi.Resource[PlaybookAttributes] {
 	vcsProvider := ""
 	vcsAccountName := ""
-	if playbook.VCSConnection != nil {
-		vcsProvider = string(playbook.VCSConnection.Provider)
-		vcsAccountName = playbook.VCSConnection.AccountName
+	if conn != nil {
+		vcsProvider = string(conn.Provider)
+		vcsAccountName = conn.AccountName
 	}
 
 	attributes := PlaybookAttributes{
@@ -1643,11 +1709,18 @@ func formatPlaybookResponse(playbook *models.AnsiblePlaybook) jsonapi.Resource[P
 	}
 }
 
-// formatPlaybooksResponse formats multiple playbooks for JSON:API response
-func formatPlaybooksResponse(playbooks []models.AnsiblePlaybook) []jsonapi.Resource[PlaybookAttributes] {
+// playbookResponse formats a playbook, describing its VCS connection only when that connection
+// belongs to the playbook's organization (storedVCSConnection). It is how every handler renders
+// a playbook, a list included.
+func (h *PlaybookHandler) playbookResponse(ctx context.Context, playbook *models.AnsiblePlaybook) jsonapi.Resource[PlaybookAttributes] {
+	return formatPlaybookResponse(playbook, h.storedVCSConnection(ctx, playbook))
+}
+
+// playbooksResponse formats multiple playbooks for JSON:API response
+func (h *PlaybookHandler) playbooksResponse(ctx context.Context, playbooks []models.AnsiblePlaybook) []jsonapi.Resource[PlaybookAttributes] {
 	result := make([]jsonapi.Resource[PlaybookAttributes], len(playbooks))
-	for i, playbook := range playbooks {
-		result[i] = formatPlaybookResponse(&playbook)
+	for i := range playbooks {
+		result[i] = h.playbookResponse(ctx, &playbooks[i])
 	}
 	return result
 }

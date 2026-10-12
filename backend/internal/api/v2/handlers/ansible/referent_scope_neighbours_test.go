@@ -463,9 +463,26 @@ func (f *neighbourScopeFixture) runCommandNaming(attribute string) func(t *testi
 	}
 }
 
+// TestAdHocReferents_ProjectReadsAsNotFound pins the project Run Command names in its body
+// (#916). Nothing was ever stored for another organization's project, but the permission check
+// answered it 403 and failed with a 500 on an identifier that names nothing, so the two told a
+// caller which project identifiers are real. The project is now held to the inventory's
+// organization before the permission check, with one answer.
+func TestAdHocReferents_ProjectReadsAsNotFound(t *testing.T) {
+	f := setupNeighbourScope(t)
+	f.assertReadAsNotFound(t, []neighbourWrite{
+		{name: "a command naming a project", send: f.runCommandNaming("project-id"), foreign: f.otherProject, detail: "Project not found in this organization"},
+	})
+
+	// The same command under a project of the inventory's own organization is launched.
+	code, body := f.runCommandNaming("project-id")(t, f.project)
+	if code != http.StatusCreated {
+		t.Errorf("a command naming a project of its own organization: %d %s, want 201", code, body)
+	}
+}
+
 // TestAdHocReferents_AlreadyOneAnswer pins the credential and the agent pool Run Command names
 // in its body. The handler already held both to the inventory's organization with one answer.
-// The project it names is refused too, but not with one answer: see the open findings.
 func TestAdHocReferents_AlreadyOneAnswer(t *testing.T) {
 	f := setupNeighbourScope(t)
 	f.assertOneAnswer(t, []neighbourWrite{

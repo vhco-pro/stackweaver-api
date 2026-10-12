@@ -5,6 +5,7 @@ package terraform
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
@@ -73,10 +75,25 @@ func NewWorkspaceHandlerV2(
 
 // validatePoolAccess checks whether a workspace is allowed to use the given agent pool
 // based on the pool's scoping rules (organization_scoped, allowed workspaces/projects, excluded workspaces).
+//
+// The pool must first of all belong to the workspace's own organization, which is that of its
+// project. The scoping rules do not say so: an organization-scoped pool allows every workspace
+// that is not excluded, whatever organization the workspace is in. A pool of another
+// organization is answered exactly like one that does not exist ("Agent pool not found"), so
+// the answer does not confirm that the identifier is real. A check that cannot establish the
+// organization refuses.
 func (h *WorkspaceHandlerV2) validatePoolAccess(poolID uuid.UUID, workspaceID string, projectID *uuid.UUID) (bool, string) {
+	const notFound = "Agent pool not found"
+	if projectID == nil {
+		return false, notFound
+	}
+	inOrganization, err := repository.NewOrganizationScope(h.db).AgentPoolInProjectOrganization(poolID, *projectID)
+	if err != nil || !inOrganization {
+		return false, notFound
+	}
 	pool, err := h.poolRepo.GetByID(poolID, true)
 	if err != nil {
-		return false, "Agent pool not found"
+		return false, notFound
 	}
 	return CheckPoolAccess(pool, workspaceID, projectID)
 }
@@ -111,12 +128,86 @@ func CheckPoolAccess(pool *models.AgentPool, workspaceID string, projectID *uuid
 	return false, "Workspace is not allowed to use this agent pool"
 }
 
+// A workspace names its VCS connection by identifier, and a run of the workspace clones with that
+// connection's token: when the run is created here, when a push or a pull request starts one, and
+// when a self-hosted runner is handed its clone URL. So the connection must belong to the
+// workspace's own organization, which is that of its project. The three helpers below are the
+// write half of that rule; the point-of-use half is the same lookup
+// (repository.OrganizationScope.VCSConnectionForProject) wherever a stored identifier is resolved.
+//
+// A connection of another organization is answered exactly like one that does not exist, so the
+// answer does not confirm that the identifier is real. Terraform Enterprise documents no status
+// or body for a workspace that names an OAuth token or an installation it may not use, so the
+// answer is this API's own: the 400 "VCS connection not found" an unknown identifier always got.
+
+// vcsRepoConnectionID resolves the connection a TFE `vcs-repo` block names to an identifier:
+// through `github-app-installation-id`, through `oauth-token-id` (a connection identifier here),
+// or, when the block names neither, the organization's own connection. It returns nil when the
+// block resolves to nothing, which leaves the workspace's connection as it is.
+//
+// The installation is looked up within the organization. Several organizations may be connected
+// through one GitHub App installation, each with a connection row of its own, and an unscoped
+// lookup would hand back whichever row came first.
+func (h *WorkspaceHandlerV2) vcsRepoConnectionID(repo *VCSRepoRequest, organizationID uuid.UUID) *uuid.UUID {
+	switch {
+	case repo.GHAInstallationID != "":
+		if conn, err := h.vcsConnectionRepo.GetByInstallationIDAndOrganization(repo.GHAInstallationID, organizationID); err == nil {
+			return &conn.ID
+		}
+	case repo.OAuthTokenID != "":
+		if parsedID, err := uuid.Parse(repo.OAuthTokenID); err == nil {
+			return &parsedID
+		}
+	default:
+		// No explicit ID - use the org's VCS connection
+		if conns, err := h.vcsConnectionRepo.ListByOrganization(organizationID); err == nil && len(conns) > 0 {
+			return &conns[0].ID
+		}
+	}
+	return nil
+}
+
+// vcsConnectionAccepted loads the VCS connection a workspace of the project is about to name, and
+// answers the request when the workspace may not name it. It reports whether the handler may go
+// on to store the identifier.
+func (h *WorkspaceHandlerV2) vcsConnectionAccepted(c *gin.Context, projectID, connectionID uuid.UUID) (*models.VCSConnection, bool) {
+	scope := h.vcsConnectionRepo.OrganizationScope().WithContext(c.Request.Context())
+	conn, err := scope.VCSConnectionForProject(connectionID, projectID)
+	switch {
+	case err == nil:
+		return conn, true
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "VCS connection not found")
+	default:
+		apierror.Internal(c, "Failed to check the VCS connection", err)
+	}
+	return nil, false
+}
+
+// storedVCSConnection loads the connection a stored workspace names, within the workspace's
+// organization. It is nil when the workspace names none or names one outside its organization,
+// which a row stored before the write path checked may.
+func storedVCSConnection(repo *repository.VCSConnectionRepository, workspace *models.Workspace) *models.VCSConnection {
+	if repo == nil || workspace.VCSConnectionID == nil {
+		return nil
+	}
+	conn, err := repo.OrganizationScope().VCSConnectionForProject(*workspace.VCSConnectionID, workspace.ProjectID)
+	if err != nil {
+		return nil
+	}
+	return conn
+}
+
 // maybeRegisterADOWebhook fires a background goroutine to register per-repository Service Hook
 // subscriptions in Azure DevOps when a workspace is linked to an ADO repo.
 // It is a no-op when the connection is not ADO, when STACKWEAVER_WEBHOOK_BASE_URL is unset,
 // or when vcsRegistry is not configured.
-func (h *WorkspaceHandlerV2) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath string) {
-	if connID == nil || repoPath == "" || h.vcsRegistry == nil {
+//
+// It takes the connection, not its identifier: the registration is made with the connection's
+// token, so the caller hands over a connection held to the workspace's organization
+// (storedVCSConnection).
+func (h *WorkspaceHandlerV2) maybeRegisterADOWebhook(conn *models.VCSConnection, repoPath string) {
+	if conn == nil || conn.Provider != models.VCSProviderAzureDevOps || repoPath == "" || h.vcsRegistry == nil {
 		return
 	}
 	webhookBaseURL := os.Getenv("STACKWEAVER_WEBHOOK_BASE_URL")
@@ -127,11 +218,7 @@ func (h *WorkspaceHandlerV2) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath
 	if len(parts) != 2 {
 		return
 	}
-	go func(id uuid.UUID, projectName, repoName string) {
-		conn, err := h.vcsConnectionRepo.GetByID(id)
-		if err != nil || conn.Provider != models.VCSProviderAzureDevOps {
-			return
-		}
+	go func(projectName, repoName string) {
 		provider, err := h.vcsRegistry.GetProvider(conn)
 		if err != nil {
 			return
@@ -140,7 +227,7 @@ func (h *WorkspaceHandlerV2) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath
 		if rErr := provider.RegisterWebhooksForRepo(bgCtx, conn, webhookBaseURL, projectName, repoName); rErr != nil {
 			logger.Warnf("Failed to register ADO webhooks for repo %s/%s: %v", projectName, repoName, rErr)
 		}
-	}(*connID, parts[0], parts[1])
+	}(parts[0], parts[1])
 }
 
 // VCSRepoRequest represents the TFE-compatible vcs-repo nested attribute
@@ -758,6 +845,14 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		attrs.AgentPoolID = &id
 	}
 
+	// The connection the response describes is loaded within the workspace's organization, not
+	// taken from the association the workspace was loaded with: a workspace row that names
+	// another organization's connection renders none of that connection's details.
+	var storedConn *models.VCSConnection
+	if len(vcsConnRepo) > 0 {
+		storedConn = storedVCSConnection(vcsConnRepo[0], workspace)
+	}
+
 	// TFE API: vcs-repo must match go-tfe's VCSRepo struct exactly; null when unwired.
 	if workspace.VCSRepository != "" {
 		branch := workspace.VCSBranch
@@ -775,21 +870,19 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		// The VCS connection reference rides as github-app-installation-id or oauth-token-id,
 		// and service-provider maps to the correct TFE value per provider type.
 		if workspace.VCSConnectionID != nil {
-			if len(vcsConnRepo) > 0 && vcsConnRepo[0] != nil {
-				if vcsConn, err := vcsConnRepo[0].GetByID(*workspace.VCSConnectionID); err == nil {
-					vcsRepo.GithubAppInstallationID = vcsConn.InstallationID
-					switch vcsConn.Provider {
-					case models.VCSProviderAzureDevOps:
-						vcsRepo.ServiceProvider = "ado_services"
-					case models.VCSProviderGitLab:
-						vcsRepo.ServiceProvider = "gitlab_hosted"
-					case models.VCSProviderBitbucket:
-						vcsRepo.ServiceProvider = "bitbucket_hosted"
-					case models.VCSProviderGitHub:
-						vcsRepo.ServiceProvider = "github"
-					default:
-						vcsRepo.ServiceProvider = "github"
-					}
+			if vcsConn := storedConn; vcsConn != nil {
+				vcsRepo.GithubAppInstallationID = vcsConn.InstallationID
+				switch vcsConn.Provider {
+				case models.VCSProviderAzureDevOps:
+					vcsRepo.ServiceProvider = "ado_services"
+				case models.VCSProviderGitLab:
+					vcsRepo.ServiceProvider = "gitlab_hosted"
+				case models.VCSProviderBitbucket:
+					vcsRepo.ServiceProvider = "bitbucket_hosted"
+				case models.VCSProviderGitHub:
+					vcsRepo.ServiceProvider = "github"
+				default:
+					vcsRepo.ServiceProvider = "github"
 				}
 			}
 			// No GitHub App: fall back to treating the connection id as an OAuth token.
@@ -823,8 +916,8 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 	// StackWeaver extensions the frontend reads; TFE clients ignore unknown attributes.
 	if workspace.VCSConnectionID != nil {
 		attrs.VCSConnectionID = workspace.VCSConnectionID.String()
-		if workspace.VCSConnection != nil {
-			attrs.VCSAccountName = workspace.VCSConnection.AccountName
+		if storedConn != nil {
+			attrs.VCSAccountName = storedConn.AccountName
 		}
 	}
 	if workspace.AgentPoolID != nil && workspace.AgentPool.Name != "" {
@@ -1010,24 +1103,7 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		}
 		// Resolve VCS connection from github-app-installation-id or oauth-token-id
 		if vcsConnectionID == nil {
-			switch {
-			case req.Data.Attributes.VCSRepo.GHAInstallationID != "":
-				conn, err := h.vcsConnectionRepo.GetByInstallationID(req.Data.Attributes.VCSRepo.GHAInstallationID)
-				if err == nil {
-					vcsConnectionID = &conn.ID
-				}
-			case req.Data.Attributes.VCSRepo.OAuthTokenID != "":
-				parsedID, err := uuid.Parse(req.Data.Attributes.VCSRepo.OAuthTokenID)
-				if err == nil {
-					vcsConnectionID = &parsedID
-				}
-			default:
-				// No explicit ID - use the org's VCS connection
-				conns, connErr := h.vcsConnectionRepo.ListByOrganization(org.ID)
-				if connErr == nil && len(conns) > 0 {
-					vcsConnectionID = &conns[0].ID
-				}
-			}
+			vcsConnectionID = h.vcsRepoConnectionID(req.Data.Attributes.VCSRepo, org.ID)
 		}
 	}
 
@@ -1083,14 +1159,15 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		}
 	}
 
-	// Validate VCS connection if provided
+	// Validate VCS connection if provided: it must be a connection of the workspace's own
+	// organization (see vcsConnectionAccepted).
+	var vcsConn *models.VCSConnection
 	if vcsConnectionID != nil {
-		// Validate VCS connection exists
-		_, err := h.vcsConnectionRepo.GetByID(*vcsConnectionID)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "VCS connection not found")
+		conn, ok := h.vcsConnectionAccepted(c, finalProjectID, *vcsConnectionID)
+		if !ok {
 			return
 		}
+		vcsConn = conn
 
 		// If VCS connection is provided, repository should also be provided
 		if vcsRepository == "" {
@@ -1250,7 +1327,7 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 	}
 
 	// Register repository-scoped webhooks when the workspace is linked to an ADO repo.
-	h.maybeRegisterADOWebhook(workspace.VCSConnectionID, workspace.VCSRepository)
+	h.maybeRegisterADOWebhook(vcsConn, workspace.VCSRepository)
 
 	// Reload workspace from database to ensure all fields (CreatedAt, UpdatedAt, etc.) are populated
 	createdWorkspace, err := h.workspaceRepo.GetByID(workspace.ID)
@@ -1365,33 +1442,15 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		}
 		// Resolve VCS connection from github-app-installation-id or oauth-token-id
 		if attrs.VCSConnectionID == nil {
-			switch {
-			case attrs.VCSRepo.GHAInstallationID != "":
-				conn, err := h.vcsConnectionRepo.GetByInstallationID(attrs.VCSRepo.GHAInstallationID)
-				if err == nil {
-					attrs.VCSConnectionID = &conn.ID
-				}
-			case attrs.VCSRepo.OAuthTokenID != "":
-				parsedID, err := uuid.Parse(attrs.VCSRepo.OAuthTokenID)
-				if err == nil {
-					attrs.VCSConnectionID = &parsedID
-				}
-			default:
-				// If no specific connection ID, try to find the org's VCS connection
-				conns, connErr := h.vcsConnectionRepo.ListByOrganization(org.ID)
-				if connErr == nil && len(conns) > 0 {
-					attrs.VCSConnectionID = &conns[0].ID
-				}
-			}
+			attrs.VCSConnectionID = h.vcsRepoConnectionID(attrs.VCSRepo, org.ID)
 		}
 	}
 
 	// Update VCS connection (state-invalidating change - validate but allow)
 	if attrs.VCSConnectionID != nil {
-		// Validate VCS connection exists
-		_, err := h.vcsConnectionRepo.GetByID(*attrs.VCSConnectionID)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "VCS connection not found")
+		// It must be a connection of the workspace's own organization (see vcsConnectionAccepted).
+		conn, ok := h.vcsConnectionAccepted(c, workspace.ProjectID, *attrs.VCSConnectionID)
+		if !ok {
 			return
 		}
 
@@ -1401,7 +1460,11 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 			(oldVCSConnectionID != nil && attrs.VCSConnectionID != nil && *oldVCSConnectionID != *attrs.VCSConnectionID) {
 			changes["vcs_connection_id"] = attrs.VCSConnectionID.String()
 		}
+		// The loaded connection is replaced together with its identifier: the workspace came
+		// from the repository with its connection attached, and a save writes the attached
+		// row's identifier back over the one set here.
 		workspace.VCSConnectionID = attrs.VCSConnectionID
+		workspace.VCSConnection = conn
 	}
 
 	// Update VCS provider (deprecated, but keep for backward compatibility)
@@ -1617,7 +1680,7 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 	}
 
 	// Register repository-scoped webhooks if VCS repo was set or changed.
-	h.maybeRegisterADOWebhook(workspace.VCSConnectionID, workspace.VCSRepository)
+	h.maybeRegisterADOWebhook(storedVCSConnection(h.vcsConnectionRepo, workspace), workspace.VCSRepository)
 
 	// Log activity (non-blocking)
 	if h.activityService != nil && len(changes) > 0 {
@@ -2129,25 +2192,22 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		if attrs.VCSBranch == "" && attrs.VCSRepo.Branch != "" {
 			attrs.VCSBranch = attrs.VCSRepo.Branch
 		}
-		if attrs.VCSConnectionID == nil {
-			switch {
-			case attrs.VCSRepo.GHAInstallationID != "":
-				conn, connErr := h.vcsConnectionRepo.GetByInstallationID(attrs.VCSRepo.GHAInstallationID)
-				if connErr == nil {
-					attrs.VCSConnectionID = &conn.ID
-				}
-			case attrs.VCSRepo.OAuthTokenID != "":
-				parsedID, parseErr := uuid.Parse(attrs.VCSRepo.OAuthTokenID)
-				if parseErr == nil {
-					attrs.VCSConnectionID = &parsedID
-				}
-			case org != nil:
-				conns, connErr := h.vcsConnectionRepo.ListByOrganization(org.ID)
-				if connErr == nil && len(conns) > 0 {
-					attrs.VCSConnectionID = &conns[0].ID
-				}
-			}
+		// Without the organization nothing can be resolved within it, and the connection is
+		// left as it is.
+		if attrs.VCSConnectionID == nil && org != nil {
+			attrs.VCSConnectionID = h.vcsRepoConnectionID(attrs.VCSRepo, org.ID)
 		}
+	}
+
+	// A connection the request names must be one of the workspace's own organization (see
+	// vcsConnectionAccepted). Checked before anything on the workspace is changed.
+	var newVCSConnection *models.VCSConnection
+	if attrs.VCSConnectionID != nil {
+		conn, ok := h.vcsConnectionAccepted(c, workspace.ProjectID, *attrs.VCSConnectionID)
+		if !ok {
+			return
+		}
+		newVCSConnection = conn
 	}
 
 	// Update execution mode
@@ -2209,9 +2269,11 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		workspace.RunTimeout = *attrs.RunTimeout
 	}
 
-	// Update VCS connection
+	// Update VCS connection. The loaded connection is replaced together with its identifier, or
+	// the save writes the attached row's identifier back (see the by-name Update above).
 	if attrs.VCSConnectionID != nil {
 		workspace.VCSConnectionID = attrs.VCSConnectionID
+		workspace.VCSConnection = newVCSConnection
 	}
 
 	// Update VCS provider (see the auto-queue-runs note above on staying in sync with Update)
@@ -2308,7 +2370,7 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		}
 	}
 
-	h.maybeRegisterADOWebhook(workspace.VCSConnectionID, workspace.VCSRepository)
+	h.maybeRegisterADOWebhook(storedVCSConnection(h.vcsConnectionRepo, workspace), workspace.VCSRepository)
 
 	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
