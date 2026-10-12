@@ -103,6 +103,21 @@ func applyOrgPolicyAttributes(org *models.Organization, attrs *OrganizationAttri
 	return "", true
 }
 
+// defaultAnsibleJobRetentionDays is the retention a new organization gets when the create request
+// carries no ansible-job-retention-days. The model has no column default (see models.Organization),
+// so this is the one place the number lives.
+const defaultAnsibleJobRetentionDays = 90
+
+// applyAnsibleJobRetentionDays copies ansible-job-retention-days from a request onto the
+// organization. Create and Update share it so the attribute has one rule: zero is a value (finished
+// jobs are kept forever), an absent attribute changes nothing, and a negative number is not a
+// retention, so it changes nothing either.
+func applyAnsibleJobRetentionDays(org *models.Organization, days *int) {
+	if days != nil && *days >= 0 {
+		org.AnsibleJobRetentionDays = *days
+	}
+}
+
 // organizationsType is the JSON:API resource type both organization request documents must carry.
 const organizationsType = "organizations"
 
@@ -519,7 +534,11 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 		Email:                  email,
 		CollaboratorAuthPolicy: collaboratorAuthPolicy,
 		CostEstimationEnabled:  costEstimationEnabled,
+		// A Stackweaver attribute (Terraform Enterprise has no Ansible settings), read on create
+		// with the rule the update applies.
+		AnsibleJobRetentionDays: defaultAnsibleJobRetentionDays,
 	}
+	applyAnsibleJobRetentionDays(org, attrs.AnsibleJobRetentionDays)
 
 	// tfe_organization policy flags (the stock provider creates with name+email only and PATCHes
 	// the rest, but the wire contract accepts them on create too).
@@ -681,7 +700,6 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	newCollaboratorAuthPolicy := attrs.CollaboratorAuthPolicy
 	newCostEstimationEnabled := attrs.CostEstimationEnabled
 	newDefaultTerraformVersion := attrs.DefaultTerraformVersion
-	newAnsibleJobRetentionDays := attrs.AnsibleJobRetentionDays
 	newAnsibleAdHocModules := attrs.AnsibleAdHocModules
 
 	previousName := org.Name
@@ -714,9 +732,7 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	if newDefaultTerraformVersion != nil {
 		org.DefaultTofuVersion = *newDefaultTerraformVersion
 	}
-	if newAnsibleJobRetentionDays != nil && *newAnsibleJobRetentionDays >= 0 {
-		org.AnsibleJobRetentionDays = *newAnsibleJobRetentionDays
-	}
+	applyAnsibleJobRetentionDays(org, attrs.AnsibleJobRetentionDays)
 	if newAnsibleAdHocModules != nil {
 		org.AnsibleAdHocModules = *newAnsibleAdHocModules
 	}

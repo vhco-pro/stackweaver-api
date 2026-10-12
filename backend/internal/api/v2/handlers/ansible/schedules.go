@@ -438,12 +438,10 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 		return
 	}
 
-	err = h.schedulerService.EnableSchedule(id)
-	if errors.Is(err, ansible.ErrTemplateDisabled) {
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
-		return
-	}
-	if err != nil {
+	// Enabling launches nothing (a status change and a next-run calculation), so there is no
+	// disabled-template conflict to answer here: that is run-now's. A schedule enabled on a
+	// disabled template records a failed run at its next due time.
+	if err := h.schedulerService.EnableSchedule(id); err != nil {
 		apierror.Internal(c, "Failed to enable schedule", err)
 		return
 	}
