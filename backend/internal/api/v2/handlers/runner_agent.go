@@ -1446,8 +1446,10 @@ type JobArtifactsResponse struct {
 	// Vaults carries every attached vault credential (multi-vault support);
 	// the runner writes each to a file and passes --vault-id <id>@<file>.
 	Vaults []VaultArtifact `json:"vaults,omitempty"`
-	// GCPServiceAccount is a decrypted service-account JSON the runner writes
-	// to a file and exposes via GOOGLE_APPLICATION_CREDENTIALS.
+	// GCPServiceAccount is a decrypted service-account JSON. It travels as content and
+	// not as variables in EnvironmentVars because the variables name a file, and only the
+	// runner knows where it wrote it: the runner calls ansible.GCPCredentialEnv, the same
+	// function the platform runner calls.
 	GCPServiceAccount string            `json:"gcp_service_account,omitempty"`
 	JobConfig         *AnsibleJobConfig `json:"job_config,omitempty"`
 	// VCS is the token-embedded clone URL. It is set only when the runner has to
