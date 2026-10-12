@@ -37,9 +37,9 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -48,7 +48,7 @@ func setupTestDBForProvider(t *testing.T) *gorm.DB {
 	if dbURL == "" {
 		dbURL = "postgres://iac:iac_password@localhost:5432/iac_platform?sslmode=disable" //nolint:gosec // G101: test database URL, not a production credential
 	}
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
 	if err != nil {
 		t.Skipf("Failed to connect to test database (set TEST_DATABASE_URL or ensure local DB is running): %v", err)
 	}

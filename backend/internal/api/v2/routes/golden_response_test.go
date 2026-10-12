@@ -59,9 +59,9 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -244,7 +244,7 @@ func goldenDB(t *testing.T) (*gorm.DB, string) {
 
 	adminURL := *u
 	adminURL.Path = "/postgres"
-	admin, err := gorm.Open(postgres.Open(adminURL.String()), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	admin, err := dbtest.Open(t, adminURL.String(), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("connect admin db: %v", err)
 	}
@@ -254,7 +254,7 @@ func goldenDB(t *testing.T) (*gorm.DB, string) {
 
 	targetURL := *u
 	targetURL.Path = "/" + name
-	db, err := gorm.Open(postgres.Open(targetURL.String()), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := dbtest.Open(t, targetURL.String(), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("connect %s: %v", name, err)
 	}

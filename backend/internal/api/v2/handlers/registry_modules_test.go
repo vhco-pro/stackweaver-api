@@ -35,9 +35,9 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -51,17 +51,10 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		t.Skip("TEST_DATABASE_URL not set - skipping integration test")
 	}
 
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
 	if err != nil {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
-	// Registered first, so it runs after every row cleanup a caller registers; see
-	// setupAuthzTestDB for why the pool is closed.
-	t.Cleanup(func() {
-		if sqlDB, err := db.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-	})
 
 	// Run migrations. The RBAC tables are included because AUD-123 gates the /v1 module
 	// read endpoints on org membership (orgRepo.UserInOrg reads organization_members AND
