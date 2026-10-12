@@ -126,12 +126,20 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 		Description     string     `json:"description"`
 		VCSConnectionID *uuid.UUID `json:"vcs_connection_id,omitempty"`
 		VCSRepository   string     `json:"vcs_repository,omitempty"`
-		AutoPublishTags bool       `json:"auto_publish_tags"`
+		AutoPublishTags *bool      `json:"auto_publish_tags"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
+	}
+
+	// A sent auto_publish_tags is stored as sent. When the key is absent the module publishes from
+	// tags exactly when it has a VCS connection to publish from, which is the rule the create
+	// dialog applies; a manual module is then not stored as tag-based.
+	autoPublishTags := req.VCSConnectionID != nil
+	if req.AutoPublishTags != nil {
+		autoPublishTags = *req.AutoPublishTags
 	}
 
 	// Validate VCS connection if provided
@@ -155,7 +163,7 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 		req.Description,
 		req.VCSConnectionID,
 		req.VCSRepository,
-		req.AutoPublishTags,
+		autoPublishTags,
 		user.ID,
 	)
 	if err != nil {
@@ -207,7 +215,7 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 	// Create webhook if VCS-connected and auto-publish enabled
 	// TODO: Create webhook for tag push events
 	// This will be implemented when we extend the webhook handler
-	_ = req.VCSConnectionID != nil && req.AutoPublishTags && h.githubAppManager != nil && h.githubAppManager.IsEnabled()
+	_ = req.VCSConnectionID != nil && autoPublishTags && h.githubAppManager != nil && h.githubAppManager.IsEnabled()
 
 	// Format response (TFE-compatible)
 	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[PublishedModuleAttributes]{

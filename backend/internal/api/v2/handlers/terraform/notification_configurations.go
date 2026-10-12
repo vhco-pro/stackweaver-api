@@ -143,8 +143,11 @@ func (h *NotificationConfigurationHandlerV2) authWorkspace(c *gin.Context, works
 	return ws, true
 }
 
-// applyAttributes copies request attributes onto a config, encrypting the token. isCreate seeds defaults.
-func (h *NotificationConfigurationHandlerV2) applyAttributes(nc *models.NotificationConfiguration, req *ncRequest, isCreate bool) error {
+// applyAttributes copies the attributes a request carries onto a config, encrypting the token, and
+// leaves the rest as they are. On create that means an absent `enabled` stays false, which is the
+// default the TFE API documents for the attribute (go-tfe refuses to send a create without it, and
+// the tfe provider's own default is false).
+func (h *NotificationConfigurationHandlerV2) applyAttributes(nc *models.NotificationConfiguration, req *ncRequest) error {
 	a := req.Data.Attributes
 	if a.Name != nil {
 		nc.Name = *a.Name
@@ -163,8 +166,6 @@ func (h *NotificationConfigurationHandlerV2) applyAttributes(nc *models.Notifica
 	}
 	if a.Enabled != nil {
 		nc.Enabled = *a.Enabled
-	} else if isCreate {
-		nc.Enabled = true
 	}
 	// Token is write-only: encrypt when provided; leave untouched on update when omitted.
 	if a.Token != nil && *a.Token != "" {
@@ -239,7 +240,7 @@ func (h *NotificationConfigurationHandlerV2) buildFromRequest(c *gin.Context) (*
 		return nil, false
 	}
 	nc := &models.NotificationConfiguration{}
-	if err := h.applyAttributes(nc, &req, true); err != nil {
+	if err := h.applyAttributes(nc, &req); err != nil {
 		ncError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to prepare notification configuration")
 		return nil, false
 	}
@@ -421,7 +422,7 @@ func (h *NotificationConfigurationHandlerV2) Update(c *gin.Context) {
 		ncError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if err := h.applyAttributes(nc, &req, false); err != nil {
+	if err := h.applyAttributes(nc, &req); err != nil {
 		ncError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to prepare notification configuration")
 		return
 	}

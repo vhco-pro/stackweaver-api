@@ -485,7 +485,9 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	description := attrs.Description // a Stackweaver extension; go-tfe neither sends nor reads it
 	email := attrs.Email
 	collaboratorAuthPolicy := "password" // Default per TFE spec
-	costEstimationEnabled := true        // Default per TFE spec
+	// The TFE API's create table documents cost-estimation-enabled as "Defaults to false", and
+	// go-tfe omits the attribute unless the caller sets it.
+	costEstimationEnabled := false
 	if attrs.CollaboratorAuthPolicy != "" {
 		collaboratorAuthPolicy = attrs.CollaboratorAuthPolicy
 	}
@@ -968,7 +970,7 @@ func (h *OrganizationHandlerV2) createDefaultTeams(orgID uuid.UUID) error {
 			Name:                       "owners",
 			Description:                "Organization owners with full control",
 			Visibility:                 "secret", // Only visible to owners and org creator
-			AllowMemberTokenManagement: true,     // Explicitly set (has default but being explicit)
+			AllowMemberTokenManagement: true,     // Stored as set: the model carries no column default
 		}
 
 		if err := h.teamRepo.Create(ownersTeam); err != nil {

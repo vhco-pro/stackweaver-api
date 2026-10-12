@@ -3,6 +3,8 @@
 package terraform
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -138,5 +140,33 @@ func TestBuildMaterializedOutputs_EncryptedValueNeverLeaksWithoutKey(t *testing.
 	result := buildMaterializedOutputs(rows, false, nil)
 	if v := result[0].Attributes.Value; v != nil {
 		t.Errorf("encrypted value must be nil without a key, got %v", v)
+	}
+}
+
+// A resource whose state entry carries `"instances": []` is stored with instance_count 0, and the
+// current-state-version-resources document must say 0 for it rather than drop the attribute or
+// report 1.
+func TestBuildMaterializedResources_ZeroInstanceCountIsReported(t *testing.T) {
+	rows := []models.StateVersionResource{
+		{ID: "wsres-empty", Address: "null_resource.empty", Mode: "managed", Type: "null_resource", Name: "empty", InstanceCount: 0},
+		{ID: "wsres-three", Address: "null_resource.three", Mode: "managed", Type: "null_resource", Name: "three", InstanceCount: 3},
+	}
+	result := buildMaterializedResources(rows)
+	if len(result) != 2 {
+		t.Fatalf("got %d resources, want 2", len(result))
+	}
+	if got := result[0].Attributes.InstanceCount; got != 0 {
+		t.Errorf("instance-count = %d, want 0", got)
+	}
+	if got := result[1].Attributes.InstanceCount; got != 3 {
+		t.Errorf("instance-count = %d, want 3", got)
+	}
+
+	body, err := json.Marshal(result[0].Attributes)
+	if err != nil {
+		t.Fatalf("marshal attributes: %v", err)
+	}
+	if !strings.Contains(string(body), `"instance-count":0`) {
+		t.Errorf("the document does not carry instance-count 0: %s", body)
 	}
 }
