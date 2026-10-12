@@ -72,7 +72,9 @@ func setupRunCreateScope(t *testing.T) *runCreateScopeFixture {
 	owner := &models.User{ID: uuid.New(), ZitadelSubject: "runscope-" + sfx, Email: "runscope-" + sfx + "@test.local"}
 	ownersTeam := &models.Team{ID: uuid.New(), OrganizationID: orgA.ID, Name: "owners"}
 	projA := &models.Project{ID: uuid.New(), OrganizationID: orgA.ID, Name: "projA-" + sfx}
-	wsA := &models.Workspace{ID: "ws-" + sfx + "0000000", ProjectID: projA.ID, Name: "wsA"}
+	// AllowDestroyPlan is set because the model has no default for it: the create handler supplies
+	// true, and the run-create cases that queue a destroy run need a workspace that allows one.
+	wsA := &models.Workspace{ID: "ws-" + sfx + "0000000", ProjectID: projA.ID, Name: "wsA", AllowDestroyPlan: true}
 
 	adminAccess := "admin" // grants Runs + WorkspaceWrite on the project's workspaces
 	seed := []interface{}{
