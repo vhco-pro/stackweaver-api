@@ -47,7 +47,7 @@ var wallExemptions = []string{
 	"/api/v2/vcs-connections/azure-devops/",       // prefix: VCS webhooks (basic-auth secret)
 	"/api/v2/zitadel/actions/",                    // prefix: Zitadel Actions webhooks (signing key)
 	"/api/v2/webhooks/",                           // prefix: GitHub webhooks (signature-validated)
-	"/api/v2/settings/",                           // prefix: account-scoped settings (JWT-only surface, mounted in SetupRoutes)
+	"/api/v2/settings/",                           // prefix: account-scoped settings (JWT-only, enforced by middleware.InteractiveOnly in SetupRoutes)
 }
 
 func exempt(path string) bool {

@@ -1,17 +1,14 @@
 {
   "method": "PATCH",
   "path": "/api/v2/settings/profile",
-  "status": 200,
+  "status": 403,
   "body": {
-    "message": "Profile updated successfully",
-    "profile": {
-      "bio": "",
-      "company": "",
-      "email": "avery.diaz@example.com",
-      "id": "\u003cuuid\u003e",
-      "location": "",
-      "name": "Avery Diaz",
-      "username": "avery.diaz@example.com"
-    }
+    "errors": [
+      {
+        "detail": "this endpoint requires an interactive sign-in and cannot be used with an API token",
+        "status": "403",
+        "title": "Forbidden"
+      }
+    ]
   }
 }

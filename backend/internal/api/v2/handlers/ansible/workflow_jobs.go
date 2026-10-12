@@ -3,6 +3,8 @@
 package ansible
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -116,7 +118,13 @@ func (h *WorkflowHandler) LaunchWorkflow(c *gin.Context) {
 	var req struct {
 		ExtraVars map[string]interface{} `json:"extra_vars"`
 	}
-	_ = c.ShouldBindJSON(&req) // body is optional
+	// The body is optional. One with no bytes, or only whitespace, makes the decoder return
+	// io.EOF, and that alone means "no body"; any other error is a body that is there and
+	// cannot be read, which must not start a run without the variables its sender asked for.
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+		return
+	}
 
 	user, _ := h.authService.GetUserFromContext(c)
 	var launchedBy *uuid.UUID

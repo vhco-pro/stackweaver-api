@@ -803,7 +803,12 @@ func SetupV2Routes(
 	// handler; the route resolves it per request.
 	agentPoolHandler.SetAPIKeyService(tokenAPIKeyService)
 	tokenHandler := handlers.NewTokenHandlerV2(tokenAPIKeyService, authService)
+	// A user-bound token acts as its owner in every organization they belong to, and these
+	// handlers mint, list and revoke on behalf of whoever AuthMiddleware resolved. The wall
+	// passes the group as agnostic (no target org), so InteractiveOnly is the authorization
+	// here: without it an org-bound key could mint itself a token for all of its owner's orgs.
 	tokens := v2.Group("/tokens")
+	tokens.Use(middleware.InteractiveOnly())
 	{
 		tokens.GET("", tokenHandler.List)
 		tokens.POST("", tokenHandler.Create)

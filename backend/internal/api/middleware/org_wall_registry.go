@@ -79,6 +79,9 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/dashboard/operations": agnostic(),
 
 	// --- own user tokens (user-bound, no target org) ---
+	// Agnostic only because there is no organization for the wall to resolve. It is not an
+	// invitation to token callers: the group carries InteractiveOnly (v2/routes/routes.go), which
+	// refuses every token identity, so what the wall lets through here the group then denies.
 	"/api/v2/tokens":     agnostic(),
 	"/api/v2/tokens/:id": agnostic(),
 

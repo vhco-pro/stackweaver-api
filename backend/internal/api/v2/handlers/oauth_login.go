@@ -94,7 +94,9 @@ type mintCodeRequest struct {
 //
 // Authenticated (Bearer) - registered on the root router with an explicit
 // AuthMiddleware so it bypasses the org-resolution wall (the flow is
-// org-agnostic; the resulting token is user-bound). Validates the PKCE
+// org-agnostic; the resulting token is user-bound), followed by
+// InteractiveOnly so that only a signed-in session, never an API token, can
+// start it. Validates the PKCE
 // challenge and loopback redirect, mints a single-use code bound to the
 // caller's user, stores it in Redis with a short TTL, and returns it.
 func (h *OAuthLoginHandler) MintCode(c *gin.Context) {

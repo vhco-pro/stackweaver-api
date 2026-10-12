@@ -1,13 +1,13 @@
 {
   "method": "DELETE",
   "path": "/api/v2/tokens/:id",
-  "status": 404,
+  "status": 403,
   "body": {
     "errors": [
       {
-        "detail": "Token not found",
-        "status": "404",
-        "title": "Not Found"
+        "detail": "this endpoint requires an interactive sign-in and cannot be used with an API token",
+        "status": "403",
+        "title": "Forbidden"
       }
     ]
   }

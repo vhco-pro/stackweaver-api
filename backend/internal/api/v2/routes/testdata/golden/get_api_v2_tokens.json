@@ -1,29 +1,14 @@
 {
   "method": "GET",
   "path": "/api/v2/tokens",
-  "status": 200,
+  "status": 403,
   "body": {
-    "data": [
+    "errors": [
       {
-        "attributes": {
-          "created_at": "\u003ctimestamp\u003e",
-          "description": "golden-harness",
-          "expires_at": null,
-          "last_used_at": "\u003ctimestamp\u003e"
-        },
-        "id": "\u003cuuid\u003e",
-        "type": "tokens"
+        "detail": "this endpoint requires an interactive sign-in and cannot be used with an API token",
+        "status": "403",
+        "title": "Forbidden"
       }
-    ],
-    "meta": {
-      "pagination": {
-        "current-page": 1,
-        "next-page": null,
-        "page-size": 1,
-        "prev-page": null,
-        "total-count": 1,
-        "total-pages": 1
-      }
-    }
+    ]
   }
 }

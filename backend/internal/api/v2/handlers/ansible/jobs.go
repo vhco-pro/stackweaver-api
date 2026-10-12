@@ -3,12 +3,15 @@
 package ansible
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -96,14 +99,100 @@ type LaunchJobRequest struct {
 	} `json:"data"`
 }
 
-// LaunchFromTemplateRequest represents the request to launch a job from a template
+// ansibleJobsType is the JSON:API resource type a launch document carries: a launch creates a job.
+const ansibleJobsType = "ansible-jobs"
+
+// LaunchFromTemplateRequest is the document a template launch may carry. The whole body is
+// optional; see decodeLaunchFromTemplateRequest for what counts as absent.
 type LaunchFromTemplateRequest struct {
-	Data struct {
-		Type       string `json:"type"`
-		Attributes struct {
-			ExtraVars models.JobExtraVars `json:"extra-vars"`
-		} `json:"attributes"`
-	} `json:"data"`
+	Data *LaunchFromTemplateData `json:"data"`
+}
+
+// LaunchFromTemplateData is the resource object of a launch document.
+type LaunchFromTemplateData struct {
+	Type       string                       `json:"type"`
+	Attributes LaunchFromTemplateAttributes `json:"attributes"`
+}
+
+// LaunchFromTemplateAttributes are the values one launch sets in place of the template's own.
+// The three strings are pointers because absent and empty mean different things: an absent
+// attribute keeps the template's value, an empty one replaces it with nothing.
+type LaunchFromTemplateAttributes struct {
+	ExtraVars models.JobExtraVars `json:"extra-vars"`
+	Limit     *string             `json:"limit"`
+	Tags      *string             `json:"tags"`
+	SkipTags  *string             `json:"skip-tags"`
+}
+
+// flatLaunchKeys are the override names as top-level members of the body, in the snake_case
+// spelling and the dash-case one. A launch has never read them there, so a body carrying one is
+// refused rather than launched without the values its sender believes it set.
+var flatLaunchKeys = []string{"extra_vars", "extra-vars", "limit", "tags", "skip_tags", "skip-tags"}
+
+const flatLaunchKeysDetail = "top-level fields are not accepted: extra_vars, limit, tags, skip_tags; " +
+	"use data.attributes (extra-vars, limit, tags, skip-tags)"
+
+// decodeLaunchFromTemplateRequest reads the optional launch body. On a rejection it writes the
+// 400 itself and returns false.
+//
+// A body with no bytes, only whitespace, or no members at all ("{}", "null") asks for nothing
+// and launches with the template's values. Anything else must be a document of type
+// "ansible-jobs". The body is read once and decoded twice from the same bytes, first for its
+// top-level members, so that a sender of the flat shape gets the most specific message: flat
+// override keys first (even beside a valid document), then a missing `data`, then `data.type`.
+func decodeLaunchFromTemplateRequest(c *gin.Context) (ansible.TemplateLaunchOverrides, bool) {
+	var none ansible.TemplateLaunchOverrides
+
+	raw, err := c.GetRawData()
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "request body could not be read")
+		return none, false
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return none, true
+	}
+
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		if _, isSyntax := errors.AsType[*json.SyntaxError](err); isSyntax {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+			return none, false
+		}
+		// Valid JSON that is not an object: not a document of any kind.
+		jsonapi.WriteDocumentRequired(c, ansibleJobsType)
+		return none, false
+	}
+	for _, key := range flatLaunchKeys {
+		if _, present := members[key]; present {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, flatLaunchKeysDetail)
+			return none, false
+		}
+	}
+	if len(members) == 0 {
+		return none, true
+	}
+
+	var req LaunchFromTemplateRequest
+	if err := binding.JSON.BindBody(raw, &req); err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+		return none, false
+	}
+	if req.Data == nil {
+		jsonapi.WriteDocumentRequired(c, ansibleJobsType)
+		return none, false
+	}
+	if req.Data.Type != ansibleJobsType {
+		jsonapi.WriteWrongType(c, ansibleJobsType, req.Data.Type)
+		return none, false
+	}
+
+	attrs := req.Data.Attributes
+	return ansible.TemplateLaunchOverrides{
+		ExtraVars: attrs.ExtraVars,
+		Limit:     attrs.Limit,
+		Tags:      attrs.Tags,
+		SkipTags:  attrs.SkipTags,
+	}, true
 }
 
 // ListByProject lists all jobs for a project
@@ -905,15 +994,14 @@ func (h *JobHandler) LaunchFromTemplate(c *gin.Context) {
 		return
 	}
 
-	var req LaunchFromTemplateRequest
-	// Optional body for extra vars
-	// If JSON binding fails, continue with empty request (backward compatibility)
-	// The request body is optional for this endpoint
-	_ = c.ShouldBindJSON(&req)
+	overrides, ok := decodeLaunchFromTemplateRequest(c)
+	if !ok {
+		return
+	}
 
 	createdBy := &user.ID
 
-	job, err := h.jobService.LaunchFromTemplate(context.Background(), id, req.Data.Attributes.ExtraVars, createdBy)
+	job, err := h.jobService.LaunchFromTemplateWithOverrides(context.Background(), id, overrides, createdBy)
 	if err != nil {
 		if errors.Is(err, ansible.ErrTemplateDisabled) {
 			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
