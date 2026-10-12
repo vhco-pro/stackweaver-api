@@ -39,6 +39,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -49,6 +50,13 @@ type workflowUpdateFixture struct {
 	owner      uuid.UUID
 	workflowID uuid.UUID
 	nodeID     uuid.UUID
+
+	// What a create document can name: the organization the workflow lives in, and a project, an
+	// inventory and a job template of that organization.
+	orgName     string
+	projectID   string
+	inventoryID string
+	templateID  string
 }
 
 // setupWorkflowUpdate seeds one workflow with one approval node in org A of the shared Ansible
@@ -92,18 +100,31 @@ func setupWorkflowUpdate(t *testing.T) *workflowUpdateFixture {
 
 	orgRepo := repository.NewOrganizationRepository(db)
 	projectRepo := repository.NewProjectRepository(db)
+	workflowRepo := repository.NewAnsibleWorkflowRepository(db)
 	h := NewWorkflowHandler(
-		repository.NewAnsibleWorkflowRepository(db), orgRepo, projectRepo,
+		workflowRepo, orgRepo, projectRepo,
 		auth.NewService(repository.NewUserRepository(db)),
 		rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), projectRepo),
+		// The engine checks what a create names; nothing here launches, so it needs no services.
+		ansiblesvc.NewWorkflowEngineService(workflowRepo, nil, nil, nil),
 	)
 	router := storedAsSentRouter()
+	router.POST("/api/v2/organizations/:name/ansible/workflows", h.Create)
 	router.GET("/api/v2/ansible/workflows/:id", h.Get)
 	router.PATCH("/api/v2/ansible/workflows/:id", h.Update)
+	router.POST("/api/v2/ansible/workflows/:id/nodes", h.CreateNode)
 	router.GET("/api/v2/ansible/workflows/:id/nodes", h.ListNodes)
 	router.PATCH("/api/v2/ansible/workflow-nodes/:id", h.UpdateNode)
 
-	return &workflowUpdateFixture{router: router, db: db, owner: f.owner.ID, workflowID: workflow.ID, nodeID: node.ID}
+	var org models.Organization
+	if err := db.First(&org, "id = ?", project.OrganizationID).Error; err != nil {
+		t.Fatalf("loading the fixture's organization: %v", err)
+	}
+
+	return &workflowUpdateFixture{
+		router: router, db: db, owner: f.owner.ID, workflowID: workflow.ID, nodeID: node.ID,
+		orgName: org.Name, projectID: project.ID.String(), inventoryID: f.inventoryID, templateID: f.templateID,
+	}
 }
 
 // patch sends one PATCH document carrying attrs and fails the test unless it answers 200.
@@ -159,6 +180,8 @@ type attributeCase struct {
 	attr string
 	sent any // the value in the document
 	want any // what the attribute reads as afterwards
+	// rejected marks a value the handler refuses with a 400, leaving the row as it was.
+	rejected bool
 }
 
 func TestWorkflowUpdate_OmittedAttributesAreLeftAlone(t *testing.T) {
@@ -222,21 +245,32 @@ func TestWorkflowUpdate_OmittedAttributesAreLeftAlone(t *testing.T) {
 
 	// One attribute per case, sent with its zero value: the hardest value to tell from absent.
 	// Cleared extra vars read as the empty object, the value a workflow created without any has.
+	//
+	// The name is the one attribute whose zero value is not stored. This case used to expect the
+	// empty string to be written, because it recorded what the handler did so that the #891 fix
+	// could be shown to change nothing else; it was never a statement that a nameless workflow
+	// is wanted. Since #899 a PATCH that carries an empty name is a 400 and the name stays.
 	zeroes := []attributeCase{
-		{"name", "", ""},
-		{"description", "", ""},
-		{"allow-simultaneous", false, false},
-		{"ask-variables-on-launch", false, false},
-		{"ask-inventory-on-launch", false, false},
-		{"ask-limit-on-launch", false, false},
-		{"extra-vars", "", map[string]any{}},
-		{"limit", "", ""},
-		{"survey-enabled", false, false},
+		{attr: "name", sent: "", want: "nightly-rollout", rejected: true},
+		{attr: "description", sent: "", want: ""},
+		{attr: "allow-simultaneous", sent: false, want: false},
+		{attr: "ask-variables-on-launch", sent: false, want: false},
+		{attr: "ask-inventory-on-launch", sent: false, want: false},
+		{attr: "ask-limit-on-launch", sent: false, want: false},
+		{attr: "extra-vars", sent: "", want: map[string]any{}},
+		{attr: "limit", sent: "", want: ""},
+		{attr: "survey-enabled", sent: false, want: false},
 	}
 	for _, tc := range zeroes {
 		t.Run(tc.attr+" alone, sent as its zero value", func(t *testing.T) {
 			reset(t)
-			f.patch(t, path, "ansible-workflows", map[string]any{tc.attr: tc.sent})
+			if tc.rejected {
+				code, body := storedAsSentCall(t, f.router, http.MethodPatch, path, f.owner,
+					workflowDocument(t, "ansible-workflows", map[string]any{tc.attr: tc.sent}, nil))
+				assertBadRequest(t, code, body, "name must not be empty")
+			} else {
+				f.patch(t, path, "ansible-workflows", map[string]any{tc.attr: tc.sent})
+			}
 
 			want := make(map[string]any, len(stored))
 			for name, value := range stored {
@@ -351,14 +385,14 @@ func TestWorkflowNodeUpdate_OmittedAttributesAreLeftAlone(t *testing.T) {
 	})
 
 	zeroes := []attributeCase{
-		{"position-x", 0, float64(0)},
-		{"position-y", 0, float64(0)},
-		{"extra-vars", "", map[string]any{}},
-		{"limit", "", ""},
-		{"tags", "", ""},
-		{"skip-tags", "", ""},
-		{"verbosity", 0, float64(0)},
-		{"all-parents-must-converge", false, false},
+		{attr: "position-x", sent: 0, want: float64(0)},
+		{attr: "position-y", sent: 0, want: float64(0)},
+		{attr: "extra-vars", sent: "", want: map[string]any{}},
+		{attr: "limit", sent: "", want: ""},
+		{attr: "tags", sent: "", want: ""},
+		{attr: "skip-tags", sent: "", want: ""},
+		{attr: "verbosity", sent: 0, want: float64(0)},
+		{attr: "all-parents-must-converge", sent: false, want: false},
 	}
 	for _, tc := range zeroes {
 		t.Run(tc.attr+" alone, sent as its zero value", func(t *testing.T) {

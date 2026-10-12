@@ -88,8 +88,8 @@ func TestLaunchWorkflow_UnreadableBodyIsRefused(t *testing.T) {
 		workflowRepo, orgRepo, projectRepo,
 		auth.NewService(repository.NewUserRepository(db)),
 		rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), projectRepo),
+		ansiblesvc.NewWorkflowEngineService(workflowRepo, jobRepo, jobService, nil),
 	)
-	h.SetEngine(ansiblesvc.NewWorkflowEngineService(workflowRepo, jobRepo, jobService, nil))
 	router := storedAsSentRouter()
 	router.POST("/api/v2/ansible/workflows/:id/launch", h.LaunchWorkflow)
 

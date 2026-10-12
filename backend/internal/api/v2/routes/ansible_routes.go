@@ -39,8 +39,7 @@ func SetupAnsibleWorkflowRoutes(
 	workflowEngine *ansible.WorkflowEngineService,
 ) {
 	// Initialize Workflow Handler
-	workflowHandler := ansibleHandlers.NewWorkflowHandler(workflowRepo, orgRepo, projectRepo, authService, rbacService)
-	workflowHandler.SetEngine(workflowEngine)
+	workflowHandler := ansibleHandlers.NewWorkflowHandler(workflowRepo, orgRepo, projectRepo, authService, rbacService, workflowEngine)
 
 	// ==========================================
 	// Ansible Workflow Template Routes
