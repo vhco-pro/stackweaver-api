@@ -29,9 +29,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -50,7 +50,7 @@ func setupWorkspaceReadAuthz(t *testing.T) *wsReadFixture {
 	if dbURL == "" {
 		t.Skip("TEST_DATABASE_URL not set - skipping integration test")
 	}
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}

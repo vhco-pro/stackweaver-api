@@ -35,9 +35,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -109,18 +109,10 @@ func TestAdminTofuVersionCreate_EnabledIsStoredAsSent(t *testing.T) {
 	if dbURL == "" {
 		t.Skip("TEST_DATABASE_URL not set - skipping integration test")
 	}
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	// Registered first, so it runs after the row cleanup below. The suite shares one Postgres with
-	// every other session on the host, and a pool left open holds connections until the test
-	// binary exits.
-	t.Cleanup(func() {
-		if sqlDB, err := db.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-	})
 	if err := db.AutoMigrate(
 		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
 		&models.Team{}, &models.TeamMember{}, &models.TofuVersion{},

@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/postgres"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -66,7 +66,7 @@ func buildRealRouter(t *testing.T) *gin.Engine {
 	if os.Getenv("DEV_INSECURE_KEY") == "" {
 		t.Setenv("DEV_INSECURE_KEY", "1")
 	}
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}

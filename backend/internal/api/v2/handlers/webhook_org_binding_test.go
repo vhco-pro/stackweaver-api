@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -25,7 +25,7 @@ func TestFilterWorkspacesByInstallation(t *testing.T) {
 	if dbURL == "" {
 		dbURL = "postgres://iac:iac_password@localhost:5432/iac_platform?sslmode=disable" //nolint:gosec // G101: test database URL
 	}
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
 	if err != nil {
 		t.Skipf("no test database: %v", err)
 	}

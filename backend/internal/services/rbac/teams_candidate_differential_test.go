@@ -30,9 +30,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -52,7 +52,7 @@ func setupRBACDB(t *testing.T) *gorm.DB {
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set - skipping integration test")
 	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := dbtest.Open(t, dsn, &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}

@@ -34,9 +34,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -70,16 +70,10 @@ func setupSettingsGuard(t *testing.T) *settingsGuardFixture {
 	// SetupV2Routes initialises the OIDC signing key and refuses an absent one.
 	t.Setenv("DEV_INSECURE_KEY", "1")
 
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	// Registered first, so it runs after the row cleanup below.
-	t.Cleanup(func() {
-		if sqlDB, err := db.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-	})
 	if err := db.AutoMigrate(
 		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
 		&models.Team{}, &models.TeamMember{}, &models.Project{},

@@ -29,7 +29,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	v2routes "github.com/michielvha/stackweaver/backend/internal/api/v2/routes"
-	"gorm.io/driver/postgres"
+	"github.com/michielvha/stackweaver/core/dbtest"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -71,7 +71,7 @@ func TestOrgWallRegistryCompleteness(t *testing.T) {
 	// Route REGISTRATION must not require production key material.
 	t.Setenv("DEV_INSECURE_KEY", "1")
 
-	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
