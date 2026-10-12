@@ -4,6 +4,7 @@ package ansible
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -81,14 +82,17 @@ func NewInventoryHandler(
 // credentials live) so the runner never needs those credentials and never has to
 // refresh tokens itself. Resolution is best-effort: on any failure the message is
 // returned without a CloneURL and the runner falls back to resolving from the DB.
+//
+// The connection is loaded within the inventory's organization (storedVCSConnection). An
+// inventory row that names a connection of another organization gets no clone URL here, and the
+// runner, which asks the same question, fails the sync.
 func (h *InventoryHandler) buildInventorySyncMessage(ctx context.Context, inventory *models.AnsibleInventory) InventorySyncMessage {
 	msg := InventorySyncMessage{InventoryID: inventory.ID}
-	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || inventory.VCSConnectionID == nil || inventory.VCSRepository == "" {
+	if h.vcsRegistry == nil || inventory.VCSRepository == "" {
 		return msg
 	}
-	conn, err := h.vcsConnectionRepo.GetByID(*inventory.VCSConnectionID)
-	if err != nil {
-		logger.Warnf("Inventory %s: failed to load VCS connection for clone-URL pre-resolution: %v", inventory.ID, err)
+	conn := h.storedVCSConnection(ctx, inventory)
+	if conn == nil {
 		return msg
 	}
 	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, inventory.VCSRepository)
@@ -104,10 +108,32 @@ func (h *InventoryHandler) buildInventorySyncMessage(ctx context.Context, invent
 	return msg
 }
 
+// storedVCSConnection loads the connection a stored inventory names, within the inventory's
+// organization (ansible.InventoryVCSConnection). It is nil when the inventory names none or
+// names one outside its organization, which a row stored before the write path checked may.
+func (h *InventoryHandler) storedVCSConnection(ctx context.Context, inventory *models.AnsibleInventory) *models.VCSConnection {
+	if inventory.VCSConnectionID == nil || h.vcsConnectionRepo == nil {
+		return nil
+	}
+	scope := h.vcsConnectionRepo.OrganizationScope().WithContext(ctx)
+	conn, err := ansible.InventoryVCSConnection(scope, inventory.OrganizationID, *inventory.VCSConnectionID)
+	if err != nil {
+		if !errors.Is(err, ansible.ErrInvalidInput) {
+			logger.Warnf("Inventory %s: loading its VCS connection failed: %v", inventory.ID, err)
+		}
+		return nil
+	}
+	return conn
+}
+
 // maybeRegisterADOWebhook registers Azure DevOps service hook subscriptions for a specific repo
 // in a background goroutine. Silently skips if not ADO, no webhook base URL, or wrong repo format.
-func (h *InventoryHandler) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath string) {
-	if connID == nil || repoPath == "" || h.vcsRegistry == nil || h.vcsConnectionRepo == nil {
+//
+// It takes the connection, not its identifier: the registration is made with the connection's
+// token, so the caller hands over a connection held to the inventory's organization
+// (storedVCSConnection).
+func (h *InventoryHandler) maybeRegisterADOWebhook(conn *models.VCSConnection, repoPath string) {
+	if conn == nil || conn.Provider != models.VCSProviderAzureDevOps || repoPath == "" || h.vcsRegistry == nil {
 		return
 	}
 	webhookBaseURL := os.Getenv("STACKWEAVER_WEBHOOK_BASE_URL")
@@ -118,11 +144,7 @@ func (h *InventoryHandler) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath s
 	if len(parts) != 2 {
 		return
 	}
-	go func(id uuid.UUID, projectName, repoName string) {
-		conn, err := h.vcsConnectionRepo.GetByID(id)
-		if err != nil || conn.Provider != models.VCSProviderAzureDevOps {
-			return
-		}
+	go func(projectName, repoName string) {
 		provider, err := h.vcsRegistry.GetProvider(conn)
 		if err != nil {
 			return
@@ -131,7 +153,7 @@ func (h *InventoryHandler) maybeRegisterADOWebhook(connID *uuid.UUID, repoPath s
 		if rErr := provider.RegisterWebhooksForRepo(bgCtx, conn, webhookBaseURL, projectName, repoName); rErr != nil {
 			logger.Warnf("Failed to register ADO webhooks for ansible inventory repo %s/%s: %v", projectName, repoName, rErr)
 		}
-	}(*connID, parts[0], parts[1])
+	}(parts[0], parts[1])
 }
 
 // CreateInventoryRequest represents the request to create an inventory
@@ -365,13 +387,19 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 		req.Data.Attributes.VCSBranch,
 		req.Data.Attributes.InventoryPath,
 	)
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		// A VCS connection the inventory may not name: one of another organization and one
+		// that does not exist get this same answer.
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
 
 	// Register ADO webhooks if this inventory is linked to an Azure DevOps repository
-	h.maybeRegisterADOWebhook(inventory.VCSConnectionID, inventory.VCSRepository)
+	h.maybeRegisterADOWebhook(h.storedVCSConnection(c.Request.Context(), inventory), inventory.VCSRepository)
 
 	// Constructed inventories: persist rules + ordered inputs, then queue the
 	// initial build.
@@ -574,6 +602,11 @@ func (h *InventoryHandler) Update(c *gin.Context) {
 		req.Data.Attributes.VCSBranch,
 		req.Data.Attributes.InventoryPath,
 	)
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		// As on create: the one answer for a VCS connection the inventory may not name.
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -607,7 +640,7 @@ func (h *InventoryHandler) Update(c *gin.Context) {
 	}
 
 	// Register ADO webhooks if this inventory is linked to an Azure DevOps repository
-	h.maybeRegisterADOWebhook(inventory.VCSConnectionID, inventory.VCSRepository)
+	h.maybeRegisterADOWebhook(h.storedVCSConnection(c.Request.Context(), inventory), inventory.VCSRepository)
 
 	jsonapi.WriteDocument(c, http.StatusOK, formatInventoryResponse(inventory))
 }

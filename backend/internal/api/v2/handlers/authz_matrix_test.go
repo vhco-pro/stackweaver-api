@@ -47,6 +47,16 @@ func setupAuthzTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
+	// Registered first, so it runs after every row cleanup a caller registers. The suite shares
+	// one Postgres with every other session on the host, and a pool left open holds connections
+	// until the test binary exits: this helper has dozens of callers in one package, and
+	// together their pools reached the server's connection limit, at which point the tests that
+	// skip on a failed connect stopped running without anyone being told.
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	// Migrate the full model set: the team-membership handlers load teams through the rbac
 	// service, which preloads project/workspace/org access rows - a partial migrate set only
 	// passes against a DB that already has those tables (dev) and fails on a fresh CI Postgres.

@@ -578,11 +578,9 @@ func SetupV2Routes(
 		rootChainWall,
 		runHandler.GetPlanJSONOutput)
 	r.GET("/api/v2/configuration-versions/:id/download",
-		terraformHandlers.TaskTokenGate(func(c *gin.Context, _, runID string) bool {
-			// The token authorizes only ITS run's configuration version.
-			run, err := runRepo.GetByID(runID)
-			return err == nil && run.ConfigurationVersionID != nil && *run.ConfigurationVersionID == c.Param("id")
-		}, configVersionHandler.DownloadConfigurationVersion),
+		terraformHandlers.TaskTokenGate(
+			terraformHandlers.TaskTokenMatchesConfigurationVersion(runRepo, configVersionRepo),
+			configVersionHandler.DownloadConfigurationVersion),
 		middleware.AuthMiddleware(authService),
 		rootChainWall,
 		configVersionHandler.DownloadConfigurationVersion)

@@ -108,6 +108,21 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project-id")
 			return
 		}
+		// Org boundary: the project must belong to the inventory's org, like the credential and
+		// the agent pool below. Asked before the permission check, with the organization in the
+		// query, so that a project of another organization and one that does not exist get one
+		// answer: the permission check answers the first 403 and fails on the second, which
+		// told a caller which project identifiers are real.
+		scope := h.projectRepo.WithContext(c.Request.Context()).OrganizationScope()
+		inOrganization, err := scope.ProjectInOrganization(projectID, inventory.OrganizationID)
+		if err != nil {
+			apierror.Internal(c, "Failed to check the project", err)
+			return
+		}
+		if !inOrganization {
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Project not found in this organization")
+			return
+		}
 	case inventory.ProjectID != nil:
 		projectID = *inventory.ProjectID
 	default:
@@ -214,10 +229,10 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		ExtraVars:     attrs.ExtraVars,
 		CreatedBy:     &user.ID,
 	})
-	// The one input the checks above do not cover is an explicit project-id of another
-	// organization than the inventory's: the service rejects it as ErrInvalidInput, which
-	// answers 400 with its sentence. Anything else is logged and answered with an
-	// operator-authored message.
+	// The service holds the project and the credentials to the inventory's organization once
+	// more, since it is what a relaunch goes through with no handler in front of it, and
+	// rejects them as ErrInvalidInput, which answers 400 with its sentence. Anything else is
+	// logged and answered with an operator-authored message.
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return

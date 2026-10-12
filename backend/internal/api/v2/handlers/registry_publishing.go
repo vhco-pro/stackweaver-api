@@ -142,15 +142,14 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 		autoPublishTags = *req.AutoPublishTags
 	}
 
-	// Validate VCS connection if provided
+	// Validate VCS connection if provided: it must be a connection of this organization. The
+	// organization is part of the lookup, so a connection of another organization and one that
+	// does not exist get one answer. They used to get a 403 and a 400, which told a caller
+	// which connection identifiers are real.
 	if req.VCSConnectionID != nil {
-		vcsConn, err := h.vcsConnectionRepo.GetByID(*req.VCSConnectionID)
-		if err != nil {
+		scope := h.vcsConnectionRepo.OrganizationScope().WithContext(c.Request.Context())
+		if _, err := scope.VCSConnection(*req.VCSConnectionID, org.ID); err != nil {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "VCS connection not found")
-			return
-		}
-		if vcsConn.OrganizationID != org.ID {
-			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "VCS connection does not belong to this organization")
 			return
 		}
 	}

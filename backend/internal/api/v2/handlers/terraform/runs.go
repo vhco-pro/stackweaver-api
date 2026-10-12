@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,6 +35,7 @@ import (
 	"github.com/michielvha/stackweaver/core/services/logparser"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/storage"
+	"gorm.io/gorm"
 )
 
 type RunHandlerV2 struct {
@@ -392,9 +394,11 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		// The configuration version's source tells us how the config was created, but the run source
 		// indicates the run was queued from a configuration version
 		runSource = "tfe-configuration-version"
-		// Fetch configuration version to check its source for plan-only logic
+		// Fetch configuration version to check its source for plan-only logic. It is loaded
+		// within the run's workspace, so a run row that names another workspace's configuration
+		// version renders none of that version's details.
 		var err error
-		configVersion, err = configVersionRepo.GetByID(*run.ConfigurationVersionID)
+		configVersion, err = configVersionRepo.GetByIDForWorkspace(*run.ConfigurationVersionID, run.WorkspaceID)
 		if err != nil {
 			configVersion = nil // Ignore error, will use defaults
 		}
@@ -739,6 +743,30 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
+	// A configuration version the request names must belong to the run's workspace: a runner
+	// later downloads its uploaded code by identifier and plans it in this workspace. One that
+	// belongs to another workspace is answered exactly like one that does not exist, so the
+	// answer does not confirm that the identifier is real.
+	//
+	// The position is deliberate, as for the destroy check above: after the workspace lookup, the
+	// token's organization binding and the RBAC checks, so a caller who may not create runs here
+	// learns nothing about configuration versions.
+	//
+	// Terraform Enterprise documents 404 for "organization or workspace not found, or user
+	// unauthorized" on this endpoint and says nothing of a configuration version the workspace
+	// does not have. The 404 follows that documented not-found answer and the one the workspace
+	// relationship of this same document gets; the wording is ours.
+	if configVersionID != nil {
+		if _, err := h.configVersionRepo.GetByIDForWorkspace(*configVersionID, workspaceID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Configuration version not found")
+				return
+			}
+			apierror.Internal(c, "Failed to check the configuration version", err)
+			return
+		}
+	}
+
 	// TFE-compatible: If no configuration version provided and workspace has VCS configured,
 	// automatically create a configuration version by cloning from VCS
 	// This allows UI runs to work without requiring manual configuration version creation
@@ -747,8 +775,11 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	if configVersionID == nil && workspace.VCSConnectionID != nil && workspace.VCSRepository != "" && workspace.VCSBranch != "" && workspace.ExecutionMode != "agent" {
 		logger.Infof("Run creation: No configuration version provided, but workspace has VCS configured. Creating configuration version from VCS.")
 
-		// Get VCS connection
-		vcsConn, err := h.vcsConnectionRepo.GetByID(*workspace.VCSConnectionID)
+		// Get the VCS connection, within the workspace's organization. A workspace row stored
+		// before a write checked its connection may name one of another organization; that one
+		// is not found here, exactly like one that no longer exists, and nothing is cloned.
+		scope := h.vcsConnectionRepo.OrganizationScope().WithContext(c.Request.Context())
+		vcsConn, err := scope.VCSConnectionForProject(*workspace.VCSConnectionID, workspace.ProjectID)
 		if err != nil {
 			logger.Infof("Run creation: Failed to get VCS connection: %v", err)
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to get VCS connection for workspace")
@@ -2521,7 +2552,7 @@ func AutoCancelSupersededSpeculativeRuns(
 		if existingRun.Operation != models.RunOperationPlanOnly || existingRun.ConfigurationVersionID == nil {
 			continue
 		}
-		cv, err := configVersionRepo.GetByID(*existingRun.ConfigurationVersionID)
+		cv, err := configVersionRepo.GetByIDForWorkspace(*existingRun.ConfigurationVersionID, existingRun.WorkspaceID)
 		if err != nil || cv == nil || !cv.Speculative {
 			continue
 		}

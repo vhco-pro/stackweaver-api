@@ -1282,8 +1282,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 					logger.Infof("Auto-applying run %s: per-run auto-apply intent (go-tfe auto-apply)", runID)
 				}
 				if run.ConfigurationVersionID != nil {
-					var configVersion models.ConfigurationVersion
-					if err := h.db.First(&configVersion, "id = ?", *run.ConfigurationVersionID).Error; err == nil {
+					if configVersion, err := h.runConfigurationVersion(&run); err == nil {
 						if configVersion.Source == "tfe-vcs" {
 							var workspace models.Workspace
 							if err := h.db.First(&workspace, "id = ?", run.WorkspaceID).Error; err == nil && workspace.AutoApply {
@@ -1603,20 +1602,31 @@ func (h *RunnerAgentHandler) playbookSnapshotExists(ctx context.Context, playboo
 // playbookVCSArtifact builds the clone instructions for a VCS-backed playbook: a fresh
 // token from the provider registry embedded in the clone URL. It returns nil when the
 // connection or a clone URL cannot be resolved.
+//
+// The connection is loaded within the playbook's organization. A playbook row that names another
+// organization's connection resolves to nothing, so a self-hosted runner is handed no clone URL
+// and no token for it.
 func (h *RunnerAgentHandler) playbookVCSArtifact(ctx context.Context, playbook *models.AnsiblePlaybook) *VCSArtifact {
-	var vcsConn models.VCSConnection
-	if err := h.db.First(&vcsConn, "id = ?", playbook.VCSConnectionID).Error; err != nil {
+	if playbook.VCSConnectionID == nil {
+		return nil
+	}
+	scope := repository.NewOrganizationScope(h.db).WithContext(ctx)
+	vcsConn, err := ansible.PlaybookVCSConnection(scope, playbook.ProjectID, *playbook.VCSConnectionID)
+	if err != nil {
+		if !errors.Is(err, ansible.ErrInvalidInput) {
+			logger.Warnf("Playbook %s: loading its VCS connection failed: %v", playbook.ID, err)
+		}
 		return nil
 	}
 	if h.vcsRegistry == nil {
 		return nil
 	}
-	provider, err := h.vcsRegistry.GetProvider(&vcsConn)
+	provider, err := h.vcsRegistry.GetProvider(vcsConn)
 	if err != nil {
 		return nil
 	}
-	accessToken, _ := provider.GetFreshToken(ctx, &vcsConn)
-	repoURL := provider.BuildCloneURL(&vcsConn, accessToken, playbook.VCSRepository)
+	accessToken, _ := provider.GetFreshToken(ctx, vcsConn)
+	repoURL := provider.BuildCloneURL(vcsConn, accessToken, playbook.VCSRepository)
 	if repoURL == "" {
 		return nil
 	}
@@ -2098,6 +2108,14 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// runConfigurationVersion loads the configuration version a run names, within the run's
+// workspace (ConfigurationVersionRepository.GetByIDForWorkspace). A run row stored before the API
+// checked may name one uploaded to another workspace; that one is gorm.ErrRecordNotFound here,
+// exactly like one that does not exist. The run must name a configuration version.
+func (h *RunnerAgentHandler) runConfigurationVersion(run *models.Run) (*models.ConfigurationVersion, error) {
+	return repository.NewConfigurationVersionRepository(h.db).GetByIDForWorkspace(*run.ConfigurationVersionID, run.WorkspaceID)
+}
+
 // getTerraformRunArtifacts returns artifacts needed for a self-hosted Terraform runner
 // to execute a run: configuration tarball, variables, environment variables, and workspace metadata.
 func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID string) {
@@ -2138,31 +2156,39 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		WorkingDirectory: run.Workspace.WorkingDirectory,
 	}
 
-	// Get configuration tarball from storage if configuration version exists
+	// Get configuration tarball from storage if configuration version exists. The version is
+	// looked up within the run's workspace first: a run row that names a configuration version
+	// uploaded to another workspace finds none, and the runner is handed none of its code.
 	if run.ConfigurationVersionID != nil && h.storageClient != nil {
-		storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", *run.ConfigurationVersionID)
-		ctx := context.Background()
-		if data, err := h.storageClient.Get(ctx, storageKey); err == nil {
-			response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
+		if configVersion, cvErr := h.runConfigurationVersion(&run); cvErr == nil {
+			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+			ctx := context.Background()
+			if data, err := h.storageClient.Get(ctx, storageKey); err == nil {
+				response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
+			}
+		} else {
+			logger.Warnf("Configuration version lookup failed for run %s: %v", runID, cvErr)
 		}
 	}
 
-	// Get VCS info from workspace for cloning (fallback when no config version)
+	// Get VCS info from workspace for cloning (fallback when no config version). The connection
+	// is loaded within the workspace's organization: a workspace row that names another
+	// organization's connection finds none, and the runner is handed no clone URL for it.
 	if run.ConfigurationVersionID == nil && run.Workspace.VCSConnectionID != nil && run.Workspace.VCSRepository != "" {
-		var vcsConn models.VCSConnection
-		if err := h.db.First(&vcsConn, "id = ?", run.Workspace.VCSConnectionID).Error; err == nil {
+		scope := repository.NewOrganizationScope(h.db).WithContext(c.Request.Context())
+		if vcsConn, err := scope.VCSConnectionForProject(*run.Workspace.VCSConnectionID, run.Workspace.ProjectID); err == nil {
 			ctx := c.Request.Context()
 			var repoURL string
 
 			// Use provider registry for token refresh and clone URL building
 			if h.vcsRegistry != nil {
-				provider, provErr := h.vcsRegistry.GetProvider(&vcsConn)
+				provider, provErr := h.vcsRegistry.GetProvider(vcsConn)
 				if provErr == nil {
-					freshToken, tokenErr := provider.GetFreshToken(ctx, &vcsConn)
+					freshToken, tokenErr := provider.GetFreshToken(ctx, vcsConn)
 					if tokenErr != nil {
 						logger.Warnf("Failed to get fresh token for VCS connection %s: %v", vcsConn.ID, tokenErr)
 					}
-					repoURL = provider.BuildCloneURL(&vcsConn, freshToken, run.Workspace.VCSRepository)
+					repoURL = provider.BuildCloneURL(vcsConn, freshToken, run.Workspace.VCSRepository)
 				} else {
 					logger.Warnf("Failed to get VCS provider for connection %s: %v", vcsConn.ID, provErr)
 				}
@@ -2740,8 +2766,7 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 	commitHash := ""
 	committer := ""
 	if run.ConfigurationVersionID != nil {
-		var configVersion models.ConfigurationVersion
-		if err := h.db.First(&configVersion, "id = ?", *run.ConfigurationVersionID).Error; err == nil {
+		if configVersion, err := h.runConfigurationVersion(&run); err == nil {
 			commitHash = configVersion.CommitHash
 			committer = configVersion.Committer
 		}

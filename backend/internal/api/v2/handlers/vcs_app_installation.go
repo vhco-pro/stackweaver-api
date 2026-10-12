@@ -164,12 +164,15 @@ func NewVCSAppInstallationHandlerV2(
 // playbookSyncPayload builds the webhook-triggered playbook sync message, resolving
 // a fresh token-embedded clone URL server-side (best-effort) so the runner needs no
 // VCS OAuth credentials. Mirrors inventorySyncPayload.
+//
+// A push has no caller to authorize, so the connection is loaded within the playbook's
+// organization: a playbook row that names another organization's connection gets no clone URL.
 func (h *VCSAppInstallationHandlerV2) playbookSyncPayload(ctx context.Context, pb *models.AnsiblePlaybook) map[string]any {
 	payload := map[string]any{"playbook_id": pb.ID.String()}
 	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || pb.VCSConnectionID == nil || pb.VCSRepository == "" {
 		return payload
 	}
-	conn, err := h.vcsConnectionRepo.GetByID(*pb.VCSConnectionID)
+	conn, err := coreansible.PlaybookVCSConnection(h.vcsConnectionRepo.OrganizationScope().WithContext(ctx), pb.ProjectID, *pb.VCSConnectionID)
 	if err != nil {
 		logger.Warnf("Playbook %s: failed to load VCS connection for clone-URL pre-resolution: %v", pb.ID, err)
 		return payload
@@ -193,7 +196,7 @@ func (h *VCSAppInstallationHandlerV2) inventorySyncPayload(ctx context.Context, 
 	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || inv.VCSConnectionID == nil || inv.VCSRepository == "" {
 		return payload
 	}
-	conn, err := h.vcsConnectionRepo.GetByID(*inv.VCSConnectionID)
+	conn, err := h.inventoryConnection(ctx, inv)
 	if err != nil {
 		logger.Warnf("Inventory %s: failed to load VCS connection for clone-URL pre-resolution: %v", inv.ID, err)
 		return payload
@@ -210,6 +213,25 @@ func (h *VCSAppInstallationHandlerV2) inventorySyncPayload(ctx context.Context, 
 	payload["clone_url"] = cloneURL
 	payload["branch"] = branch
 	return payload
+}
+
+// inventoryConnection loads the VCS connection an inventory names, within the inventory's
+// organization. A push has no caller to authorize, so this is where an inventory row that names
+// another organization's connection stops: the connection is not found, the inventory is not
+// matched to the delivery and gets no clone URL. The inventory must name a connection.
+func (h *VCSAppInstallationHandlerV2) inventoryConnection(ctx context.Context, inv *models.AnsibleInventory) (*models.VCSConnection, error) {
+	scope := h.vcsConnectionRepo.OrganizationScope().WithContext(ctx)
+	return coreansible.InventoryVCSConnection(scope, inv.OrganizationID, *inv.VCSConnectionID)
+}
+
+// workspaceConnection loads the VCS connection a workspace names, within the workspace's
+// organization, which is that of its project. It is how every webhook path reaches a workspace's
+// connection: to match the workspace to a delivery, to clone for the run a push or a pull request
+// starts, and to post a commit status. None of them has a caller to authorize, so a workspace row
+// that names another organization's connection stops here: the connection is not found
+// (gorm.ErrRecordNotFound), exactly as if it did not exist. The workspace must name a connection.
+func (h *VCSAppInstallationHandlerV2) workspaceConnection(ws *models.Workspace) (*models.VCSConnection, error) {
+	return h.vcsConnectionRepo.OrganizationScope().VCSConnectionForProject(*ws.VCSConnectionID, ws.ProjectID)
 }
 
 // InitiateInstallation initiates the GitHub App installation flow
@@ -528,7 +550,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 			var vcsConn *models.VCSConnection
 			if ws.VCSConnectionID != nil {
 				var connErr error
-				vcsConn, connErr = h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+				vcsConn, connErr = h.workspaceConnection(&ws)
 				if connErr != nil {
 					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, connErr)
 					return
@@ -789,7 +811,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 			var vcsConn *models.VCSConnection
 			if ws.VCSConnectionID != nil {
 				var connErr error
-				vcsConn, connErr = h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+				vcsConn, connErr = h.workspaceConnection(&ws)
 				if connErr != nil {
 					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, connErr)
 					return
@@ -1125,7 +1147,7 @@ func (h *VCSAppInstallationHandlerV2) filterWorkspacesByInstallation(workspaces 
 			logger.Warnf("webhook: workspace %s has no VCS connection; skipping (AUD-102)", ws.ID)
 			continue
 		}
-		conn, err := h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+		conn, err := h.workspaceConnection(&ws)
 		if err != nil || conn == nil {
 			logger.Warnf("webhook: workspace %s VCS connection load failed; skipping", ws.ID)
 			continue
@@ -1149,7 +1171,7 @@ func (h *VCSAppInstallationHandlerV2) filterInventoriesByInstallation(inventorie
 		if inv.VCSConnectionID == nil {
 			continue
 		}
-		conn, err := h.vcsConnectionRepo.GetByID(*inv.VCSConnectionID)
+		conn, err := h.inventoryConnection(context.Background(), &inv)
 		if err != nil || conn == nil || conn.InstallationID == "" || conn.InstallationID != installationID {
 			logger.Warnf("webhook: inventory %s connection installation does not match delivery installation %q; skipping (AUD-102)", inv.ID, installationID)
 			continue
@@ -1172,7 +1194,7 @@ func (h *VCSAppInstallationHandlerV2) filterWorkspacesByADOOrg(workspaces []mode
 			logger.Warnf("webhook: workspace %s has no VCS connection; skipping (AUD-102 ADO)", ws.ID)
 			continue
 		}
-		conn, err := h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+		conn, err := h.workspaceConnection(&ws)
 		if err != nil || conn == nil {
 			logger.Warnf("webhook: workspace %s VCS connection load failed; skipping", ws.ID)
 			continue
@@ -1193,7 +1215,7 @@ func (h *VCSAppInstallationHandlerV2) filterInventoriesByADOOrg(inventories []mo
 		if inv.VCSConnectionID == nil {
 			continue
 		}
-		conn, err := h.vcsConnectionRepo.GetByID(*inv.VCSConnectionID)
+		conn, err := h.inventoryConnection(context.Background(), &inv)
 		if err != nil || conn == nil || conn.Provider != models.VCSProviderAzureDevOps || adoOrg == "" || !strings.EqualFold(conn.AccountName, adoOrg) {
 			logger.Warnf("webhook: inventory %s connection ADO org does not match delivery org %q; skipping (AUD-102 ADO)", inv.ID, adoOrg)
 			continue
@@ -1711,7 +1733,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 			var vcsConn *models.VCSConnection
 			if ws.VCSConnectionID != nil {
 				var err error
-				vcsConn, err = h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+				vcsConn, err = h.workspaceConnection(&ws)
 				if err != nil {
 					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, err)
 					return
@@ -2201,7 +2223,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			var vcsConn *models.VCSConnection
 			if ws.VCSConnectionID != nil {
 				var err error
-				vcsConn, err = h.vcsConnectionRepo.GetByID(*ws.VCSConnectionID)
+				vcsConn, err = h.workspaceConnection(&ws)
 				if err != nil {
 					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, err)
 					return
