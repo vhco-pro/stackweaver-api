@@ -46,6 +46,9 @@ type PlaybookHandler struct {
 	// agentPoolRepo backs the agent pool org-ownership check on template
 	// create/update (wired via SetAgentPoolRepo).
 	agentPoolRepo *repository.AgentPoolRepository
+	// jobService owns the rule about what a job template may name
+	// (JobService.CheckTemplateReferents): it is what later launches the template.
+	jobService *ansible.JobService
 }
 
 // NewPlaybookHandler creates a new playbook handler
@@ -61,8 +64,10 @@ func NewPlaybookHandler(
 	redisQueue queue.Queue,
 	vcsRegistry *vcs.ProviderRegistry,
 	vcsConnectionRepo *repository.VCSConnectionRepository,
+	jobService *ansible.JobService,
 ) *PlaybookHandler {
 	return &PlaybookHandler{
+		jobService:        jobService,
 		playbookRepo:      playbookRepo,
 		templateRepo:      templateRepo,
 		jobRepo:           jobRepo,
@@ -1115,6 +1120,10 @@ func (h *PlaybookHandler) CreateTemplate(c *gin.Context) {
 		agentPoolID = &apid
 	}
 
+	if !h.templateReferentsAccepted(c, projectID, &playbookID, &inventoryID, credentialIDs, "Failed to create job template") {
+		return
+	}
+
 	template := &models.AnsibleJobTemplate{
 		ProjectID:         projectID,
 		PlaybookID:        playbookID,
@@ -1249,6 +1258,10 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 			return
 		}
 		agentPoolID = &apid
+	}
+
+	if !h.templateReferentsAccepted(c, projectID, &playbookID, &inventoryID, credentialIDs, "Failed to create job template") {
+		return
 	}
 
 	template := &models.AnsibleJobTemplate{
@@ -1416,33 +1429,22 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		}
 	}
 
-	// Handle playbook relationship update
+	// Handle playbook relationship update. The organization is the tenant boundary: the UI
+	// lists playbooks org-wide and a template may name a playbook of a sibling project, so the
+	// check below holds the playbook to the organization, not to the project.
+	var newPlaybookID *uuid.UUID
 	if req.Data.Relationships.Playbook.Data != nil {
 		pbid, err := uuid.Parse(req.Data.Relationships.Playbook.Data.ID)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid playbook ID")
 			return
 		}
-		playbook, err := h.playbookRepo.GetByID(pbid)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Playbook not found")
-			return
-		}
-		// The organization is the tenant boundary: the UI lists playbooks
-		// org-wide and templates may legitimately reference a playbook from a
-		// sibling project, so only cross-org references are rejected.
-		if playbook.ProjectID != template.ProjectID {
-			tplProject, tplErr := h.projectRepo.GetByID(template.ProjectID)
-			pbProject, pbErr := h.projectRepo.GetByID(playbook.ProjectID)
-			if tplErr != nil || pbErr != nil || tplProject.OrganizationID != pbProject.OrganizationID {
-				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Playbook does not belong to this template's organization")
-				return
-			}
-		}
 		template.PlaybookID = pbid
+		newPlaybookID = &pbid
 	}
 
 	// Handle inventory relationship update
+	var newInventoryID *uuid.UUID
 	if req.Data.Relationships.Inventory.Data != nil {
 		iid, err := uuid.Parse(req.Data.Relationships.Inventory.Data.ID)
 		if err != nil {
@@ -1451,6 +1453,7 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		}
 		logger.Debugf("UpdateTemplate: Setting InventoryID from %s to %s", template.InventoryID.String(), iid.String())
 		template.InventoryID = iid
+		newInventoryID = &iid
 	} else {
 		logger.Debugf("UpdateTemplate: Inventory relationship not provided in request (Data is nil)")
 	}
@@ -1486,6 +1489,12 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 			}
 			credentialIDs = append(credentialIDs, cid)
 		}
+	}
+
+	// What the update changes the template to name is held to the template's organization
+	// before anything is written. A relationship the request left out is not checked.
+	if !h.templateReferentsAccepted(c, template.ProjectID, newPlaybookID, newInventoryID, credentialIDs, "Failed to update job template") {
+		return
 	}
 
 	logger.Debugf("UpdateTemplate: Before Save - InventoryID: %s", template.InventoryID.String())
@@ -1643,6 +1652,18 @@ func formatPlaybooksResponse(playbooks []models.AnsiblePlaybook) []jsonapi.Resou
 	return result
 }
 
+// templateReferentsAccepted holds what a job template is about to name to the organization of
+// its project, and answers the request when it may not name it. It reports whether the handler
+// may go on to store the template.
+//
+// The rule is the job service's (JobService.CheckTemplateReferents), since the job service is
+// what launches the template later. A nil playbook or inventory is one the request does not
+// change. A row of another organization gets the same 400 as one that does not exist.
+func (h *PlaybookHandler) templateReferentsAccepted(c *gin.Context, projectID uuid.UUID, playbookID, inventoryID *uuid.UUID, credentialIDs []uuid.UUID, failure string) bool {
+	err := h.jobService.CheckTemplateReferents(c.Request.Context(), projectID, playbookID, inventoryID, credentialIDs)
+	return referentsAccepted(c, err, failure)
+}
+
 // formatJobTemplateResponse formats a job template for JSON:API response
 // applyTemplateCredentials replaces a template's credential set with the given
 // IDs, enforcing the AWX one-credential-per-type rule via AttachCredential.
@@ -1650,7 +1671,9 @@ func formatPlaybooksResponse(playbooks []models.AnsiblePlaybook) []jsonapi.Resou
 // The set is the template's only record of what it runs with, so a rejected
 // credential is a real error rather than something to log past - but the
 // template row itself is already saved by the time this runs, so a failure is
-// reported without unwinding it. Callers pass the parsed relationship IDs.
+// reported without unwinding it. Callers pass the parsed relationship IDs, and
+// have held them to the template's organization first (templateReferentsAccepted):
+// nothing here compares organizations.
 func (h *PlaybookHandler) applyTemplateCredentials(c *gin.Context, template *models.AnsibleJobTemplate, credentialIDs []uuid.UUID) {
 	if h.credentialRepo == nil || len(credentialIDs) == 0 {
 		return
@@ -1659,12 +1682,6 @@ func (h *PlaybookHandler) applyTemplateCredentials(c *gin.Context, template *mod
 		cred, err := h.credentialRepo.GetByID(id)
 		if err != nil {
 			logger.Warnf("Failed to load credential %s for template %s: %v", id, template.ID, err)
-			continue
-		}
-		// Tenant boundary: credentials are org-scoped and the template's org
-		// comes via its project.
-		if template.Project.OrganizationID != uuid.Nil && template.Project.OrganizationID != cred.OrganizationID {
-			logger.Warnf("Refusing to attach credential %s from another organization to template %s", id, template.ID)
 			continue
 		}
 		if err := h.templateRepo.AttachCredential(template.ID, cred); err != nil {

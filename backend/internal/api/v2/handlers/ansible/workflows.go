@@ -185,15 +185,16 @@ func extraVarsColumn(attr string) (datatypes.JSON, error) {
 	return datatypes.JSON(attr), nil
 }
 
-// referentsAccepted answers the request when err, the result of checking what a workflow, a node
-// or an edge names, is not nil, and reports whether the handler may go on to store the row.
+// referentsAccepted answers the request when err, the result of checking what a row names, is
+// not nil, and reports whether the handler may go on.
 //
-// The checks are the engine's (CheckWorkflowReferents, CheckNodeReferents, CheckEdgeNodes): the
-// engine is what later acts on a stored reference with no caller to authorize, so it owns the
-// rule and applies the same one again at launch. A row the caller may not name is their input
-// and answers 400 with the engine's sentence, which is the same for a row of another
-// organization and for one that does not exist. Anything else is the database's and answers 500
-// without its text.
+// The checks are the services' (for a workflow, a node or an edge the engine's
+// CheckWorkflowReferents, CheckNodeReferents and CheckEdgeNodes; for a job the job service's
+// launch): the service is what later acts on a stored reference with no caller to authorize, so
+// it owns the rule and applies the same one again at the point of use. A row the caller may not
+// name is their input and answers 400 with the service's sentence, which is the same for a row
+// of another organization and for one that does not exist. Anything else is the database's and
+// answers 500 without its text.
 func referentsAccepted(c *gin.Context, err error, failure string) bool {
 	switch {
 	case err == nil:

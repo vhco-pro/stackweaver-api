@@ -242,7 +242,7 @@ func SetupAnsibleRoutes(
 	groupHandler := ansibleHandlers.NewGroupHandler(inventoryService, inventoryRepo, authService, rbacService)
 	credentialHandler := ansibleHandlers.NewCredentialHandler(credentialService, orgRepo, projectRepo, authService, rbacService)
 	agentPoolRepo := repository.NewAgentPoolRepository(db)
-	playbookHandler := ansibleHandlers.NewPlaybookHandler(playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo)
+	playbookHandler := ansibleHandlers.NewPlaybookHandler(playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo, jobService)
 	playbookHandler.SetCredentialRepo(credentialRepo)
 	playbookHandler.SetAgentPoolRepo(agentPoolRepo)
 	jobHandler := ansibleHandlers.NewJobHandler(jobService, projectRepo, orgRepo, templateRepo, authService, rbacService)

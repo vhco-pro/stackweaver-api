@@ -448,9 +448,9 @@ func (h *JobHandler) Launch(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
 		return
 	}
-	if err != nil {
-		// AUD-063: don't echo the raw service error to the client.
-		apierror.Internal(c, "Failed to launch job", err)
+	// A credential the job may not name is the caller's input and answers 400 with the service's
+	// sentence. AUD-063: any other service error is logged, not echoed.
+	if !referentsAccepted(c, err, "Failed to launch job") {
 		return
 	}
 
@@ -577,9 +577,9 @@ func (h *JobHandler) LaunchByOrganization(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
 		return
 	}
-	if err != nil {
-		// AUD-063: don't echo the raw service error to the client.
-		apierror.Internal(c, "Failed to launch job", err)
+	// A credential the job may not name is the caller's input and answers 400 with the service's
+	// sentence. AUD-063: any other service error is logged, not echoed.
+	if !referentsAccepted(c, err, "Failed to launch job") {
 		return
 	}
 

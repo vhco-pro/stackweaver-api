@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -137,15 +138,18 @@ func (h *PlaybookHandler) AttachTemplateCredential(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Credential repository not configured")
 		return
 	}
-	cred, err := h.credentialRepo.GetByID(credID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Credential not found")
+	// The organization is the tenant boundary (credentials are org-scoped; the template's
+	// organization comes via its project). The check is the one a template create and update
+	// make, so a credential of another organization gets the same answer here as there, and the
+	// same answer as one that does not exist: this handler used to tell the two apart with a
+	// 400 and a 404.
+	if !h.templateReferentsAccepted(c, template.ProjectID, nil, nil, []uuid.UUID{credID}, "Failed to attach credential") {
 		return
 	}
-	// The org is the tenant boundary (credentials are org-scoped; the template's
-	// org comes via its project).
-	if template.Project.OrganizationID != cred.OrganizationID {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Credential does not belong to this template's organization")
+	cred, err := h.credentialRepo.GetByID(credID)
+	if err != nil {
+		// It was there a moment ago: deleted in between, or the database failed.
+		apierror.Internal(c, "Failed to attach credential", err)
 		return
 	}
 	if err := h.templateRepo.AttachCredential(template.ID, cred); err != nil {
