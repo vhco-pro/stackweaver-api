@@ -35,14 +35,16 @@ func recorded(t *testing.T, fn func(c *gin.Context)) (int, map[string]any) {
 }
 
 func TestWriteErrorMatchesTheShapeHandlersAlreadyEmit(t *testing.T) {
-	// Verbatim from testdata/golden/errors/patch_api_v2_ansible_schedules_schedule_id.json.
-	const want = `{"errors":[{"status":"404","title":"Not Found","detail":"resource not found"}]}`
+	// Verbatim from testdata/golden/errors/patch_api_v2_ansible_schedules_schedule_id.json,
+	// which records the schedule handler's own bind failure.
+	const detail = "json: cannot unmarshal array into Go value of type ansible.UpdateScheduleRequest"
+	const want = `{"errors":[{"status":"400","title":"Bad Request","detail":"` + detail + `"}]}`
 
 	code, got := recorded(t, func(c *gin.Context) {
-		WriteError(c, http.StatusNotFound, TitleNotFound, "resource not found")
+		WriteError(c, http.StatusBadRequest, TitleBadRequest, detail)
 	})
-	if code != http.StatusNotFound {
-		t.Errorf("status code: got %d, want 404", code)
+	if code != http.StatusBadRequest {
+		t.Errorf("status code: got %d, want 400", code)
 	}
 
 	var expected map[string]any

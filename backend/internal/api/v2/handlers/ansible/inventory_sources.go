@@ -4,13 +4,14 @@ package ansible
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -56,7 +57,7 @@ func NewInventorySourceHandler(
 func (h *InventorySourceHandler) authorizeInventoryByID(c *gin.Context, inventoryID uuid.UUID, write bool) bool {
 	inventory, err := h.inventoryService.GetInventory(inventoryID)
 	if err != nil {
-		response.NotFound(c, "Inventory not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return false
 	}
 	return authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write)
@@ -68,12 +69,12 @@ func (h *InventorySourceHandler) authorizeInventoryByID(c *gin.Context, inventor
 func (h *InventorySourceHandler) authorizeSource(c *gin.Context, sourceID uuid.UUID, write bool) (*models.AnsibleInventorySource, bool) {
 	source, err := h.sourceService.GetInventorySource(sourceID)
 	if err != nil {
-		response.NotFound(c, "Inventory source not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory source not found")
 		return nil, false
 	}
 	inventory, err := h.inventoryService.GetInventory(source.InventoryID)
 	if err != nil {
-		response.NotFound(c, "Inventory not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return nil, false
 	}
 	if !authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write) {
@@ -141,13 +142,13 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	// Get inventory_id from path parameter (route: /ansible/inventories/:id/sources)
 	inventoryIDStr := c.Param("id")
 	if inventoryIDStr == "" {
-		response.BadRequest(c, "inventory_id is required in path")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "inventory_id is required in path")
 		return
 	}
 
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory_id")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory_id")
 		return
 	}
 
@@ -157,7 +158,7 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 
 	var req CreateInventorySourceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -167,7 +168,7 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	if attrs.CredentialID != nil && *attrs.CredentialID != "" {
 		id, err := uuid.Parse(*attrs.CredentialID)
 		if err != nil {
-			response.BadRequest(c, "Invalid credential_id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential_id")
 			return
 		}
 		credentialID = &id
@@ -181,8 +182,15 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 		credentialID,
 		attrs.Config,
 	)
+	// The service validates the caller's input (the credential and its type, the Azure
+	// configuration) in the same call that writes the row. Input errors keep their sentence and
+	// answer 400; anything else is logged and answered with an operator-authored message.
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	if err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to create inventory source", err)
 		return
 	}
 
@@ -226,7 +234,7 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 func (h *InventorySourceHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory source ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory source ID")
 		return
 	}
 
@@ -243,13 +251,13 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 	// Get inventory_id from path parameter (route: /ansible/inventories/:id/sources)
 	inventoryIDStr := c.Param("id")
 	if inventoryIDStr == "" {
-		response.BadRequest(c, "inventory_id is required")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "inventory_id is required")
 		return
 	}
 
 	inventoryID, err := uuid.Parse(inventoryIDStr)
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory_id")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory_id")
 		return
 	}
 
@@ -267,7 +275,7 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 
 	sources, total, err := h.sourceService.ListInventorySources(inventoryID, perPage, offset)
 	if err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to list inventory sources", err)
 		return
 	}
 
@@ -278,7 +286,7 @@ func (h *InventorySourceHandler) List(c *gin.Context) {
 func (h *InventorySourceHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory source ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory source ID")
 		return
 	}
 
@@ -288,7 +296,7 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 
 	var req UpdateInventorySourceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -320,7 +328,7 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 		} else {
 			credID, err := uuid.Parse(*attrs.CredentialID)
 			if err != nil {
-				response.BadRequest(c, "Invalid credential_id")
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential_id")
 				return
 			}
 			opts.CredentialID = &credID
@@ -328,8 +336,12 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 	}
 
 	source, err := h.sourceService.UpdateInventorySource(id, opts)
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	if err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to update inventory source", err)
 		return
 	}
 
@@ -340,7 +352,7 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 func (h *InventorySourceHandler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory source ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory source ID")
 		return
 	}
 
@@ -349,7 +361,7 @@ func (h *InventorySourceHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.sourceService.DeleteInventorySource(id); err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to delete inventory source", err)
 		return
 	}
 
@@ -360,7 +372,7 @@ func (h *InventorySourceHandler) Delete(c *gin.Context) {
 func (h *InventorySourceHandler) Sync(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("source_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory source ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory source ID")
 		return
 	}
 
@@ -371,7 +383,7 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 	}
 
 	if !source.Enabled {
-		response.BadRequest(c, "Inventory source is disabled")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Inventory source is disabled")
 		return
 	}
 
@@ -393,11 +405,11 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 			if markErr := h.sourceService.MarkSyncFailed(id, "Failed to queue sync job: "+err.Error()); markErr != nil {
 				logger.Warnf("Failed to update source after queue error: %v", markErr)
 			}
-			response.InternalError(c, "Failed to queue sync job")
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to queue sync job")
 			return
 		}
 	} else {
-		response.InternalError(c, "Sync queue not available")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Sync queue not available")
 		return
 	}
 

@@ -1,13 +1,13 @@
 {
   "method": "PATCH",
   "path": "/api/v2/ansible/inventory-sources/:source_id",
-  "status": 404,
+  "status": 400,
   "body": {
     "errors": [
       {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
+        "detail": "json: cannot unmarshal array into Go value of type ansible.UpdateInventorySourceRequest",
+        "status": "400",
+        "title": "Bad Request"
       }
     ]
   }

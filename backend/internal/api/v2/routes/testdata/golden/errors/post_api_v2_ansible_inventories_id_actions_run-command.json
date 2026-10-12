@@ -1,13 +1,13 @@
 {
   "method": "POST",
   "path": "/api/v2/ansible/inventories/:id/actions/run-command",
-  "status": 404,
+  "status": 400,
   "body": {
     "errors": [
       {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
+        "detail": "Key: 'Data.Attributes.Module' Error:Field validation for 'Module' failed on the 'required' tag",
+        "status": "400",
+        "title": "Bad Request"
       }
     ]
   }

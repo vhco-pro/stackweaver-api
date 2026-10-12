@@ -12995,15 +12995,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/error-400"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Bad Request"
           }
         },
         "summary": "POST /api/v2/ansible/inventories/:id/actions/run-command",
@@ -13322,15 +13322,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/error-400"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Bad Request"
           }
         },
         "summary": "POST /api/v2/ansible/inventories/:id/sources",
@@ -13460,15 +13460,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/error-400"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Bad Request"
           }
         },
         "summary": "PATCH /api/v2/ansible/inventory-sources/:source_id",
@@ -14684,15 +14684,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/error-400"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Bad Request"
           }
         },
         "summary": "PATCH /api/v2/ansible/schedules/:schedule_id",
@@ -17044,15 +17044,15 @@
           }
         ],
         "responses": {
-          "404": {
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/error-404"
+                  "$ref": "#/components/schemas/error-400"
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Bad Request"
           }
         },
         "summary": "POST /api/v2/organizations/:name/ansible/schedules",

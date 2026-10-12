@@ -10,10 +10,10 @@
 // This package is the first half of the fix (#755, Phase 2): the envelope and the error object,
 // which between them cover 1641 of those sites. Resource models follow in Phase 3.
 //
-// It is deliberately separate from backend/internal/api/v2/response, which predates it and
-// emits a different, non-JSON:API shape ({"error": "..."}) still used by roughly 83 call sites
-// in the Ansible handlers. Unifying those changes bytes on the wire and is tracked separately;
-// mixing the two vocabularies in one package would make it easy to reach for the wrong one.
+// It is deliberately separate from backend/internal/api/v2/response, which holds the bare
+// acknowledgements ({"message": "..."}, {"status": "..."}) a few endpoints answer with and no
+// error shape at all: every error the API defines is written through this package. Mixing the
+// two vocabularies in one package would make it easy to reach for the wrong one.
 package jsonapi
 
 import (

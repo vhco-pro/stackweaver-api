@@ -3,11 +3,13 @@
 package ansible
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
@@ -69,7 +71,7 @@ type UpdateScheduleRequest struct {
 func (h *ScheduleHandler) Create(c *gin.Context) {
 	var req CreateScheduleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
@@ -78,7 +80,7 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 
 	// Validate JSON:API type
 	if req.Data.Type != "schedules" {
-		response.BadRequest(c, "data.type must be 'schedules'")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'schedules'")
 		return
 	}
 
@@ -86,7 +88,7 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		response.NotFound(c, "Organization not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 	orgID := org.ID
@@ -114,48 +116,48 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 	switch attrs.ScheduleType {
 	case models.ScheduleTypeJobTemplate:
 		if attrs.JobTemplateID == "" {
-			response.BadRequest(c, "job-template-id is required for job_template schedules")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "job-template-id is required for job_template schedules")
 			return
 		}
 		id, err := uuid.Parse(attrs.JobTemplateID)
 		if err != nil {
-			response.BadRequest(c, "Invalid job-template-id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid job-template-id")
 			return
 		}
 		jobTemplateID = &id
 
 	case models.ScheduleTypeInventorySource:
 		if attrs.InventorySourceID == "" {
-			response.BadRequest(c, "inventory-source-id is required for inventory_source schedules")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "inventory-source-id is required for inventory_source schedules")
 			return
 		}
 		id, err := uuid.Parse(attrs.InventorySourceID)
 		if err != nil {
-			response.BadRequest(c, "Invalid inventory-source-id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory-source-id")
 			return
 		}
 		inventorySourceID = &id
 
 	case models.ScheduleTypePlaybookSync:
 		if attrs.PlaybookID == "" {
-			response.BadRequest(c, "playbook-id is required for playbook_sync schedules")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "playbook-id is required for playbook_sync schedules")
 			return
 		}
 		id, err := uuid.Parse(attrs.PlaybookID)
 		if err != nil {
-			response.BadRequest(c, "Invalid playbook-id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid playbook-id")
 			return
 		}
 		playbookID = &id
 
 	case models.ScheduleTypeWorkflow:
 		if attrs.WorkflowID == "" {
-			response.BadRequest(c, "workflow-id is required for workflow schedules")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "workflow-id is required for workflow schedules")
 			return
 		}
 		id, err := uuid.Parse(attrs.WorkflowID)
 		if err != nil {
-			response.BadRequest(c, "Invalid workflow-id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workflow-id")
 			return
 		}
 		workflowID = &id
@@ -166,7 +168,7 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 	if attrs.StartDateTime != "" {
 		startDT, err := time.Parse(time.RFC3339, attrs.StartDateTime)
 		if err != nil {
-			response.BadRequest(c, "Invalid start-date-time format, must be RFC3339")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid start-date-time format, must be RFC3339")
 			return
 		}
 		startDateTime = &startDT
@@ -174,7 +176,7 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 	if attrs.EndDateTime != "" {
 		endDT, err := time.Parse(time.RFC3339, attrs.EndDateTime)
 		if err != nil {
-			response.BadRequest(c, "Invalid end-date-time format, must be RFC3339")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid end-date-time format, must be RFC3339")
 			return
 		}
 		endDateTime = &endDT
@@ -207,8 +209,15 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 		startDateTime,
 		endDateTime,
 	)
+	// The service validates the caller's input (cron expression, timezone, the referent) in the
+	// same call that writes the row. Input errors keep their sentence and answer 400; anything
+	// else is logged and answered with an operator-authored message (AUD-063).
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	if err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to create schedule", err)
 		return
 	}
 
@@ -286,13 +295,13 @@ func formatScheduleResponse(schedule *models.AnsibleSchedule) jsonapi.Resource[S
 func (h *ScheduleHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid schedule ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid schedule ID")
 		return
 	}
 
 	schedule, err := h.schedulerService.GetSchedule(id)
 	if err != nil {
-		response.NotFound(c, "Schedule not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Schedule not found")
 		return
 	}
 
@@ -319,14 +328,14 @@ func (h *ScheduleHandler) Get(c *gin.Context) {
 func (h *ScheduleHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid schedule ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid schedule ID")
 		return
 	}
 
 	// RBAC: fetch schedule and check org-level write permission
 	existingSchedule, err := h.schedulerService.GetSchedule(id)
 	if err != nil {
-		response.NotFound(c, "Schedule not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Schedule not found")
 		return
 	}
 	user, err := h.authService.GetUserFromContext(c)
@@ -346,13 +355,17 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 
 	var req UpdateScheduleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
 	schedule, err := h.schedulerService.UpdateSchedule(id, req.Name, req.Description, req.CronExpression, req.Timezone, req.Config)
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	if err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to update schedule", err)
 		return
 	}
 
@@ -363,14 +376,14 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 func (h *ScheduleHandler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid schedule ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid schedule ID")
 		return
 	}
 
 	// RBAC: fetch schedule and check org-level write permission
 	schedule, err := h.schedulerService.GetSchedule(id)
 	if err != nil {
-		response.NotFound(c, "Schedule not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Schedule not found")
 		return
 	}
 	user, err := h.authService.GetUserFromContext(c)
@@ -389,7 +402,7 @@ func (h *ScheduleHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.schedulerService.DeleteSchedule(id); err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to delete schedule", err)
 		return
 	}
 
@@ -400,14 +413,14 @@ func (h *ScheduleHandler) Delete(c *gin.Context) {
 func (h *ScheduleHandler) Enable(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid schedule ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid schedule ID")
 		return
 	}
 
 	// RBAC: fetch schedule and check org-level write permission
 	schedule, err := h.schedulerService.GetSchedule(id)
 	if err != nil {
-		response.NotFound(c, "Schedule not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Schedule not found")
 		return
 	}
 	user, err := h.authService.GetUserFromContext(c)
@@ -425,8 +438,13 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 		return
 	}
 
-	if err := h.schedulerService.EnableSchedule(id); err != nil {
-		response.InternalError(c, err.Error())
+	err = h.schedulerService.EnableSchedule(id)
+	if errors.Is(err, ansible.ErrTemplateDisabled) {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
+		return
+	}
+	if err != nil {
+		apierror.Internal(c, "Failed to enable schedule", err)
 		return
 	}
 
@@ -437,14 +455,14 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 func (h *ScheduleHandler) Disable(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid schedule ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid schedule ID")
 		return
 	}
 
 	// RBAC: fetch schedule and check org-level write permission
 	schedule, err := h.schedulerService.GetSchedule(id)
 	if err != nil {
-		response.NotFound(c, "Schedule not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Schedule not found")
 		return
 	}
 	user, err := h.authService.GetUserFromContext(c)
@@ -463,7 +481,7 @@ func (h *ScheduleHandler) Disable(c *gin.Context) {
 	}
 
 	if err := h.schedulerService.DisableSchedule(id); err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to disable schedule", err)
 		return
 	}
 
@@ -472,12 +490,11 @@ func (h *ScheduleHandler) Disable(c *gin.Context) {
 
 // ValidateCron validates a cron expression and returns the next run time.
 //
-// Errors go out through jsonapi.WriteError rather than the flat response.BadRequest helper the
-// rest of this file uses. That is not a style preference: TestGoldenErrorEnvelopeComplete
-// asserts every recorded error response carries the JSON:API `errors` array, and the sibling
-// schedule routes only satisfy it by accident - they take a path parameter, so an error fixture
-// 404s on the lookup before reaching the handler body. This route has no path parameter, so its
-// bind failure is the response that actually gets recorded.
+// Its errors are JSON:API error documents, like every other error in this file. This route takes
+// no path parameter and is org-agnostic, so the golden error harness records its bind failure
+// directly; the routes that take one are recorded through goldenErrorOverrides in
+// routes/golden_response_test.go, because the harness's API-key identity is otherwise answered
+// by the org wall before the handler runs.
 func (h *ScheduleHandler) ValidateCron(c *gin.Context) {
 	var req ValidateCronRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -534,7 +551,7 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 	orgName := c.Param("name")
 	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
-		response.NotFound(c, "Organization not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 	orgID := org.ID
@@ -565,7 +582,7 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 
 	schedules, total, err := h.schedulerService.ListSchedules(orgID, perPage, offset)
 	if err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to list schedules", err)
 		return
 	}
 
@@ -573,9 +590,9 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 	for i := range schedules {
 		formatted = append(formatted, formatScheduleResponse(&schedules[i]))
 	}
-	// The JSON:API envelope, not response.Paginated: fetchAllPages reads
-	// meta.pagination.total-pages and fell back to "one page" against the old top-level shape,
-	// capping the Schedules screen at 20 rows.
+	// The JSON:API envelope with meta.pagination: fetchAllPages reads
+	// meta.pagination.total-pages and falls back to "one page" when it is absent, which would
+	// cap the Schedules screen at 20 rows.
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, formatted, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
@@ -583,14 +600,14 @@ func (h *ScheduleHandler) ListByOrganization(c *gin.Context) {
 func (h *ScheduleHandler) RunNow(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("schedule_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid schedule ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid schedule ID")
 		return
 	}
 
 	// RBAC: fetch schedule and check org-level write permission
 	schedule, err := h.schedulerService.GetSchedule(id)
 	if err != nil {
-		response.NotFound(c, "Schedule not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Schedule not found")
 		return
 	}
 	user, err := h.authService.GetUserFromContext(c)
@@ -608,8 +625,16 @@ func (h *ScheduleHandler) RunNow(c *gin.Context) {
 		return
 	}
 
-	if err := h.schedulerService.RunScheduleNow(id); err != nil {
-		response.InternalError(c, err.Error())
+	// A disabled job template is the one launch failure the caller can act on, and the sibling
+	// launch handlers answer it with 409 (jobs.go). Every other failure is logged and answered
+	// with an operator-authored message.
+	err = h.schedulerService.RunScheduleNow(id)
+	if errors.Is(err, ansible.ErrTemplateDisabled) {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
+		return
+	}
+	if err != nil {
+		apierror.Internal(c, "Failed to run schedule now", err)
 		return
 	}
 

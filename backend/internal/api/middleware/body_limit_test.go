@@ -43,6 +43,13 @@ func TestMaxBodyBytes_RejectsOversizeContentLength(t *testing.T) {
 	if bodyRead {
 		t.Errorf("handler must NOT execute when Content-Length exceeds limit")
 	}
+
+	// The 413 is a JSON:API error document like every other error the API defines (#857). It
+	// was the last flat {"error": "..."} body outside the RFC 6749 and Zitadel surfaces.
+	const want = `{"errors":[{"status":"413","title":"Request Entity Too Large","detail":"request body too large"}]}`
+	if got := strings.TrimSpace(w.Body.String()); got != want {
+		t.Errorf("413 body:\n got %s\nwant %s", got, want)
+	}
 }
 
 func TestMaxBodyBytes_AllowsBodyAtLimit(t *testing.T) {

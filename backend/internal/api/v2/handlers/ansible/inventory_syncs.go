@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -45,7 +44,7 @@ func NewInventorySyncHandler(
 func (h *InventorySyncHandler) authorizeInventoryRead(c *gin.Context, inventoryID uuid.UUID) bool {
 	inventory, err := h.inventoryRepo.GetByID(inventoryID)
 	if err != nil {
-		response.NotFound(c, "Inventory not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return false
 	}
 	user, err := h.authService.GetUserFromContext(c)
@@ -55,7 +54,7 @@ func (h *InventorySyncHandler) authorizeInventoryRead(c *gin.Context, inventoryI
 	}
 	hasPermission, err := h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, inventory.OrganizationID)
 	if err != nil {
-		response.InternalError(c, "Failed to check permissions")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return false
 	}
 	if !hasPermission {
@@ -70,7 +69,7 @@ func (h *InventorySyncHandler) authorizeInventoryRead(c *gin.Context, inventoryI
 func (h *InventorySyncHandler) List(c *gin.Context) {
 	inventoryID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory_id")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory_id")
 		return
 	}
 
@@ -89,7 +88,7 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 
 	syncs, total, err := h.syncRepo.ListByInventory(inventoryID, perPage, jsonapi.Offset(page, perPage))
 	if err != nil {
-		response.InternalError(c, "Failed to list inventory syncs")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list inventory syncs")
 		return
 	}
 
@@ -105,13 +104,13 @@ func (h *InventorySyncHandler) List(c *gin.Context) {
 func (h *InventorySyncHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("sync_id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory sync ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory sync ID")
 		return
 	}
 
 	sync, err := h.syncRepo.GetByID(id)
 	if err != nil {
-		response.NotFound(c, "Inventory sync not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory sync not found")
 		return
 	}
 	if !h.authorizeInventoryRead(c, sync.InventoryID) {
