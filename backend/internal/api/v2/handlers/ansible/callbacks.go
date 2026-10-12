@@ -132,7 +132,9 @@ func (h *ProvisioningCallbackHandler) findRequestingHost(inventoryID uuid.UUID, 
 			if host.Name == clientIP || host.Hostname == clientIP {
 				return host.Name
 			}
-			if ah, ok := host.Variables["ansible_host"].(string); ok && ah == clientIP {
+			// Read through the engine's tag: for a host a dynamic source discovered, the stored
+			// ansible_host is {"__ansible_unsafe": "address"} and not a bare string.
+			if ah, ok := ansible.VariableText(host.Variables["ansible_host"]); ok && ah == clientIP {
 				return host.Name
 			}
 		}
