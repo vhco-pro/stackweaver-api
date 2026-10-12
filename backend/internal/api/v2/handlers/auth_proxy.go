@@ -37,17 +37,32 @@ const (
 	NotificationModeEmail      NotificationMode = "email"
 )
 
+// AllowReturnCodeVar is the development-only opt-in without which return_code is refused.
+const AllowReturnCodeVar = "STACKWEAVER_ALLOW_RETURN_CODE"
+
+// AllowReturnCode reports whether the opt-in is set. Only the exact value "true" counts, so a
+// typo or a leftover "1" fails closed.
+func AllowReturnCode(raw string) bool {
+	return strings.TrimSpace(raw) == "true"
+}
+
 // ParseNotificationMode reads STACKWEAVER_NOTIFICATION_MODE and fails closed. Unset or empty
 // means email in every mode, so no deployment hands auth codes to the browser by accident.
-// return_code is accepted only outside production (release false): it returns verification
-// and reset codes to whoever asked, which is safe on a developer machine and nowhere else.
-func ParseNotificationMode(raw string, release bool) (NotificationMode, error) {
+//
+// return_code returns verification and reset codes to whoever asked, which is safe on a
+// developer machine and nowhere else. It is therefore refused in production (release true), and
+// outside production it needs the explicit opt-in (allowReturnCode): a Docker Compose install
+// does not run in release mode, so release alone would not protect it.
+func ParseNotificationMode(raw string, allowReturnCode, release bool) (NotificationMode, error) {
 	switch strings.TrimSpace(raw) {
 	case "", string(NotificationModeEmail):
 		return NotificationModeEmail, nil
 	case string(NotificationModeReturnCode):
 		if release {
 			return "", fmt.Errorf("STACKWEAVER_NOTIFICATION_MODE %q is not allowed with GIN_MODE=release: it returns auth codes to anonymous callers; configure SMTP and use \"email\" (see the self-hosting email documentation)", raw)
+		}
+		if !allowReturnCode {
+			return "", fmt.Errorf("STACKWEAVER_NOTIFICATION_MODE %q needs %s=true, a development-only switch: it returns auth codes to anonymous callers; on anything but a development machine configure SMTP and use \"email\" (see the self-hosting email documentation)", raw, AllowReturnCodeVar)
 		}
 		return NotificationModeReturnCode, nil
 	default:
@@ -538,8 +553,49 @@ func (p *AuthProxy) HealthAuthProxy(c *gin.Context) {
 func (p *AuthProxy) parsedHeaders() map[string]string {
 	p.headerOnce.Do(func() {
 		p.headers = parseCustomHeaders(p.config.CustomRequestHeaders)
+		addIssuerPublicHost(p.headers, p.config.ZitadelIssuer)
 	})
 	return p.headers
+}
+
+const (
+	zitadelInstanceHostHeader = "x-zitadel-instance-host"
+	zitadelPublicHostHeader   = "x-zitadel-public-host"
+)
+
+// equalHeaderName compares HTTP header names, which are case-insensitive.
+func equalHeaderName(a, b string) bool {
+	return strings.EqualFold(a, b)
+}
+
+// addIssuerPublicHost tells Zitadel the public host, taken from the issuer the API validates
+// tokens against, whenever the operator names the instance by header.
+//
+// The proxy reaches Zitadel at an internal address, so the operator sets
+// x-zitadel-instance-host to pick the instance. Zitadel then also builds the issuer of the
+// tokens it mints from that header, and the header carries the external domain without a port:
+// on http://localhost:8080 it issued "http://localhost", and the API rejected every token for
+// an issuer mismatch. With the public host stated, the issuer Zitadel uses is the one in
+// ZITADEL_ISSUER. Where the two already agree (a domain on the default port) this changes
+// nothing, and an operator's own x-zitadel-public-host is left alone.
+func addIssuerPublicHost(headers map[string]string, issuer string) {
+	instanceHost := ""
+	for name, value := range headers {
+		if equalHeaderName(name, zitadelPublicHostHeader) {
+			return
+		}
+		if equalHeaderName(name, zitadelInstanceHostHeader) {
+			instanceHost = value
+		}
+	}
+	if instanceHost == "" {
+		return
+	}
+	u, err := url.Parse(issuer)
+	if err != nil || u.Host == "" {
+		return
+	}
+	headers[zitadelPublicHostHeader] = u.Host
 }
 
 // parseCustomHeaders parses a comma-separated "key:value,key2:value2" string.

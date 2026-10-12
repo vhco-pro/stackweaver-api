@@ -58,6 +58,14 @@ type Config struct {
 }
 
 func main() {
+	// Before anything reads the environment: load the env file a Docker Compose install names,
+	// so values zitadel-init generated after this container was created are in place. The
+	// logger is not initialised yet, so a failure goes to stderr.
+	if err := loadEnvFileFromEnvironment(); err != nil {
+		fmt.Fprintln(os.Stderr, "startup:", err)
+		os.Exit(1)
+	}
+
 	// Initialize logger first (reads LOG_LEVEL from environment)
 	logLevel := os.Getenv("LOG_LEVEL")
 	logger.Init(logLevel)
@@ -860,7 +868,11 @@ func main() {
 
 	// #829: parse the notification mode whether or not the auth proxy is enabled, so a typo or a
 	// production return_code fails at startup instead of silently changing how codes are sent.
-	notificationMode, err := handlers.ParseNotificationMode(os.Getenv("STACKWEAVER_NOTIFICATION_MODE"), isProduction)
+	notificationMode, err := handlers.ParseNotificationMode(
+		os.Getenv("STACKWEAVER_NOTIFICATION_MODE"),
+		handlers.AllowReturnCode(os.Getenv(handlers.AllowReturnCodeVar)),
+		isProduction,
+	)
 	if err != nil {
 		logger.Errorf("startup: %v", err)
 		os.Exit(1)
