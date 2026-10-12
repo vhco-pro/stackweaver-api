@@ -6,11 +6,16 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 )
 
-// MaxBodyBytes wraps the request body in an http.MaxBytesReader so any
-// downstream call to ShouldBindJSON / io.ReadAll fails fast with a 413
-// once `limit` bytes have been consumed.
+// MaxBodyBytes caps the request body at `limit` bytes, in two ways. A request
+// whose Content-Length already exceeds the limit is answered here with a 413
+// JSON:API error document and the handler never runs. Any other body is
+// wrapped in an http.MaxBytesReader, so a downstream ShouldBindJSON /
+// io.ReadAll gets a read error once `limit` bytes have been consumed; this
+// middleware writes nothing in that case, and the status and body are
+// whatever the handler makes of its read error.
 //
 // Round 25c Finding C-2 (CRITICAL): the auth proxy handlers all call
 // `c.ShouldBindJSON` with no upstream cap. The /auth/* surface is
@@ -26,9 +31,7 @@ import (
 func MaxBodyBytes(limit int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Body != nil && c.Request.ContentLength > limit {
-			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
-				"error": "request body too large",
-			})
+			jsonapi.AbortError(c, http.StatusRequestEntityTooLarge, http.StatusText(http.StatusRequestEntityTooLarge), "request body too large")
 			return
 		}
 		if c.Request.Body != nil {

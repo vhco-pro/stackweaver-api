@@ -3,12 +3,13 @@
 package ansible
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -65,7 +66,7 @@ func AdHocModules(org *models.Organization) []string {
 func (h *AdHocHandler) RunCommand(c *gin.Context) {
 	inventoryID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		response.BadRequest(c, "Invalid inventory ID")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory ID")
 		return
 	}
 
@@ -86,14 +87,14 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 	attrs := req.Data.Attributes
 
 	inventory, err := h.inventoryRepo.GetByID(inventoryID)
 	if err != nil {
-		response.NotFound(c, "Inventory not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
 		return
 	}
 
@@ -104,7 +105,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 	case attrs.ProjectID != "":
 		projectID, err = uuid.Parse(attrs.ProjectID)
 		if err != nil {
-			response.BadRequest(c, "Invalid project-id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid project-id")
 			return
 		}
 	case inventory.ProjectID != nil:
@@ -114,7 +115,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		// how inventory creation resolves a project).
 		defaultProject, err := h.projectRepo.GetByOrganizationAndName(inventory.OrganizationID, "default")
 		if err != nil {
-			response.BadRequest(c, "project-id is required: this inventory is org-scoped and the organization has no default project")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "project-id is required: this inventory is org-scoped and the organization has no default project")
 			return
 		}
 		projectID = defaultProject.ID
@@ -136,7 +137,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		&projectID,
 	)
 	if err != nil {
-		response.InternalError(c, "Failed to check permissions")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {
@@ -147,7 +148,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 	// Enforce the org module allowlist server-side.
 	org, err := h.orgRepo.GetByID(inventory.OrganizationID)
 	if err != nil {
-		response.InternalError(c, "Failed to load organization")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load organization")
 		return
 	}
 	allowed := false
@@ -158,7 +159,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		}
 	}
 	if !allowed {
-		response.BadRequest(c, "Module "+attrs.Module+" is not in the organization's ad hoc module allowlist")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Module "+attrs.Module+" is not in the organization's ad hoc module allowlist")
 		return
 	}
 
@@ -168,7 +169,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 	if attrs.CredentialID != "" {
 		id, err := uuid.Parse(attrs.CredentialID)
 		if err != nil {
-			response.BadRequest(c, "Invalid credential-id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential-id")
 			return
 		}
 		// Org boundary: the credential must belong to the inventory's org -
@@ -176,7 +177,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		// attacker-controlled hosts.
 		cred, err := h.credentialRepo.GetByID(id)
 		if err != nil || cred.OrganizationID != inventory.OrganizationID {
-			response.BadRequest(c, "Credential not found in this organization")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Credential not found in this organization")
 			return
 		}
 		credentialIDs = append(credentialIDs, id)
@@ -186,14 +187,14 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 	if attrs.AgentPoolID != "" {
 		id, err := uuid.Parse(attrs.AgentPoolID)
 		if err != nil {
-			response.BadRequest(c, "Invalid agent-pool-id")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid agent-pool-id")
 			return
 		}
 		// Org boundary: the pool must belong to the inventory's org, or the
 		// command would be routed to another organization's runners.
 		pool, err := h.agentPoolRepo.GetByID(id, false)
 		if err != nil || pool.OrganizationID != inventory.OrganizationID {
-			response.BadRequest(c, "Agent pool not found in this organization")
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Agent pool not found in this organization")
 			return
 		}
 		agentPoolID = &id
@@ -213,8 +214,16 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		ExtraVars:     attrs.ExtraVars,
 		CreatedBy:     &user.ID,
 	})
+	// The one input the checks above do not cover is an explicit project-id of another
+	// organization than the inventory's: the service rejects it as ErrInvalidInput, which
+	// answers 400 with its sentence. Anything else is logged and answered with an
+	// operator-authored message.
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	if err != nil {
-		response.InternalError(c, err.Error())
+		apierror.Internal(c, "Failed to launch ad hoc command", err)
 		return
 	}
 
@@ -226,7 +235,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 func (h *AdHocHandler) ListModules(c *gin.Context) {
 	org, err := h.orgRepo.GetByName(c.Param("name"))
 	if err != nil {
-		response.NotFound(c, "Organization not found")
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return
 	}
 	user, err := h.authService.GetUserFromContext(c)
@@ -236,7 +245,7 @@ func (h *AdHocHandler) ListModules(c *gin.Context) {
 	}
 	hasPermission, err := h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
-		response.InternalError(c, "Failed to check permissions")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
 	if !hasPermission {

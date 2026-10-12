@@ -1,13 +1,13 @@
 {
   "method": "POST",
   "path": "/api/v2/ansible/inventories/:id/sources",
-  "status": 404,
+  "status": 400,
   "body": {
     "errors": [
       {
-        "detail": "resource not found",
-        "status": "404",
-        "title": "Not Found"
+        "detail": "Key: 'CreateInventorySourceRequest.Data.Attributes.Name' Error:Field validation for 'Name' failed on the 'required' tag\nKey: 'CreateInventorySourceRequest.Data.Attributes.SourceType' Error:Field validation for 'SourceType' failed on the 'required' tag",
+        "status": "400",
+        "title": "Bad Request"
       }
     ]
   }

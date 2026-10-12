@@ -157,6 +157,40 @@ var goldenQueries = map[string]string{
 	"GET /api/v2/organizations/:name/analytics/executions": "until=" + goldenSeedInstant,
 }
 
+// goldenErrorOverride changes how TestGoldenErrorEnvelope records one mutating route.
+type goldenErrorOverride struct {
+	// resolveParams fills the path parameters with seeded identifiers (buildPath) instead of
+	// missingID, so the org wall resolves them and the request reaches the handler.
+	resolveParams bool
+	// body is the request body sent instead of "{}".
+	body string
+}
+
+// goldenErrorOverrides names the routes whose error fixture is the HANDLER's own response.
+//
+// By default every path parameter of an error recording is missingID, and the harness
+// authenticates with an API key. For that identity the org wall runs before any handler, fails
+// to resolve the parameter and answers 404 "resource not found" itself, so the fixture pins
+// the wall's envelope and says nothing about the handler behind it. That is how four Ansible
+// handlers kept a flat {"error": "..."} body through #757: 183 of the 243 error fixtures were
+// the wall's, and no fixture ever contained their output (#857).
+//
+// An entry here is safe only if the request cannot change anything, which is why the map is
+// opt-in and short. Each of these five fails in the handler's bind step, before any write: a
+// document without the required members for the three creates, and a body that is not an
+// object for the two updates (an empty object binds cleanly on both update structs, so "{}"
+// would perform an update). The routes that would mutate or enqueue with a valid identifier
+// (the deletes, the schedule actions, the source sync) are deliberately not listed and keep
+// the wall's 404, which is a true response for an API-key caller. Their handler errors are
+// pinned by TestAnsibleErrorEnvelope in handlers/ansible, which mounts the handlers directly.
+var goldenErrorOverrides = map[string]goldenErrorOverride{
+	"POST /api/v2/organizations/:name/ansible/schedules":       {resolveParams: true, body: "{}"},
+	"POST /api/v2/ansible/inventories/:id/sources":             {resolveParams: true, body: "{}"},
+	"POST /api/v2/ansible/inventories/:id/actions/run-command": {resolveParams: true, body: "{}"},
+	"PATCH /api/v2/ansible/schedules/:schedule_id":             {resolveParams: true, body: "[]"},
+	"PATCH /api/v2/ansible/inventory-sources/:source_id":       {resolveParams: true, body: "[]"},
+}
+
 // calendarDateRe matches a value that is entirely a calendar date, the label form the
 // analytics daily series uses. Anchored on both ends so a date inside a longer string is
 // left alone.
@@ -925,7 +959,14 @@ func errorPath(routePath string) string {
 
 func (h *goldenHarness) captureError(t *testing.T, method, routePath string) goldenFixture {
 	t.Helper()
-	req := httptest.NewRequest(method, errorPath(routePath), strings.NewReader("{}"))
+	target, reqBody := errorPath(routePath), "{}"
+	if o, ok := goldenErrorOverrides[method+" "+routePath]; ok {
+		if o.resolveParams {
+			target = h.buildPath(routePath)
+		}
+		reqBody = o.body
+	}
+	req := httptest.NewRequest(method, target, strings.NewReader(reqBody))
 	req.Header.Set("Authorization", "Bearer "+h.token)
 	req.Header.Set("Content-Type", "application/vnd.api+json")
 	rec := httptest.NewRecorder()
@@ -1151,32 +1192,22 @@ func TestGoldenFamiliesResolve(t *testing.T) {
 //
 // Before the convergence there were four shapes, and which one a client got depended on which
 // endpoint it called: 43 responses carried only a detail, 85 carried a bare {"error"}, five
-// had no title, four spelled the status as a number under a different key. The helpers that
-// produced those shapes are deleted, and this test is what fails if any of them is
-// reinvented inline.
+// had no title, four spelled the status as a number under a different key.
+//
+// What this test can and cannot say. It reads the committed fixtures, so it is exactly as
+// wide as what TestGoldenErrorEnvelope records, and that is one response per mutating route:
+// for most routes the org wall's 404 in front of the handler, for the routes in
+// goldenErrorOverrides and the parameter-less ones the handler's own bind failure. It does not
+// see a handler's other error sites or any error of a GET route. It passed for a month over a
+// corpus that held none of the 77 flat bodies four Ansible handlers were still writing (#857).
+// The guard for the code is that the helpers which wrote the flat body no longer exist, so
+// nothing can call them; this test guards the recorded corpus against a shape reinvented
+// inline, and it rejects a body that mixes both shapes or has no body at all.
 //
 // Exempt by external specification, not by choice: the OAuth endpoints (RFC 6749 fixes their
 // error body, and terraform login parses it) and the registry protocol (an array of plain
 // strings, per HashiCorp's API docs, parsed by terraform init).
 func TestGoldenErrorEnvelopeComplete(t *testing.T) {
-	exempt := func(path string) bool {
-		return strings.HasPrefix(path, "/v1/") ||
-			strings.HasPrefix(path, "/v2/") || // registry download summaries share the protocol
-			strings.Contains(path, "/oauth/") ||
-			// The auth proxy is deliberately not JSON:API. routes.go says so where it mounts
-			// these: "NOT under /api/v2/* - responses use Zitadel's v2 API shape, not JSON:API"
-			// (DR-5). They pass Zitadel's own error bodies through - {code, details, message},
-			// or {error, error_description} on the OIDC endpoints - because the custom login UI
-			// is written against Zitadel's shapes. Rewrapping them in a JSON:API envelope would
-			// be a breaking change to that client for the sake of a rule these routes were
-			// never under.
-			//
-			// This exemption arrived with #790, which widened the harness to mount the router
-			// production mounts rather than only its v2 half. The rule did not change; the
-			// corpus it is applied to did, so its scope had to be stated rather than implied.
-			strings.HasPrefix(path, "/auth/")
-	}
-
 	var violations []string
 	for _, dir := range []string{goldenDir, filepath.Join(goldenDir, "errors")} {
 		entries, err := os.ReadDir(dir)
@@ -1195,42 +1226,7 @@ func TestGoldenErrorEnvelopeComplete(t *testing.T) {
 			if err := json.Unmarshal(raw, &fx); err != nil {
 				t.Fatalf("parse %s: %v", e.Name(), err)
 			}
-			if fx.Status < 400 || exempt(fx.Path) {
-				continue
-			}
-			body, ok := fx.Body.(map[string]any)
-			if !ok {
-				if fx.Body != nil {
-					violations = append(violations, fmt.Sprintf("%s %s (%d): error body is not an object", fx.Method, fx.Path, fx.Status))
-				}
-				continue
-			}
-			errs, ok := body["errors"].([]any)
-			if !ok || len(errs) == 0 {
-				violations = append(violations, fmt.Sprintf("%s %s (%d): no errors array (members: %v)", fx.Method, fx.Path, fx.Status, keysOf(body)))
-				continue
-			}
-			for _, el := range errs {
-				obj, ok := el.(map[string]any)
-				if !ok {
-					violations = append(violations, fmt.Sprintf("%s %s (%d): errors element is not an object", fx.Method, fx.Path, fx.Status))
-					continue
-				}
-				// status and title are required; detail is optional per the JSON:API spec,
-				// and the title-only class (WriteErrorNoDetail, 117 sites) is legitimate.
-				// What is NOT allowed is a detail key that is present but empty - that is a
-				// bug, not brevity.
-				for _, member := range []string{"status", "title"} {
-					if v, _ := obj[member].(string); v == "" {
-						violations = append(violations, fmt.Sprintf("%s %s (%d): %s missing or empty", fx.Method, fx.Path, fx.Status, member))
-					}
-				}
-				if v, present := obj["detail"]; present {
-					if str, _ := v.(string); str == "" {
-						violations = append(violations, fmt.Sprintf("%s %s (%d): detail present but empty", fx.Method, fx.Path, fx.Status))
-					}
-				}
-			}
+			violations = append(violations, envelopeViolations(fx)...)
 		}
 	}
 	sort.Strings(violations)
@@ -1238,6 +1234,116 @@ func TestGoldenErrorEnvelopeComplete(t *testing.T) {
 		t.Errorf("%d recorded error response(s) do not carry the full JSON:API envelope:\n  %s",
 			len(violations), strings.Join(violations, "\n  "))
 	}
+}
+
+// TestGoldenErrorEnvelopeGuard feeds envelopeViolations the shapes it exists to reject. The
+// committed corpus holds none of them, so without this the guard's rejections would be
+// asserted by nothing: a check that has never failed proves nothing.
+func TestGoldenErrorEnvelopeGuard(t *testing.T) {
+	envelope := map[string]any{"errors": []any{map[string]any{"status": "400", "title": "Bad Request", "detail": "x"}}}
+	hybrid := map[string]any{"errors": envelope["errors"], "error": "x"}
+
+	cases := []struct {
+		name string
+		fx   goldenFixture
+		want string // a substring of the single violation, or "" for none
+	}{
+		{"a complete envelope passes", goldenFixture{Method: "POST", Path: "/api/v2/x", Status: 400, Body: envelope}, ""},
+		{"a success body is not inspected", goldenFixture{Method: "GET", Path: "/api/v2/x", Status: 200, Body: map[string]any{"error": "x"}}, ""},
+		{"a flat error body", goldenFixture{Method: "POST", Path: "/api/v2/x", Status: 400, Body: map[string]any{"error": "x"}}, "top-level error key"},
+		{"both shapes in one body", goldenFixture{Method: "POST", Path: "/api/v2/x", Status: 400, Body: hybrid}, "top-level error key"},
+		{"no body at all", goldenFixture{Method: "POST", Path: "/api/v2/x", Status: 500, Body: nil}, "no body"},
+		{"a body that is not an object", goldenFixture{Method: "POST", Path: "/api/v2/x", Status: 400, Body: "nope"}, "not an object"},
+		{"the RFC 6749 surface keeps its flat body", goldenFixture{Method: "POST", Path: "/api/v2/oauth/token", Status: 400, Body: map[string]any{"error": "invalid_grant"}}, ""},
+		{"the auth proxy keeps Zitadel's bodies", goldenFixture{Method: "POST", Path: "/auth/oidc/token", Status: 400, Body: map[string]any{"error": "invalid_grant"}}, ""},
+		{"the registry protocol may answer without a body", goldenFixture{Method: "GET", Path: "/v1/modules/:namespace", Status: 404, Body: nil}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := envelopeViolations(tc.fx)
+			if tc.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("violations = %v, want none", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+				t.Fatalf("violations = %v, want exactly one containing %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// envelopeViolations returns what is wrong with one recorded response, or nothing: for a
+// non-exempt fixture at status 400 or above the body must be an object whose only error
+// vocabulary is a non-empty `errors` array of objects with status and title.
+func envelopeViolations(fx goldenFixture) []string {
+	exempt := func(path string) bool {
+		return strings.HasPrefix(path, "/v1/") ||
+			strings.HasPrefix(path, "/v2/") || // registry download summaries share the protocol
+			strings.Contains(path, "/oauth/") ||
+			// The auth proxy is deliberately not JSON:API. routes.go says so where it mounts
+			// these: "NOT under /api/v2/* - responses use Zitadel's v2 API shape, not JSON:API"
+			// (DR-5). They pass Zitadel's own error bodies through - {code, details, message},
+			// or {error, error_description} on the OIDC endpoints - because the custom login UI
+			// is written against Zitadel's shapes. Rewrapping them in a JSON:API envelope would
+			// be a breaking change to that client for the sake of a rule these routes were
+			// never under.
+			//
+			// This exemption arrived with #790, which widened the harness to mount the router
+			// production mounts rather than only its v2 half. The rule did not change; the
+			// corpus it is applied to did, so its scope had to be stated rather than implied.
+			strings.HasPrefix(path, "/auth/")
+	}
+
+	if fx.Status < 400 || exempt(fx.Path) {
+		return nil
+	}
+	where := fmt.Sprintf("%s %s (%d)", fx.Method, fx.Path, fx.Status)
+
+	// An error with no body at all tells a client nothing, and the "no errors array" check
+	// below cannot see it: there is no object to look in.
+	if fx.Body == nil {
+		return []string{where + ": no body"}
+	}
+	body, ok := fx.Body.(map[string]any)
+	if !ok {
+		return []string{where + ": error body is not an object"}
+	}
+	// Checked before the errors array on purpose. A body carrying both `errors` and a flat
+	// `error` would satisfy every check below while still feeding a client that reads the
+	// flat key, so the flat key is a violation whatever sits beside it.
+	if _, flat := body["error"]; flat {
+		return []string{fmt.Sprintf("%s: top-level error key (members: %v)", where, keysOf(body))}
+	}
+	errs, ok := body["errors"].([]any)
+	if !ok || len(errs) == 0 {
+		return []string{fmt.Sprintf("%s: no errors array (members: %v)", where, keysOf(body))}
+	}
+
+	var violations []string
+	for _, el := range errs {
+		obj, ok := el.(map[string]any)
+		if !ok {
+			violations = append(violations, where+": errors element is not an object")
+			continue
+		}
+		// status and title are required; detail is optional per the JSON:API spec,
+		// and the title-only class (WriteErrorNoDetail, 117 sites) is legitimate.
+		// What is NOT allowed is a detail key that is present but empty - that is a
+		// bug, not brevity.
+		for _, member := range []string{"status", "title"} {
+			if v, _ := obj[member].(string); v == "" {
+				violations = append(violations, fmt.Sprintf("%s: %s missing or empty", where, member))
+			}
+		}
+		if v, present := obj["detail"]; present {
+			if str, _ := v.(string); str == "" {
+				violations = append(violations, where+": detail present but empty")
+			}
+		}
+	}
+	return violations
 }
 
 func keysOf(m map[string]any) []string {
@@ -1279,6 +1385,13 @@ func TestGoldenExclusionsAreLive(t *testing.T) {
 	for key := range goldenQueries {
 		if !registered[key] {
 			stale = append(stale, key+"  (goldenQueries)")
+		}
+	}
+	// A stale override is the quietest of the four: the route would fall back to the default
+	// recording, the wall's 404, and the fixture would still look like coverage.
+	for key := range goldenErrorOverrides {
+		if !registered[key] {
+			stale = append(stale, key+"  (goldenErrorOverrides)")
 		}
 	}
 	sort.Strings(stale)
@@ -1335,10 +1448,17 @@ func writeRouteManifest(t *testing.T, routes gin.RoutesInfo) {
 // TestGoldenErrorEnvelope records the error-path response of every mutating route.
 //
 // Replaying real mutations against the seeded data would make each fixture depend on the order
-// the previous ones ran in, and would destroy the resources the GET fixtures describe. So every
-// path parameter is deliberately set to a non-existent identifier and the body is empty: the
-// handler rejects the request before touching anything, and what gets recorded is the envelope
-// - status, `errors` array, object shape.
+// the previous ones ran in, and would destroy the resources the GET fixtures describe. So by
+// default every path parameter is set to a non-existent identifier and the body is an empty
+// object. What that records depends on the route. Where a path parameter names a resource, the
+// org wall fails to resolve it for the harness's API-key identity and answers 404 itself: the
+// handler never runs, and the fixture pins the wall's envelope. Where there is no such
+// parameter the handler runs, and usually rejects the empty document. A handful of routes
+// accept it and answer 200 or 201 (their fixtures say so), which is why this test has a
+// database of its own.
+//
+// goldenErrorOverrides opts single routes out of the default so that the handler's own bind
+// failure is what gets recorded; see the comment there for why the list is short.
 //
 // That envelope is not a consolation prize. AC2 replaces 632 hand-built error payloads with one
 // shared type, and this fixture set is what proves that substitution changed nothing. It runs

@@ -21,8 +21,8 @@ import (
 //   - The handler read `limit`/`offset` while every client sends `page[number]`/`page[size]`
 //     (frontend/src/api/ansible.ts builds the latter for every Ansible route), so the requested
 //     size was discarded and the handler's own default of 20 applied instead.
-//   - It replied through response.Paginated, whose envelope is a top-level
-//     {data,total,limit,offset,has_more} with no `meta` at all. fetchAllPages
+//   - It replied with a top-level {data,total,limit,offset,has_more} envelope (a helper
+//     since deleted) that has no `meta` at all. fetchAllPages
 //     (frontend/src/lib/pagination.ts) reads meta.pagination.total-pages, so it fell back to
 //     "one page" and never requested the second - capping the Schedules screen at 20 rows with
 //     no error and nothing in the console.
@@ -72,11 +72,11 @@ func TestSchedulesListHonoursJSONAPIPagination(t *testing.T) {
 	t.Run("the envelope is JSON:API, not the legacy paginated shape", func(t *testing.T) {
 		body := get(t, base)
 
-		// The legacy response.Paginated envelope put these at the top level. Their presence
-		// means the handler still answers in a shape fetchAllPages cannot read.
+		// The legacy paginated envelope put these at the top level. Their presence means the
+		// handler answers in a shape fetchAllPages cannot read.
 		for _, legacy := range []string{"total", "limit", "offset", "has_more"} {
 			if _, present := body[legacy]; present {
-				t.Errorf("response carries top-level %q - still the response.Paginated envelope", legacy)
+				t.Errorf("response carries top-level %q - the legacy paginated envelope", legacy)
 			}
 		}
 

@@ -3,23 +3,24 @@
 package response
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 )
 
 // The non-JSON:API payloads this API also emits (#755, Phase 3).
 //
 // These are not JSON:API documents and are not pretending to be. They cover the endpoints that
-// answer with a bare acknowledgement or a legacy `{"error": ...}` body: internal callbacks, the
-// TOTP and session flows, the GitHub webhook receiver, and the Ansible handlers that predate
-// the JSON:API convention.
+// answer with a bare acknowledgement: internal callbacks, the TOTP and session flows, the
+// GitHub webhook receiver, and the schedule actions.
 //
 // They are typed for the same reason everything else here is - a map has no definition, so
-// nothing describes the shape to a client or to the OpenAPI generator. The legacy
-// `{"error": ...}` body and the `{"code", "message"}` pair that used to live here were
-// converged onto the JSON:API envelope in #757 and their helpers deleted, so those shapes
-// cannot quietly return; what remains is the non-error acknowledgements.
+// nothing describes the shape to a client or to the OpenAPI generator.
+//
+// This package holds no error shape. Errors are JSON:API error documents written through
+// jsonapi.WriteError (or apierror.Internal for a server-side failure). The flat
+// `{"error": ...}` body and the `{"code", "message"}` pair once lived here; #757 removed the
+// second and some writers of the first, and #857 removed the rest (ErrorResponse and its six
+// helpers, which four Ansible handlers still called at 77 sites). With the helpers gone the
+// compiler is the guard: nothing can call a function that does not exist.
 
 // MessageResponse is a bare acknowledgement: {"message": "..."}.
 type MessageResponse struct {
@@ -34,11 +35,6 @@ type StatusResponse struct {
 // Message sends a MessageResponse.
 func Message(c *gin.Context, code int, message string) {
 	c.JSON(code, MessageResponse{Message: message})
-}
-
-// OKMessage sends a 200 MessageResponse.
-func OKMessage(c *gin.Context, message string) {
-	c.JSON(http.StatusOK, MessageResponse{Message: message})
 }
 
 // Status sends a StatusResponse.
