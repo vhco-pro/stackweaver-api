@@ -11,7 +11,7 @@
         "ansible-job-retention-days": 90,
         "assessments-enforced": false,
         "collaborator-auth-policy": "password",
-        "cost-estimation-enabled": true,
+        "cost-estimation-enabled": false,
         "created-at": "\u003ctimestamp\u003e",
         "default-execution-mode": "remote",
         "default-terraform-version": "",

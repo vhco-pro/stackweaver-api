@@ -270,13 +270,16 @@ func (h *NotificationHandler) resolveTemplate(c *gin.Context, write bool) *model
 	return template
 }
 
+// attachRequest is the flat JSON body of an attach. OnSuccess and OnFailure are pointers so an
+// absent key can default to on while a sent false is stored as false; OnStarted defaults to off,
+// which a plain bool already gives.
 type attachRequest struct {
 	NotificationTemplateID string `json:"notification_template_id"`
 	JobTemplateID          string `json:"job_template_id"`
 	WorkflowID             string `json:"workflow_id"`
 	OnStarted              bool   `json:"on_started"`
-	OnSuccess              bool   `json:"on_success"`
-	OnFailure              bool   `json:"on_failure"`
+	OnSuccess              *bool  `json:"on_success"`
+	OnFailure              *bool  `json:"on_failure"`
 }
 
 // Attach binds a notification template to a job template or workflow.
@@ -309,8 +312,14 @@ func (h *NotificationHandler) Attach(c *gin.Context) {
 	attachment := &models.AnsibleNotificationAttachment{
 		NotificationTemplateID: ntID,
 		OnStarted:              req.OnStarted,
-		OnSuccess:              req.OnSuccess,
-		OnFailure:              req.OnFailure,
+		OnSuccess:              true,
+		OnFailure:              true,
+	}
+	if req.OnSuccess != nil {
+		attachment.OnSuccess = *req.OnSuccess
+	}
+	if req.OnFailure != nil {
+		attachment.OnFailure = *req.OnFailure
 	}
 	if req.JobTemplateID != "" {
 		jtID, err := uuid.Parse(req.JobTemplateID)
