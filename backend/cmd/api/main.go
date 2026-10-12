@@ -39,7 +39,6 @@ import (
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/tofu"
 	"gopkg.in/yaml.v3"
-	"gorm.io/gorm"
 )
 
 type Config struct {
@@ -452,92 +451,17 @@ func main() {
 		}
 	}
 
-	// AUD-023: reconcile foreign-key ON DELETE behavior. GORM's AutoMigrate creates foreign keys
-	// but never alters an existing constraint's ON DELETE clause, so every historical constraint is
-	// NO ACTION - which is why deleting a parent relied on long, hand-ordered manual cascades in the
-	// repositories (fragile: one missed child orphans rows or wedges the delete). This converts each
-	// constraint to its intended behavior so the database enforces integrity as a backstop, covering
-	// the full organization/project object graph (an interconnected closure - it must be converted as
-	// one consistent set, since a partial conversion would make a parent delete fail against a
-	// leftover NO ACTION reference). The rules (see models.FKDeleteRules):
-	//   - CASCADE for compositions and junction rows (a child that cannot exist without its parent),
-	//     so a single DELETE reaches every descendant.
-	//   - SET NULL for nullable references whose row outlives the parent - critically the org-scoped
-	//     resources (schedules, variable sets, workflows, inventories, credentials, configs) that
-	//     survive a *project* delete but point at project-scoped rows being removed; without SET NULL
-	//     those surviving references would block the delete.
-	//   - Untouched (NO ACTION): the NOT-NULL "uses" references (job_template -> playbook/inventory,
-	//     job -> inventory, runner -> agent_pool). Both endpoints die together in any org/project
-	//     delete (the deferred end-of-statement check passes), and a standalone delete of an in-use
-	//     resource stays correctly blocked.
-	// Idempotent: a constraint already at the desired behavior is skipped; a missing/renamed
-	// constraint (e.g. a GORM join table that lacks FKs on a fresh migrate) is skipped quietly.
-	reconcileFKOnDelete := func(table, constraint, behavior string) {
-		var def string
-		if err := db.Raw(
-			"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = ? AND conrelid = ?::regclass",
-			constraint, table,
-		).Scan(&def).Error; err != nil {
-			logger.Warnf("FK reconcile: inspect %s.%s: %v", table, constraint, err)
-			return
-		}
-		if def == "" {
-			return // constraint absent on this schema variant - nothing to reconcile
-		}
-		want := "ON DELETE " + behavior
-		if strings.Contains(def, want) {
-			return // already at the desired behavior
-		}
-		base := def
-		if i := strings.Index(base, " ON DELETE "); i >= 0 {
-			base = base[:i] // strip any existing (non-matching) ON DELETE clause
-		}
-		desired := base + " " + want
-		if err := db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Exec(fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", table, constraint)).Error; err != nil {
-				return err
-			}
-			return tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s %s", table, constraint, desired)).Error
-		}); err != nil {
-			logger.Warnf("FK reconcile: convert %s.%s to %s: %v", table, constraint, behavior, err)
-		} else {
-			logger.Infof("FK reconcile: %s.%s -> ON DELETE %s", table, constraint, behavior)
-		}
+	// AUD-023: bring every foreign key to its intended ON DELETE behavior, which AutoMigrate never
+	// does for a constraint that already exists. The step lives in core/models so this and the
+	// integration tests drive the same code (see models.ReconcileFKDeleteRules for the rules and
+	// the rationale). A constraint that cannot be converted is reported rather than fatal: the
+	// repositories' deletes then fail on that reference, which is no worse than before the boot.
+	fkApplied, fkErr := models.ReconcileFKDeleteRules(db)
+	for _, r := range fkApplied {
+		logger.Infof("FK reconcile: %s.%s -> ON DELETE %s", r.Table, r.Constraint, r.Behavior)
 	}
-	// Some pure GORM many-to-many join tables (variable_set_projects, variable_set_workspaces) are
-	// created with NO foreign keys at all on a fresh migrate - so deleting a variable set, project,
-	// or workspace leaves orphaned join rows (the reconciliation below can only convert constraints
-	// that already exist). Older DBs migrated by earlier GORM versions do have these FKs (as
-	// NO ACTION), so this only creates what is missing; existing constraints are left for the
-	// reconcile pass to convert to CASCADE. Idempotent: skipped when the named constraint exists.
-	ensureJoinFK := func(table, constraint, column, parent, parentCol string) {
-		var exists bool
-		if err := db.Raw(
-			"SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conname = ? AND conrelid = ?::regclass)",
-			constraint, table,
-		).Scan(&exists).Error; err != nil {
-			logger.Warnf("ensure join FK: inspect %s.%s: %v", table, constraint, err)
-			return
-		}
-		if exists {
-			return
-		}
-		if err := db.Exec(fmt.Sprintf(
-			"ALTER TABLE %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE",
-			table, constraint, column, parent, parentCol,
-		)).Error; err != nil {
-			logger.Warnf("ensure join FK: create %s.%s: %v", table, constraint, err)
-		} else {
-			logger.Infof("ensure join FK: created %s.%s -> %s(%s) ON DELETE CASCADE", table, constraint, parent, parentCol)
-		}
-	}
-	ensureJoinFK("variable_set_projects", "fk_variable_set_projects_variable_set", "variable_set_id", "variable_sets", "id")
-	ensureJoinFK("variable_set_projects", "fk_variable_set_projects_project", "project_id", "projects", "id")
-	ensureJoinFK("variable_set_workspaces", "fk_variable_set_workspaces_variable_set", "variable_set_id", "variable_sets", "id")
-	ensureJoinFK("variable_set_workspaces", "fk_variable_set_workspaces_workspace", "workspace_id", "workspaces", "id")
-
-	for _, r := range models.FKDeleteRules {
-		reconcileFKOnDelete(r.Table, r.Constraint, r.Behavior)
+	if fkErr != nil {
+		logger.Warnf("FK reconcile: %v", fkErr)
 	}
 
 	logger.Info("Database migrations completed successfully")

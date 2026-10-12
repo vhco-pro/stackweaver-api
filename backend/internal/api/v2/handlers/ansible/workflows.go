@@ -3,10 +3,15 @@
 package ansible
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -23,7 +28,8 @@ type WorkflowHandler struct {
 	projectRepo  *repository.ProjectRepository
 	authService  *auth.Service
 	rbacService  *rbac.Service
-	// engine executes workflow runs (wired via SetEngine).
+	// engine executes workflow runs, and owns the rule for what a workflow, a node and an edge
+	// may name. Every write asks it, so it is required.
 	engine *ansible.WorkflowEngineService
 }
 
@@ -34,6 +40,7 @@ func NewWorkflowHandler(
 	projectRepo *repository.ProjectRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	engine *ansible.WorkflowEngineService,
 ) *WorkflowHandler {
 	return &WorkflowHandler{
 		workflowRepo: workflowRepo,
@@ -41,6 +48,7 @@ func NewWorkflowHandler(
 		projectRepo:  projectRepo,
 		authService:  authService,
 		rbacService:  rbacService,
+		engine:       engine,
 	}
 }
 
@@ -153,14 +161,49 @@ type UpdateNodeRequest struct {
 	} `json:"data"`
 }
 
+// errExtraVarsNotObject is the answer to an `extra-vars` attribute that is not a JSON object. Its
+// text is the detail of the 400 the caller reads.
+var errExtraVarsNotObject = errors.New("extra-vars must be a JSON object")
+
 // extraVarsColumn turns the `extra-vars` attribute, a JSON object travelling as a string, into
 // the value its jsonb column stores. The empty string clears the variables: it becomes the empty
 // object, which is what a row created without any holds.
-func extraVarsColumn(attr string) datatypes.JSON {
+//
+// Anything else must decode to a JSON object, and errExtraVarsNotObject is returned when it does
+// not. Text that is not JSON would be refused by the column, which the caller would read as a
+// 500; a list, a string, a number or null would be stored and then dropped without a word when
+// the workflow runs, because the engine decodes the column into a map and discards the error.
+func extraVarsColumn(attr string) (datatypes.JSON, error) {
 	if attr == "" {
-		return datatypes.JSON("{}")
+		return datatypes.JSON("{}"), nil
 	}
-	return datatypes.JSON(attr)
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(attr), &object); err != nil || object == nil {
+		// A nil map after a clean decode is the JSON null.
+		return nil, errExtraVarsNotObject
+	}
+	return datatypes.JSON(attr), nil
+}
+
+// referentsAccepted answers the request when err, the result of checking what a workflow, a node
+// or an edge names, is not nil, and reports whether the handler may go on to store the row.
+//
+// The checks are the engine's (CheckWorkflowReferents, CheckNodeReferents, CheckEdgeNodes): the
+// engine is what later acts on a stored reference with no caller to authorize, so it owns the
+// rule and applies the same one again at launch. A row the caller may not name is their input
+// and answers 400 with the engine's sentence, which is the same for a row of another
+// organization and for one that does not exist. Anything else is the database's and answers 500
+// without its text.
+func referentsAccepted(c *gin.Context, err error, failure string) bool {
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, ansible.ErrInvalidInput):
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+	default:
+		apierror.Internal(c, failure, err)
+	}
+	return false
 }
 
 type CreateEdgeRequest struct {
@@ -266,6 +309,17 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// The model's `not null` is satisfied by the empty string, so the name is checked here.
+	if strings.TrimSpace(req.Data.Attributes.Name) == "" {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "name is required")
+		return
+	}
+	extraVars, err := extraVarsColumn(req.Data.Attributes.ExtraVars)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+		return
+	}
+
 	workflow := &models.AnsibleWorkflow{
 		OrganizationID:       org.ID,
 		Name:                 req.Data.Attributes.Name,
@@ -274,12 +328,9 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 		AskVariablesOnLaunch: req.Data.Attributes.AskVariablesOnLaunch,
 		AskInventoryOnLaunch: req.Data.Attributes.AskInventoryOnLaunch,
 		AskLimitOnLaunch:     req.Data.Attributes.AskLimitOnLaunch,
+		ExtraVars:            extraVars,
 		Limit:                req.Data.Attributes.Limit,
 		SurveyEnabled:        req.Data.Attributes.SurveyEnabled,
-	}
-
-	if req.Data.Attributes.ExtraVars != "" {
-		workflow.ExtraVars = datatypes.JSON([]byte(req.Data.Attributes.ExtraVars))
 	}
 
 	if req.Data.Relationships.Project.Data != nil {
@@ -302,8 +353,19 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	}
 
 	if req.Data.Relationships.Inventory.Data != nil {
-		inventoryID, _ := uuid.Parse(req.Data.Relationships.Inventory.Data.ID)
+		inventoryID, err := uuid.Parse(req.Data.Relationships.Inventory.Data.ID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid inventory ID")
+			return
+		}
 		workflow.InventoryID = &inventoryID
+	}
+
+	// The permission check above is about the organization in the URL. It says nothing about
+	// the project and the inventory the document names, which must be that organization's too:
+	// the workflow's own permissions are derived from its project.
+	if !referentsAccepted(c, h.engine.CheckWorkflowReferents(c.Request.Context(), workflow), "Failed to create workflow") {
+		return
 	}
 
 	workflow.CreatedBy = &user.ID
@@ -418,7 +480,21 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// The two attributes that can be refused are checked before anything is assigned, so a
+	// refused document leaves the row exactly as it was.
 	attrs := req.Data.Attributes
+	if attrs.Name != nil && strings.TrimSpace(*attrs.Name) == "" {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "name must not be empty")
+		return
+	}
+	if attrs.ExtraVars != nil {
+		extraVars, err := extraVarsColumn(*attrs.ExtraVars)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+			return
+		}
+		workflow.ExtraVars = extraVars
+	}
 	if attrs.Name != nil {
 		workflow.Name = *attrs.Name
 	}
@@ -436,9 +512,6 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 	}
 	if attrs.AskLimitOnLaunch != nil {
 		workflow.AskLimitOnLaunch = *attrs.AskLimitOnLaunch
-	}
-	if attrs.ExtraVars != nil {
-		workflow.ExtraVars = extraVarsColumn(*attrs.ExtraVars)
 	}
 	if attrs.Limit != nil {
 		workflow.Limit = *attrs.Limit
@@ -551,12 +624,30 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 		return
 	}
 
+	extraVars, err := extraVarsColumn(req.Data.Attributes.ExtraVars)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+		return
+	}
+	// A node of a type the engine does not know is never started and never finished, so the
+	// run it is part of never ends.
+	nodeType := models.WorkflowNodeType(req.Data.Attributes.NodeType)
+	if !nodeType.IsValid() {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, fmt.Sprintf(
+			"node-type must be one of %s, %s, %s, %s",
+			models.WorkflowNodeTypeJobTemplate, models.WorkflowNodeTypeWorkflow,
+			models.WorkflowNodeTypeInventorySync, models.WorkflowNodeTypeApproval,
+		))
+		return
+	}
+
 	node := &models.AnsibleWorkflowNode{
 		WorkflowID:             workflowID,
-		NodeType:               models.WorkflowNodeType(req.Data.Attributes.NodeType),
+		NodeType:               nodeType,
 		Identifier:             req.Data.Attributes.Identifier,
 		PositionX:              req.Data.Attributes.PositionX,
 		PositionY:              req.Data.Attributes.PositionY,
+		ExtraVars:              extraVars,
 		Limit:                  req.Data.Attributes.Limit,
 		Tags:                   req.Data.Attributes.Tags,
 		SkipTags:               req.Data.Attributes.SkipTags,
@@ -566,23 +657,40 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 		ApprovalMessage:        req.Data.Attributes.ApprovalMessage,
 	}
 
-	if req.Data.Attributes.ExtraVars != "" {
-		node.ExtraVars = datatypes.JSON([]byte(req.Data.Attributes.ExtraVars))
-	}
-
+	// A relationship identifier that does not parse is the caller's mistake. Left unchecked it
+	// became the zero UUID and failed at the foreign key, which the caller read as a 500.
 	if req.Data.Relationships.JobTemplate.Data != nil {
-		templateID, _ := uuid.Parse(req.Data.Relationships.JobTemplate.Data.ID)
+		templateID, err := uuid.Parse(req.Data.Relationships.JobTemplate.Data.ID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid job template ID")
+			return
+		}
 		node.JobTemplateID = &templateID
 	}
 
 	if req.Data.Relationships.Inventory.Data != nil {
-		inventoryID, _ := uuid.Parse(req.Data.Relationships.Inventory.Data.ID)
+		inventoryID, err := uuid.Parse(req.Data.Relationships.Inventory.Data.ID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid inventory ID")
+			return
+		}
 		node.InventoryID = &inventoryID
 	}
 
 	if req.Data.Relationships.Credential.Data != nil {
-		credentialID, _ := uuid.Parse(req.Data.Relationships.Credential.Data.ID)
+		credentialID, err := uuid.Parse(req.Data.Relationships.Credential.Data.ID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid credential ID")
+			return
+		}
 		node.CredentialID = &credentialID
+	}
+
+	// The permission check above is about the workflow. What the node names must belong to the
+	// workflow's organization as well, or a launch would run another organization's job
+	// template on that organization's hosts.
+	if !referentsAccepted(c, h.engine.CheckNodeReferents(c.Request.Context(), workflow.OrganizationID, node), "Failed to create node") {
+		return
 	}
 
 	if err := h.workflowRepo.CreateNode(node); err != nil {
@@ -697,15 +805,22 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 		return
 	}
 
+	// The one attribute that can be refused is checked before anything is assigned, so a refused
+	// document leaves the row exactly as it was.
 	attrs := req.Data.Attributes
+	if attrs.ExtraVars != nil {
+		extraVars, err := extraVarsColumn(*attrs.ExtraVars)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+			return
+		}
+		node.ExtraVars = extraVars
+	}
 	if attrs.PositionX != nil {
 		node.PositionX = *attrs.PositionX
 	}
 	if attrs.PositionY != nil {
 		node.PositionY = *attrs.PositionY
-	}
-	if attrs.ExtraVars != nil {
-		node.ExtraVars = extraVarsColumn(*attrs.ExtraVars)
 	}
 	if attrs.Limit != nil {
 		node.Limit = *attrs.Limit
@@ -833,14 +948,39 @@ func (h *WorkflowHandler) CreateEdge(c *gin.Context) {
 		return
 	}
 
-	sourceNodeID, _ := uuid.Parse(req.Data.Relationships.SourceNode.Data.ID)
-	targetNodeID, _ := uuid.Parse(req.Data.Relationships.TargetNode.Data.ID)
+	// Both ends are required. An identifier that is absent or does not parse is the caller's
+	// mistake; left unchecked it became the zero UUID and failed at the foreign key.
+	sourceNodeID, err := uuid.Parse(req.Data.Relationships.SourceNode.Data.ID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid source node ID")
+		return
+	}
+	targetNodeID, err := uuid.Parse(req.Data.Relationships.TargetNode.Data.ID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid target node ID")
+		return
+	}
+	// The engine follows an edge only when its condition is one it knows.
+	condition := models.WorkflowEdgeCondition(req.Data.Attributes.Condition)
+	if !condition.IsValid() {
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, fmt.Sprintf(
+			"condition must be one of %s, %s, %s",
+			models.WorkflowEdgeOnSuccess, models.WorkflowEdgeOnFailure, models.WorkflowEdgeAlways,
+		))
+		return
+	}
 
 	edge := &models.AnsibleWorkflowEdge{
 		WorkflowID:   workflowID,
 		SourceNodeID: sourceNodeID,
 		TargetNodeID: targetNodeID,
-		Condition:    models.WorkflowEdgeCondition(req.Data.Attributes.Condition),
+		Condition:    condition,
+	}
+
+	// An edge joins two nodes of the workflow in the URL. The foreign keys only ask that the two
+	// rows exist, so an edge could be hung on a node of any other workflow.
+	if !referentsAccepted(c, h.engine.CheckEdgeNodes(c.Request.Context(), edge), "Failed to create edge") {
+		return
 	}
 
 	if err := h.workflowRepo.CreateEdge(edge); err != nil {

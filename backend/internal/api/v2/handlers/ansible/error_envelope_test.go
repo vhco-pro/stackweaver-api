@@ -10,8 +10,10 @@
 // on real Postgres. Each case asserts the status, errors[0].status, title and detail, and that
 // no top-level `error` key is left.
 //
-// Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. The schema is expected to
-// be migrated already. Cleanup is strictly row-scoped (the database may be live). Run with:
+// Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. The tables are expected to
+// exist already (AutoMigrate); the fixture applies the foreign key delete rules it depends on
+// itself, so the package passes on its own on a database that has seen nothing but AutoMigrate
+// (#900). Cleanup is strictly row-scoped (the database may be live). Run with:
 //
 //	go test -tags integration ./internal/api/v2/handlers/ansible/ -run TestAnsibleErrorEnvelope
 
@@ -75,6 +77,14 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connecting to the test database: %v", err)
+	}
+	// The orphan schedule below is built by deleting the job template under it, which only works
+	// once fk_ansible_schedules_job_template is ON DELETE SET NULL. AutoMigrate creates that
+	// constraint bare; the rule is applied by the API's startup migration, so the fixture runs
+	// the same step rather than depend on something else having run it first. A no-op on a
+	// database that is already reconciled.
+	if _, err := models.ReconcileFKDeleteRules(db); err != nil {
+		t.Fatalf("reconciling the foreign key delete rules: %v", err)
 	}
 	sfx := uuid.NewString()[:8]
 
@@ -203,8 +213,9 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	disabledSourceSchedule := newSchedule("errenv-sched-src", models.ScheduleTypeInventorySource, nil, &disabledSource.ID)
 	brokenCronSchedule := newSchedule("errenv-sched-cron", models.ScheduleTypeJobTemplate, &template.ID, nil)
 
-	// The schedule's foreign key is ON DELETE SET NULL (core/models/fk_delete_rules.go), so
-	// deleting the template leaves a schedule with no target, which run-now cannot execute.
+	// The schedule's foreign key is ON DELETE SET NULL (models.ReconcileFKDeleteRules, applied
+	// above), so deleting the template leaves a schedule with no target, which run-now cannot
+	// execute.
 	if err := db.Where("id = ?", doomedTemplate.ID).Delete(&models.AnsibleJobTemplate{}).Error; err != nil {
 		t.Fatalf("deleting the job template under the orphan schedule: %v", err)
 	}

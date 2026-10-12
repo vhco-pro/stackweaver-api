@@ -13,14 +13,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 )
-
-// SetEngine wires the workflow execution engine (optional setter to avoid
-// constructor churn).
-func (h *WorkflowHandler) SetEngine(engine *ansible.WorkflowEngineService) {
-	h.engine = engine
-}
 
 // resolveWorkflowForRun loads the workflow and checks the caller's permission.
 // Writes the error response and returns nil on failure.
