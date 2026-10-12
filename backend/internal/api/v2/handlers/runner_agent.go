@@ -1765,6 +1765,40 @@ func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 	response.Status(c, http.StatusOK, string(job.Status))
 }
 
+// ansibleJobCredentialIDs returns the credentials a job's artifacts are built from. When it
+// cannot, it answers the request and reports false.
+//
+// It reads the set through ansible.JobCredentialIDs, the point-of-use check the platform runner
+// makes too: a job whose stored set names a credential outside the job's organization gets none
+// of them. Such a job is failed here and the runner is told 409 with the same sentence a missing
+// credential gets, so that it neither receives another organization's secret nor runs the job
+// without a credential the job names. A lookup that fails for any other reason answers 500 and
+// leaves the job as it is.
+func (h *RunnerAgentHandler) ansibleJobCredentialIDs(c *gin.Context, job *models.AnsibleJob) ([]uuid.UUID, bool) {
+	if h.credentialRepo == nil {
+		// No credential is ever decrypted without the repository, so there is no set to read.
+		return nil, true
+	}
+	credIDs, err := ansible.JobCredentialIDs(c.Request.Context(), h.ansibleJobRepo, job.ID)
+	if err == nil {
+		return credIDs, true
+	}
+	if !errors.Is(err, ansible.ErrInvalidInput) {
+		logger.Errorf("Reading the credentials of job %s: %v", job.ID, err)
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return nil, false
+	}
+	message := "reading the job's credentials: " + err.Error()
+	logger.Warnf("Job %s is not handed to runner: %s", job.ID, message)
+	job.Status = models.AnsibleJobStatusFailed
+	job.ErrorMessage = message
+	if updateErr := h.ansibleJobRepo.Update(job); updateErr != nil {
+		logger.Warnf("Failed to mark job %s failed: %v", job.ID, updateErr)
+	}
+	jsonapi.WriteError(c, http.StatusConflict, "Conflict", message)
+	return nil, false
+}
+
 // GetJobArtifacts returns all artifacts needed to execute a job
 // GET /api/v2/runner/jobs/:id/artifacts
 func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
@@ -1864,16 +1898,15 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	// Resolve every credential attached to the job: the template's
 	// multi-credential set plus the job's own credential (legacy single
 	// machine credential; skipped when already in the set).
+	//
+	// The job's own credential set, snapshotted at launch - not the template's live set, so an
+	// edit to the template cannot change what an already-dispatched job authenticates with.
+	credIDs, ok := h.ansibleJobCredentialIDs(c, job)
+	if !ok {
+		return
+	}
 	var decryptedPassword string
 	if h.credentialRepo != nil && h.cryptoService != nil {
-		// The job's own credential set, snapshotted at launch - not the
-		// template's live set, so an edit to the template cannot change what an
-		// already-dispatched job authenticates with.
-		var credIDs []uuid.UUID
-		if err := h.db.Raw("SELECT ansible_credential_id FROM ansible_job_credentials WHERE ansible_job_id = ? ORDER BY ansible_credential_id", job.ID).Scan(&credIDs).Error; err != nil {
-			logger.Warnf("Failed to list credentials for job %s: %v", job.ID, err)
-		}
-
 		decrypt := func(v string) string {
 			if v == "" {
 				return ""
@@ -1972,11 +2005,7 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 			// If we have a credential with a username, inject ansible_user so the runner uses it
 			// (avoids falling back to the runner process user e.g. "iac" in Docker)
 			if h.credentialRepo != nil {
-				var machineCredIDs []uuid.UUID
-				if err := h.db.Raw("SELECT ansible_credential_id FROM ansible_job_credentials WHERE ansible_job_id = ? ORDER BY ansible_credential_id", job.ID).Scan(&machineCredIDs).Error; err != nil {
-					logger.Warnf("Failed to list credentials for job %s: %v", job.ID, err)
-				}
-				for _, id := range machineCredIDs {
+				for _, id := range credIDs {
 					cred, err := h.credentialRepo.GetByID(id)
 					if err != nil || cred.Username == "" {
 						continue
