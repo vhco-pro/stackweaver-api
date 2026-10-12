@@ -56,6 +56,14 @@ type errorEnvelopeFixture struct {
 	orphanSchedule           string // its job template was deleted after the schedule was created
 	disabledSourceSchedule   string
 	brokenCronSchedule       string // cron_expression corrupted in the row
+
+	// One of everything a schedule can name, owned by the second organization. The owner
+	// administers that organization too, so only the organization boundary stands between a
+	// schedule of the first and these rows.
+	otherTemplateID string
+	otherPlaybookID string
+	otherSourceID   string
+	otherWorkflowID string
 }
 
 func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
@@ -116,6 +124,10 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	jobService := ansiblesvc.NewJobService(jobRepo, playbookRepo, inventoryRepo, templateRepo, projectRepo, nil)
 	jobService.SetOrganizationRepo(orgRepo)
 	schedulerService := ansiblesvc.NewSchedulerService(scheduleRepo, jobRepo, templateRepo, playbookRepo, sourceService, jobService, orgRepo)
+	// A workflow schedule is refused outright without an engine, before its workflow is looked up.
+	schedulerService.SetWorkflowEngine(ansiblesvc.NewWorkflowEngineService(
+		repository.NewAnsibleWorkflowRepository(db), jobRepo, jobService, sourceService,
+	))
 
 	inventory, err := inventoryService.CreateInventory(
 		orgA.ID, &projA.ID, "errenv-inv-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "",
@@ -140,7 +152,15 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	template := &models.AnsibleJobTemplate{ID: uuid.New(), ProjectID: projA.ID, PlaybookID: playbook.ID, InventoryID: inventory.ID, Name: "errenv-tmpl-" + sfx}
 	disabledTemplate := &models.AnsibleJobTemplate{ID: uuid.New(), ProjectID: projA.ID, PlaybookID: playbook.ID, InventoryID: inventory.ID, Name: "errenv-tmpl-off-" + sfx, Disabled: true}
 	doomedTemplate := &models.AnsibleJobTemplate{ID: uuid.New(), ProjectID: projA.ID, PlaybookID: playbook.ID, InventoryID: inventory.ID, Name: "errenv-tmpl-gone-" + sfx}
-	for _, row := range []any{sshCredential, playbook, template, disabledTemplate, doomedTemplate} {
+	otherInventory := &models.AnsibleInventory{ID: uuid.New(), OrganizationID: orgB.ID, Name: "errenv-inv-b-" + sfx, Type: models.InventoryTypeStatic}
+	otherPlaybook := &models.AnsiblePlaybook{ID: uuid.New(), ProjectID: projB.ID, Name: "errenv-pb-b-" + sfx, PlaybookPath: "site.yml", SourceMode: "cached"}
+	otherTemplate := &models.AnsibleJobTemplate{ID: uuid.New(), ProjectID: projB.ID, PlaybookID: otherPlaybook.ID, InventoryID: otherInventory.ID, Name: "errenv-tmpl-b-" + sfx}
+	otherSource := &models.AnsibleInventorySource{ID: uuid.New(), InventoryID: otherInventory.ID, Name: "errenv-src-b-" + sfx, Type: models.InventorySourceTypeCustom}
+	otherWorkflow := &models.AnsibleWorkflow{ID: uuid.New(), OrganizationID: orgB.ID, ProjectID: projB.ID, Name: "errenv-wf-b-" + sfx}
+	for _, row := range []any{
+		sshCredential, playbook, template, disabledTemplate, doomedTemplate,
+		otherInventory, otherPlaybook, otherTemplate, otherSource, otherWorkflow,
+	} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatalf("seeding %T: %v", row, err)
 		}
@@ -148,14 +168,15 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 
 	t.Cleanup(func() {
 		// Children before parents (foreign-key order), every statement scoped to this run's ids.
-		db.Where("organization_id = ?", orgA.ID).Delete(&models.AnsibleSchedule{})
+		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.AnsibleSchedule{})
+		db.Where("id = ?", otherWorkflow.ID).Delete(&models.AnsibleWorkflow{})
 		db.Where("project_id = ?", projA.ID).Delete(&models.AnsibleJob{})
-		db.Where("project_id = ?", projA.ID).Delete(&models.AnsibleJobTemplate{})
-		db.Where("id = ?", playbook.ID).Delete(&models.AnsiblePlaybook{})
+		db.Where("project_id IN ?", []uuid.UUID{projA.ID, projB.ID}).Delete(&models.AnsibleJobTemplate{})
+		db.Where("id IN ?", []uuid.UUID{playbook.ID, otherPlaybook.ID}).Delete(&models.AnsiblePlaybook{})
 		db.Where("inventory_id = ?", inventory.ID).Delete(&models.AnsibleInventorySync{})
-		db.Where("inventory_id = ?", inventory.ID).Delete(&models.AnsibleInventorySource{})
+		db.Where("inventory_id IN ?", []uuid.UUID{inventory.ID, otherInventory.ID}).Delete(&models.AnsibleInventorySource{})
 		db.Where("id = ?", sshCredential.ID).Delete(&models.AnsibleCredential{})
-		db.Where("id = ?", inventory.ID).Delete(&models.AnsibleInventory{})
+		db.Where("id IN ?", []uuid.UUID{inventory.ID, otherInventory.ID}).Delete(&models.AnsibleInventory{})
 		db.Where("team_id IN ?", []uuid.UUID{teamA.ID, teamB.ID}).Delete(&models.TeamProjectAccess{})
 		db.Where("team_id IN ?", []uuid.UUID{teamA.ID, teamB.ID}).Delete(&models.TeamMember{})
 		db.Where("id IN ?", []uuid.UUID{teamA.ID, teamB.ID}).Delete(&models.Team{})
@@ -243,6 +264,10 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 		orphanSchedule:           orphanSchedule.ID.String(),
 		disabledSourceSchedule:   disabledSourceSchedule.ID.String(),
 		brokenCronSchedule:       brokenCronSchedule.ID.String(),
+		otherTemplateID:          otherTemplate.ID.String(),
+		otherPlaybookID:          otherPlaybook.ID.String(),
+		otherSourceID:            otherSource.ID.String(),
+		otherWorkflowID:          otherWorkflow.ID.String(),
 	}
 }
 
@@ -326,6 +351,39 @@ func TestAnsibleErrorEnvelope(t *testing.T) {
 		{
 			"schedule: create naming a job template that does not exist", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
 			scheduleBody(t, map[string]any{"job-template-id": missing}), 400, badRequest, "job template not found",
+		},
+		// The inventory source and the workflow had no lookup, so the foreign key refused the
+		// INSERT: a 500 "Failed to create schedule" that told the caller nothing (#880).
+		{
+			"schedule: create naming an inventory source that does not exist", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
+			scheduleBody(t, map[string]any{"schedule-type": "inventory_source", "inventory-source-id": missing}), 400, badRequest,
+			"inventory source not found",
+		},
+		{
+			"schedule: create naming a workflow that does not exist", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
+			scheduleBody(t, map[string]any{"schedule-type": "workflow", "workflow-id": missing}), 400, badRequest,
+			"workflow not found",
+		},
+		// A referent of another organization reads exactly like one that does not exist. The
+		// caller here administers both organizations, so nothing but the lookup stands in the way.
+		{
+			"schedule: create naming a job template of another organization", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
+			scheduleBody(t, map[string]any{"job-template-id": f.otherTemplateID}), 400, badRequest, "job template not found",
+		},
+		{
+			"schedule: create naming a playbook of another organization", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
+			scheduleBody(t, map[string]any{"schedule-type": "playbook_sync", "playbook-id": f.otherPlaybookID}), 400, badRequest,
+			"playbook not found",
+		},
+		{
+			"schedule: create naming an inventory source of another organization", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
+			scheduleBody(t, map[string]any{"schedule-type": "inventory_source", "inventory-source-id": f.otherSourceID}), 400, badRequest,
+			"inventory source not found",
+		},
+		{
+			"schedule: create naming a workflow of another organization", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
+			scheduleBody(t, map[string]any{"schedule-type": "workflow", "workflow-id": f.otherWorkflowID}), 400, badRequest,
+			"workflow not found",
 		},
 		{
 			"schedule: update with an invalid cron expression", http.MethodPatch, "/ansible/schedules/" + f.scheduleID,
@@ -474,5 +532,82 @@ func TestAnsibleErrorEnvelope(t *testing.T) {
 				t.Errorf("errors[0].detail = %q, want %q", *got.Detail, tc.wantDetail)
 			}
 		})
+	}
+}
+
+// TestScheduleEnable_DisabledTemplateIsNotALaunch pins what enabling a schedule does when its job
+// template is disabled (#880): it succeeds. Enabling is a status change and a next-run
+// calculation; nothing is launched, so the 409 the launch paths answer for a disabled template
+// has no way to arise there, and the handler no longer carries a branch for it.
+//
+// The schedule is then in the state any schedule reaches when its template is disabled after it
+// was created, and what happens at each due time is visible rather than silent: the launch is
+// refused, and the schedule records a failed run (last-run-status, last-run-at, run-count) that
+// the Schedules page shows as a badge. Run-now drives the same code the scheduler tick runs
+// (SchedulerService.executeSchedule), which is how this test observes it without waiting for a
+// tick or touching any other schedule in the database.
+func TestScheduleEnable_DisabledTemplateIsNotALaunch(t *testing.T) {
+	f := setupErrorEnvelope(t)
+	base := "/ansible/schedules/" + f.disabledTemplateSchedule
+
+	call := func(method, path string) (int, []byte) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("X-Test-User", f.owner.ID.String())
+		rec := httptest.NewRecorder()
+		f.router.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.Bytes()
+	}
+	read := func() map[string]any {
+		t.Helper()
+		code, body := call(http.MethodGet, base)
+		if code != http.StatusOK {
+			t.Fatalf("read = %d, want 200 (%s)", code, body)
+		}
+		var doc struct {
+			Data struct {
+				Attributes map[string]any `json:"attributes"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatalf("decoding the schedule: %v; body: %s", err, body)
+		}
+		return doc.Data.Attributes
+	}
+
+	if code, body := call(http.MethodPost, base+"/actions/disable"); code != http.StatusOK {
+		t.Fatalf("disable = %d, want 200 (%s)", code, body)
+	}
+	code, body := call(http.MethodPost, base+"/actions/enable")
+	if code != http.StatusOK {
+		t.Fatalf("enable = %d, want 200 (%s)", code, body)
+	}
+	if want := `{"message":"Schedule enabled"}`; string(body) != want {
+		t.Errorf("enable body = %s, want %s", body, want)
+	}
+	attrs := read()
+	if attrs["status"] != "enabled" {
+		t.Errorf("status after enable = %v, want enabled", attrs["status"])
+	}
+	if _, ran := attrs["last-run-status"]; ran {
+		t.Errorf("enabling recorded a run (last-run-status = %v); it must not launch anything", attrs["last-run-status"])
+	}
+	if attrs["next-run-at"] == nil {
+		t.Error("enabling left next-run-at empty")
+	}
+
+	// What the next due time does with it.
+	if code, body := call(http.MethodPost, base+"/actions/run-now"); code != http.StatusConflict {
+		t.Fatalf("run-now = %d, want 409 (%s)", code, body)
+	}
+	attrs = read()
+	if attrs["last-run-status"] != "failed" {
+		t.Errorf("last-run-status after the refused launch = %v, want failed", attrs["last-run-status"])
+	}
+	if attrs["run-count"] != float64(1) {
+		t.Errorf("run-count after the refused launch = %v, want 1", attrs["run-count"])
+	}
+	if attrs["status"] != "enabled" {
+		t.Errorf("status after the refused launch = %v, want enabled (the schedule stays on)", attrs["status"])
 	}
 }

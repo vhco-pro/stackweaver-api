@@ -174,28 +174,8 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 		credentialID = &id
 	}
 
-	source, err := h.sourceService.CreateInventorySource(
-		inventoryID,
-		attrs.Name,
-		attrs.Description,
-		attrs.SourceType,
-		credentialID,
-		attrs.Config,
-	)
-	// The service validates the caller's input (the credential and its type, the Azure
-	// configuration) in the same call that writes the row. Input errors keep their sentence and
-	// answer 400; anything else is logged and answered with an operator-authored message.
-	if errors.Is(err, ansible.ErrInvalidInput) {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-	if err != nil {
-		apierror.Internal(c, "Failed to create inventory source", err)
-		return
-	}
-
-	// Apply the sync-behavior attributes the constructor doesn't take, so
-	// create requests don't silently fall back to model defaults.
+	// The sync attributes the caller sent. One left out stays nil and the service supplies the
+	// create default, so the row is written once with its final values.
 	syncOpts := ansible.UpdateInventorySourceOptions{
 		UpdateOnLaunch:     attrs.UpdateOnLaunch,
 		UpdateCacheTimeout: attrs.UpdateCacheTimeout,
@@ -219,12 +199,26 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	if attrs.InstanceFilters != "" {
 		syncOpts.InstanceFilters = &attrs.InstanceFilters
 	}
-	if syncOpts != (ansible.UpdateInventorySourceOptions{}) {
-		if updated, optErr := h.sourceService.UpdateInventorySource(source.ID, syncOpts); optErr != nil {
-			logger.Warnf("Inventory source %s created but sync options not applied: %v", source.ID, optErr)
-		} else {
-			source = updated
-		}
+
+	source, err := h.sourceService.CreateInventorySourceWithOptions(
+		inventoryID,
+		attrs.Name,
+		attrs.Description,
+		attrs.SourceType,
+		credentialID,
+		attrs.Config,
+		syncOpts,
+	)
+	// The service validates the caller's input (the credential and its type, the Azure
+	// configuration) in the same call that writes the row. Input errors keep their sentence and
+	// answer 400; anything else is logged and answered with an operator-authored message.
+	if errors.Is(err, ansible.ErrInvalidInput) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if err != nil {
+		apierror.Internal(c, "Failed to create inventory source", err)
+		return
 	}
 
 	jsonapi.WriteDocument(c, http.StatusCreated, formatInventorySourceResponse(source))
