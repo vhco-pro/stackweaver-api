@@ -1141,6 +1141,8 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		}
 	}
 
+	// The five booleans that default to true get that default here and nowhere else: the model
+	// carries no default for them, so the value in this struct is the value stored.
 	workspace := &models.Workspace{
 		ProjectID:                  finalProjectID,
 		Name:                       workspaceName,
@@ -1237,16 +1239,6 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 	if err := h.workspaceRepo.Create(workspace); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create workspace")
 		return
-	}
-
-	// GORM leaves zero-valued fields that carry a `default` tag out of the INSERT, so a
-	// workspace created with file-triggers-enabled=false would come back as true (the
-	// column is `default:true`). Now that the flag actually drives path filtering, write
-	// the false back explicitly instead of silently ignoring it (#678).
-	if !workspace.FileTriggersEnabled {
-		if err := h.workspaceRepo.Update(workspace); err != nil {
-			logger.Warnf("Failed to persist file-triggers-enabled=false for workspace %s: %v", workspace.ID, err)
-		}
 	}
 
 	// TFE tag bindings: apply the workspace's `tags` (sent as a tag-bindings relation, values in

@@ -241,8 +241,8 @@ func TestRunCreate_RejectsBodiesThatAreNotTheDocument(t *testing.T) {
 const destroyNotAllowedDetail = "Destroy plans are not allowed on this workspace: its allow-destroy-plan " +
 	"setting is off. Turn the setting on to queue a destroy run."
 
-// setAllowDestroyPlan writes the setting with an UPDATE. A `false` given to Create would be
-// replaced by the column default, because the model declares `default:true` on a bool.
+// setAllowDestroyPlan writes the setting with an UPDATE and reads it back, so a case can flip it
+// on the shared fixture without building a workspace of its own.
 func (f *runCreateScopeFixture) setAllowDestroyPlan(t *testing.T, allow bool) {
 	t.Helper()
 	if err := f.db.Model(&models.Workspace{}).Where("id = ?", f.workspace).
@@ -316,16 +316,16 @@ func TestRunCreate_DestroyRequiresAllowDestroyPlan(t *testing.T) {
 		}
 	})
 
-	t.Run("setting on, which is the default: the destroy run is created", func(t *testing.T) {
+	t.Run("setting on: the destroy run is created", func(t *testing.T) {
 		f := setupRunCreateScope(t)
 
-		// The fixture creates its workspace without the attribute, so this also pins the default.
+		// The fixture sets it; the handler's default is pinned by TestWorkspaceCreate_BooleanDefaults.
 		var ws models.Workspace
 		if err := f.db.Select("allow_destroy_plan").First(&ws, "id = ?", f.workspace).Error; err != nil {
 			t.Fatalf("reading workspace: %v", err)
 		}
 		if !ws.AllowDestroyPlan {
-			t.Fatal("a workspace created without allow-destroy-plan must have it on")
+			t.Fatal("the fixture's workspace must have allow-destroy-plan on")
 		}
 
 		w := f.postRunBody(t, f.runDocument(destroyAttrs))

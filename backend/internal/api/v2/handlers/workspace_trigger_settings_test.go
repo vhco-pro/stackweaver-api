@@ -16,11 +16,17 @@ import (
 	"gorm.io/gorm"
 )
 
-// file_triggers_enabled=false has to survive a round trip through the database now that it
-// actually disables path filtering (#678). models.Workspace.FileTriggersEnabled carries a
-// `default:true` GORM tag, and GORM leaves zero-valued fields with a default tag out of the
-// INSERT - so a plain Create silently stores true. The TFE workspace create handler works
-// around that with an explicit follow-up write; this test pins both halves.
+// file_triggers_enabled=false has to survive a round trip through the database, because it is
+// what disables path filtering (#678). WorkspaceRepository.Create must store the false it is
+// given, with no further write.
+//
+// This test used to have a second half that re-assigned false and called Update, pinning a
+// follow-up write in the workspace create handler. That half is gone on purpose (#867): the
+// model then carried `gorm:"default:true"`, GORM substituted the default for the zero value in
+// the INSERT and wrote true back into the struct, so the handler's `if !FileTriggersEnabled`
+// condition could never be true and the write it guarded never ran. The tag was removed from the
+// model, the unreachable write was deleted from the handler, and what is left to pin is the
+// plain create.
 func TestFileTriggersEnabledFalseSurvivesCreate(t *testing.T) {
 	dbURL := os.Getenv("TEST_DATABASE_URL")
 	if dbURL == "" {
@@ -56,35 +62,20 @@ func TestFileTriggersEnabledFalseSurvivesCreate(t *testing.T) {
 		db.Where("id = ?", org.ID).Delete(&models.Organization{})
 	})
 
-	// Document what a bare Create does, so the day GORM stops swallowing the false the
-	// workaround below can be dropped rather than quietly kept forever.
-	afterCreate, err := repo.GetByID(ws.ID)
+	// Create must not have rewritten the caller's struct either: a substituted default shows up
+	// here before it shows up in the row.
+	if ws.FileTriggersEnabled {
+		t.Errorf("Create changed the struct's FileTriggersEnabled from false to true")
+	}
+
+	stored, err := repo.GetByID(ws.ID)
 	if err != nil {
 		t.Fatalf("reload after create: %v", err)
 	}
-	if afterCreate.FileTriggersEnabled {
-		t.Logf("as expected, Create dropped file_triggers_enabled=false (GORM `default:true` tag); the handler's explicit write is required")
-	} else {
-		t.Logf("Create persisted file_triggers_enabled=false directly - the handler's follow-up write is now redundant")
+	if stored.FileTriggersEnabled {
+		t.Errorf("file_triggers_enabled = true after creating with false; a workspace configured to always trigger stays path-filtered")
 	}
-
-	// This is the handler's workaround: Update uses Save, which writes every column.
-	if !afterCreate.FileTriggersEnabled {
-		return
-	}
-	ws.FileTriggersEnabled = false
-	if err := repo.Update(ws); err != nil {
-		t.Fatalf("update workspace: %v", err)
-	}
-
-	reloaded, err := repo.GetByID(ws.ID)
-	if err != nil {
-		t.Fatalf("reload after update: %v", err)
-	}
-	if reloaded.FileTriggersEnabled {
-		t.Errorf("file_triggers_enabled = true after an explicit write of false; a workspace configured to always trigger stays path-filtered")
-	}
-	if reloaded.TriggerPrefixes != `["modules/network"]` {
-		t.Errorf("trigger_prefixes = %q, want the stored JSON array", reloaded.TriggerPrefixes)
+	if stored.TriggerPrefixes != `["modules/network"]` {
+		t.Errorf("trigger_prefixes = %q, want the stored JSON array", stored.TriggerPrefixes)
 	}
 }
