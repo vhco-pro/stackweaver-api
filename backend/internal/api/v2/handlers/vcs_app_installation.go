@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -35,6 +37,7 @@ import (
 	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/storage"
+	"gorm.io/gorm"
 )
 
 // webhookCloneSem bounds concurrent per-workspace webhook clone goroutines (AUD-062). Without
@@ -54,6 +57,7 @@ type VCSAppInstallationHandlerV2 struct {
 	playbookRepo       *repository.AnsiblePlaybookRepository
 	webhookEventRepo   *repository.WebhookEventRepository // For recording webhook deliveries
 	authService        *auth.Service
+	rbacService        *rbac.Service // For the manage-vcs-settings check on the installation flows
 	githubAppManager   *vcs.GitHubAppManager
 	azureDevOpsManager *vcs.AzureDevOpsManager
 	vcsRegistry        *vcs.ProviderRegistry
@@ -113,6 +117,7 @@ func NewVCSAppInstallationHandlerV2(
 	playbookRepo *repository.AnsiblePlaybookRepository,
 	webhookEventRepo *repository.WebhookEventRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 	githubAppManager *vcs.GitHubAppManager,
 	azureDevOpsManager *vcs.AzureDevOpsManager,
 	vcsRegistry *vcs.ProviderRegistry,
@@ -146,6 +151,7 @@ func NewVCSAppInstallationHandlerV2(
 		playbookRepo:       playbookRepo,
 		webhookEventRepo:   webhookEventRepo,
 		authService:        authService,
+		rbacService:        rbacService,
 		githubAppManager:   githubAppManager,
 		azureDevOpsManager: azureDevOpsManager,
 		vcsRegistry:        vcsRegistry,
@@ -243,9 +249,15 @@ func (h *VCSAppInstallationHandlerV2) InitiateInstallation(c *gin.Context) {
 	returnPath := c.Query("return")
 
 	// Verify organization exists
-	_, err := h.orgRepo.GetByName(orgName)
+	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+		return
+	}
+
+	// Starting an installation is the first half of connecting the organization, so it takes
+	// the permission that connecting does.
+	if !authorizeManageVCSSettings(c, h.authService, h.rbacService, org.ID) {
 		return
 	}
 
@@ -279,9 +291,16 @@ func (h *VCSAppInstallationHandlerV2) InitiateAzureDevOpsInstallation(c *gin.Con
 	adoOrg := c.Query("ado_org")    // Azure DevOps organization name
 	returnPath := c.Query("return") // Where to send user after auth
 
-	_, err := h.orgRepo.GetByName(orgName)
+	org, err := h.orgRepo.GetByName(orgName)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+		return
+	}
+
+	// The state issued below is what CompleteAzureDevOpsInstallation accepts in place of a
+	// caller, so it is issued only to someone who may connect this organization. This is the
+	// authorization for the whole flow: the callback has no identity to check.
+	if !authorizeManageVCSSettings(c, h.authService, h.rbacService, org.ID) {
 		return
 	}
 
@@ -322,6 +341,11 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 
 	// AUD-155: verify the HMAC-signed state before trusting any field. A missing/forged/expired
 	// state (e.g. an attacker-crafted state pointing at a victim org) fails signature verification.
+	//
+	// The state is also this handler's authorization. The route is registered without the
+	// authentication middleware, so there is no caller to check here; what stands in for one is
+	// that InitiateAzureDevOpsInstallation issues a state only to someone who holds
+	// manage-vcs-settings in the organization it names.
 	payload, ok := verifyOAuthState(state)
 	if !ok {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid or expired state parameter")
@@ -372,6 +396,12 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 
 	// Update existing ADO connection if one exists for this org
 	existing, getErr := h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, models.VCSProviderAzureDevOps)
+	// Only "not found" means there is none. Any other error leaves the question unanswered, and
+	// creating on it could give the organization a second connection for the provider.
+	if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check for an existing VCS connection")
+		return
+	}
 
 	if getErr == nil && existing != nil && existing.ID != uuid.Nil {
 		existing.AccessToken = tokenResult.AccessToken
@@ -1290,11 +1320,7 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 	var installationEvent struct {
 		Action       string `json:"action"`
 		Installation struct {
-			ID      int64 `json:"id"`
-			Account struct {
-				Login string `json:"login"`
-				Type  string `json:"type"` // "User" or "Organization"
-			} `json:"account"`
+			ID                  int64  `json:"id"`
 			RepositorySelection string `json:"repository_selection"` // "all" or "selected"
 			Repositories        []struct {
 				ID   int64  `json:"id"`
@@ -1320,54 +1346,19 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 	}
 
 	installationID := strconv.FormatInt(installationEvent.Installation.ID, 10)
-	accountName := installationEvent.Installation.Account.Login
-	accountType := "user"
-	if installationEvent.Installation.Account.Type == "Organization" {
-		accountType = "organization"
-	}
 
 	// Handle different installation events
 	switch installationEvent.Action {
 	case "created":
-		// AUTOMATIC: Create VCS connection when installation is created (like Terraform Enterprise)
-		// Try to find organization by account name (GitHub org/user name matches our org name)
-		org, err := h.orgRepo.GetByName(accountName)
-		if err != nil {
-			// Organization not found - this is OK, user can manually connect later
-			// But we still return success so GitHub knows we processed the webhook
-			c.Status(http.StatusOK)
-			return
-		}
-
-		// Check if connection already exists
-		existing, _ := h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, models.VCSProviderGitHub)
-		if existing != nil {
-			// Update existing connection with new installation ID
-			existing.InstallationID = installationID
-			existing.AccountName = accountName
-			existing.AccountType = accountType
-			if err := h.vcsConnectionRepo.Update(existing); err != nil {
-				c.Status(http.StatusOK) // Still return OK to GitHub
-				return
-			}
-			c.Status(http.StatusOK)
-			return
-		}
-
-		// Create new VCS connection automatically
-		connection := &models.VCSConnection{
-			OrganizationID: org.ID,
-			Provider:       models.VCSProviderGitHub,
-			InstallationID: installationID,
-			AccountName:    accountName,
-			AccountType:    accountType,
-		}
-
-		if err := h.vcsConnectionRepo.Create(connection); err != nil {
-			c.Status(http.StatusOK) // Still return OK to GitHub
-			return
-		}
-
+		// Acknowledged, and nothing else. A connection is made through the interactive flow:
+		// InitiateInstallation sends a signed-in user to GitHub, and
+		// CreateConnectionFromInstallation records the installation they came back with for
+		// the organization they named.
+		//
+		// This used to connect the organization whose name equalled the installing account's
+		// login. A delivery proves only that some GitHub account installed the app, and on an
+		// app installable by any account that is anyone who holds a login equal to an
+		// organization's name. Do not derive an organization from the payload here.
 		c.Status(http.StatusOK)
 
 	case "deleted":
@@ -1422,6 +1413,13 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 		return
 	}
 
+	// This creates the organization's GitHub connection or points the existing one at another
+	// installation, so it takes the permission that creating and deleting a connection take.
+	// Checked before the installation is looked up at GitHub and before anything is written.
+	if !authorizeManageVCSSettings(c, h.authService, h.rbacService, org.ID) {
+		return
+	}
+
 	if h.githubAppManager == nil || !h.githubAppManager.IsEnabled() {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Configuration Error", "GitHub App is not configured.")
 		return
@@ -1438,6 +1436,12 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 
 	// Check if connection already exists
 	existing, getErr := h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, models.VCSProviderGitHub)
+	// Only "not found" means there is none. Any other error leaves the question unanswered, and
+	// creating on it could give the organization a second connection for the provider.
+	if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check for an existing VCS connection")
+		return
+	}
 	if getErr == nil && existing != nil && existing.ID != uuid.Nil {
 		// Update existing connection
 		existing.InstallationID = installationID

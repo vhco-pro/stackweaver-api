@@ -2019,83 +2019,6 @@ func buildDecoyFinalizePreconditionResponse() []byte {
 	return out
 }
 
-// buildDecoyUserScopedResponse synthesizes a Zitadel-shaped response
-// for a userScopedProxy endpoint hit on a decoy session. Round 22
-// Finding 1: forwarding a decoy through `userScopedProxyWithMethod`
-// would 403 (cookie UserID="" doesn't match URL :id), while a real
-// loginName-only session would forward to Zitadel and 200 with
-// endpoint-specific content. The 403-vs-200 divergence is itself an
-// enumeration oracle.
-//
-// Per-endpoint synthesis is keyed off the upstream Zitadel path:
-//   - `/authentication_methods` → empty `authMethodTypes` array (a
-//     fresh user with no MFA enrolled)
-//   - everything else → generic `details` envelope success (matches
-//     Zitadel's shape for register-MFA, register-passkey, password-
-//     reset, change-password, verify-email, etc.)
-//
-// The synthesized response is a "no-op success" - appropriate for
-// the read endpoint and for register-side endpoints, less so for
-// destructive actions, but those aren't reachable on a decoy in the
-// SPA flow anyway.
-//
-// Round 22 Finding 6: the generic-path `details.resourceOwner` was
-// previously hardcoded to "0", which is wire-distinguishable from a
-// real Zitadel response (which carries the org's snowflake id). The
-// SPA can't reach this branch in normal flow (decoys 4xx at the
-// password check before any register-MFA call), but a directly-
-// crafted attacker probe with a forged decoy cookie + decoy-hash
-// URL could. Closes the leak by deriving the same fake org
-// snowflake we use elsewhere - `deriveDecoySnowflake(secret,
-// "org:"+loginName)` - so it matches the GetSession decoy's
-// `factors.user.organizationId` for the same loginName.
-func buildDecoyUserScopedResponse(zitadelPath string, entry *sessionEntry, decoySecret []byte) []byte {
-	if strings.Contains(zitadelPath, "/authentication_methods") {
-		// SPA's `Password.tsx::checkForcedFlows` reads
-		// `authMethodTypes` to decide whether to prompt for MFA. An
-		// empty array is the canonical "no factors enrolled yet" shape.
-		out, err := json.Marshal(map[string]any{
-			"details":         searchSessionsListDetails{TotalResult: "0", Timestamp: time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")},
-			"authMethodTypes": []string{},
-		})
-		if err != nil {
-			return []byte(`{"authMethodTypes":[]}`)
-		}
-		return out
-	}
-	// Generic Zitadel-shaped success envelope. `sequence` and
-	// `resourceOwner` are stringified per the JSON-mapping convention.
-	type genericDetails struct {
-		Sequence      string `json:"sequence"`
-		ChangeDate    string `json:"changeDate"`
-		ResourceOwner string `json:"resourceOwner"`
-	}
-	resourceOwner := "0"
-	sequence := "1"
-	if entry != nil && entry.LoginName != "" && len(decoySecret) > 0 {
-		resourceOwner = deriveDecoySnowflake(decoySecret, "org:"+entry.LoginName)
-		// Round 25 hardening (item 27 / R25b F6): HMAC-derived sequence
-		// in the keyed branch. Unkeyed branch (entry == nil) keeps "1"
-		// - those reach this code only via a forged-cookie probe with
-		// no loginName context, so there's nothing to anchor to.
-		sequence = deriveDecoySequence(decoySecret, entry.LoginName)
-	}
-	body := struct {
-		Details genericDetails `json:"details"`
-	}{
-		Details: genericDetails{
-			Sequence:      sequence,
-			ChangeDate:    time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"),
-			ResourceOwner: resourceOwner,
-		},
-	}
-	out, err := json.Marshal(body)
-	if err != nil {
-		return []byte{}
-	}
-	return out
-}
-
 // isLikelyUnknownUserResponse heuristically detects a Zitadel
 // response that indicates the requested user doesn't exist. Used by
 // Round 23 Findings 2/3 (F-sec-7 from-a-different-angle) to canonicalize
@@ -3244,7 +3167,18 @@ func (p *AuthProxy) PasswordReset(c *gin.Context) {
 }
 
 // ChangePassword handles POST /auth/users/:id/password.
-// Requires verification code - Zitadel enforces server-side (DR-4).
+//
+// The request itself must carry proof: a non-empty `currentPassword` (the
+// in-app change) or a non-empty `verificationCode` (the reset flow), and
+// Zitadel then judges whether that proof is right. A body with neither is
+// refused here and never forwarded, because the proxy's service token is
+// what makes Zitadel honour an unverified password set: to Zitadel that is
+// an administrator resetting a password, to the public it would be a
+// password set on any user id. The refusal is decided before the user id
+// is looked at, so it cannot say whether the id exists, and it uses the
+// same status and body the unknown-user canonicalisation below produces,
+// so a direct prober sees one shape whether the id is real, unknown, or
+// the body was simply empty.
 func (p *AuthProxy) ChangePassword(c *gin.Context) {
 	userID := c.Param("id")
 	if userID == "" {
@@ -3255,6 +3189,11 @@ func (p *AuthProxy) ChangePassword(c *gin.Context) {
 	var reqBody map[string]any
 	if err := c.ShouldBindJSON(&reqBody); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if !passwordChangeCarriesProof(reqBody) {
+		c.Data(http.StatusBadRequest, "application/json", canonicalCodeInvalidResponse())
 		return
 	}
 
@@ -3278,6 +3217,20 @@ func (p *AuthProxy) ChangePassword(c *gin.Context) {
 	c.Data(statusCode, "application/json", respBody)
 }
 
+// passwordChangeCarriesProof reports whether a SetPassword body names exactly
+// one of `currentPassword` and `verificationCode` as a non-empty string.
+// JSON null is "unset" to Zitadel's protobuf mapping and an empty string is
+// rejected by its field validation, so neither counts; both present is a
+// oneof violation Zitadel rejects before any lookup, and is refused here for
+// the same reason.
+func passwordChangeCarriesProof(body map[string]any) bool {
+	nonEmptyString := func(key string) bool {
+		s, ok := body[key].(string)
+		return ok && s != ""
+	}
+	return nonEmptyString("currentPassword") != nonEmptyString("verificationCode")
+}
+
 // userScopedProxy is a generic handler for user-scoped endpoints that require session ownership.
 // Used for TOTP, passkey, U2F, and OTP registration endpoints.
 // Per DR-4: requires a valid session cookie before forwarding to Zitadel.
@@ -3293,12 +3246,28 @@ func (p *AuthProxy) userScopedProxy(c *gin.Context, zitadelPath string) {
 // `Password.tsx::checkForcedFlows` to discover user-level MFA enrollment)
 // route through here so the body-binding path is skipped.
 //
-// DR-4 enforcement: the URL `:id` (target user) MUST match at least one
-// session's bound UserID in the caller's cookie. Round 17 (F-sec-9)
-// added this - pre-fix, any logged-in user could mutate any other user's
-// authenticators (TOTP, passkey, etc.) just by swapping the id in the
-// URL. The `userId` URL parameter name comes from the route definition
-// in `routes.go` (e.g. `users.GET("/:id/authentication_methods", ...)`).
+// Authorization has two parts, both applied to every method:
+//
+// Ownership: the URL `:id` (target user) MUST match at least one session's
+// bound UserID in the caller's cookie. Round 17 (F-sec-9) added this -
+// pre-fix, any logged-in user could mutate any other user's authenticators
+// (TOTP, passkey, etc.) just by swapping the id in the URL. The `userId`
+// URL parameter name comes from the route definition in `routes.go` (e.g.
+// `users.GET("/:id/authentication_methods", ...)`).
+//
+// Proof: one of those sessions must have, per Zitadel's own session
+// resource, at least one credential factor verified (password, passkey or
+// security key, external identity provider intent, or a one-time code). A
+// session that has only named a user has proven nothing about who is
+// asking, and the login name is public knowledge, so ownership alone would
+// let anyone enroll or verify authenticators on an account, or read its
+// record, by typing its login name. The reads are held to the same proof
+// because the login pages make them only after the password has been
+// verified (Password.tsx::checkForcedFlows runs after the password PATCH
+// succeeded). The verdict is fetched from Zitadel at request time rather
+// than cached in the cookie: that costs one upstream GET per request, two
+// per password login for the forced-flow reads and a handful per
+// enrollment, and it cannot go stale across UpdateSession.
 func (p *AuthProxy) userScopedProxyWithMethod(c *gin.Context, method, zitadelPath string) {
 	entries := p.readSessionCookie(c)
 	if len(entries) == 0 {
@@ -3313,24 +3282,19 @@ func (p *AuthProxy) userScopedProxyWithMethod(c *gin.Context, method, zitadelPat
 	// for those.
 	//
 	// Round 22 Finding 1 (F-sec-7 leak): a decoy session has UserID="",
-	// so the legacy match below always 403s decoys. A real loginName-
-	// only session forwards to Zitadel and returns whatever Zitadel
-	// says about the user - DIFFERENT shape from the decoy 403.
-	// Match decoys via their hash-derived fake user id: the decoy's
-	// `factors.user.id` (returned by GetSession) equals
-	// `deriveDecoySnowflake(secret, "user:"+entry.LoginName)`. If the
-	// URL `:id` matches that hash for any decoy entry, short-circuit
-	// the upstream call with a Zitadel-shaped success response so a
-	// decoy probe is indistinguishable from a real loginName-only
-	// session probe.
+	// so a plain ownership match always 403s decoys while a real
+	// loginName-only session took a different path - a wire-distinguishable
+	// divergence. Match decoys via their hash-derived fake user id: the
+	// decoy's `factors.user.id` (returned by GetSession) equals
+	// `deriveDecoySnowflake(secret, "user:"+entry.LoginName)`, and answer a
+	// matched decoy exactly as a real session in the same state.
 	if targetUserID := c.Param("id"); targetUserID != "" {
-		matchedReal := false
+		var matchedReal []sessionEntry
 		var matchedDecoy *sessionEntry
 		for i := range entries {
 			e := &entries[i]
 			if !e.Decoy && e.UserID != "" && e.UserID == targetUserID {
-				matchedReal = true
-				break
+				matchedReal = append(matchedReal, *e)
 			}
 			if e.Decoy && e.LoginName != "" {
 				if deriveDecoySnowflake(p.decoySecret, "user:"+e.LoginName) == targetUserID {
@@ -3338,12 +3302,25 @@ func (p *AuthProxy) userScopedProxyWithMethod(c *gin.Context, method, zitadelPat
 				}
 			}
 		}
-		if !matchedReal && matchedDecoy == nil {
+		if len(matchedReal) == 0 && matchedDecoy == nil {
 			respondError(c, http.StatusForbidden, "session does not authorize this user")
 			return
 		}
 		if matchedDecoy != nil {
-			c.Data(http.StatusOK, "application/json", buildDecoyUserScopedResponse(zitadelPath, matchedDecoy, p.decoySecret))
+			// A decoy can never have verified a credential (UpdateSession
+			// answers it with the canonical password-invalid rejection), so
+			// it gets the same refusal as a real session that has proven
+			// nothing. The real path spends one upstream call on the session
+			// lookup before refusing; spend one here too, so the two refusals
+			// take the same time as well as the same shape.
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+			_, _, _ = p.proxyJSON(ctx, http.MethodGet, "/v2/settings/login", nil)
+			cancel()
+			respondError(c, http.StatusForbidden, "session has not verified a credential for this user")
+			return
+		}
+		if !p.anySessionVerifiedCredential(c.Request.Context(), matchedReal) {
+			respondError(c, http.StatusForbidden, "session has not verified a credential for this user")
 			return
 		}
 	}
@@ -3999,27 +3976,81 @@ func (p *AuthProxy) storeSessionFromResponse(c *gin.Context, respBody json.RawMe
 	p.upsertSessionEntry(c, entry)
 }
 
+// verifiedFactor is one entry of a Zitadel session's `factors`: a factor is
+// verified when Zitadel has stamped it, and an entry that is present but
+// unstamped is not.
+type verifiedFactor struct {
+	VerifiedAt string `json:"verifiedAt"`
+}
+
+// sessionFactors is the part of Zitadel's `GET /v2/sessions/{id}` the proxy
+// reads: who the session names, and which credentials it has verified.
+type sessionFactors struct {
+	User struct {
+		verifiedFactor
+		ID string `json:"id"`
+	} `json:"user"`
+	Password verifiedFactor `json:"password"`
+	WebAuthN verifiedFactor `json:"webAuthN"`
+	Intent   verifiedFactor `json:"intent"`
+	TOTP     verifiedFactor `json:"totp"`
+	OTPSMS   verifiedFactor `json:"otpSms"`
+	OTPEmail verifiedFactor `json:"otpEmail"`
+}
+
+// credentialVerified reports whether the session has verified at least one
+// credential factor. The user factor does not count: it only says a login
+// name resolved.
+func (f sessionFactors) credentialVerified() bool {
+	for _, c := range []verifiedFactor{f.Password, f.WebAuthN, f.Intent, f.TOTP, f.OTPSMS, f.OTPEmail} {
+		if c.VerifiedAt != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// fetchSessionFactors reads a session's factors from Zitadel. The second
+// return is false when Zitadel did not return the session (transport
+// failure, non-200, or an unparseable body).
+func (p *AuthProxy) fetchSessionFactors(ctx context.Context, sessionID string) (sessionFactors, bool) {
+	respBody, statusCode, err := p.proxyJSON(ctx, http.MethodGet, "/v2/sessions/"+sessionID, nil)
+	if err != nil || statusCode != http.StatusOK {
+		return sessionFactors{}, false
+	}
+	var parsed struct {
+		Session struct {
+			Factors sessionFactors `json:"factors"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return sessionFactors{}, false
+	}
+	return parsed.Session.Factors, true
+}
+
 // fetchSessionUserID returns the user id bound to a Zitadel session, or
 // "" on error / empty factor. Used exclusively by storeSessionFromResponse
 // to populate the UserID field on cookie entries.
 func (p *AuthProxy) fetchSessionUserID(ctx context.Context, sessionID string) string {
-	respBody, statusCode, err := p.proxyJSON(ctx, http.MethodGet, "/v2/sessions/"+sessionID, nil)
-	if err != nil || statusCode != http.StatusOK {
+	factors, ok := p.fetchSessionFactors(ctx, sessionID)
+	if !ok {
 		return ""
 	}
-	var parsed struct {
-		Session struct {
-			Factors struct {
-				User struct {
-					ID string `json:"id"`
-				} `json:"user"`
-			} `json:"factors"`
-		} `json:"session"`
+	return factors.User.ID
+}
+
+// anySessionVerifiedCredential reports whether at least one of the given
+// cookie sessions has, according to Zitadel, verified a credential factor.
+// Each session is asked in turn and the first proof ends the search, so a
+// caller with one session costs one upstream call.
+func (p *AuthProxy) anySessionVerifiedCredential(ctx context.Context, entries []sessionEntry) bool {
+	for _, e := range entries {
+		if factors, ok := p.fetchSessionFactors(ctx, e.ID); ok && factors.credentialVerified() {
+			return true
+		}
 	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return ""
-	}
-	return parsed.Session.Factors.User.ID
+	return false
 }
 
 // BackchannelStatusResponse reports the back-channel logout binding state.

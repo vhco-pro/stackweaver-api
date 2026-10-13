@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"gorm.io/gorm"
 )
 
 type VCSConnectionHandlerV2 struct {
@@ -96,15 +98,7 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
-		return
-	}
-
-	hasPermission, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, org.ID)
-	if err != nil || !hasPermission {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage VCS connections. This requires organization-level manage-vcs-settings permission via team membership.")
+	if !authorizeManageVCSSettings(c, h.authService, h.rbacService, org.ID) {
 		return
 	}
 
@@ -123,9 +117,15 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	existing, _ := h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, provider)
-	if existing != nil {
+	// One connection per provider. Only "not found" means there is none: any other error leaves
+	// the question unanswered, and answering it either way would be a guess.
+	_, err = h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, provider)
+	if err == nil {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "VCS connection for this provider already exists")
+		return
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check for an existing VCS connection")
 		return
 	}
 
@@ -210,15 +210,7 @@ func (h *VCSConnectionHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
-		return
-	}
-
-	hasPermission, err := h.rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, org.ID)
-	if err != nil || !hasPermission {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage VCS connections. This requires organization-level manage-vcs-settings permission via team membership.")
+	if !authorizeManageVCSSettings(c, h.authService, h.rbacService, org.ID) {
 		return
 	}
 
@@ -229,6 +221,44 @@ func (h *VCSConnectionHandlerV2) Delete(c *gin.Context) {
 
 	c.Status(http.StatusNoContent)
 }
+
+// authorizeManageVCSSettings gates an action on the caller holding the organization-level
+// manage-vcs-settings permission in orgID. It writes the JSON:API error and returns false when
+// the caller may not proceed: 401 without an identity, 403 without the permission.
+//
+// Every handler that creates, re-points or removes an organization's VCS connection calls it,
+// and so does every handler that starts a flow ending in one: the GitHub App installation, and
+// the Azure DevOps authorization whose signed state the callback later accepts in place of a
+// caller. One function, so that those handlers hold the same rule and cannot drift apart. Call
+// it once the organization is known and before anything is fetched from the provider or
+// written.
+//
+// It answers what the caller's USER may do. What an API token may do is the org wall's
+// question, and the wall asks it before any of these handlers runs (wallRegistry in
+// middleware/org_wall_registry.go). A token the wall refused never reaches this, so the check
+// only ever narrows what a token may do and is never a second way in for one.
+func authorizeManageVCSSettings(c *gin.Context, authService *auth.Service, rbacService *rbac.Service, orgID uuid.UUID) bool {
+	user, err := authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return false
+	}
+	// A handler wired without the service cannot answer the question, and must not answer yes.
+	if rbacService == nil {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", manageVCSSettingsRefusal)
+		return false
+	}
+	hasPermission, err := rbacService.CheckOrgManageVCSSettings(c.Request.Context(), user.ID, orgID)
+	if err != nil || !hasPermission {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", manageVCSSettingsRefusal)
+		return false
+	}
+	return true
+}
+
+// manageVCSSettingsRefusal is the one answer a caller without the permission gets, whichever
+// handler refused them.
+const manageVCSSettingsRefusal = "You do not have permission to manage VCS connections. This requires organization-level manage-vcs-settings permission via team membership."
 
 // requireOrgMembership gates an action on the caller being a member of orgID.
 // Writes the JSON:API error and returns false when unauthorized - 401 (no auth),

@@ -2066,10 +2066,23 @@ func TestIsPureSinglePasswordCheck(t *testing.T) {
 // session's Zitadel response). The proxy detects the URL :id matching the
 // decoy's hash-derived fake user id and synthesizes an empty
 // `authMethodTypes` array.
+//
+// Updated: the decoy used to be answered with a fabricated 200 so that it matched a
+// real session that had only named the user, which forwarded. Every user-scoped
+// route now requires a verified credential on the session, which a decoy can never
+// hold, so the decoy is refused with the same 403 a real unverified session gets and
+// nothing is fabricated. The invariant this test pins is unchanged: the decoy must
+// not forward to Zitadel, and must not be answered differently from a real session
+// in the same state. The fabricated-body helper this test and
+// TestBuildDecoyUserScopedResponse_GenericPathResourceOwner covered no longer exists;
+// its per-route stability property is now pinned, as refusal equality across every
+// route, by TestUserScopedProxy_DecoyIsIndistinguishableFromUnverifiedRealSession.
 func TestUserScopedProxy_DecoyShortCircuitsAuthMethods(t *testing.T) {
-	zitadelHit := false
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		zitadelHit = true
+	zitadelUsersHit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/users/") {
+			zitadelUsersHit = true
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer upstream.Close()
@@ -2095,66 +2108,11 @@ func TestUserScopedProxy_DecoyShortCircuitsAuthMethods(t *testing.T) {
 
 	proxy.userScopedProxyWithMethod(c, http.MethodGet, "/v2/users/"+fakeUserID+"/authentication_methods")
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("decoy authentication_methods must 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("decoy authentication_methods must be refused with 403, got %d: %s", w.Code, w.Body.String())
 	}
-	if zitadelHit {
-		t.Errorf("decoy must NOT forward to Zitadel (403/Zitadel divergence is the leak)")
-	}
-	var resp struct {
-		AuthMethodTypes []string `json:"authMethodTypes"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decoy authentication_methods body must unmarshal: %v: %s", err, w.Body.String())
-	}
-	if resp.AuthMethodTypes == nil {
-		t.Errorf("decoy authentication_methods must carry an empty authMethodTypes array")
-	}
-}
-
-// TestBuildDecoyUserScopedResponse_GenericPathResourceOwner: Round 22
-// Finding 6. The generic-path `details.resourceOwner` previously
-// hardcoded "0", which is wire-distinguishable from a real Zitadel
-// register-MFA response. Must now derive a stable fake snowflake
-// matching the GetSession decoy's `factors.user.organizationId` for
-// the same loginName.
-func TestBuildDecoyUserScopedResponse_GenericPathResourceOwner(t *testing.T) {
-	secret := []byte("test-decoy-secret-32-bytes-long!")
-	loginName := "ghost@example.com"
-	entry := &sessionEntry{LoginName: loginName, Decoy: true}
-
-	body := buildDecoyUserScopedResponse("/v2/users/123/totp", entry, secret)
-
-	var resp struct {
-		Details struct {
-			Sequence      string `json:"sequence"`
-			ChangeDate    string `json:"changeDate"`
-			ResourceOwner string `json:"resourceOwner"`
-		} `json:"details"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("generic body must unmarshal: %v: %s", err, body)
-	}
-	if resp.Details.ResourceOwner == "0" || resp.Details.ResourceOwner == "" {
-		t.Errorf("resourceOwner must be a derived snowflake, not %q (the leak)", resp.Details.ResourceOwner)
-	}
-	expected := deriveDecoySnowflake(secret, "org:"+loginName)
-	if resp.Details.ResourceOwner != expected {
-		t.Errorf("resourceOwner must match deriveDecoySnowflake; want %q got %q", expected, resp.Details.ResourceOwner)
-	}
-	// Must be stable: same loginName → same id (mirrors real-user
-	// stability across probes; Round 21 Finding 1 invariant).
-	body2 := buildDecoyUserScopedResponse("/v2/users/456/passkeys", entry, secret)
-	var resp2 struct {
-		Details struct {
-			ResourceOwner string `json:"resourceOwner"`
-		} `json:"details"`
-	}
-	if err := json.Unmarshal(body2, &resp2); err != nil {
-		t.Fatalf("second generic body must unmarshal: %v: %s", err, body2)
-	}
-	if resp2.Details.ResourceOwner != resp.Details.ResourceOwner {
-		t.Errorf("resourceOwner must be stable across endpoints for the same loginName; got %q vs %q", resp.Details.ResourceOwner, resp2.Details.ResourceOwner)
+	if zitadelUsersHit {
+		t.Errorf("decoy must NOT forward to Zitadel (the status divergence is the leak)")
 	}
 }
 

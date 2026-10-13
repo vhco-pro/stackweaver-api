@@ -621,6 +621,51 @@ func (h *TeamProjectAccessHandlerV2) Create(c *gin.Context) {
 	jsonapi.WriteDocument(c, http.StatusCreated, formatTeamProjectAccessResponse(accessEntry))
 }
 
+// accessFromRoute loads the team project access a by-id request addresses. Two route shapes
+// share the by-id handlers and name their parameters differently:
+//
+//	/api/v2/team-projects/:id                                    :id is the access (TFE)
+//	/api/v2/projects/:id/relationships/team-access/:access_id    :id is the project
+//
+// GetByID, UpdateByID and DeleteByID all resolve the access here, so they cannot disagree about
+// which parameter holds it. The org wall authorizes the project-scoped shape by :access_id
+// (wallRegistry in middleware/org_wall_registry.go), so this must read the access from the same
+// parameter: a handler that acts on a different one acts on a resource the wall never looked at.
+//
+// The project-scoped shape names a project, and an access of another project is not found under
+// it; the TFE shape names none, so there is nothing to compare.
+//
+// When there is no access to return, the response has been written and ok is false.
+func (h *TeamProjectAccessHandlerV2) accessFromRoute(c *gin.Context) (access *models.TeamProjectAccess, ok bool) {
+	accessIDStr, projectIDStr := c.Param("id"), ""
+	if scoped := c.Param("access_id"); scoped != "" {
+		accessIDStr, projectIDStr = scoped, c.Param("id")
+	}
+
+	accessID, err := uuid.Parse(accessIDStr)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
+		return nil, false
+	}
+
+	access, err = h.teamRepo.GetProjectAccessByID(accessID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
+		return nil, false
+	}
+
+	if projectIDStr != "" {
+		// A project id that does not parse names no project, so no access is under it either.
+		projectID, err := uuid.Parse(projectIDStr)
+		if err != nil || access.ProjectID != projectID {
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
+			return nil, false
+		}
+	}
+
+	return access, true
+}
+
 // Get retrieves a team project access by ID
 // GET /api/v2/team-projects/:id
 // Alias for GetByID to match route expectations
@@ -629,26 +674,17 @@ func (h *TeamProjectAccessHandlerV2) Get(c *gin.Context) {
 }
 
 // GetByID retrieves a team project access by ID
+// GET /api/v2/projects/:id/relationships/team-access/:access_id
 // GET /api/v2/team-projects/:id
 func (h *TeamProjectAccessHandlerV2) GetByID(c *gin.Context) {
-	accessIDStr := c.Param("id")
-
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
-	accessID, err := uuid.Parse(accessIDStr)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
-		return
-	}
-
-	// Get access entry
-	access, err := h.teamRepo.GetProjectAccessByID(accessID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
+	access, ok := h.accessFromRoute(c)
+	if !ok {
 		return
 	}
 
@@ -686,24 +722,14 @@ func (h *TeamProjectAccessHandlerV2) Update(c *gin.Context) {
 // PATCH /api/v2/projects/:id/relationships/team-access/:access_id
 // PATCH /api/v2/team-projects/:id
 func (h *TeamProjectAccessHandlerV2) UpdateByID(c *gin.Context) {
-	accessIDStr := c.Param("id")
-
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
-	accessID, err := uuid.Parse(accessIDStr)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
-		return
-	}
-
-	// Get existing access
-	access, err := h.teamRepo.GetProjectAccessByID(accessID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
+	access, ok := h.accessFromRoute(c)
+	if !ok {
 		return
 	}
 
@@ -914,24 +940,14 @@ func (h *TeamProjectAccessHandlerV2) Delete(c *gin.Context) {
 // DELETE /api/v2/projects/:id/relationships/team-access/:access_id
 // DELETE /api/v2/team-projects/:id
 func (h *TeamProjectAccessHandlerV2) DeleteByID(c *gin.Context) {
-	accessIDStr := c.Param("id")
-
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
-	accessID, err := uuid.Parse(accessIDStr)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
-		return
-	}
-
-	// Get existing access
-	access, err := h.teamRepo.GetProjectAccessByID(accessID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team project access not found")
+	access, ok := h.accessFromRoute(c)
+	if !ok {
 		return
 	}
 
@@ -956,7 +972,7 @@ func (h *TeamProjectAccessHandlerV2) DeleteByID(c *gin.Context) {
 	}
 
 	// Delete access entry
-	if err := h.teamRepo.DeleteProjectAccess(accessID); err != nil {
+	if err := h.teamRepo.DeleteProjectAccess(access.ID); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete team project access")
 		return
 	}
