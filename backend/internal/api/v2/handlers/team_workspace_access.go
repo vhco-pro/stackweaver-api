@@ -493,56 +493,60 @@ func (h *TeamWorkspaceAccessHandlerV2) Create(c *gin.Context) {
 	jsonapi.WriteDocument(c, http.StatusCreated, formatTeamWorkspaceAccessResponse(createdAccess))
 }
 
+// accessFromRoute loads the team workspace access a by-id request addresses. Two route shapes
+// share the by-id handlers and name their parameters differently:
+//
+//	/api/v2/team-workspaces/:id                                    :id is the access (TFE)
+//	/api/v2/workspaces/:id/relationships/team-access/:access_id    :id is the workspace
+//
+// Get, Update and Delete all resolve the access here, so they cannot disagree about which
+// parameter holds it. The workspace-scoped shape names a workspace, and an access of another
+// workspace is not found under it; the TFE shape names none, so there is nothing to compare.
+//
+// When there is no access to return, the response has been written and ok is false.
+func (h *TeamWorkspaceAccessHandlerV2) accessFromRoute(c *gin.Context) (access *models.TeamWorkspaceAccess, ok bool) {
+	accessIDStr, workspaceID := c.Param("id"), ""
+	if scoped := c.Param("access_id"); scoped != "" {
+		accessIDStr, workspaceID = scoped, c.Param("id")
+	}
+
+	accessID, err := uuid.Parse(accessIDStr)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
+		return nil, false
+	}
+
+	access, err = h.teamRepo.GetWorkspaceAccessByID(accessID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
+		return nil, false
+	}
+
+	if workspaceID != "" && access.WorkspaceID != workspaceID {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
+		return nil, false
+	}
+
+	return access, true
+}
+
 // Get retrieves a team workspace access by ID
 // GET /api/v2/team-workspaces/:id (TFE-compatible)
 // GET /api/v2/workspaces/:id/relationships/team-access/:access_id (legacy)
 func (h *TeamWorkspaceAccessHandlerV2) Get(c *gin.Context) {
-	// TFE-compatible: ID is directly in URL (/api/v2/team-workspaces/:id)
-	// Legacy: workspace ID and access ID are both in URL (/api/v2/workspaces/:id/relationships/team-access/:access_id)
-	accessIDStr := c.Param("id")
-	accessIDFromSecondParam := c.Param("access_id")
-
-	var workspaceID string
-	if accessIDFromSecondParam != "" {
-		// Legacy route: workspace ID is first param, access ID is second param
-		workspaceID = accessIDStr
-		accessIDStr = accessIDFromSecondParam
-	}
-	// TFE route: access ID is the only param, workspace ID will be retrieved from the access record
-
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
-	accessID, err := uuid.Parse(accessIDStr)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
+	access, ok := h.accessFromRoute(c)
+	if !ok {
 		return
-	}
-
-	// Get access entry
-	access, err := h.teamRepo.GetWorkspaceAccessByID(accessID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
-		return
-	}
-
-	// For legacy route, verify workspace ID matches
-	if workspaceID != "" && access.WorkspaceID != workspaceID {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
-		return
-	}
-
-	// Use workspace ID from access record (for TFE route) or from URL param (for legacy route)
-	actualWorkspaceID := access.WorkspaceID
-	if workspaceID != "" {
-		actualWorkspaceID = workspaceID
 	}
 
 	// Verify workspace exists and user has access
-	workspace, err := h.workspaceRepo.GetByID(actualWorkspaceID)
+	workspace, err := h.workspaceRepo.GetByID(access.WorkspaceID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
@@ -565,39 +569,22 @@ func (h *TeamWorkspaceAccessHandlerV2) Get(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return
 	}
-	_ = workspace
 
 	jsonapi.WriteDocument(c, http.StatusOK, formatTeamWorkspaceAccessResponse(access))
 }
 
 // Update updates team workspace access
-// PATCH /api/v2/workspaces/:id/relationships/team-access/:access_id
+// PATCH /api/v2/team-workspaces/:id (TFE-compatible)
+// PATCH /api/v2/workspaces/:id/relationships/team-access/:access_id (legacy)
 func (h *TeamWorkspaceAccessHandlerV2) Update(c *gin.Context) {
-	workspaceID := c.Param("id")
-	accessIDStr := c.Param("access_id")
-
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
-	accessID, err := uuid.Parse(accessIDStr)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
-		return
-	}
-
-	// Get access entry
-	access, err := h.teamRepo.GetWorkspaceAccessByID(accessID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
-		return
-	}
-
-	// Verify workspace ID matches
-	if access.WorkspaceID != workspaceID {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
+	access, ok := h.accessFromRoute(c)
+	if !ok {
 		return
 	}
 
@@ -730,7 +717,7 @@ func (h *TeamWorkspaceAccessHandlerV2) Update(c *gin.Context) {
 	}
 
 	// Reload with relationships
-	updatedAccess, err := h.teamRepo.GetWorkspaceAccessByID(accessID)
+	updatedAccess, err := h.teamRepo.GetWorkspaceAccessByID(access.ID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve updated access")
 		return
@@ -743,40 +730,14 @@ func (h *TeamWorkspaceAccessHandlerV2) Update(c *gin.Context) {
 // DELETE /api/v2/team-workspaces/:id (TFE-compatible)
 // DELETE /api/v2/workspaces/:id/relationships/team-access/:access_id (legacy)
 func (h *TeamWorkspaceAccessHandlerV2) Delete(c *gin.Context) {
-	// TFE-compatible: ID is directly in URL
-	// Legacy: workspace ID and access ID are both in URL
-	accessIDStr := c.Param("id")
-	accessIDFromSecondParam := c.Param("access_id")
-
-	var workspaceID string
-	if accessIDFromSecondParam != "" {
-		// Legacy route: workspace ID is first param, access ID is second param
-		workspaceID = accessIDStr
-		accessIDStr = accessIDFromSecondParam
-	}
-
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
 
-	accessID, err := uuid.Parse(accessIDStr)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid access ID format")
-		return
-	}
-
-	// Get access entry
-	access, err := h.teamRepo.GetWorkspaceAccessByID(accessID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
-		return
-	}
-
-	// Verify workspace ID matches
-	if access.WorkspaceID != workspaceID {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
+	access, ok := h.accessFromRoute(c)
+	if !ok {
 		return
 	}
 
@@ -807,7 +768,7 @@ func (h *TeamWorkspaceAccessHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.teamRepo.DeleteWorkspaceAccess(accessID); err != nil {
+	if err := h.teamRepo.DeleteWorkspaceAccess(access.ID); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete team workspace access")
 		return
 	}

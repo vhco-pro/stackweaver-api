@@ -7389,17 +7389,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "properties": {
-                "@type": {
-                  "type": "string"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                }
-              }
+              "additionalProperties": true
             }
           },
           "message": {
@@ -26209,7 +26199,7 @@
           }
         ],
         "responses": {
-          "401": {
+          "400": {
             "content": {
               "application/json": {
                 "schema": {
@@ -26217,7 +26207,7 @@
                 }
               }
             },
-            "description": "Unauthorized"
+            "description": "Bad Request"
           }
         },
         "summary": "POST /auth/users/:id/password",
