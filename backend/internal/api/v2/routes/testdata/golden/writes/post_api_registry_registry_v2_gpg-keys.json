@@ -1,0 +1,59 @@
+{
+  "method": "POST",
+  "path": "/api/registry/:registry/v2/gpg-keys",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "ascii-armor": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nxjMEas0K1hYJKwYBBAHaRw8BAQdAh01KN8xf8Ktli4eVGbLFxniuogsxNQxnkV1/\nz3D+I/zNKUV4YW1wbGUgUHVibGlzaGVyIDxwdWJsaXNoZXJAZXhhbXBsZS5jb20+\nwr0EExYIAG8FgmrNCtYCCwcJEJ/eqepw/6osNRQAAAAAABwAEHNhbHRAbm90YXRp\nb25zLm9wZW5wZ3Bqcy5vcmeSBhf5NmyOW5uc03S3sOYmAhUIAhYAAhkBApsDAh4B\nFiEE04bZtLiGDFZM0bvln96p6nD/qiwAADwPAQC8R5butyQqGWZLIfEYoWR56NTz\npEJBrNGpdUBoJ4hV9QEAvIruX8dWCXK6DYxJchtTI44QKXVPlNV14JgdX660pgPO\nOARqzQrWEgorBgEEAZdVAQUBAQdAor8PZLBVOUKLMrYzZ7Uir1rzd/QJ/l+UJV7Y\n0wnU+BADAQoJwq4EGBYIAGAFgmrNCtYJEJ/eqepw/6osNRQAAAAAABwAEHNhbHRA\nbm90YXRpb25zLm9wZW5wZ3Bqcy5vcmerHCZzfOX7oKC5zqSJn+CWApsMFiEE04bZ\ntLiGDFZM0bvln96p6nD/qiwAANStAQDdiHiEp7Zr878xnS3l66bH2QvdTy8DYoEa\nB0l9PmhDbAEAitlue+AM5KjGbnJ6GQGyMUh+rsWJbMXxX72b1pPlfg0=\n=MEZv\n-----END PGP PUBLIC KEY BLOCK-----\n",
+          "namespace": "demo"
+        },
+        "type": "gpg-keys"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "ascii-armor": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Data struct { Type string \"json:\\\"type\\\"\"; Attributes struct { Namespace string \"json:\\\"namespace\\\"\"; ASCIIArmor string \"json:\\\"ascii-armor\\\"\" } \"json:\\\"attributes\\\"\" } \"json:\\\"data\\\"\" }"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "ascii-armor": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nxjMEas0K1hYJKwYBBAHaRw8BAQdAh01KN8xf8Ktli4eVGbLFxniuogsxNQxnkV1/\nz3D+I/zNKUV4YW1wbGUgUHVibGlzaGVyIDxwdWJsaXNoZXJAZXhhbXBsZS5jb20+\nwr0EExYIAG8FgmrNCtYCCwcJEJ/eqepw/6osNRQAAAAAABwAEHNhbHRAbm90YXRp\nb25zLm9wZW5wZ3Bqcy5vcmeSBhf5NmyOW5uc03S3sOYmAhUIAhYAAhkBApsDAh4B\nFiEE04bZtLiGDFZM0bvln96p6nD/qiwAADwPAQC8R5butyQqGWZLIfEYoWR56NTz\npEJBrNGpdUBoJ4hV9QEAvIruX8dWCXK6DYxJchtTI44QKXVPlNV14JgdX660pgPO\nOARqzQrWEgorBgEEAZdVAQUBAQdAor8PZLBVOUKLMrYzZ7Uir1rzd/QJ/l+UJV7Y\n0wnU+BADAQoJwq4EGBYIAGAFgmrNCtYJEJ/eqepw/6osNRQAAAAAABwAEHNhbHRA\nbm90YXRpb25zLm9wZW5wZ3Bqcy5vcmerHCZzfOX7oKC5zqSJn+CWApsMFiEE04bZ\ntLiGDFZM0bvln96p6nD/qiwAANStAQDdiHiEp7Zr878xnS3l66bH2QvdTy8DYoEa\nB0l9PmhDbAEAitlue+AM5KjGbnJ6GQGyMUh+rsWJbMXxX72b1pPlfg0=\n=MEZv\n-----END PGP PUBLIC KEY BLOCK-----\n",
+        "created-at": "\u003ctimestamp\u003e",
+        "key-id": "9FDEA9EA70FFAA2C",
+        "namespace": "demo",
+        "source": "",
+        "source-url": null,
+        "trust-signature": "",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "9FDEA9EA70FFAA2C",
+      "type": "gpg-keys"
+    }
+  }
+}

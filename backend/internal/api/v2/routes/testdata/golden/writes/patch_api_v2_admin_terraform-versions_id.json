@@ -1,0 +1,109 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/admin/terraform-versions/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "deprecated": true,
+          "deprecated-reason": "Superseded by a patched release; move workspaces off this version.",
+          "enabled": false
+        },
+        "type": "terraform-versions"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "archs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "arch": {
+                        "type": "string"
+                      },
+                      "os": {
+                        "type": "string"
+                      },
+                      "sha": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "beta": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "deprecated": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "deprecated-reason": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "official": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "sha": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "url": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "version": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.updateTerraformVersionRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "archs": [],
+        "beta": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "deprecated": true,
+        "deprecated-reason": "Superseded by a patched release; move workspaces off this version.",
+        "enabled": false,
+        "official": true,
+        "sha": "",
+        "url": "",
+        "usage": 0,
+        "version": "1.13.1"
+      },
+      "id": "\u003cid\u003e",
+      "type": "terraform-versions"
+    }
+  }
+}

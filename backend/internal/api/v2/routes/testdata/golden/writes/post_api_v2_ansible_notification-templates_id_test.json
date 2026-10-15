@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/notification-templates/:id/test",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

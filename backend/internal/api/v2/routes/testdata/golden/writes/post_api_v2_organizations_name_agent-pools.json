@@ -1,0 +1,161 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/agent-pools",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "name": "golden-write-pool",
+          "organization-scoped": false
+        },
+        "relationships": {
+          "allowed-workspaces": {
+            "data": [
+              {
+                "id": "\u003cid\u003e",
+                "type": "workspaces"
+              }
+            ]
+          }
+        },
+        "type": "agent-pools"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "organization-scoped": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "allowed-projects": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "allowed-workspaces": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "excluded-workspaces": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attributes",
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateAgentPoolRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "agent-count": 0,
+        "created-at": "\u003ctimestamp\u003e",
+        "name": "golden-write-pool",
+        "organization-scoped": false
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/agent-pools/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "allowed-workspaces": {
+          "data": [
+            {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          ]
+        },
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "agent-pools"
+    }
+  }
+}

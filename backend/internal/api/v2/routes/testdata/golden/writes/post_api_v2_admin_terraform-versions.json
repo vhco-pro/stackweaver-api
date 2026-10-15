@@ -1,0 +1,123 @@
+{
+  "method": "POST",
+  "path": "/api/v2/admin/terraform-versions",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "archs": [
+            {
+              "arch": "amd64",
+              "os": "linux",
+              "sha": "5f2b1c0a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+              "url": "https://mirror.example.com/opentofu/1.6.0-rc1/tofu_1.6.0-rc1_linux_amd64.zip"
+            }
+          ],
+          "beta": true,
+          "enabled": true,
+          "official": false,
+          "sha": "5f2b1c0a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+          "url": "https://mirror.example.com/opentofu/1.6.0-rc1/tofu_1.6.0-rc1_linux_amd64.zip",
+          "version": "1.6.0-rc1"
+        },
+        "type": "terraform-versions"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "archs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "arch": {
+                        "type": "string"
+                      },
+                      "os": {
+                        "type": "string"
+                      },
+                      "sha": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "beta": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "deprecated": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "deprecated-reason": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "official": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "sha": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.createTerraformVersionRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "archs": [
+          {
+            "arch": "amd64",
+            "os": "linux",
+            "sha": "5f2b1c0a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+            "url": "https://mirror.example.com/opentofu/1.6.0-rc1/tofu_1.6.0-rc1_linux_amd64.zip"
+          }
+        ],
+        "beta": true,
+        "created-at": "\u003ctimestamp\u003e",
+        "deprecated": false,
+        "enabled": true,
+        "official": false,
+        "sha": "5f2b1c0a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+        "url": "https://mirror.example.com/opentofu/1.6.0-rc1/tofu_1.6.0-rc1_linux_amd64.zip",
+        "usage": 0,
+        "version": "1.6.0-rc1"
+      },
+      "id": "\u003cid\u003e",
+      "type": "terraform-versions"
+    }
+  }
+}

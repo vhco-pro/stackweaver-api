@@ -1,0 +1,17 @@
+{
+  "method": "POST",
+  "path": "/auth/users/:id/totp",
+  "request": {
+    "takes_none": true
+  },
+  "status": 200,
+  "response": {
+    "details": {
+      "changeDate": "\u003ctimestamp\u003e",
+      "resourceOwner": "\u003cid\u003e",
+      "sequence": "\u003csequence\u003e"
+    },
+    "secret": "\u003csecret\u003e",
+    "uri": "\u003csecret\u003e"
+  }
+}

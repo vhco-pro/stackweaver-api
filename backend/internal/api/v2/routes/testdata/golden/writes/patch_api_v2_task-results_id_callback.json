@@ -1,0 +1,165 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/task-results/:id/callback",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "message": "No drift detected in 14 resources.",
+          "status": "passed",
+          "url": "https://tasks.example.com/drift/results/1042"
+        },
+        "type": "task-results"
+      },
+      "included": [
+        {
+          "attributes": {
+            "body": "## Drift scan\n\n14 resources checked, 0 drifted.",
+            "description": "All managed resources match their recorded state.",
+            "outcome-id": "DRIFT-001",
+            "tags": {
+              "Severity": [
+                {
+                  "label": "None"
+                }
+              ],
+              "Status": [
+                {
+                  "label": "Passed",
+                  "level": "info"
+                }
+              ]
+            },
+            "url": "https://tasks.example.com/drift/results/1042#DRIFT-001"
+          },
+          "type": "task-result-outcomes"
+        }
+      ]
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        },
+        "included": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "outcome-id": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "object",
+                    "properties": {
+                      "Severity": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      },
+                      "Status": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "type": "string"
+                            },
+                            "level": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.taskCallbackDocument"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "message": "No drift detected in 14 resources.",
+        "status": "passed",
+        "status-timestamps": {
+          "passed-at": "\u003ctimestamp\u003e",
+          "running-at": "\u003ctimestamp\u003e"
+        },
+        "task-id": "\u003cid\u003e",
+        "task-name": "drift-scanner",
+        "task-url": "https://tasks.example.invalid/drift",
+        "updated-at": "\u003ctimestamp\u003e",
+        "url": "https://tasks.example.com/drift/results/1042",
+        "workspace-task-enforcement-level": "mandatory",
+        "workspace-task-id": ""
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "task-stage": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "task-stages"
+          }
+        },
+        "task_stage": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "task-stages"
+          }
+        }
+      },
+      "type": "task-results"
+    }
+  }
+}

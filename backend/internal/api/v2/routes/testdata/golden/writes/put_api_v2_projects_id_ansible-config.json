@@ -1,0 +1,68 @@
+{
+  "method": "PUT",
+  "path": "/api/v2/projects/:id/ansible-config",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "config-content": "[defaults]\nforks = 20\nhost_key_checking = False\ntimeout = 30\n\n[ssh_connection]\npipelining = True\n"
+        },
+        "type": "ansible-configs"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "config-content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "config-content"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attributes"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.AnsibleConfigRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "config-content": "[defaults]\nforks = 20\nhost_key_checking = False\ntimeout = 30\n\n[ssh_connection]\npipelining = True\n",
+        "created-at": "\u003ctimestamp\u003e",
+        "scope": "project",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-configs"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "method": "POST",
+  "path": "/api/v2/workspaces/:id/configuration-versions",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "auto-queue-runs": false,
+          "speculative": true
+        },
+        "type": "configuration-versions"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "auto-queue-runs": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "speculative": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.CreateConfigurationVersionRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "auto-queue-runs": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "source": "tfe-cli",
+        "speculative": true,
+        "status": "pending",
+        "updated-at": "",
+        "upload-url": "http://example.com/api/v2/configuration-versions/\u003cid\u003e/upload?token=\u003csigned\u003e="
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "upload": "http://example.com/api/v2/configuration-versions/\u003cid\u003e/upload?token=\u003csigned\u003e="
+      },
+      "relationships": {
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "configuration-versions"
+    }
+  }
+}

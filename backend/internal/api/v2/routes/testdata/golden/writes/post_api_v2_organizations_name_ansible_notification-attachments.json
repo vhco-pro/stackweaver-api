@@ -1,0 +1,68 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/notification-attachments",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "job_template_id": "\u003cuuid\u003e",
+      "notification_template_id": "\u003cuuid\u003e",
+      "on_failure": true,
+      "on_started": true,
+      "on_success": false
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "job_template_id": {
+          "type": "string"
+        },
+        "notification_template_id": {
+          "type": "string"
+        },
+        "on_failure": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "on_started": {
+          "type": "boolean"
+        },
+        "on_success": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.attachRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "notification-template-name": "golden-write-webhook",
+        "on-failure": true,
+        "on-started": true,
+        "on-success": false
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "job-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        },
+        "notification-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-notification-templates"
+          }
+        }
+      },
+      "type": "ansible-notification-attachments"
+    }
+  }
+}

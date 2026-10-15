@@ -1,0 +1,168 @@
+{
+  "method": "POST",
+  "path": "/api/v2/workspaces/:id/state-versions",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "lineage": "\u003cuuid\u003e",
+      "serial": 1,
+      "state_data": {
+        "lineage": "\u003cuuid\u003e",
+        "outputs": {
+          "endpoint": {
+            "type": "string",
+            "value": "https://warehouse.example.com"
+          }
+        },
+        "resources": [
+          {
+            "instances": [
+              {
+                "attributes": {
+                  "id": "5577006791947779410",
+                  "triggers": null
+                },
+                "schema_version": 0
+              }
+            ],
+            "mode": "managed",
+            "name": "example",
+            "provider": "provider[\"registry.opentofu.org/hashicorp/null\"]",
+            "type": "null_resource"
+          }
+        ],
+        "serial": 1,
+        "terraform_version": "1.10.6",
+        "version": 4
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "lineage": {
+          "type": "string"
+        },
+        "serial": {
+          "type": "integer",
+          "nullable": true
+        },
+        "state_data": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "state_data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.CreateStateVersionRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created_at": "\u003ctimestamp\u003e",
+        "id": "\u003cid\u003e",
+        "lineage": "\u003cuuid\u003e",
+        "serial": 1,
+        "version": 1,
+        "workspace": {
+          "agent_pool": {
+            "created_at": "\u003ctimestamp\u003e",
+            "id": "\u003cuuid\u003e",
+            "name": "",
+            "organization": {
+              "aggregated_commit_status_enabled": false,
+              "allow_force_delete_workspaces": false,
+              "ansible_adhoc_modules": "",
+              "ansible_job_retention_days": 0,
+              "assessments_enforced": false,
+              "collaborator_auth_policy": "",
+              "cost_estimation_enabled": false,
+              "created_at": "\u003ctimestamp\u003e",
+              "default_execution_mode": "",
+              "default_tofu_version": "",
+              "description": "",
+              "email": "",
+              "id": "\u003cuuid\u003e",
+              "name": "",
+              "send_passing_statuses_for_untriggered_speculative_plans": false,
+              "updated_at": "\u003ctimestamp\u003e"
+            },
+            "organization_id": "\u003cuuid\u003e",
+            "organization_scoped": false
+          },
+          "allow_destroy_plan": false,
+          "assessments_enabled": false,
+          "auto_apply": false,
+          "auto_apply_run_trigger": false,
+          "auto_queue_runs": false,
+          "created_at": "\u003ctimestamp\u003e",
+          "description": "",
+          "drift_detection_enabled": false,
+          "drift_detection_timezone": "",
+          "execution_mode": "",
+          "file_triggers_enabled": false,
+          "force_delete": false,
+          "global_remote_state": false,
+          "id": "",
+          "locked": false,
+          "name": "",
+          "project": {
+            "created_at": "\u003ctimestamp\u003e",
+            "default_execution_mode": "",
+            "description": "",
+            "id": "\u003cuuid\u003e",
+            "name": "",
+            "organization": {
+              "aggregated_commit_status_enabled": false,
+              "allow_force_delete_workspaces": false,
+              "ansible_adhoc_modules": "",
+              "ansible_job_retention_days": 0,
+              "assessments_enforced": false,
+              "collaborator_auth_policy": "",
+              "cost_estimation_enabled": false,
+              "created_at": "\u003ctimestamp\u003e",
+              "default_execution_mode": "",
+              "default_tofu_version": "",
+              "description": "",
+              "email": "",
+              "id": "\u003cuuid\u003e",
+              "name": "",
+              "send_passing_statuses_for_untriggered_speculative_plans": false,
+              "updated_at": "\u003ctimestamp\u003e"
+            },
+            "organization_id": "\u003cuuid\u003e",
+            "settings_overwritten": false,
+            "updated_at": "\u003ctimestamp\u003e"
+          },
+          "project_id": "\u003cuuid\u003e",
+          "queue_all_runs": false,
+          "resource_count": 0,
+          "run_timeout": 0,
+          "speculative_enabled": false,
+          "structured_run_output_enabled": false,
+          "tofu_version": "",
+          "updated_at": "\u003ctimestamp\u003e",
+          "vcs_branch": "",
+          "vcs_ingress_submodules": false,
+          "vcs_provider": "",
+          "vcs_repository": "",
+          "working_directory": ""
+        },
+        "workspace_id": "\u003cid\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "state-versions"
+    }
+  }
+}

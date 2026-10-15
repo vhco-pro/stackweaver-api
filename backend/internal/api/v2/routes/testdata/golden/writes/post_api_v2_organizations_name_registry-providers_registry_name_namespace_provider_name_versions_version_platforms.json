@@ -1,0 +1,30 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/registry-providers/:registry_name/:namespace/:provider_name/versions/:version/platforms",
+  "request": {
+    "content_type": "multipart/form-data",
+    "form": {
+      "arch": "amd64",
+      "file": "\u003cfile\u003e",
+      "key_id": "9FDEA9EA70FFAA2C",
+      "os": "linux",
+      "protocols": "5.0,6.0",
+      "shasums": "\u003cfile\u003e",
+      "shasums_sig": "\u003cfile\u003e"
+    }
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "arch": "amd64",
+        "filename": "terraform-provider-internal-dns_1.0.0_linux_amd64.zip",
+        "os": "linux",
+        "provider-binary-uploaded": true,
+        "shasum": "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "registry-provider-platforms"
+    }
+  }
+}

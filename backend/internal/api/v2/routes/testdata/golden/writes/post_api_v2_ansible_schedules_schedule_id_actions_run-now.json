@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/schedules/:schedule_id/actions/run-now",
+  "request": {
+    "takes_none": true
+  },
+  "status": 200,
+  "response": {
+    "message": "Schedule triggered"
+  }
+}

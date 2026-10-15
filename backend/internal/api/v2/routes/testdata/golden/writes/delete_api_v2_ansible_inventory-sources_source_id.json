@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/ansible/inventory-sources/:source_id",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

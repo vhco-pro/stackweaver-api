@@ -1,0 +1,19 @@
+{
+  "method": "POST",
+  "path": "/api/v2/oauth/token",
+  "request": {
+    "content_type": "application/x-www-form-urlencoded",
+    "form": {
+      "client_id": "terraform-cli",
+      "code": "\u003csecret\u003e",
+      "code_verifier": "\u003csecret\u003e",
+      "grant_type": "authorization_code",
+      "redirect_uri": "http://localhost:10000/login"
+    }
+  },
+  "status": 200,
+  "response": {
+    "access_token": "\u003csecret\u003e",
+    "token_type": "bearer"
+  }
+}

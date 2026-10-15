@@ -1,0 +1,142 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/schedules",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "config": {
+            "extra_vars": {
+              "compliance_profile": "cis-level-1"
+            }
+          },
+          "cron-expression": "30 3 * * 1-5",
+          "description": "Recorded by the golden write harness",
+          "end-date-time": "\u003ctimestamp\u003e",
+          "job-template-id": "\u003cuuid\u003e",
+          "name": "golden-write-schedule",
+          "schedule-type": "job_template",
+          "start-date-time": "\u003ctimestamp\u003e",
+          "timezone": "Europe/Brussels"
+        },
+        "type": "schedules"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "cron-expression": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "end-date-time": {
+                  "type": "string"
+                },
+                "inventory-source-id": {
+                  "type": "string"
+                },
+                "job-template-id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "playbook-id": {
+                  "type": "string"
+                },
+                "schedule-type": {
+                  "type": "string"
+                },
+                "start-date-time": {
+                  "type": "string"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "workflow-id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cron-expression",
+                "name",
+                "schedule-type",
+                "timezone"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attributes",
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateScheduleRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "config": {
+          "extra_vars": {
+            "compliance_profile": "cis-level-1"
+          }
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "cron-expression": "30 3 * * 1-5",
+        "description": "Recorded by the golden write harness",
+        "end-date-time": "\u003ctimestamp\u003e",
+        "name": "golden-write-schedule",
+        "next-run-at": "\u003ctimestamp\u003e",
+        "schedule-type": "job_template",
+        "start-date-time": "\u003ctimestamp\u003e",
+        "status": "enabled",
+        "timezone": "Europe/Brussels",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "created-by": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "users"
+          }
+        },
+        "job-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "schedules"
+    }
+  }
+}

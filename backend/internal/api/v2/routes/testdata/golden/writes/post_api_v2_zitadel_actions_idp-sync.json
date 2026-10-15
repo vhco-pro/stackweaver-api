@@ -1,0 +1,167 @@
+{
+  "method": "POST",
+  "path": "/api/v2/zitadel/actions/idp-sync",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "fullMethod": "/zitadel.user.v2.UserService/RetrieveIdentityProviderIntent",
+      "instanceID": "312909075211976984",
+      "orgID": "312909075212042520",
+      "request": {
+        "idpIntentId": "312911568405479384"
+      },
+      "response": {
+        "addHumanUser": {
+          "email": {
+            "email": "avery.diaz@example.com",
+            "isVerified": true
+          },
+          "profile": {
+            "familyName": "Diaz",
+            "givenName": "Avery"
+          }
+        },
+        "details": {
+          "resourceOwner": "312909075211976984",
+          "sequence": "599"
+        },
+        "idpInformation": {
+          "idpId": "312910411843633176",
+          "rawInformation": {
+            "email": "avery.diaz@example.com",
+            "groups": [
+              "platform-engineering",
+              "security"
+            ],
+            "sub": "00u1a2b3c4d5e6f7g8h9"
+          }
+        }
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "fullMethod": {
+          "type": "string"
+        },
+        "instanceID": {
+          "type": "string"
+        },
+        "orgID": {
+          "type": "string"
+        },
+        "request": {
+          "type": "object",
+          "properties": {
+            "idpIntentId": {
+              "type": "string"
+            }
+          }
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "addHumanUser": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string"
+                    },
+                    "isVerified": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "profile": {
+                  "type": "object",
+                  "properties": {
+                    "familyName": {
+                      "type": "string"
+                    },
+                    "givenName": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "details": {
+              "type": "object",
+              "properties": {
+                "resourceOwner": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "string"
+                }
+              }
+            },
+            "idpInformation": {
+              "type": "object",
+              "properties": {
+                "idpId": {
+                  "type": "string"
+                },
+                "rawInformation": {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string"
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "sub": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "example"
+  },
+  "status": 200,
+  "response": {
+    "addHumanUser": {
+      "email": {
+        "email": "avery.diaz@example.com",
+        "isVerified": true
+      },
+      "metadata": [
+        {
+          "key": "sso_groups",
+          "value": "WyJwbGF0Zm9ybS1lbmdpbmVlcmluZyIsInNlY3VyaXR5Il0="
+        }
+      ],
+      "profile": {
+        "familyName": "Diaz",
+        "givenName": "Avery"
+      }
+    },
+    "details": {
+      "resourceOwner": "312909075211976984",
+      "sequence": "599"
+    },
+    "idpInformation": {
+      "idpId": "312910411843633176",
+      "rawInformation": {
+        "email": "avery.diaz@example.com",
+        "groups": [
+          "platform-engineering",
+          "security"
+        ],
+        "sub": "00u1a2b3c4d5e6f7g8h9"
+      }
+    }
+  }
+}

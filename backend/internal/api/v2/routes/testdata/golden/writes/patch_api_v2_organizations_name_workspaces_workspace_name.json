@@ -1,0 +1,284 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/organizations/:name/workspaces/:workspace_name",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "auto-apply": true,
+          "description": "Updated by the golden write harness",
+          "execution-mode": "remote",
+          "run-timeout": 5400,
+          "tag-names": [
+            "production",
+            "platform"
+          ],
+          "terraform-version": "1.10.6",
+          "trigger-prefixes": [
+            "modules/network",
+            "modules/compute"
+          ],
+          "working-directory": "environments/production"
+        },
+        "type": "workspaces"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "agent-pool-id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "allow-destroy-plan": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "assessments-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "auto-apply": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "auto-apply-run-trigger": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "auto-queue-runs": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "execution-mode": {
+                  "type": "string"
+                },
+                "file-triggers-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "force-delete": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "global-remote-state": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string"
+                },
+                "queue-all-runs": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "run-timeout": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "speculative-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "structured-run-output-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "tag-names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "terraform-version": {
+                  "type": "string"
+                },
+                "trigger-patterns": {
+                  "type": "array",
+                  "nullable": true,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "trigger-prefixes": {
+                  "type": "array",
+                  "nullable": true,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "vcs-branch": {
+                  "type": "string"
+                },
+                "vcs-connection-id": {
+                  "nullable": true
+                },
+                "vcs-provider": {
+                  "type": "string"
+                },
+                "vcs-repo": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "github-app-installation-id": {
+                      "type": "string"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "ingress-submodules": {
+                      "type": "boolean"
+                    },
+                    "oauth-token-id": {
+                      "type": "string"
+                    },
+                    "tags-regex": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "vcs-repository": {
+                  "type": "string"
+                },
+                "working-directory": {
+                  "type": "string"
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "tag-bindings": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "attributes": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.UpdateWorkspaceRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "actions": {
+          "is-destroyable": true
+        },
+        "agent-pool-id": null,
+        "allow-destroy-plan": true,
+        "assessments-enabled": false,
+        "auto-apply": true,
+        "auto-apply-run-trigger": false,
+        "auto-queue-runs": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Updated by the golden write harness",
+        "environment": "default",
+        "execution-mode": "remote",
+        "file-triggers-enabled": true,
+        "force-delete": false,
+        "global-remote-state": false,
+        "latest-change-at": "\u003ctimestamp\u003e",
+        "locked": false,
+        "locked-reason": null,
+        "name": "analytics-warehouse",
+        "operations": true,
+        "permissions": {
+          "can-destroy": true,
+          "can-force-delete": true,
+          "can-force-unlock": true,
+          "can-lock": true,
+          "can-queue-destroy": true,
+          "can-queue-run": true,
+          "can-read-settings": true,
+          "can-unlock": true,
+          "can-update": true,
+          "can-update-variable": true
+        },
+        "queue-all-runs": true,
+        "resource-count": 0,
+        "run-timeout": 5400,
+        "setting-overwrites": {
+          "agent-pool": false,
+          "execution-mode": false
+        },
+        "source": "tfe-api",
+        "speculative-enabled": true,
+        "structured-run-output-enabled": true,
+        "tag-names": [
+          "platform",
+          "production"
+        ],
+        "terraform-version": "1.10.6",
+        "trigger-patterns": [],
+        "trigger-prefixes": [
+          "modules/compute",
+          "modules/network"
+        ],
+        "updated-at": "\u003ctimestamp\u003e",
+        "vcs-repo": null,
+        "working-directory": "environments/production"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "agent-pool": {
+          "data": null
+        },
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "workspaces"
+    }
+  }
+}

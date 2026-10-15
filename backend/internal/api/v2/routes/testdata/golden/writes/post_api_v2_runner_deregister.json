@@ -1,0 +1,24 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/deregister",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "runner_id": "\u003cuuid\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "runner_id": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { RunnerID string \"json:\\\"runner_id\\\"\" }"
+  },
+  "status": 200,
+  "response": {
+    "status": "deregistered"
+  }
+}

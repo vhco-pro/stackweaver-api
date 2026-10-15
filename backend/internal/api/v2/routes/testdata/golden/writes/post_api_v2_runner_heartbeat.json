@@ -1,0 +1,48 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/heartbeat",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "available_capacity": 2,
+      "current_jobs": 0,
+      "runner_id": "\u003cuuid\u003e",
+      "status": "online"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "available_capacity": {
+          "type": "integer"
+        },
+        "current_jobs": {
+          "type": "integer"
+        },
+        "runner_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner_id"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.HeartbeatRequest"
+  },
+  "status": 200,
+  "response": {
+    "pending_jobs": [
+      {
+        "job_id": "\u003cid\u003e",
+        "job_type": "tofu_run",
+        "priority": 0,
+        "run_type": "plan",
+        "workspace_id": "\u003cid\u003e",
+        "workspace_name": "analytics-warehouse"
+      }
+    ]
+  }
+}

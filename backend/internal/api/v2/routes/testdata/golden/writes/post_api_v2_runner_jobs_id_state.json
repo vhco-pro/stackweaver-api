@@ -1,0 +1,29 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/jobs/:id/state",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "runner_id": "\u003cuuid\u003e",
+      "state": "eyJ2ZXJzaW9uIjo0LCJ0ZXJyYWZvcm1fdmVyc2lvbiI6IjEuOS4wIiwic2VyaWFsIjoxLCJsaW5lYWdlIjoiZ29sZGVuLXdyaXRlLWxpbmVhZ2UiLCJvdXRwdXRzIjp7ImVuZHBvaW50Ijp7InZhbHVlIjoiaHR0cHM6Ly9zZXJ2aWNlLmV4YW1wbGUuY29tIiwidHlwZSI6InN0cmluZyJ9fSwicmVzb3VyY2VzIjpbXX0="
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "runner_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { RunnerID string \"json:\\\"runner_id\\\"\"; State string \"json:\\\"state\\\"\" }"
+  },
+  "status": 200,
+  "response": {
+    "status": "ok",
+    "version": 1
+  }
+}

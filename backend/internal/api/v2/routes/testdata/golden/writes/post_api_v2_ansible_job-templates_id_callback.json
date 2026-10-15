@@ -1,0 +1,31 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/job-templates/:id/callback",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "host_config_key": "\u003csecret\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "host_config_key": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { HostConfigKey string \"json:\\\"host_config_key\\\"\" }"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "limit": "web-01.demo.internal",
+        "status": "pending"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "ansible-jobs"
+    }
+  }
+}

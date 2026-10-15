@@ -1,0 +1,21 @@
+{
+  "method": "POST",
+  "path": "/auth/oidc/token",
+  "request": {
+    "content_type": "application/x-www-form-urlencoded",
+    "form": {
+      "client_id": "\u003cid\u003e",
+      "code": "\u003csecret\u003e",
+      "code_verifier": "\u003csecret\u003e",
+      "grant_type": "authorization_code",
+      "redirect_uri": "http://localhost:5173/auth/callback"
+    }
+  },
+  "status": 200,
+  "response": {
+    "access_token": "\u003csecret\u003e",
+    "expires_in": 43199,
+    "id_token": "\u003csecret\u003e",
+    "token_type": "Bearer"
+  }
+}

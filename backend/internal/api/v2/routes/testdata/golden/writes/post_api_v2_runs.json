@@ -1,0 +1,148 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runs",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "message": "Recorded by the golden write harness",
+          "plan-only": true
+        },
+        "relationships": {
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "runs"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "auto-apply": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "is-destroy": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "message": {
+                  "type": "string"
+                },
+                "plan-only": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "configuration-version": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "workspace": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.CreateRunRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "actions": {
+          "is-cancelable": true,
+          "is-confirmable": false,
+          "is-discardable": true,
+          "is-force-cancelable": false
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "has-changes": false,
+        "is-destroy": false,
+        "message": "",
+        "operation": "plan-only",
+        "permissions": {
+          "can-apply": false,
+          "can-cancel": true,
+          "can-discard": true,
+          "can-force-cancel": false,
+          "can-force-execute": false
+        },
+        "plan-only": true,
+        "source": "tfe-api",
+        "status": "pending",
+        "status-timestamps": {
+          "plan-queued-at": "\u003ctimestamp\u003e"
+        },
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "plan": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "plans"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "runs"
+    }
+  }
+}

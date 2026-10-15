@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/idp/complete/:intentId",
+  "named": {
+    "reason": "needs a system outside the machine",
+    "detail": "The intent in the path and the `idpIntentToken` in the body are handed to the browser by the external identity provider's callback, after a person has signed in there. Success needs that sign-in to have happened."
+  }
+}

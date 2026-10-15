@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runs/:id/actions/force-execute",
+  "request": {
+    "takes_none": true
+  },
+  "status": 202
+}

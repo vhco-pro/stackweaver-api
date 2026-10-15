@@ -1,0 +1,118 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/inventories/:id/groups",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Recorded by the golden write harness",
+          "name": "webservers-eu",
+          "variables": {
+            "region": "eu-west-1"
+          }
+        },
+        "relationships": {
+          "parent": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-groups"
+            }
+          }
+        },
+        "type": "ansible-groups"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "variables": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "parent": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateGroupRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "name": "webservers-eu",
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {
+          "region": "eu-west-1"
+        }
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "children": {
+          "data": []
+        },
+        "hosts": {
+          "data": []
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "parent": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-groups"
+          }
+        }
+      },
+      "type": "ansible-groups"
+    }
+  }
+}

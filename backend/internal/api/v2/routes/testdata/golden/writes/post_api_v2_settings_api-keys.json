@@ -1,0 +1,52 @@
+{
+  "method": "POST",
+  "path": "/api/v2/settings/api-keys",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "expires_at": "\u003ctimestamp\u003e",
+      "name": "ci-pipeline",
+      "scopes": [
+        "org:\u003cuuid\u003e:read",
+        "org:\u003cuuid\u003e:write"
+      ]
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "expires_at": {
+          "type": "string",
+          "nullable": true
+        },
+        "name": {
+          "type": "string"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateAPIKeyRequest"
+  },
+  "status": 201,
+  "response": {
+    "created_at": "\u003ctimestamp\u003e",
+    "expires_at": "\u003ctimestamp\u003e",
+    "id": "\u003cuuid\u003e",
+    "key": "\u003csecret\u003e",
+    "key_prefix": "\u003csecret\u003e",
+    "name": "ci-pipeline",
+    "organization_id": "\u003cuuid\u003e",
+    "scopes": [
+      "org:\u003cuuid\u003e:read",
+      "org:\u003cuuid\u003e:write"
+    ]
+  }
+}

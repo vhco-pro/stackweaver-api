@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/varsets/:id",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

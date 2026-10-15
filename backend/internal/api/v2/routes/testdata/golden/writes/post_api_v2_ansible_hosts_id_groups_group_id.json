@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/hosts/:id/groups/:group_id",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

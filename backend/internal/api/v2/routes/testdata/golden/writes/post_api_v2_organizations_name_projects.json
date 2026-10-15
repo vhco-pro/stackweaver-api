@@ -1,0 +1,136 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/projects",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Recorded by the golden write harness",
+          "name": "golden-write-project"
+        },
+        "relationships": {
+          "tag-bindings": {
+            "data": [
+              {
+                "attributes": {
+                  "key": "environment",
+                  "value": "staging"
+                },
+                "type": "tag-bindings"
+              },
+              {
+                "attributes": {
+                  "key": "cost-center",
+                  "value": "platform-1042"
+                },
+                "type": "tag-bindings"
+              }
+            ]
+          }
+        },
+        "type": "projects"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "tag-bindings": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "attributes": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attributes",
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateProjectRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "default-execution-mode": "remote",
+        "description": "Recorded by the golden write harness",
+        "is-unified": false,
+        "name": "golden-write-project",
+        "setting-overwrites": {
+          "default-agent-pool": false,
+          "default-execution-mode": false
+        },
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/projects/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "default-agent-pool": {
+          "data": null
+        },
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "projects"
+    }
+  }
+}

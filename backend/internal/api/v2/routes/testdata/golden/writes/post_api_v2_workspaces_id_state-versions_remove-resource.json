@@ -1,0 +1,29 @@
+{
+  "method": "POST",
+  "path": "/api/v2/workspaces/:id/state-versions/remove-resource",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "address": "null_resource.example"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "address"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Address string \"json:\\\"address\\\" binding:\\\"required\\\"\" }"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "message": "Resource null_resource.example removed from state"
+    }
+  }
+}

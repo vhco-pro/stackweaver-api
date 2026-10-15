@@ -1,0 +1,140 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/organizations/:name/projects/:project_name",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "default-agent-pool-id": "\u003cuuid\u003e",
+          "default-execution-mode": "agent",
+          "description": "Updated by the golden write harness"
+        },
+        "type": "projects"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "default-agent-pool-id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "default-execution-mode": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "setting-overwrites": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "default-agent-pool": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "default-execution-mode": {
+                      "type": "boolean",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "tag-bindings": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "attributes": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateProjectRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "default-execution-mode": "agent",
+        "description": "Updated by the golden write harness",
+        "is-unified": false,
+        "name": "data",
+        "setting-overwrites": {
+          "default-agent-pool": true,
+          "default-execution-mode": true
+        },
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/projects/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "default-agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "projects"
+    }
+  }
+}

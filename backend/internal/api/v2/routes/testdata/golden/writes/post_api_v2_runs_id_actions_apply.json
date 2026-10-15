@@ -1,0 +1,61 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runs/:id/actions/apply",
+  "request": {
+    "takes_none": true
+  },
+  "status": 202,
+  "response": {
+    "data": {
+      "attributes": {
+        "actions": {
+          "is-cancelable": true,
+          "is-confirmable": false,
+          "is-discardable": false,
+          "is-force-cancelable": false
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "has-changes": false,
+        "is-destroy": false,
+        "message": "",
+        "operation": "plan-and-apply",
+        "permissions": {
+          "can-apply": false,
+          "can-cancel": true,
+          "can-discard": true,
+          "can-force-cancel": false,
+          "can-force-execute": false
+        },
+        "plan-only": false,
+        "source": "tfe-api",
+        "status": "applying",
+        "status-timestamps": {
+          "applying-at": "\u003ctimestamp\u003e"
+        },
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "apply": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "applies"
+          }
+        },
+        "plan": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "plans"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "runs"
+    }
+  }
+}

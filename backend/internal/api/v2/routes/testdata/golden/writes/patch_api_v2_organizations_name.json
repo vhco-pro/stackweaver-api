@@ -1,0 +1,212 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/organizations/:name",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "ansible-job-retention-days": 30,
+          "assessments-enforced": true,
+          "collaborator-auth-policy": "two_factor_mandatory",
+          "cost-estimation-enabled": true,
+          "default-execution-mode": "agent",
+          "description": "Updated by the golden write harness",
+          "email": "platform-team@example.com",
+          "speculative-plan-management-enabled": false
+        },
+        "relationships": {
+          "default-agent-pool": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "agent-pools"
+            }
+          }
+        },
+        "type": "organizations"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "aggregated-commit-status-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "allow-force-delete-workspaces": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "ansible-adhoc-modules": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "ansible-job-retention-days": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "assessments-enforced": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "collaborator-auth-policy": {
+                  "type": "string"
+                },
+                "cost-estimation-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "default-execution-mode": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "default-terraform-version": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "send-passing-statuses-for-untriggered-speculative-plans": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "speculative-plan-management-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "user-tokens-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "default-agent-pool": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateOrganizationRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "aggregated-commit-status-enabled": false,
+        "allow-force-delete-workspaces": false,
+        "ansible-adhoc-modules": "",
+        "ansible-job-retention-days": 30,
+        "assessments-enforced": true,
+        "collaborator-auth-policy": "two_factor_mandatory",
+        "cost-estimation-enabled": true,
+        "created-at": "\u003ctimestamp\u003e",
+        "default-execution-mode": "agent",
+        "default-terraform-version": "",
+        "email": "platform-team@example.com",
+        "enforce-hyok": false,
+        "external-id": "\u003cuuid\u003e",
+        "max-ttl-enabled": false,
+        "name": "demo",
+        "owners-team-saml-role-id": "",
+        "permissions": {
+          "can-access-via-teams": true,
+          "can-create-module": true,
+          "can-create-project": true,
+          "can-create-provider": true,
+          "can-create-team": true,
+          "can-create-workspace": true,
+          "can-deploy-no-code-modules": false,
+          "can-destroy": true,
+          "can-manage-assessments": true,
+          "can-manage-policies": true,
+          "can-manage-policy-overrides": true,
+          "can-manage-projects": true,
+          "can-manage-public-modules": true,
+          "can-manage-public-providers": false,
+          "can-manage-run-tasks": true,
+          "can-manage-sso": false,
+          "can-manage-subscription": false,
+          "can-manage-tags": true,
+          "can-manage-users": true,
+          "can-manage-varsets": true,
+          "can-read-assessments": true,
+          "can-read-run-tasks": true,
+          "can-read-varsets": true,
+          "can-start-trial": false,
+          "can-traverse": true,
+          "can-update": true,
+          "can-update-agent-pools": true,
+          "can-update-api-token": true,
+          "can-update-oauth": true,
+          "can-update-sentinel": false,
+          "can-update-ssh-keys": true,
+          "can-view-explorer": true
+        },
+        "send-passing-statuses-for-untriggered-speculative-plans": false,
+        "session-remember": null,
+        "session-timeout": null,
+        "speculative-plan-management-enabled": false,
+        "stacks-enabled": false,
+        "two-factor-conformant": false,
+        "updated-at": "\u003ctimestamp\u003e",
+        "user-tokens-enabled": true
+      },
+      "id": "demo",
+      "links": {
+        "self": "/api/v2/organizations/demo"
+      },
+      "relationships": {
+        "default-agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        }
+      },
+      "type": "organizations"
+    }
+  }
+}

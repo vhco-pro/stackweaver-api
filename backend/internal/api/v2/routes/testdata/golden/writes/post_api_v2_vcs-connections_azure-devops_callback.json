@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/v2/vcs-connections/azure-devops/callback",
+  "named": {
+    "reason": "needs a system outside the machine",
+    "detail": "The server exchanges the authorization code with Microsoft Entra ID and then checks the token it gets against the Azure DevOps organization. Success needs a code Entra ID issued for a browser sign-in and both services to answer."
+  }
+}

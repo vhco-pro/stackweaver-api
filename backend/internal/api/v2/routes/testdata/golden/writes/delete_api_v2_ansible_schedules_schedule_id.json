@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/ansible/schedules/:schedule_id",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

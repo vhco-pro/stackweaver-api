@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/users/:id/passkeys/:pkId",
+  "named": {
+    "reason": "needs a physical authenticator",
+    "detail": "The body is the credential an authenticator creates for the challenge that `POST /auth/users/{id}/passkeys` returned, signed by the authenticator. Success needs a passkey to produce it."
+  }
+}

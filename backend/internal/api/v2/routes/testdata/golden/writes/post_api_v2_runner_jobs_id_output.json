@@ -1,0 +1,36 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/jobs/:id/output",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "output": "OpenTofu will perform the following actions:\n\n  # null_resource.example will be created\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
+      "runner_id": "\u003cuuid\u003e",
+      "stream": "plan"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "output": {
+          "type": "string"
+        },
+        "runner_id": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "output",
+        "runner_id"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.JobOutputRequest"
+  },
+  "status": 200,
+  "response": {
+    "status": "received"
+  }
+}

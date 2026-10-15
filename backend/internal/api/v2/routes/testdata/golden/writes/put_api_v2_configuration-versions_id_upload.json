@@ -1,0 +1,35 @@
+{
+  "method": "PUT",
+  "path": "/api/v2/configuration-versions/:id/upload",
+  "request": {
+    "content_type": "application/octet-stream",
+    "binary": true
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "auto-queue-runs": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "source": "tfe-cli",
+        "speculative": false,
+        "status": "uploaded",
+        "updated-at": "\u003ctimestamp\u003e",
+        "upload-url": "http://example.com/api/v2/configuration-versions/\u003cid\u003e/upload"
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "upload": "http://example.com/api/v2/configuration-versions/\u003cid\u003e/upload"
+      },
+      "relationships": {
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "configuration-versions"
+    }
+  }
+}

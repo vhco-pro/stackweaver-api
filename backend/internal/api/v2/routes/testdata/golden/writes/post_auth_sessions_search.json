@@ -1,0 +1,61 @@
+{
+  "method": "POST",
+  "path": "/auth/sessions/search",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "query": {
+        "asc": true,
+        "limit": 20
+      },
+      "sortingColumn": "SESSION_FIELD_NAME_CREATION_DATE"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "asc": {
+              "type": "boolean"
+            },
+            "limit": {
+              "type": "integer"
+            }
+          }
+        },
+        "sortingColumn": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "example"
+  },
+  "status": 200,
+  "response": {
+    "details": {
+      "timestamp": "\u003ctimestamp\u003e",
+      "totalResult": "1"
+    },
+    "sessions": [
+      {
+        "changeDate": "\u003ctimestamp\u003e",
+        "creationDate": "\u003ctimestamp\u003e",
+        "factors": {
+          "password": {
+            "verifiedAt": "\u003ctimestamp\u003e"
+          },
+          "user": {
+            "displayName": "Golden Write",
+            "id": "\u003cuser-id\u003e",
+            "loginName": "\u003clogin-name\u003e",
+            "organizationId": "\u003cid\u003e",
+            "verifiedAt": "\u003ctimestamp\u003e"
+          }
+        },
+        "id": "\u003csession-id\u003e",
+        "sequence": "\u003csequence\u003e"
+      }
+    ]
+  }
+}

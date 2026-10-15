@@ -1,0 +1,103 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/organization-memberships",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "email": "new.hire@example.com"
+        },
+        "type": "organization-memberships"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "email"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "teams": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateOrganizationMembershipRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "email": "new.hire@example.com",
+        "name": "-",
+        "role": null,
+        "status": "invited",
+        "username": "N/A"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "teams": {
+          "data": []
+        },
+        "user": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "users"
+          }
+        }
+      },
+      "type": "organization-memberships"
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/organizations/:name/varsets/:id/relationships/vars/:variable_id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "category": "env",
+          "description": "Updated by the golden write harness",
+          "key": "AWS_DEFAULT_REGION",
+          "sensitive": false,
+          "value": "eu-central-1"
+        },
+        "type": "vars"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "hcl": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "key": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "sensitive": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "value": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateVariableSetVariableRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "category": "env",
+        "description": "Updated by the golden write harness",
+        "hcl": false,
+        "key": "AWS_DEFAULT_REGION",
+        "sensitive": false,
+        "value": "eu-central-1"
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/vars/\u003cid\u003e"
+      },
+      "relationships": {
+        "varset": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "varsets"
+          },
+          "links": {
+            "related": "/api/v2/varsets/\u003cid\u003e"
+          }
+        }
+      },
+      "type": "vars"
+    }
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/workspaces/:id/tasks/:tid",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "enforcement-level": "mandatory",
+          "stages": [
+            "pre_plan",
+            "post_plan"
+          ]
+        },
+        "type": "workspace-tasks"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "enforcement-level": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "stage": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "stages": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "task": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.workspaceTaskRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "enforcement-level": "mandatory",
+        "stage": "pre_plan",
+        "stages": [
+          "post_plan",
+          "pre_plan"
+        ],
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "task": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "tasks"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "workspace-tasks"
+    }
+  }
+}

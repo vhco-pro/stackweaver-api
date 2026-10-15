@@ -1,0 +1,85 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/explorer/bulk-actions",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "action_inputs": {
+            "message": "The 5.x line stops receiving fixes next quarter. Bump the provider constraint, run a plan and confirm it is clean.",
+            "subject": "Upgrade the AWS provider to 6.x"
+          },
+          "action_type": "change_requests",
+          "target_ids": [
+            "\u003cid\u003e",
+            "\u003cid\u003e"
+          ]
+        },
+        "type": "bulk_actions"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "action_inputs": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "subject": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "action_type": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "target_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.bulkActionRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "action_inputs": {
+          "message": "The 5.x line stops receiving fixes next quarter. Bump the provider constraint, run a plan and confirm it is clean.",
+          "subject": "Upgrade the AWS provider to 6.x"
+        },
+        "action_type": "change_requests",
+        "created_by": {
+          "id": "\u003cuuid\u003e",
+          "type": "users"
+        },
+        "organization_id": "\u003cuuid\u003e"
+      },
+      "type": "bulk_actions"
+    }
+  }
+}

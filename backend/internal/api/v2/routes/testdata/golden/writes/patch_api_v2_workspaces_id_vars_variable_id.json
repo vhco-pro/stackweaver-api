@@ -1,0 +1,98 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/workspaces/:id/vars/:variable_id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "category": "terraform",
+          "description": "Updated by the golden write harness",
+          "hcl": false,
+          "key": "instance_type",
+          "sensitive": false,
+          "value": "t3.large"
+        },
+        "id": "\u003cid\u003e",
+        "type": "vars"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "hcl": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "key": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "sensitive": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "value": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.UpdateVariableRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "category": "terraform",
+        "description": "Updated by the golden write harness",
+        "hcl": false,
+        "key": "instance_type",
+        "sensitive": false,
+        "value": "t3.large",
+        "version-id": ""
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/workspaces/\u003cid\u003e/vars/\u003cid\u003e"
+      },
+      "relationships": {
+        "configurable": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          },
+          "links": {
+            "related": "/api/v2/organizations/demo/workspaces/analytics-warehouse"
+          }
+        }
+      },
+      "type": "vars"
+    }
+  }
+}

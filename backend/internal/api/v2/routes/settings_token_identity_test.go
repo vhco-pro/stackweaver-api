@@ -141,7 +141,7 @@ func setupSettingsGuard(t *testing.T) *settingsGuardFixture {
 	authService.SetAPIKeyService(apiKeyService)
 
 	gin.SetMode(gin.TestMode)
-	f.router = buildHarnessRouter(t, db, authService)
+	f.router = buildHarnessRouter(t, db, authService, identityFromEnv())
 	return f
 }
 

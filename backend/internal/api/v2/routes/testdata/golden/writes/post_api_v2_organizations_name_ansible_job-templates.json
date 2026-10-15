@@ -1,0 +1,276 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/job-templates",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "become-enabled": true,
+          "description": "Recorded by the golden write harness",
+          "diff-mode": true,
+          "extra-vars": {
+            "app_version": "1.4.2",
+            "rolling_update": true
+          },
+          "forks": 10,
+          "job-slice-count": 2,
+          "limit": "webservers",
+          "name": "golden-write-template",
+          "retention-days": 30,
+          "skip-tags": "slow",
+          "tags": "deploy,config",
+          "timeout-seconds": 3600,
+          "verbosity": 1
+        },
+        "relationships": {
+          "credentials": {
+            "data": [
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "ansible-credentials"
+              }
+            ]
+          },
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "ansible-job-templates"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "allow-simultaneous": {
+                  "type": "boolean"
+                },
+                "become-enabled": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "diff-mode": {
+                  "type": "boolean"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "extra-vars": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "forks": {
+                  "type": "integer"
+                },
+                "job-slice-count": {
+                  "type": "integer"
+                },
+                "limit": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "retention-days": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "schedule-cron": {
+                  "type": "string"
+                },
+                "schedule-enabled": {
+                  "type": "boolean"
+                },
+                "skip-tags": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "string"
+                },
+                "timeout-seconds": {
+                  "type": "integer"
+                },
+                "verbosity": {
+                  "type": "integer"
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "agent-pool": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "credentials": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "inventory": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "playbook": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "project": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateJobTemplateRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "allow-callbacks": false,
+        "allow-simultaneous": false,
+        "become-enabled": true,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "diff-mode": true,
+        "enabled": true,
+        "extra-vars": {
+          "app_version": "1.4.2",
+          "rolling_update": true
+        },
+        "forks": 10,
+        "host-config-key": "",
+        "job-slice-count": 2,
+        "launch-on-webhook": false,
+        "limit": "webservers",
+        "name": "golden-write-template",
+        "retention-days": 30,
+        "schedule-cron": "",
+        "schedule-enabled": false,
+        "skip-tags": "slow",
+        "tags": "deploy,config",
+        "timeout-seconds": 3600,
+        "updated-at": "\u003ctimestamp\u003e",
+        "verbosity": 1
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "playbook": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-playbooks"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-job-templates"
+    }
+  }
+}

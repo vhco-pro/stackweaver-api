@@ -1,0 +1,40 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/inventories/:id/actions/sync",
+  "request": {
+    "takes_none": true
+  },
+  "status": 202,
+  "response": {
+    "data": {
+      "attributes": {
+        "constructed-cache-timeout": 0,
+        "constructed-limit": "",
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "",
+        "inventory-type": "constructed",
+        "last-sync-at": null,
+        "last-sync-error": "",
+        "last-sync-hosts-discovered": 0,
+        "last-sync-log": "",
+        "last-sync-status": "syncing",
+        "name": "golden-write-constructed",
+        "source": "",
+        "source-vars": "",
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {},
+        "vcs_branch": "main"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "ansible-inventories"
+    }
+  }
+}

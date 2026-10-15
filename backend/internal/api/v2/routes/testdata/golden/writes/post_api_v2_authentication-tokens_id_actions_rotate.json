@@ -1,0 +1,53 @@
+{
+  "method": "POST",
+  "path": "/api/v2/authentication-tokens/:id/actions/rotate",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "grace-period-hours": 48
+        },
+        "type": "authentication-tokens"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "grace-period-hours": {
+                  "type": "integer",
+                  "nullable": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.agentTokenRotateRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "golden-write-agent",
+        "last-used-at": null,
+        "token": "\u003csecret\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "authentication-tokens"
+    },
+    "meta": {
+      "rotated-from": "\u003cuuid\u003e",
+      "rotated-from-expired-at": "\u003ctimestamp\u003e"
+    }
+  }
+}

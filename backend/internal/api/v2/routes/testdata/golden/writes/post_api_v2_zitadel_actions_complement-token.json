@@ -1,0 +1,81 @@
+{
+  "method": "POST",
+  "path": "/api/v2/zitadel/actions/complement-token",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "function": "function/preaccesstoken",
+      "org": {
+        "id": "312909075212042520",
+        "name": "acme-platform"
+      },
+      "user": {
+        "id": "312912345678901234",
+        "preferred_login_name": "avery.diaz@example.com"
+      },
+      "user_metadata": [
+        {
+          "key": "sso_groups",
+          "value": "WyJwbGF0Zm9ybS1lbmdpbmVlcmluZyIsInNlY3VyaXR5Il0="
+        }
+      ]
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "function": {
+          "type": "string"
+        },
+        "org": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "user": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "preferred_login_name": {
+              "type": "string"
+            }
+          }
+        },
+        "user_metadata": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "example"
+  },
+  "status": 200,
+  "response": {
+    "append_claims": [
+      {
+        "key": "sso_groups",
+        "value": [
+          "platform-engineering",
+          "security"
+        ]
+      }
+    ]
+  }
+}

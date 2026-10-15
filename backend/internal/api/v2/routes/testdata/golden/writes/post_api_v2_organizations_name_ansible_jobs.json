@@ -1,0 +1,252 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/jobs",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "become-enabled": true,
+          "diff-mode": true,
+          "extra-vars": {
+            "release": "1.4.2"
+          },
+          "forks": 10,
+          "job-type": "check",
+          "limit": "webservers",
+          "name": "golden-write-job",
+          "tags": "deploy",
+          "verbosity": 1
+        },
+        "relationships": {
+          "credentials": {
+            "data": [
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "ansible-credentials"
+              }
+            ]
+          },
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "ansible-jobs"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "ansible-version": {
+                  "type": "string"
+                },
+                "become-enabled": {
+                  "type": "boolean"
+                },
+                "diff-mode": {
+                  "type": "boolean"
+                },
+                "extra-vars": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "forks": {
+                  "type": "integer"
+                },
+                "job-type": {
+                  "type": "string"
+                },
+                "limit": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "skip-tags": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "string"
+                },
+                "verbosity": {
+                  "type": "integer"
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "credentials": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "inventory": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "playbook": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "project": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.LaunchJobRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "ansible-version": "",
+        "become-enabled": true,
+        "created-at": "\u003ctimestamp\u003e",
+        "diff-mode": true,
+        "error-message": "",
+        "exit-code": null,
+        "extra-vars": {
+          "release": "1.4.2",
+          "stackweaver_inventory_id": "\u003cuuid\u003e",
+          "stackweaver_playbook_id": "\u003cuuid\u003e",
+          "stackweaver_project_id": "\u003cuuid\u003e"
+        },
+        "finished-at": null,
+        "forks": 10,
+        "has-warnings": false,
+        "hosts-changed": 0,
+        "hosts-failed": 0,
+        "hosts-ignored": 0,
+        "hosts-ok": 0,
+        "hosts-rescued": 0,
+        "hosts-skipped": 0,
+        "hosts-total": 0,
+        "hosts-unreachable": 0,
+        "job-type": "check",
+        "limit": "webservers",
+        "name": "golden-write-job",
+        "runner-id": null,
+        "skip-tags": "",
+        "slice-count": 0,
+        "slice-group-id": null,
+        "slice-number": 0,
+        "started-at": null,
+        "status": "pending",
+        "tags": "deploy",
+        "updated-at": "\u003ctimestamp\u003e",
+        "verbosity": 1,
+        "warnings-count": 0
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "created-by": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "users"
+          }
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "playbook": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-playbooks"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-jobs"
+    }
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/ansible/groups/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Updated by the golden write harness",
+          "variables": {
+            "http_port": 8080,
+            "max_clients": 200
+          }
+        },
+        "type": "ansible-groups"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "variables": {
+                  "type": "object",
+                  "nullable": true,
+                  "additionalProperties": true
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "parent": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.UpdateGroupRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Updated by the golden write harness",
+        "name": "webservers",
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {
+          "http_port": 8080,
+          "max_clients": 200
+        }
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "children": {
+          "data": []
+        },
+        "hosts": {
+          "data": []
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        }
+      },
+      "type": "ansible-groups"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "method": "PATCH",
+  "path": "/api/registry/:registry/v2/gpg-keys/:namespace/:key_id",
+  "request": {
+    "takes_none": true
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "ascii-armor": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nxjMEas0K1hYJKwYBBAHaRw8BAQdAh01KN8xf8Ktli4eVGbLFxniuogsxNQxnkV1/\nz3D+I/zNKUV4YW1wbGUgUHVibGlzaGVyIDxwdWJsaXNoZXJAZXhhbXBsZS5jb20+\nwr0EExYIAG8FgmrNCtYCCwcJEJ/eqepw/6osNRQAAAAAABwAEHNhbHRAbm90YXRp\nb25zLm9wZW5wZ3Bqcy5vcmeSBhf5NmyOW5uc03S3sOYmAhUIAhYAAhkBApsDAh4B\nFiEE04bZtLiGDFZM0bvln96p6nD/qiwAADwPAQC8R5butyQqGWZLIfEYoWR56NTz\npEJBrNGpdUBoJ4hV9QEAvIruX8dWCXK6DYxJchtTI44QKXVPlNV14JgdX660pgPO\nOARqzQrWEgorBgEEAZdVAQUBAQdAor8PZLBVOUKLMrYzZ7Uir1rzd/QJ/l+UJV7Y\n0wnU+BADAQoJwq4EGBYIAGAFgmrNCtYJEJ/eqepw/6osNRQAAAAAABwAEHNhbHRA\nbm90YXRpb25zLm9wZW5wZ3Bqcy5vcmerHCZzfOX7oKC5zqSJn+CWApsMFiEE04bZ\ntLiGDFZM0bvln96p6nD/qiwAANStAQDdiHiEp7Zr878xnS3l66bH2QvdTy8DYoEa\nB0l9PmhDbAEAitlue+AM5KjGbnJ6GQGyMUh+rsWJbMXxX72b1pPlfg0=\n=MEZv\n-----END PGP PUBLIC KEY BLOCK-----\n",
+        "created-at": "\u003ctimestamp\u003e",
+        "key-id": "9FDEA9EA70FFAA2C",
+        "namespace": "demo",
+        "source": "",
+        "source-url": null,
+        "trust-signature": "",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "9FDEA9EA70FFAA2C",
+      "type": "gpg-keys"
+    }
+  }
+}

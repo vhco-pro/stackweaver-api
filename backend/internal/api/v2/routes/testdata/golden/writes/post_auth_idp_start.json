@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/idp/start",
+  "named": {
+    "reason": "needs an instance-wide identity-provider setting changed",
+    "detail": "The body names an external identity provider (`idpId`), and the answer is the address at that provider the browser is sent to. Success needs an administrator to have set such a provider up at the identity provider, where it is offered to everyone who signs in to the instance."
+  }
+}

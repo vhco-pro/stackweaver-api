@@ -1,0 +1,82 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/register",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "agent_pool_id": "\u003cuuid\u003e",
+      "agent_version": "1.4.2",
+      "ansible_version": "2.17.4",
+      "available_collections": [
+        "ansible.posix",
+        "community.general"
+      ],
+      "hostname": "runner-01.internal.example.com",
+      "labels": [
+        "region:eu-west-1",
+        "gpu"
+      ],
+      "max_concurrent_jobs": 2,
+      "name": "golden-write-runner",
+      "os_type": "linux",
+      "os_version": "Ubuntu 24.04",
+      "tofu_version": "1.9.0"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "agent_pool_id": {
+          "type": "string"
+        },
+        "agent_version": {
+          "type": "string"
+        },
+        "ansible_version": {
+          "type": "string"
+        },
+        "available_collections": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_concurrent_jobs": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "os_type": {
+          "type": "string"
+        },
+        "os_version": {
+          "type": "string"
+        },
+        "tofu_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_pool_id",
+        "name"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.RegisterRequest"
+  },
+  "status": 201,
+  "response": {
+    "poll_interval_seconds": 10,
+    "runner_api_key": "\u003csecret\u003e",
+    "runner_id": "\u003cuuid\u003e"
+  }
+}

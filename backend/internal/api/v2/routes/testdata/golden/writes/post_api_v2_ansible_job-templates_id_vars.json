@@ -1,0 +1,87 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/job-templates/:id/vars",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "category": "env",
+          "description": "Recorded by the golden write harness",
+          "key": "app_version",
+          "sensitive": false,
+          "value": "1.4.2"
+        },
+        "type": "vars"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "hcl": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "sensitive": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "value"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateVariableRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "category": "env",
+        "description": "Recorded by the golden write harness",
+        "hcl": false,
+        "key": "app_version",
+        "sensitive": false,
+        "value": "1.4.2"
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/ansible/job-templates/\u003cuuid\u003e/vars/\u003cid\u003e"
+      },
+      "relationships": {
+        "configurable": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "job-templates"
+          }
+        }
+      },
+      "type": "vars"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/registry/:registry/v2/gpg-keys/:namespace/:key_id",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

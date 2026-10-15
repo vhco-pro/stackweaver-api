@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions/:version",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

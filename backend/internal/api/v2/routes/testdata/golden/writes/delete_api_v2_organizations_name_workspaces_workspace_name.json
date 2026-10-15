@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/organizations/:name/workspaces/:workspace_name",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

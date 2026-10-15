@@ -1,0 +1,76 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/oidc-configurations",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "project-number": "123456789012",
+          "service-account-email": "stackweaver-deployer@acme-platform.iam.gserviceaccount.com",
+          "workload-provider-name": "projects/123456789012/locations/global/workloadIdentityPools/stackweaver/providers/stackweaver-oidc"
+        },
+        "type": "gcp-oidc-configurations"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "project-number": {
+                  "type": "string"
+                },
+                "service-account-email": {
+                  "type": "string"
+                },
+                "workload-provider-name": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attributes",
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateGCPOIDCConfigRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "project-number": "123456789012",
+        "service-account-email": "stackweaver-deployer@acme-platform.iam.gserviceaccount.com",
+        "workload-provider-name": "projects/123456789012/locations/global/workloadIdentityPools/stackweaver/providers/stackweaver-oidc"
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/oidc-configurations/\u003cid\u003e"
+      },
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "gcp-oidc-configurations"
+    }
+  }
+}

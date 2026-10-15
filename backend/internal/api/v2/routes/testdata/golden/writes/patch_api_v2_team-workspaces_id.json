@@ -1,0 +1,96 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/team-workspaces/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "access": "admin"
+        },
+        "type": "team-workspaces"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "access": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "run-tasks": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "runs": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "sentinel-mocks": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "state-versions": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "variables": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "workspace-locking": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateTeamWorkspaceAccessRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "access": "admin"
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/team-workspaces/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "team": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "teams"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "team-workspaces"
+    }
+  }
+}

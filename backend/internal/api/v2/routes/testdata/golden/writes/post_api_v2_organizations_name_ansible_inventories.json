@@ -1,0 +1,167 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/inventories",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Recorded by the golden write harness",
+          "inventory-type": "static",
+          "name": "golden-write-inventory",
+          "variables": {
+            "ansible_user": "deploy",
+            "ntp_server": "time.example.com"
+          }
+        },
+        "relationships": {
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "inventories"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "constructed-cache-timeout": {
+                  "type": "integer"
+                },
+                "constructed-limit": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "input-inventory-ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "inventory-type": {
+                  "type": "string"
+                },
+                "inventory_path": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "source-vars": {
+                  "type": "string"
+                },
+                "variables": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "vcs_branch": {
+                  "type": "string"
+                },
+                "vcs_repository": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "project": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "vcs_connection": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateInventoryRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "constructed-cache-timeout": 0,
+        "constructed-limit": "",
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "inventory-type": "static",
+        "last-sync-at": null,
+        "last-sync-error": "",
+        "last-sync-hosts-discovered": 0,
+        "last-sync-log": "",
+        "last-sync-status": "",
+        "name": "golden-write-inventory",
+        "source": "",
+        "source-vars": "",
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {
+          "ansible_user": "deploy",
+          "ntp_server": "time.example.com"
+        },
+        "vcs_branch": "main"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "ansible-inventories"
+    }
+  }
+}

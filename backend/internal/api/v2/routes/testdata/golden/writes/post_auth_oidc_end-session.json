@@ -1,0 +1,17 @@
+{
+  "method": "POST",
+  "path": "/auth/oidc/end-session",
+  "request": {
+    "content_type": "application/x-www-form-urlencoded",
+    "form": {
+      "client_id": "\u003cid\u003e",
+      "id_token_hint": "\u003csecret\u003e",
+      "post_logout_redirect_uri": "http://localhost:5173",
+      "state": "golden-write"
+    }
+  },
+  "status": 200,
+  "response": {
+    "loggedOut": true
+  }
+}

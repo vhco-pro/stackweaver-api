@@ -1,0 +1,44 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/teams/:id/relationships/users",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": [
+        {
+          "id": "priya.raman@example.com",
+          "type": "users"
+        }
+      ]
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Data []struct { Type string \"json:\\\"type\\\" binding:\\\"required\\\"\"; ID string \"json:\\\"id\\\" binding:\\\"required\\\"\" } \"json:\\\"data\\\" binding:\\\"required\\\"\" }"
+  },
+  "status": 204
+}
