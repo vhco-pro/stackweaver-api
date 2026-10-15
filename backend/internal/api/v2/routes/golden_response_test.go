@@ -412,6 +412,38 @@ type goldenHarness struct {
 	prefixed map[string]map[string]string // path prefix -> parameter name -> value
 }
 
+// harnessIdentity is everything buildHarnessRouter needs to know about the identity provider.
+//
+// It is an explicit argument rather than something the builder reads from the environment for
+// one reason: the recorders must not share it by accident. The read and error fixtures pin what
+// the /auth and /api/v2/settings routes answer with the settings identityFromEnv returns - 14 of
+// them record Zitadel's 401 for an empty token. A recorder that needs a working token (the write
+// recorder, #869) passes its own, and the others keep passing exactly what they always read, so
+// giving one of them credentials can never change what another one records.
+type harnessIdentity struct {
+	Issuer       string
+	InternalAddr string
+	PAT          string
+	// CustomRequestHeaders and NotificationMode are left at their zero values by
+	// identityFromEnv, which is what every fixture recorded before #869 saw.
+	CustomRequestHeaders string
+	NotificationMode     v2handlers.NotificationMode
+}
+
+// identityFromEnv is the identity configuration the read and error recorders have always used:
+// the Zitadel coordinates in the process environment, with the dev stack's issuer as default.
+func identityFromEnv() harnessIdentity {
+	issuer := os.Getenv("ZITADEL_ISSUER")
+	if issuer == "" {
+		issuer = "http://localhost:8080"
+	}
+	return harnessIdentity{
+		Issuer:       issuer,
+		InternalAddr: os.Getenv("ZITADEL_INTERNAL_ADDR"),
+		PAT:          os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN"),
+	}
+}
+
 // buildHarnessRouter mounts the router the SERVER mounts, not just its v2 half.
 //
 // This used to call v2routes.SetupV2Routes directly, which registered 406 of the 465 routes the
@@ -441,7 +473,7 @@ type goldenHarness struct {
 // without a reachable instance and the routes register either way. A service that cannot be
 // constructed is logged and passed as nil, which loses its routes rather than the whole run - the
 // alternative is a harness that refuses to record anything at all when Zitadel is down.
-func buildHarnessRouter(t *testing.T, db *gorm.DB, authService *auth.Service) *gin.Engine {
+func buildHarnessRouter(t *testing.T, db *gorm.DB, authService *auth.Service, id harnessIdentity) *gin.Engine {
 	t.Helper()
 
 	// The recording pass drives every route back to back from one address, which is exactly the
@@ -458,12 +490,7 @@ func buildHarnessRouter(t *testing.T, db *gorm.DB, authService *auth.Service) *g
 	t.Setenv("AUTH_RATE_LIMIT_RPS", "100000")
 	t.Setenv("AUTH_RATE_LIMIT_BURST", "100000")
 
-	issuer := os.Getenv("ZITADEL_ISSUER")
-	if issuer == "" {
-		issuer = "http://localhost:8080"
-	}
-	internalAddr := os.Getenv("ZITADEL_INTERNAL_ADDR")
-	pat := os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN")
+	issuer, internalAddr, pat := id.Issuer, id.InternalAddr, id.PAT
 
 	totpService, err := totp.NewService(issuer, internalAddr, pat)
 	if err != nil {
@@ -489,9 +516,11 @@ func buildHarnessRouter(t *testing.T, db *gorm.DB, authService *auth.Service) *g
 	)
 
 	authProxy := v2handlers.NewAuthProxy(v2handlers.AuthProxyConfig{
-		ZitadelIssuer:      issuer,
-		ZitadelInternalURL: issuer,
-		PAT:                pat,
+		ZitadelIssuer:        issuer,
+		ZitadelInternalURL:   issuer,
+		PAT:                  pat,
+		CustomRequestHeaders: id.CustomRequestHeaders,
+		NotificationMode:     id.NotificationMode,
 	})
 
 	// SetupRoutes builds its own engine with gin.Default(), which installs Recovery - the same
@@ -565,7 +594,7 @@ func setupGoldenHarness(t *testing.T) *goldenHarness {
 	grantHarnessAccess(t, db, seedUser.ID)
 
 	gin.SetMode(gin.TestMode)
-	router := buildHarnessRouter(t, db, authService)
+	router := buildHarnessRouter(t, db, authService, identityFromEnv())
 
 	return &goldenHarness{
 		db:       db,
@@ -1424,17 +1453,72 @@ type routeManifestEntry struct {
 	Path     string `json:"path"`
 	Excluded string `json:"excluded,omitempty"`
 	Mutating bool   `json:"mutating"`
+	// Handler is the function gin runs last for the route, as gin names it.
+	Handler string `json:"handler"`
+	// Query is the query parameters that handler reads, taken from its source by the pass in
+	// query_extract_test.go (#869). QueryForwarded marks a route that hands its query string on
+	// unread, so its parameters are whatever the system behind it accepts.
+	Query          []string `json:"query,omitempty"`
+	QueryForwarded bool     `json:"query_forwarded,omitempty"`
+}
+
+// backendModuleDir is the backend module's root, from this package's directory.
+const backendModuleDir = "../../../.."
+
+// routeQueries reads every route's query parameters from its handler's source.
+//
+// It fails on anything the pass cannot attribute: a handler name that resolves to no function, a
+// read with no literal name and no rule, a call it cannot follow, and a rule nothing reaches any
+// more. Each of those would otherwise be a parameter missing from the document, or one declared
+// for a handler that stopped reading it, with nothing to notice.
+func routeQueries(t *testing.T, routes gin.RoutesInfo) map[string]routeQuery {
+	t.Helper()
+	e, err := loadQueryExtractor(backendModuleDir, "./...")
+	if err != nil {
+		t.Fatalf("read the handlers' source: %v", err)
+	}
+	out := make(map[string]routeQuery, len(routes))
+	used := map[string]bool{}
+	var problems []string
+	for _, rt := range routes {
+		key := rt.Method + " " + rt.Path
+		q, routeProblems := e.forRoute(rt.Method, rt.Path, rt.Handler, used)
+		for _, p := range routeProblems {
+			problems = append(problems, key+": "+p)
+		}
+		out[key] = q
+	}
+	for rule := range queryRules {
+		if !used[rule] {
+			problems = append(problems, "the query rule for "+rule+" applies to no route; the site it described is gone")
+		}
+	}
+	for route := range queryRouteRules {
+		if !used[route] {
+			problems = append(problems, "the query rule for route "+route+" matches no registered route")
+		}
+	}
+	sort.Strings(problems)
+	if len(problems) > 0 {
+		t.Fatalf("%d problem(s) reading query parameters from the handlers:\n  %s", len(problems), strings.Join(problems, "\n  "))
+	}
+	return out
 }
 
 func writeRouteManifest(t *testing.T, routes gin.RoutesInfo) {
 	t.Helper()
+	queries := routeQueries(t, routes)
 	m := routeManifest{}
 	for _, rt := range routes {
+		q := queries[rt.Method+" "+rt.Path]
 		m.Routes = append(m.Routes, routeManifestEntry{
-			Method:   rt.Method,
-			Path:     rt.Path,
-			Excluded: goldenExclusions[rt.Method+" "+rt.Path],
-			Mutating: !safeMethods[rt.Method],
+			Method:         rt.Method,
+			Path:           rt.Path,
+			Excluded:       goldenExclusions[rt.Method+" "+rt.Path],
+			Mutating:       !safeMethods[rt.Method],
+			Handler:        rt.Handler,
+			Query:          q.Names,
+			QueryForwarded: q.Forwarded,
 		})
 	}
 	sort.Slice(m.Routes, func(i, j int) bool {

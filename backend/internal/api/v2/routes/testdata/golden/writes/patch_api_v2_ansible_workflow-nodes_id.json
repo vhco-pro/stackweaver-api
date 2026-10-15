@@ -1,0 +1,109 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/ansible/workflow-nodes/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "extra-vars": "{\"reboot\":false}",
+          "limit": "webservers",
+          "position-x": 80,
+          "position-y": 120,
+          "skip-tags": "slow",
+          "verbosity": 2
+        },
+        "type": "ansible-workflow-nodes"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "all-parents-must-converge": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "extra-vars": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "limit": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "position-x": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "position-y": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "skip-tags": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "tags": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "verbosity": {
+                  "type": "integer",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.UpdateNodeRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "all-parents-must-converge": false,
+        "approval-message": "",
+        "approval-timeout": 0,
+        "created-at": "\u003ctimestamp\u003e",
+        "extra-vars": "{\"reboot\":false}",
+        "identifier": "patch",
+        "job-template-name": "patch-linux-fleet",
+        "limit": "webservers",
+        "node-type": "job_template",
+        "position-x": 80,
+        "position-y": 120,
+        "skip-tags": "slow",
+        "tags": "",
+        "verbosity": 2
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "job-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        },
+        "workflow": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-workflows"
+          }
+        }
+      },
+      "type": "ansible-workflow-nodes"
+    }
+  }
+}

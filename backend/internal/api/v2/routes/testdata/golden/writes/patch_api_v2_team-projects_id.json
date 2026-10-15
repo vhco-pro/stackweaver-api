@@ -1,0 +1,130 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/team-projects/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "access": "maintain"
+        },
+        "type": "team-projects"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "access": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "project-access": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "teams": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "variable-sets": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                },
+                "workspace-access": {
+                  "type": "object",
+                  "properties": {
+                    "create": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "delete": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "locking": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "move": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "run-tasks": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "runs": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "sentinel-mocks": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "state-versions": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "variables": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateTeamProjectAccessRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "access": "maintain"
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/team-projects/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        },
+        "team": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "teams"
+          }
+        }
+      },
+      "type": "team-projects"
+    }
+  }
+}

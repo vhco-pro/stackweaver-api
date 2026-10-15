@@ -1,0 +1,147 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/organizations/:name/teams/:teamName",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Updated by the golden write harness",
+          "organization-access": {
+            "manage-run-tasks": true,
+            "manage-workspaces": false,
+            "read-workspaces": true
+          },
+          "visibility": "organization"
+        },
+        "type": "teams"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "allow-member-token-management": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "organization-access": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "sso-team-id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "visibility": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateTeamRequestV2"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "allow-member-token-management": true,
+        "name": "application-developers",
+        "organization-access": {
+          "access-secret-teams": false,
+          "manage-agent-pools": false,
+          "manage-ansible": false,
+          "manage-ansible-credentials": false,
+          "manage-ansible-inventories": false,
+          "manage-ansible-job-templates": false,
+          "manage-ansible-jobs": false,
+          "manage-ansible-playbooks": false,
+          "manage-ansible-schedules": false,
+          "manage-membership": false,
+          "manage-modules": false,
+          "manage-organization-access": false,
+          "manage-policies": false,
+          "manage-policy-overrides": false,
+          "manage-projects": false,
+          "manage-providers": false,
+          "manage-run-tasks": true,
+          "manage-teams": false,
+          "manage-vcs-settings": false,
+          "manage-workspaces": false,
+          "read-ansible": false,
+          "read-ansible-credentials": false,
+          "read-ansible-inventories": false,
+          "read-ansible-job-templates": false,
+          "read-ansible-jobs": false,
+          "read-ansible-playbooks": false,
+          "read-ansible-schedules": false,
+          "read-projects": false,
+          "read-workspaces": true
+        },
+        "permissions": {
+          "can-destroy": true,
+          "can-update-api-token": true,
+          "can-update-membership": true,
+          "can-update-organization-access": true,
+          "can-update-visibility": true
+        },
+        "sso-team-id": null,
+        "users-count": 3,
+        "visibility": "organization"
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/teams/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "authentication-token": {
+          "meta": {}
+        },
+        "organization-memberships": {
+          "data": []
+        },
+        "users": {
+          "data": [
+            {
+              "id": "\u003cuuid\u003e",
+              "type": "users"
+            },
+            {
+              "id": "\u003cuuid\u003e",
+              "type": "users"
+            },
+            {
+              "id": "\u003cuuid\u003e",
+              "type": "users"
+            }
+          ]
+        }
+      },
+      "type": "teams"
+    }
+  }
+}

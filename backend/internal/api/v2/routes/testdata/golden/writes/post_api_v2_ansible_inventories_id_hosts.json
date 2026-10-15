@@ -1,0 +1,97 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/inventories/:id/hosts",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Recorded by the golden write harness",
+          "enabled": true,
+          "hostname": "10.0.1.12",
+          "name": "web-02.demo.internal",
+          "port": 22,
+          "variables": {
+            "ansible_user": "deploy",
+            "http_port": 8080
+          }
+        },
+        "type": "ansible-hosts"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer"
+                },
+                "variables": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateHostRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "enabled": true,
+        "hostname": "10.0.1.12",
+        "name": "web-02.demo.internal",
+        "port": 22,
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {
+          "ansible_user": "deploy",
+          "http_port": 8080
+        }
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "groups": {
+          "data": []
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        }
+      },
+      "type": "ansible-hosts"
+    }
+  }
+}

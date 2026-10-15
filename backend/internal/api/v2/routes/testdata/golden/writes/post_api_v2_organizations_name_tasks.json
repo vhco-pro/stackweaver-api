@@ -1,0 +1,125 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/tasks",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "category": "task",
+          "description": "Recorded by the golden write harness",
+          "enabled": true,
+          "global-configuration": {
+            "enabled": true,
+            "enforcement-level": "advisory",
+            "stages": [
+              "post_plan"
+            ]
+          },
+          "hmac-key": "\u003csecret\u003e",
+          "name": "cost-estimate",
+          "url": "https://run-tasks.example.com/run-tasks/cost-estimate"
+        },
+        "type": "tasks"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "global-configuration": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "enforcement-level": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "stages": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "hmac-key": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "url": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.runTaskRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "category": "task",
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "enabled": true,
+        "global-configuration": {
+          "enabled": true,
+          "enforcement-level": "advisory",
+          "stages": [
+            "post_plan"
+          ]
+        },
+        "name": "cost-estimate",
+        "updated-at": "\u003ctimestamp\u003e",
+        "url": "https://run-tasks.example.com/run-tasks/cost-estimate"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "workspace-tasks": {
+          "data": []
+        }
+      },
+      "type": "tasks"
+    }
+  }
+}

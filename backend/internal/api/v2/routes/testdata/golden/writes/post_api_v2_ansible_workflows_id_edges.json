@@ -1,0 +1,114 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/workflows/:id/edges",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "condition": "on_success"
+        },
+        "relationships": {
+          "source-node": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-workflow-nodes"
+            }
+          },
+          "target-node": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-workflow-nodes"
+            }
+          }
+        },
+        "type": "ansible-workflow-edges"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "type": "string"
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "source-node": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "target-node": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateEdgeRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "condition": "on_success",
+        "created-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "source-node": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-workflow-nodes"
+          }
+        },
+        "target-node": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-workflow-nodes"
+          }
+        },
+        "workflow": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-workflows"
+          }
+        }
+      },
+      "type": "ansible-workflow-edges"
+    }
+  }
+}

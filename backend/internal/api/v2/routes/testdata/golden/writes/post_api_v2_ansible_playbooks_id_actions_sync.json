@@ -1,0 +1,47 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/playbooks/:id/actions/sync",
+  "request": {
+    "takes_none": true
+  },
+  "status": 202,
+  "response": {
+    "data": {
+      "attributes": {
+        "cached-at": null,
+        "cached-commit": "",
+        "cached-size-bytes": 0,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "last-sync-at": null,
+        "last-sync-commit": "",
+        "last-sync-error": "",
+        "last-sync-status": "syncing",
+        "name": "golden-write-synced",
+        "playbook-path": "playbooks/site.yml",
+        "source-mode": "fresh",
+        "updated-at": "\u003ctimestamp\u003e",
+        "vcs-account-name": "stackweaver-demo",
+        "vcs-branch": "main",
+        "vcs-provider": "github",
+        "vcs-repository": "stackweaver-demo/ansible-playbooks"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        },
+        "vcs-connection": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "vcs-connections"
+          }
+        }
+      },
+      "type": "ansible-playbooks"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "method": "POST",
+  "path": "/api/v2/varsets/:id/relationships/workspaces",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": [
+        {
+          "id": "\u003cid\u003e",
+          "type": "workspaces"
+        }
+      ]
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Data []struct { Type string \"json:\\\"type\\\"\"; ID string \"json:\\\"id\\\"\" } \"json:\\\"data\\\"\" }"
+  },
+  "status": 204
+}

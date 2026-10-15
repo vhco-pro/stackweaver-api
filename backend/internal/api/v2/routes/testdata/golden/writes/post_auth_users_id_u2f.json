@@ -1,0 +1,89 @@
+{
+  "method": "POST",
+  "path": "/auth/users/:id/u2f",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "domain": "localhost"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "example"
+  },
+  "status": 200,
+  "response": {
+    "details": {
+      "changeDate": "\u003ctimestamp\u003e",
+      "resourceOwner": "\u003cid\u003e",
+      "sequence": "\u003csequence\u003e"
+    },
+    "publicKeyCredentialCreationOptions": {
+      "publicKey": {
+        "attestation": "none",
+        "authenticatorSelection": {
+          "userVerification": "required"
+        },
+        "challenge": "\u003cvaries\u003e",
+        "pubKeyCredParams": [
+          {
+            "alg": -257,
+            "type": "public-key"
+          },
+          {
+            "alg": -258,
+            "type": "public-key"
+          },
+          {
+            "alg": -259,
+            "type": "public-key"
+          },
+          {
+            "alg": -35,
+            "type": "public-key"
+          },
+          {
+            "alg": -36,
+            "type": "public-key"
+          },
+          {
+            "alg": -37,
+            "type": "public-key"
+          },
+          {
+            "alg": -38,
+            "type": "public-key"
+          },
+          {
+            "alg": -39,
+            "type": "public-key"
+          },
+          {
+            "alg": -7,
+            "type": "public-key"
+          },
+          {
+            "alg": -8,
+            "type": "public-key"
+          }
+        ],
+        "rp": {
+          "id": "localhost",
+          "name": "ZITADEL"
+        },
+        "timeout": 300000,
+        "user": {
+          "displayName": "Golden Write",
+          "id": "\u003cuser-id-base64url\u003e",
+          "name": "\u003clogin-name\u003e"
+        }
+      }
+    },
+    "u2fId": "\u003cid\u003e"
+  }
+}

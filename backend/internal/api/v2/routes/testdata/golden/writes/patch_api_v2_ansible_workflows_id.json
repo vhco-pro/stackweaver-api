@@ -1,0 +1,109 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/ansible/workflows/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "allow-simultaneous": true,
+          "ask-inventory-on-launch": true,
+          "description": "Updated by the golden write harness",
+          "extra-vars": "{\"environment\":\"production\",\"canary\":true}",
+          "limit": "webservers"
+        },
+        "type": "ansible-workflows"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "allow-simultaneous": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "ask-inventory-on-launch": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "ask-limit-on-launch": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "ask-variables-on-launch": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "extra-vars": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "limit": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "survey-enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.UpdateWorkflowRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "allow-simultaneous": true,
+        "ask-inventory-on-launch": true,
+        "ask-limit-on-launch": false,
+        "ask-variables-on-launch": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Updated by the golden write harness",
+        "extra-vars": "{\"environment\":\"production\",\"canary\":true}",
+        "limit": "webservers",
+        "name": "patch-and-verify",
+        "survey-enabled": false,
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-workflows"
+    }
+  }
+}

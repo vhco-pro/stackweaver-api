@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runs/:id/actions/discard",
+  "request": {
+    "takes_none": true
+  },
+  "status": 202
+}

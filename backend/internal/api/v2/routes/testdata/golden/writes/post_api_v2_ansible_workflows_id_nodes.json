@@ -1,0 +1,182 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/workflows/:id/nodes",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "all-parents-must-converge": true,
+          "extra-vars": "{\"smoke_tests\":true}",
+          "identifier": "verify",
+          "limit": "webservers",
+          "node-type": "job_template",
+          "position-x": 320,
+          "position-y": 120,
+          "tags": "verify",
+          "verbosity": 1
+        },
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "job-template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          }
+        },
+        "type": "ansible-workflow-nodes"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "all-parents-must-converge": {
+                  "type": "boolean"
+                },
+                "approval-message": {
+                  "type": "string"
+                },
+                "approval-timeout": {
+                  "type": "integer"
+                },
+                "extra-vars": {
+                  "type": "string"
+                },
+                "identifier": {
+                  "type": "string"
+                },
+                "limit": {
+                  "type": "string"
+                },
+                "node-type": {
+                  "type": "string"
+                },
+                "position-x": {
+                  "type": "number"
+                },
+                "position-y": {
+                  "type": "number"
+                },
+                "skip-tags": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "string"
+                },
+                "verbosity": {
+                  "type": "integer"
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "credential": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "inventory": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "job-template": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateNodeRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "all-parents-must-converge": true,
+        "approval-message": "",
+        "approval-timeout": 0,
+        "created-at": "\u003ctimestamp\u003e",
+        "extra-vars": "{\"smoke_tests\": true}",
+        "identifier": "verify",
+        "limit": "webservers",
+        "node-type": "job_template",
+        "position-x": 320,
+        "position-y": 120,
+        "skip-tags": "",
+        "tags": "verify",
+        "verbosity": 1
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "job-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        },
+        "workflow": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-workflows"
+          }
+        }
+      },
+      "type": "ansible-workflow-nodes"
+    }
+  }
+}

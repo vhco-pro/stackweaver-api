@@ -1,0 +1,39 @@
+{
+  "method": "POST",
+  "path": "/api/v2/tokens",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "description": "Laptop CLI",
+      "expires_at": "\u003ctimestamp\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateTokenRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created_at": "\u003ctimestamp\u003e",
+        "description": "Laptop CLI",
+        "expires_at": "\u003ctimestamp\u003e",
+        "token": "\u003csecret\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "tokens"
+    }
+  }
+}

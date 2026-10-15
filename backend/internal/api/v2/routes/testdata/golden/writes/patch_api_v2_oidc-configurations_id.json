@@ -1,0 +1,76 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/oidc-configurations/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "service-account-email": "stackweaver-readonly@acme-platform.iam.gserviceaccount.com"
+        },
+        "type": "gcp-oidc-configurations"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "project-number": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "service-account-email": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "workload-provider-name": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateGCPOIDCConfigRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "project-number": "123456789012",
+        "service-account-email": "stackweaver-readonly@acme-platform.iam.gserviceaccount.com",
+        "workload-provider-name": "projects/123456789012/locations/global/workloadIdentityPools/stackweaver/providers/stackweaver-oidc"
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/oidc-configurations/\u003cid\u003e"
+      },
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "gcp-oidc-configurations"
+    }
+  }
+}

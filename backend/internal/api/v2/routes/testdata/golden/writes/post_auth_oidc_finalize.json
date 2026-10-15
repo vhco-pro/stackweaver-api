@@ -1,0 +1,37 @@
+{
+  "method": "POST",
+  "path": "/auth/oidc/finalize",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "authRequestId": "\u003cauth-request-id\u003e",
+      "sessionId": "\u003csession-id\u003e",
+      "sessionToken": "\u003csecret\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "authRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionToken": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { AuthRequestID string \"json:\\\"authRequestId\\\"\"; SessionID string \"json:\\\"sessionId\\\"\"; SessionToken string \"json:\\\"sessionToken\\\"\" }"
+  },
+  "status": 200,
+  "response": {
+    "callbackUrl": "\u003csecret\u003e",
+    "details": {
+      "changeDate": "\u003ctimestamp\u003e",
+      "resourceOwner": "\u003cid\u003e",
+      "sequence": "\u003csequence\u003e"
+    }
+  }
+}

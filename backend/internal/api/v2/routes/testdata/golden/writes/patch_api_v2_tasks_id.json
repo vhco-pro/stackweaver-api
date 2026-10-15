@@ -1,0 +1,125 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/tasks/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "category": "task",
+          "description": "Updated by the golden write harness",
+          "enabled": false,
+          "global-configuration": {
+            "enabled": true,
+            "enforcement-level": "advisory",
+            "stages": [
+              "post_plan",
+              "pre_apply"
+            ]
+          },
+          "name": "drift-scanner"
+        },
+        "type": "tasks"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "global-configuration": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "enforcement-level": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "stages": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "hmac-key": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "url": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.runTaskRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "category": "task",
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Updated by the golden write harness",
+        "enabled": false,
+        "global-configuration": {
+          "enabled": true,
+          "enforcement-level": "advisory",
+          "stages": [
+            "post_plan",
+            "pre_apply"
+          ]
+        },
+        "name": "drift-scanner",
+        "updated-at": "\u003ctimestamp\u003e",
+        "url": "https://tasks.example.invalid/drift"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "workspace-tasks": {
+          "data": []
+        }
+      },
+      "type": "tasks"
+    }
+  }
+}

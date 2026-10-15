@@ -1,0 +1,155 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/workflows",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "allow-simultaneous": true,
+          "ask-limit-on-launch": true,
+          "ask-variables-on-launch": true,
+          "description": "Recorded by the golden write harness",
+          "extra-vars": "{\"environment\":\"staging\"}",
+          "limit": "webservers",
+          "name": "golden-write-workflow"
+        },
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "project": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "projects"
+            }
+          }
+        },
+        "type": "ansible-workflows"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "allow-simultaneous": {
+                  "type": "boolean"
+                },
+                "ask-inventory-on-launch": {
+                  "type": "boolean"
+                },
+                "ask-limit-on-launch": {
+                  "type": "boolean"
+                },
+                "ask-variables-on-launch": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "extra-vars": {
+                  "type": "string"
+                },
+                "limit": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "survey-enabled": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "inventory": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "project": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateWorkflowRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "allow-simultaneous": true,
+        "ask-inventory-on-launch": false,
+        "ask-limit-on-launch": true,
+        "ask-variables-on-launch": true,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "extra-vars": "{\"environment\": \"staging\"}",
+        "limit": "webservers",
+        "name": "golden-write-workflow",
+        "survey-enabled": false,
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-workflows"
+    }
+  }
+}

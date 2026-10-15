@@ -1,0 +1,170 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/inventories/:id/sources",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "config": {
+            "regions": [
+              "eu-central-1"
+            ]
+          },
+          "credential-id": "\u003cuuid\u003e",
+          "description": "Recorded by the golden write harness",
+          "group-by-region": true,
+          "group-by-tag": "Environment",
+          "hostname-var": "private_ip",
+          "name": "aws-eu-central-1",
+          "overwrite": true,
+          "source-type": "aws",
+          "sync-schedule": "0 */6 * * *",
+          "update-cache-timeout": 300,
+          "update-on-launch": true
+        },
+        "type": "inventory-sources"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "credential-id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "group-by-availability-zone": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "group-by-instance-id": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "group-by-region": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "group-by-tag": {
+                  "type": "string"
+                },
+                "hostname-var": {
+                  "type": "string"
+                },
+                "instance-filters": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "overwrite": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "overwrite-vars": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "source-type": {
+                  "type": "string"
+                },
+                "sync-schedule": {
+                  "type": "string"
+                },
+                "update-cache-timeout": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "update-on-launch": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "verbosity": {
+                  "type": "integer",
+                  "nullable": true
+                }
+              },
+              "required": [
+                "name",
+                "source-type"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.CreateInventorySourceRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "config": {
+          "regions": [
+            "eu-central-1"
+          ]
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "enabled": true,
+        "group-by-availability-zone": false,
+        "group-by-instance-id": false,
+        "group-by-region": true,
+        "group-by-tag": "Environment",
+        "hostname-var": "private_ip",
+        "hosts-count": 0,
+        "instance-filters": "",
+        "last-sync-at": null,
+        "last-sync-error": "",
+        "last-sync-log": "",
+        "name": "aws-eu-central-1",
+        "overwrite": true,
+        "overwrite-vars": false,
+        "source-type": "aws",
+        "status": "never_synced",
+        "sync-schedule": "0 */6 * * *",
+        "update-cache-timeout": 300,
+        "update-on-launch": true,
+        "updated-at": "\u003ctimestamp\u003e",
+        "verbosity": 0
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "credential": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-credentials"
+          }
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        }
+      },
+      "type": "inventory-sources"
+    }
+  }
+}

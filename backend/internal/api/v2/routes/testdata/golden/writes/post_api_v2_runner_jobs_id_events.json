@@ -1,0 +1,40 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/jobs/:id/events",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "event": "galaxy_install",
+      "failed": false,
+      "stderr": "",
+      "stdout": "Starting galaxy collection install process\ncommunity.general:9.4.0 was installed successfully\n",
+      "task": "Install collections from requirements.yml"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "stdout": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.JobEventRequest"
+  },
+  "status": 200,
+  "response": {
+    "status": "received"
+  }
+}

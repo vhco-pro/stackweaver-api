@@ -1,0 +1,87 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/playbooks/actions/find-or-create",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "branch": "main",
+      "name": "golden-write-hardening",
+      "path": "playbooks/hardening.yml",
+      "project_id": "\u003cuuid\u003e",
+      "repository": "stackweaver-demo/ansible-playbooks",
+      "source_mode": "fresh",
+      "vcs_connection_id": "\u003cuuid\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "source_mode": {
+          "type": "string"
+        },
+        "vcs_connection_id": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.FindOrCreateRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "cached-at": null,
+        "cached-commit": "",
+        "cached-size-bytes": 0,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "",
+        "last-sync-at": null,
+        "last-sync-commit": "",
+        "last-sync-error": "",
+        "last-sync-status": "syncing",
+        "name": "golden-write-hardening",
+        "playbook-path": "playbooks/hardening.yml",
+        "source-mode": "fresh",
+        "updated-at": "\u003ctimestamp\u003e",
+        "vcs-account-name": "stackweaver-demo",
+        "vcs-branch": "main",
+        "vcs-provider": "github",
+        "vcs-repository": "stackweaver-demo/ansible-playbooks"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        },
+        "vcs-connection": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "vcs-connections"
+          }
+        }
+      },
+      "type": "ansible-playbooks"
+    },
+    "meta": {
+      "created": true
+    }
+  }
+}

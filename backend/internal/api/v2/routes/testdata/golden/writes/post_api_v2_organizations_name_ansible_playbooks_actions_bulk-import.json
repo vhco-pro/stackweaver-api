@@ -1,0 +1,82 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/playbooks/actions/bulk-import",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "branch": "main",
+      "playbooks": [
+        {
+          "name": "golden-write-webservers",
+          "path": "playbooks/webservers.yml"
+        },
+        {
+          "name": "golden-write-databases",
+          "path": "playbooks/databases.yml"
+        }
+      ],
+      "project_id": "\u003cuuid\u003e",
+      "repository": "stackweaver-demo/ansible-playbooks",
+      "source_mode": "cached",
+      "vcs_connection_id": "\u003cuuid\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "playbooks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "source_mode": {
+          "type": "string"
+        },
+        "vcs_connection_id": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.BulkImportRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "created": 2,
+      "failed": 0,
+      "results": [
+        {
+          "name": "golden-write-databases",
+          "path": "playbooks/databases.yml",
+          "playbook_id": "\u003cuuid\u003e",
+          "status": "created"
+        },
+        {
+          "name": "golden-write-webservers",
+          "path": "playbooks/webservers.yml",
+          "playbook_id": "\u003cuuid\u003e",
+          "status": "created"
+        }
+      ],
+      "skipped": 0
+    }
+  }
+}

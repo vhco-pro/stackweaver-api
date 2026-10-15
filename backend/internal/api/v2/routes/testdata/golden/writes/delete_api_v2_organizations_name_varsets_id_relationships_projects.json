@@ -1,0 +1,37 @@
+{
+  "method": "DELETE",
+  "path": "/api/v2/organizations/:name/varsets/:id/relationships/projects",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": [
+        {
+          "id": "\u003cuuid\u003e",
+          "type": "projects"
+        }
+      ]
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Data []struct { Type string \"json:\\\"type\\\"\"; ID string \"json:\\\"id\\\"\" } \"json:\\\"data\\\"\" }"
+  },
+  "status": 204
+}

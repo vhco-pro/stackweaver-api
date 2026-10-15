@@ -1,0 +1,162 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/ansible/inventories/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Updated by the golden write harness",
+          "variables": {
+            "ansible_port": 2222,
+            "ansible_user": "deploy"
+          }
+        },
+        "type": "inventories"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "constructed-cache-timeout": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "constructed-limit": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "input-inventory-ids": {
+                  "type": "array",
+                  "nullable": true,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "inventory_path": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "source": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "source-vars": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "variables": {
+                  "type": "object",
+                  "nullable": true,
+                  "additionalProperties": true
+                },
+                "vcs_branch": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "vcs_repository": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "project": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "vcs_connection": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.UpdateInventoryRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "constructed-cache-timeout": 0,
+        "constructed-limit": "",
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Updated by the golden write harness",
+        "inventory-type": "static",
+        "last-sync-at": null,
+        "last-sync-error": "",
+        "last-sync-hosts-discovered": 0,
+        "last-sync-log": "",
+        "last-sync-status": "",
+        "name": "production",
+        "source": "",
+        "source-vars": "",
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {
+          "ansible_port": 2222,
+          "ansible_user": "deploy"
+        },
+        "vcs_branch": "main"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "ansible-inventories"
+    }
+  }
+}

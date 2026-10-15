@@ -1,0 +1,187 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/varsets",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Recorded by the golden write harness",
+          "global": false,
+          "name": "golden-write-varset",
+          "priority": true
+        },
+        "relationships": {
+          "projects": {
+            "data": [
+              {
+                "id": "\u003cuuid\u003e",
+                "type": "projects"
+              }
+            ]
+          },
+          "vars": {
+            "data": [
+              {
+                "attributes": {
+                  "category": "terraform",
+                  "description": "Region every workspace deploys to.",
+                  "key": "region",
+                  "value": "eu-west-1"
+                },
+                "type": "vars"
+              },
+              {
+                "attributes": {
+                  "category": "env",
+                  "key": "DEPLOY_TOKEN",
+                  "sensitive": true,
+                  "value": "\u003csecret\u003e"
+                },
+                "type": "vars"
+              }
+            ]
+          },
+          "workspaces": {
+            "data": [
+              {
+                "id": "\u003cid\u003e",
+                "type": "workspaces"
+              }
+            ]
+          }
+        },
+        "type": "varsets"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "global": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "parent": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "projects": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                },
+                "vars": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                },
+                "workspaces": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attributes",
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateVariableSetRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "description": "Recorded by the golden write harness",
+        "global": false,
+        "name": "golden-write-varset",
+        "priority": true,
+        "project-count": 1,
+        "updated-at": "\u003ctimestamp\u003e",
+        "var-count": 2,
+        "workspace-count": 1
+      },
+      "id": "\u003cid\u003e",
+      "links": {
+        "self": "/api/v2/varsets/\u003cid\u003e"
+      },
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "parent": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "vars": {
+          "data": []
+        }
+      },
+      "type": "varsets"
+    }
+  }
+}

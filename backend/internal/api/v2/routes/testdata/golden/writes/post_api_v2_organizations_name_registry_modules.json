@@ -1,0 +1,57 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/registry/modules",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "auto_publish_tags": false,
+      "description": "Recorded by the golden write harness",
+      "name": "golden-write",
+      "provider": "aws"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "auto_publish_tags": {
+          "type": "boolean",
+          "nullable": true
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "vcs_connection_id": {
+          "nullable": true
+        },
+        "vcs_repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provider"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Name string \"json:\\\"name\\\" binding:\\\"required\\\"\"; Provider string \"json:\\\"provider\\\" binding:\\\"required\\\"\"; Description string \"json:\\\"description\\\"\"; VCSConnectionID *uuid.UUID \"json:\\\"vcs_connection_id,omitempty\\\"\"; VCSRepository string \"json:\\\"vcs_repository,omitempty\\\"\"; AutoPublishTags *bool \"json:\\\"auto_publish_tags\\\"\" }"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "auto_publish_tags": false,
+        "description": "Recorded by the golden write harness",
+        "name": "golden-write",
+        "provider": "aws",
+        "vcs_repository": ""
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "registry-modules"
+    }
+  }
+}

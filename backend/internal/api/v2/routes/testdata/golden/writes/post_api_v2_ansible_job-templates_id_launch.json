@@ -1,0 +1,134 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/job-templates/:id/launch",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "extra-vars": {
+            "release": "1.4.2"
+          },
+          "limit": "web"
+        },
+        "type": "ansible-jobs"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "extra-vars": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "limit": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "skip-tags": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "tags": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.LaunchFromTemplateRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "ansible-version": "",
+        "become-enabled": false,
+        "created-at": "\u003ctimestamp\u003e",
+        "diff-mode": false,
+        "error-message": "",
+        "exit-code": null,
+        "extra-vars": {
+          "release": "1.4.2",
+          "stackweaver_inventory_id": "\u003cuuid\u003e",
+          "stackweaver_job_template_id": "\u003cuuid\u003e",
+          "stackweaver_playbook_id": "\u003cuuid\u003e",
+          "stackweaver_project_id": "\u003cuuid\u003e"
+        },
+        "finished-at": null,
+        "forks": 5,
+        "has-warnings": false,
+        "hosts-changed": 0,
+        "hosts-failed": 0,
+        "hosts-ignored": 0,
+        "hosts-ok": 0,
+        "hosts-rescued": 0,
+        "hosts-skipped": 0,
+        "hosts-total": 0,
+        "hosts-unreachable": 0,
+        "job-type": "run",
+        "limit": "web",
+        "name": "baseline-compliance - \u003ctimestamp\u003e",
+        "runner-id": null,
+        "skip-tags": "",
+        "slice-count": 0,
+        "slice-group-id": null,
+        "slice-number": 0,
+        "started-at": null,
+        "status": "pending",
+        "tags": "",
+        "updated-at": "\u003ctimestamp\u003e",
+        "verbosity": 0,
+        "warnings-count": 0
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "created-by": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "users"
+          }
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "playbook": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-playbooks"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        },
+        "template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        }
+      },
+      "type": "ansible-jobs"
+    }
+  }
+}

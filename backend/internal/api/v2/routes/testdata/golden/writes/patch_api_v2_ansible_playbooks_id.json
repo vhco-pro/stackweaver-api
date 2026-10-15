@@ -1,0 +1,121 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/ansible/playbooks/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Updated by the golden write harness",
+          "playbook-path": "playbooks/deploy-app.yml",
+          "source-mode": "cached",
+          "vcs-branch": "release"
+        },
+        "type": "ansible-playbooks"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "playbook-path": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "source-mode": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "vcs-branch": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "vcs-repository": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "id": {
+              "type": "string"
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "vcs-connection": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.UpdatePlaybookRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "cached-at": null,
+        "cached-commit": "",
+        "cached-size-bytes": 0,
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Updated by the golden write harness",
+        "last-sync-at": null,
+        "last-sync-commit": "",
+        "last-sync-error": "",
+        "last-sync-status": "",
+        "name": "deploy-app",
+        "playbook-path": "playbooks/deploy-app.yml",
+        "source-mode": "cached",
+        "updated-at": "\u003ctimestamp\u003e",
+        "vcs-account-name": "",
+        "vcs-branch": "release",
+        "vcs-provider": "",
+        "vcs-repository": ""
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-playbooks"
+    }
+  }
+}

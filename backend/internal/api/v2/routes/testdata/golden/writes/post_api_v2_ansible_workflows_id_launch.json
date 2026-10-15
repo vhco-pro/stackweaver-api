@@ -1,0 +1,46 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/workflows/:id/launch",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "extra_vars": {
+        "canary": true,
+        "release": "1.4.2"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "extra_vars": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { ExtraVars map[string]interface {} \"json:\\\"extra_vars\\\"\" }"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "finished-at": null,
+        "name": "patch-and-verify #\u003cunix-time\u003e",
+        "started-at": "\u003ctimestamp\u003e",
+        "status": "running"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "workflow": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-workflows"
+          }
+        }
+      },
+      "type": "ansible-workflow-jobs"
+    }
+  }
+}

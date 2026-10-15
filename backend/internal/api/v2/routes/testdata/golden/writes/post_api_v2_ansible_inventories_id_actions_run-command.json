@@ -1,0 +1,135 @@
+{
+  "method": "POST",
+  "path": "/api/v2/ansible/inventories/:id/actions/run-command",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "become-enabled": true,
+          "credential-id": "\u003cuuid\u003e",
+          "forks": 10,
+          "limit": "webservers",
+          "module": "shell",
+          "module-args": "uptime",
+          "verbosity": 1
+        },
+        "type": "ansible-jobs"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "agent-pool-id": {
+                  "type": "string"
+                },
+                "become-enabled": {
+                  "type": "boolean"
+                },
+                "credential-id": {
+                  "type": "string"
+                },
+                "extra-vars": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "forks": {
+                  "type": "integer"
+                },
+                "limit": {
+                  "type": "string"
+                },
+                "module": {
+                  "type": "string"
+                },
+                "module-args": {
+                  "type": "string"
+                },
+                "project-id": {
+                  "type": "string"
+                },
+                "verbosity": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "module"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Data struct { Attributes struct { Module string \"json:\\\"module\\\" binding:\\\"required\\\"\"; ModuleArgs string \"json:\\\"module-args\\\"\"; Limit string \"json:\\\"limit\\\"\"; ProjectID string \"json:\\\"project-id\\\"\"; CredentialID string \"json:\\\"credential-id\\\"\"; AgentPoolID string \"json:\\\"agent-pool-id\\\"\"; Verbosity int \"json:\\\"verbosity\\\"\"; Forks int \"json:\\\"forks\\\"\"; BecomeEnabled bool \"json:\\\"become-enabled\\\"\"; ExtraVars models.JobExtraVars \"json:\\\"extra-vars\\\"\" } \"json:\\\"attributes\\\"\" } \"json:\\\"data\\\"\" }"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "ansible-version": "",
+        "become-enabled": true,
+        "created-at": "\u003ctimestamp\u003e",
+        "diff-mode": false,
+        "error-message": "",
+        "exit-code": null,
+        "extra-vars": {},
+        "finished-at": null,
+        "forks": 10,
+        "has-warnings": false,
+        "hosts-changed": 0,
+        "hosts-failed": 0,
+        "hosts-ignored": 0,
+        "hosts-ok": 0,
+        "hosts-rescued": 0,
+        "hosts-skipped": 0,
+        "hosts-total": 0,
+        "hosts-unreachable": 0,
+        "job-type": "adhoc",
+        "limit": "webservers",
+        "module": "shell",
+        "module-args": "uptime",
+        "name": "Ad hoc: shell",
+        "runner-id": null,
+        "skip-tags": "",
+        "slice-count": 0,
+        "slice-group-id": null,
+        "slice-number": 0,
+        "started-at": null,
+        "status": "pending",
+        "tags": "",
+        "updated-at": "\u003ctimestamp\u003e",
+        "verbosity": 1,
+        "warnings-count": 0
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "created-by": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "users"
+          }
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "project": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "ansible-jobs"
+    }
+  }
+}

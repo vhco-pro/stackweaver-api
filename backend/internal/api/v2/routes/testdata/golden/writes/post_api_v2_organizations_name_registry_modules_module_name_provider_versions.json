@@ -1,0 +1,22 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions",
+  "request": {
+    "content_type": "multipart/form-data",
+    "form": {
+      "file": "\u003cfile\u003e",
+      "version": "3.0.0"
+    }
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "published_at": "\u003ctimestamp\u003e",
+        "version": "3.0.0"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "registry-module-versions"
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/jobs/:id/complete",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "exit_code": 0,
+      "has_changes": true,
+      "output_changes": 0,
+      "plan_json": "{\"format_version\":\"1.2\",\"resource_changes\":[{\"address\":\"null_resource.example\",\"mode\":\"managed\",\"type\":\"null_resource\",\"name\":\"example\",\"change\":{\"actions\":[\"create\"]}}]}",
+      "resource_additions": 1,
+      "resource_changes": 0,
+      "resource_destructions": 0,
+      "runner_id": "\u003cuuid\u003e",
+      "status": "completed"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "error_message": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "has_changes": {
+          "type": "boolean"
+        },
+        "output": {
+          "type": "string"
+        },
+        "output_changes": {
+          "type": "integer"
+        },
+        "plan_json": {
+          "type": "string"
+        },
+        "resource_additions": {
+          "type": "integer"
+        },
+        "resource_changes": {
+          "type": "integer"
+        },
+        "resource_destructions": {
+          "type": "integer"
+        },
+        "runner_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner_id",
+        "status"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.JobCompleteRequest"
+  },
+  "status": 200,
+  "response": {
+    "status": "completed"
+  }
+}

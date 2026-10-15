@@ -1,0 +1,72 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/vcs-connections",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "access_token": "\u003csecret\u003e",
+      "account_name": "acme-platform",
+      "account_type": "organization",
+      "provider": "gitlab",
+      "refresh_token": "\u003csecret\u003e",
+      "token_expires_at": "\u003ctimestamp\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "account_name": {
+          "type": "string"
+        },
+        "account_type": {
+          "type": "string"
+        },
+        "installation_id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "refresh_token": {
+          "type": "string"
+        },
+        "token_expires_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "access_token",
+        "account_name",
+        "account_type",
+        "provider"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateVCSConnectionRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "account_name": "acme-platform",
+        "account_type": "organization",
+        "created_at": "\u003ctimestamp\u003e",
+        "provider": "gitlab",
+        "token_expires_at": "\u003ctimestamp\u003e",
+        "updated_at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "vcs-connections"
+    }
+  }
+}

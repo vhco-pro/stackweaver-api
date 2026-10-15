@@ -1,0 +1,31 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/workspaces/change-requests/:id",
+  "request": {
+    "takes_none": true
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "archived-at": "\u003ctimestamp\u003e",
+        "archived-by": "\u003cuuid\u003e",
+        "created-at": "\u003ctimestamp\u003e",
+        "created-by": "\u003cuuid\u003e",
+        "message": "Part of the storage consolidation. Needs a maintenance window.",
+        "subject": "Move state to the new bucket",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "workspace_change_requests"
+    }
+  }
+}

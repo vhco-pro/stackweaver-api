@@ -1,0 +1,89 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/organization-memberships/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "id": "\u003cuuid\u003e",
+        "type": "organization-memberships"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string"
+                }
+              }
+            },
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Data struct { Type string \"json:\\\"type\\\" binding:\\\"required\\\"\"; ID string \"json:\\\"id\\\" binding:\\\"required\\\"\"; Attributes struct { Role string \"json:\\\"role\\\"\" } \"json:\\\"attributes\\\"\" } \"json:\\\"data\\\" binding:\\\"required\\\"\" }"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "email": "lena.fischer@example.com",
+        "name": "Lena Fischer",
+        "role": null,
+        "status": "active",
+        "username": "lena.fischer@example.com"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "demo",
+            "type": "organizations"
+          }
+        },
+        "teams": {
+          "data": []
+        },
+        "user": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "users"
+          }
+        }
+      },
+      "type": "organization-memberships"
+    },
+    "included": [
+      {
+        "attributes": {
+          "email": "lena.fischer@example.com",
+          "name": "Lena Fischer",
+          "username": "lena.fischer@example.com"
+        },
+        "id": "\u003cuuid\u003e",
+        "type": "users"
+      }
+    ]
+  }
+}

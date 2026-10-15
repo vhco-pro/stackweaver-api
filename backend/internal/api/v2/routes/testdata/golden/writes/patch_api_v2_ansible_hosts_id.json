@@ -1,0 +1,96 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/ansible/hosts/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Updated by the golden write harness",
+          "enabled": false,
+          "hostname": "10.0.1.21",
+          "port": 2222,
+          "variables": {
+            "ansible_user": "deploy"
+          }
+        },
+        "type": "ansible-hosts"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "hostname": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "port": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "variables": {
+                  "type": "object",
+                  "nullable": true,
+                  "additionalProperties": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.UpdateHostRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Updated by the golden write harness",
+        "enabled": false,
+        "hostname": "10.0.1.21",
+        "name": "web-01.demo.internal",
+        "port": 2222,
+        "updated-at": "\u003ctimestamp\u003e",
+        "variables": {
+          "ansible_user": "deploy"
+        }
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "groups": {
+          "data": []
+        },
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        }
+      },
+      "type": "ansible-hosts"
+    }
+  }
+}

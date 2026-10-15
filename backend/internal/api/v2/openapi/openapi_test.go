@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,7 +88,8 @@ func TestEveryResponseReferencesASchema(t *testing.T) {
 	var doc struct {
 		Paths map[string]map[string]struct {
 			Responses map[string]struct {
-				Content map[string]struct {
+				Description string `json:"description"`
+				Content     map[string]struct {
 					Schema map[string]any `json:"schema"`
 				} `json:"content"`
 			} `json:"responses"`
@@ -109,6 +111,12 @@ func TestEveryResponseReferencesASchema(t *testing.T) {
 				// 204 and 304 carry no body by definition (RFC 9110), so demanding a schema
 				// for them would be demanding a contradiction.
 				if code == "204" || code == "304" {
+					continue
+				}
+				// A write recorded answering with an empty body says so, and has nothing to
+				// reference either. Four run actions answer 202 that way, as Terraform
+				// Enterprise does, so the status code alone no longer tells (#869).
+				if len(resp.Content) == 0 && strings.HasSuffix(resp.Description, "No content.") {
 					continue
 				}
 				if len(resp.Content) == 0 {

@@ -1,0 +1,128 @@
+{
+  "method": "POST",
+  "path": "/api/v2/vcs-connections/azure-devops/webhook",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "eventType": "git.push",
+      "notificationId": 14,
+      "publisherId": "tfs",
+      "resource": {
+        "commits": [
+          {
+            "author": {
+              "email": "avery.diaz@example.com",
+              "name": "Avery Diaz"
+            },
+            "comment": "Open the admin port to the bastion subnet",
+            "commitId": "33b55f7cb7e7e245323987634f960cf4a6e6bc74"
+          }
+        ],
+        "refUpdates": [
+          {
+            "name": "refs/heads/main",
+            "newObjectId": "33b55f7cb7e7e245323987634f960cf4a6e6bc74",
+            "oldObjectId": "aad331d8d3b131fa9ae03cf5e53965b51942618a"
+          }
+        ],
+        "repository": {
+          "name": "network",
+          "project": {
+            "name": "Infrastructure"
+          },
+          "remoteUrl": "https://dev.azure.com/acme-platform/Infrastructure/_git/network"
+        }
+      },
+      "subscriptionId": "\u003cuuid\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "eventType": {
+          "type": "string"
+        },
+        "notificationId": {
+          "type": "integer"
+        },
+        "publisherId": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "object",
+          "properties": {
+            "commits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "author": {
+                    "type": "object",
+                    "properties": {
+                      "email": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "comment": {
+                    "type": "string"
+                  },
+                  "commitId": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "refUpdates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "newObjectId": {
+                    "type": "string"
+                  },
+                  "oldObjectId": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "repository": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "project": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "remoteUrl": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "subscriptionId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "schema_source": "example"
+  },
+  "status": 200,
+  "response": {
+    "message": "No workspaces found for this repository and branch"
+  }
+}

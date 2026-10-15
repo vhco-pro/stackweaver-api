@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/users",
+  "named": {
+    "reason": "needs an instance-wide identity-provider setting changed",
+    "detail": "Self sign-up is accepted only while the login policy of the identity provider allows registration, a setting shared by everyone who signs in to the instance. Success needs that setting to allow it, and creates an account that only an administrator of the identity provider can remove."
+  }
+}

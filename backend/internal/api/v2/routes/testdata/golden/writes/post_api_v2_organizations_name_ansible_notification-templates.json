@@ -1,0 +1,67 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/ansible/notification-templates",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "config": {
+        "headers": {
+          "X-Source": "stackweaver"
+        },
+        "method": "POST",
+        "url": "https://hooks.example.com/stackweaver/deploys",
+        "username": "stackweaver"
+      },
+      "description": "Recorded by the golden write harness",
+      "name": "golden-write-deploy-hook",
+      "secret": "\u003csecret\u003e",
+      "type": "webhook"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string",
+          "nullable": true
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.notificationTemplateRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "config": {
+          "headers": {
+            "X-Source": "stackweaver"
+          },
+          "method": "POST",
+          "url": "https://hooks.example.com/stackweaver/deploys",
+          "username": "stackweaver"
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Recorded by the golden write harness",
+        "has-secret": true,
+        "name": "golden-write-deploy-hook",
+        "notification-type": "webhook"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "ansible-notification-templates"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/users/:id/u2f/:u2fId",
+  "named": {
+    "reason": "needs a physical authenticator",
+    "detail": "The body is the credential a security key creates for the challenge that `POST /auth/users/{id}/u2f` returned, signed by the key. Success needs a security key to produce it."
+  }
+}

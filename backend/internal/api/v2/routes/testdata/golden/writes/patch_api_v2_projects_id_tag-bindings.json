@@ -1,0 +1,85 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/projects/:id/tag-bindings",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": [
+        {
+          "attributes": {
+            "key": "environment",
+            "value": "production"
+          },
+          "type": "tag-bindings"
+        },
+        {
+          "attributes": {
+            "key": "owner",
+            "value": "platform-engineering"
+          },
+          "type": "tag-bindings"
+        }
+      ]
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.tagBindingsRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": [
+      {
+        "attributes": {
+          "key": "environment",
+          "value": "production"
+        },
+        "id": "\u003cid\u003e",
+        "type": "tag-bindings"
+      },
+      {
+        "attributes": {
+          "key": "owner",
+          "value": "platform-engineering"
+        },
+        "id": "\u003cid\u003e",
+        "type": "tag-bindings"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 2,
+        "prev-page": null,
+        "total-count": 2,
+        "total-pages": 1
+      }
+    }
+  }
+}

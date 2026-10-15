@@ -1,0 +1,27 @@
+{
+  "method": "POST",
+  "path": "/auth/users/:id/email",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "verificationCode": "\u003csecret\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "verificationCode": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "example"
+  },
+  "status": 200,
+  "response": {
+    "details": {
+      "changeDate": "\u003ctimestamp\u003e",
+      "resourceOwner": "\u003cid\u003e",
+      "sequence": "\u003csequence\u003e"
+    }
+  }
+}

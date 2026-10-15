@@ -1,0 +1,105 @@
+{
+  "method": "POST",
+  "path": "/api/v2/projects/:id/notification-configurations",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "destination-type": "generic",
+          "enabled": true,
+          "name": "golden-write-run-events",
+          "token": "\u003csecret\u003e",
+          "triggers": [
+            "run:needs_attention",
+            "run:completed",
+            "run:errored"
+          ],
+          "url": "https://hooks.example.com/stackweaver/runs"
+        },
+        "type": "notification-configurations"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "destination-type": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "email-addresses": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "token": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "triggers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "url": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "terraform.ncRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "destination-type": "generic",
+        "email-addresses": [],
+        "enabled": true,
+        "name": "golden-write-run-events",
+        "triggers": [
+          "run:completed",
+          "run:errored",
+          "run:needs_attention"
+        ],
+        "updated-at": "\u003ctimestamp\u003e",
+        "url": "https://hooks.example.com/stackweaver/runs"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "subscribable": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "projects"
+          }
+        }
+      },
+      "type": "notification-configurations"
+    }
+  }
+}

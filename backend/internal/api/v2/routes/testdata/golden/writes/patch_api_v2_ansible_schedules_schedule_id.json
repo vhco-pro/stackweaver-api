@@ -1,0 +1,83 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/ansible/schedules/:schedule_id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "config": {
+        "extra_vars": {
+          "reboot": false
+        }
+      },
+      "cron_expression": "15 1 * * *",
+      "description": "Updated by the golden write harness",
+      "name": "nightly-patch-baseline",
+      "timezone": "Europe/Brussels"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "object",
+          "nullable": true,
+          "additionalProperties": true
+        },
+        "cron_expression": {
+          "type": "string",
+          "nullable": true
+        },
+        "description": {
+          "type": "string",
+          "nullable": true
+        },
+        "name": {
+          "type": "string",
+          "nullable": true
+        },
+        "timezone": {
+          "type": "string",
+          "nullable": true
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "ansible.UpdateScheduleRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "config": {
+          "extra_vars": {
+            "reboot": false
+          }
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "cron-expression": "15 1 * * *",
+        "description": "Updated by the golden write harness",
+        "name": "nightly-patch-baseline",
+        "next-run-at": "\u003ctimestamp\u003e",
+        "schedule-type": "job_template",
+        "status": "disabled",
+        "timezone": "Europe/Brussels",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "job-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "schedules"
+    }
+  }
+}

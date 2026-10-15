@@ -1,0 +1,51 @@
+{
+  "method": "POST",
+  "path": "/api/v2/agent-pools/:id/authentication-tokens",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Runners in the eu-west-1 build cluster"
+        },
+        "type": "authentication-tokens"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.agentTokenCreateRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "Runners in the eu-west-1 build cluster",
+        "last-used-at": null,
+        "token": "\u003csecret\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "authentication-tokens"
+    }
+  }
+}

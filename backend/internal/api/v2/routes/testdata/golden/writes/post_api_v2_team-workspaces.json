@@ -1,0 +1,161 @@
+{
+  "method": "POST",
+  "path": "/api/v2/team-workspaces",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "access": "custom",
+          "run-tasks": false,
+          "runs": "apply",
+          "sentinel-mocks": "none",
+          "state-versions": "read-outputs",
+          "variables": "write",
+          "workspace-locking": true
+        },
+        "relationships": {
+          "team": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "teams"
+            }
+          },
+          "workspace": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "workspaces"
+            }
+          }
+        },
+        "type": "team-workspaces"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "access": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "run-tasks": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "runs": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "sentinel-mocks": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "state-versions": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "variables": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "workspace-locking": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              }
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "team": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "workspace": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateTeamWorkspaceAccessRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "access": "custom",
+        "permissions": {
+          "run-tasks": false,
+          "runs": "apply",
+          "sentinel-mocks": "none",
+          "state-versions": "read-outputs",
+          "variables": "write",
+          "workspace-locking": true
+        }
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/team-workspaces/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "team": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "teams"
+          }
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "team-workspaces"
+    }
+  }
+}

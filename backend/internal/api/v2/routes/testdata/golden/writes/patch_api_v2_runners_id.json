@@ -1,0 +1,91 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/runners/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "Build capacity for non-production workspaces",
+          "labels": [
+            "region:eu-west-1",
+            "tier:build"
+          ]
+        },
+        "type": "runners"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "struct { Data struct { Attributes struct { Description *string \"json:\\\"description\\\"\"; Labels []string \"json:\\\"labels\\\"\" } \"json:\\\"attributes\\\"\" } \"json:\\\"data\\\"\" }"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "agent-pool-id": "\u003cuuid\u003e",
+        "agent-pool-name": "build-agents",
+        "agent-version": "",
+        "ansible-version": "",
+        "available-collections": [],
+        "current-jobs": 0,
+        "description": "Build capacity for non-production workspaces",
+        "hostname": "",
+        "ip-address": "",
+        "labels": [
+          "region:eu-west-1",
+          "tier:build"
+        ],
+        "last-heartbeat-at": "\u003ctimestamp\u003e",
+        "max-concurrent-jobs": 1,
+        "name": "build-agent-01",
+        "os-type": "",
+        "os-version": "",
+        "registered-at": "\u003ctimestamp\u003e",
+        "runner-type": "combined",
+        "status": "offline",
+        "tofu-version": ""
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "runners"
+    }
+  }
+}

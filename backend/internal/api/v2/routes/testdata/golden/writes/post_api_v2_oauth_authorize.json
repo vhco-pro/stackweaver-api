@@ -1,0 +1,41 @@
+{
+  "method": "POST",
+  "path": "/api/v2/oauth/authorize",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "client_id": "terraform-cli",
+      "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      "code_challenge_method": "S256",
+      "redirect_uri": "http://localhost:10000/login",
+      "state": "9c1f6a52-terraform-login"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "client_id": {
+          "type": "string"
+        },
+        "code_challenge": {
+          "type": "string"
+        },
+        "code_challenge_method": {
+          "type": "string"
+        },
+        "redirect_uri": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.mintCodeRequest"
+  },
+  "status": 200,
+  "response": {
+    "code": "\u003csecret\u003e",
+    "state": "9c1f6a52-terraform-login"
+  }
+}

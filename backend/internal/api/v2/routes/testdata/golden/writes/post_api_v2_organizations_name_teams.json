@@ -1,0 +1,162 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/teams",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "allow-member-token-management": false,
+          "description": "Recorded by the golden write harness",
+          "name": "golden-write-team",
+          "organization-access": {
+            "manage-modules": true,
+            "manage-workspaces": true,
+            "read-ansible": true,
+            "read-projects": true
+          },
+          "visibility": "organization"
+        },
+        "type": "teams"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "allow-member-token-management": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "organization-access": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "sso-team-id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "visibility": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "organization": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attributes",
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.CreateTeamRequestV2"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "allow-member-token-management": false,
+        "name": "golden-write-team",
+        "organization-access": {
+          "access-secret-teams": false,
+          "manage-agent-pools": false,
+          "manage-ansible": false,
+          "manage-ansible-credentials": false,
+          "manage-ansible-inventories": false,
+          "manage-ansible-job-templates": false,
+          "manage-ansible-jobs": false,
+          "manage-ansible-playbooks": false,
+          "manage-ansible-schedules": false,
+          "manage-membership": false,
+          "manage-modules": true,
+          "manage-organization-access": false,
+          "manage-policies": false,
+          "manage-policy-overrides": false,
+          "manage-projects": false,
+          "manage-providers": false,
+          "manage-run-tasks": false,
+          "manage-teams": false,
+          "manage-vcs-settings": false,
+          "manage-workspaces": true,
+          "read-ansible": true,
+          "read-ansible-credentials": true,
+          "read-ansible-inventories": true,
+          "read-ansible-job-templates": true,
+          "read-ansible-jobs": true,
+          "read-ansible-playbooks": true,
+          "read-ansible-schedules": true,
+          "read-projects": true,
+          "read-workspaces": false
+        },
+        "permissions": {
+          "can-destroy": true,
+          "can-update-api-token": true,
+          "can-update-membership": true,
+          "can-update-organization-access": true,
+          "can-update-visibility": true
+        },
+        "sso-team-id": null,
+        "users-count": 0,
+        "visibility": "organization"
+      },
+      "id": "\u003cuuid\u003e",
+      "links": {
+        "self": "/api/v2/teams/\u003cuuid\u003e"
+      },
+      "relationships": {
+        "authentication-token": {
+          "meta": {}
+        },
+        "organization-memberships": {
+          "data": []
+        },
+        "users": {
+          "data": []
+        }
+      },
+      "type": "teams"
+    }
+  }
+}
