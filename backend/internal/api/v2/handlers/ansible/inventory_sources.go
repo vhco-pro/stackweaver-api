@@ -211,7 +211,11 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	)
 	// The service validates the caller's input (the credential and its type, the Azure
 	// configuration) in the same call that writes the row. Input errors keep their sentence and
-	// answer 400; anything else is logged and answered with an operator-authored message.
+	// answer 400; anything else is logged and answered with an operator-authored message. A
+	// constructed inventory takes no source, because its build would remove what a sync adds.
+	if writeConstructedRefusal(c, err) {
+		return
+	}
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return

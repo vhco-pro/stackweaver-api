@@ -166,6 +166,9 @@ func (h *HostHandler) Create(c *gin.Context) {
 		req.Data.Attributes.Variables,
 		enabled,
 	)
+	if writeConstructedRefusal(c, err) {
+		return
+	}
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -328,10 +331,26 @@ func (h *HostHandler) authorizeHostGroup(c *gin.Context, hostID, groupID uuid.UU
 	return true
 }
 
+// writeConstructedRefusal answers a write the inventory service refused because its inventory is
+// constructed (ansible.ErrConstructedInventory) with 409 and the service's sentence, and reports
+// whether it did. The request is well formed; it conflicts with what the inventory is, whose
+// hosts and groups come from its build alone. Every host, group and source route that can add or
+// move a row asks this before its other error mapping.
+func writeConstructedRefusal(c *gin.Context, err error) bool {
+	if !errors.Is(err, ansible.ErrConstructedInventory) {
+		return false
+	}
+	jsonapi.WriteError(c, http.StatusConflict, jsonapi.TitleConflict, err.Error())
+	return true
+}
+
 // writeHostGroupError maps a host-group association error to its response. The
 // repository's cross-inventory guard backs up authorizeHostGroup, so it answers
 // with the same 404.
 func writeHostGroupError(c *gin.Context, err error) {
+	if writeConstructedRefusal(c, err) {
+		return
+	}
 	if errors.Is(err, repository.ErrHostGroupInventoryMismatch) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Group not found")
 		return

@@ -173,6 +173,9 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		req.Data.Attributes.Variables,
 		parentID,
 	)
+	if writeConstructedRefusal(c, err) {
+		return
+	}
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		// A parent the group may not name: a group of another inventory and one that does not
 		// exist get this same answer (InventoryService.checkParentGroup).
@@ -243,6 +246,9 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		parentID,
 		false, // Don't clear parent unless explicitly requested
 	)
+	if writeConstructedRefusal(c, err) {
+		return
+	}
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		// As on create: the one answer for a parent the group may not name.
 		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())

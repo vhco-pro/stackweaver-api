@@ -23,6 +23,7 @@
         "hosts-skipped": "\u003cnumber\u003e",
         "hosts-total": "\u003cnumber\u003e",
         "hosts-unreachable": "\u003cnumber\u003e",
+        "inventory-sync-warnings": [],
         "job-type": "run",
         "limit": "",
         "name": "baseline-compliance - 2026-08-23 08:10",

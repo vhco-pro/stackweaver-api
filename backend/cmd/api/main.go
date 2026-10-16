@@ -451,6 +451,17 @@ func main() {
 		}
 	}
 
+	// Drop the columns of model fields that have been removed, which AutoMigrate never does (see
+	// models.DropRetiredColumns for the list). A failure is reported rather than fatal: a leftover
+	// column that nothing maps is harmless.
+	retired, retiredErr := models.DropRetiredColumns(db)
+	for _, col := range retired {
+		logger.Infof("Dropped retired column %s", col)
+	}
+	if retiredErr != nil {
+		logger.Warnf("Failed to drop retired columns: %v", retiredErr)
+	}
+
 	// AUD-023: bring every foreign key to its intended ON DELETE behavior, which AutoMigrate never
 	// does for a constraint that already exists. The step lives in core/models so this and the
 	// integration tests drive the same code (see models.ReconcileFKDeleteRules for the rules and

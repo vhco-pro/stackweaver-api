@@ -2155,6 +2155,13 @@
                     "hosts-unreachable": {
                       "type": "string"
                     },
+                    "inventory-sync-warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
                     "job-type": {
                       "type": "string"
                     },
@@ -2362,6 +2369,13 @@
                   },
                   "hosts-unreachable": {
                     "type": "string"
+                  },
+                  "inventory-sync-warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
                   },
                   "job-type": {
                     "type": "string"
@@ -12155,6 +12169,13 @@
                   "hosts-unreachable": {
                     "type": "integer"
                   },
+                  "inventory-sync-warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
                   "job-type": {
                     "type": "string"
                   },
@@ -12590,6 +12611,13 @@
                   "hosts-unreachable": {
                     "type": "integer"
                   },
+                  "inventory-sync-warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
                   "job-type": {
                     "type": "string"
                   },
@@ -12859,6 +12887,13 @@
                   "hosts-unreachable": {
                     "type": "integer"
                   },
+                  "inventory-sync-warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
                   "job-type": {
                     "type": "string"
                   },
@@ -13086,6 +13121,13 @@
                   },
                   "hosts-unreachable": {
                     "type": "integer"
+                  },
+                  "inventory-sync-warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
                   },
                   "job-type": {
                     "type": "string"
@@ -14272,6 +14314,13 @@
                   },
                   "hosts-unreachable": {
                     "type": "integer"
+                  },
+                  "inventory-sync-warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
                   },
                   "job-type": {
                     "type": "string"
