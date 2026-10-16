@@ -399,29 +399,40 @@ func TestOrgWall_AdminTokenSatisfiesWrite(t *testing.T) {
 	}
 }
 
-func TestOrgWall_ProjectScopedTokenDefersToHandler(t *testing.T) {
-	// A token scoped only to a project (no org-level scope) cannot be
-	// evaluated at org granularity; the wall must allow it through to the
-	// handler rather than deny a mutating request.
+// A token scoped only to a project or a team cannot be evaluated at org granularity, so which
+// resources it reaches is left to the handlers, whose permission checks judge it as its project or
+// team (rbac.Subject) rather than as its owner. The wall still holds it to its scope's level. This
+// test used to pass a read-level project token's write through to the handler; it is refused here
+// now, since a read scope can never authorize a write whatever the resource.
+func TestOrgWall_ProjectOrTeamScopedTokenHeldToItsLevel(t *testing.T) {
 	org := uuid.New()
-	project := uuid.New()
-	key := &models.APIKey{
-		Kind:           models.APIKeyKindOrg,
-		Scopes:         models.StringArray{"project:" + project.String() + ":read"},
-		OrganizationID: &org,
-	}
-	code := runWall(t, wallTestCase{
-		route:      "/api/v2/workspaces/:id",
-		reqPath:    "/api/v2/workspaces/ws-1",
-		method:     http.MethodPost,
-		tokenKind:  models.APIKeyKindOrg,
-		tokenOrgID: &org,
-		apiKey:     key,
-		resolver:   &fakeResolver{org: org},
-		wantStatus: http.StatusOK,
-	})
-	if code != http.StatusOK {
-		t.Fatalf("project-scoped token POST: got %d, want 200 (deferred)", code)
+	for _, tc := range []struct {
+		scope  string
+		method string
+		want   int
+	}{
+		{"project:" + uuid.New().String() + ":read", http.MethodGet, http.StatusOK},
+		{"project:" + uuid.New().String() + ":read", http.MethodPost, http.StatusForbidden},
+		{"project:" + uuid.New().String() + ":read", http.MethodDelete, http.StatusForbidden},
+		{"project:" + uuid.New().String() + ":write", http.MethodPost, http.StatusOK},
+		{"project:" + uuid.New().String() + ":admin", http.MethodPatch, http.StatusOK},
+		{"team:" + uuid.New().String() + ":read", http.MethodPost, http.StatusForbidden},
+		{"team:" + uuid.New().String() + ":admin", http.MethodPost, http.StatusOK},
+	} {
+		key := &models.APIKey{Kind: models.APIKeyKindOrg, Scopes: models.StringArray{tc.scope}, OrganizationID: &org}
+		code := runWall(t, wallTestCase{
+			route:      "/api/v2/workspaces/:id",
+			reqPath:    "/api/v2/workspaces/ws-1",
+			method:     tc.method,
+			tokenKind:  models.APIKeyKindOrg,
+			tokenOrgID: &org,
+			apiKey:     key,
+			resolver:   &fakeResolver{org: org},
+			wantStatus: tc.want,
+		})
+		if code != tc.want {
+			t.Errorf("%s with scope %s: got %d, want %d", tc.method, tc.scope, code, tc.want)
+		}
 	}
 }
 

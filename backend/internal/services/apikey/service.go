@@ -678,6 +678,23 @@ func (s *Service) UpdateLastUsed(id uuid.UUID) error {
 	return s.apiKeyRepo.UpdateLastUsed(id)
 }
 
+// ActiveAPIKey returns the key with this id while it exists and has not expired.
+func (s *Service) ActiveAPIKey(id uuid.UUID) (*models.APIKey, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("getting API key %s: %w", id, err)
+	}
+	if apiKey.ExpiresAt != nil && apiKey.ExpiresAt.Before(time.Now()) {
+		return nil, fmt.Errorf("API key %s has expired", id)
+	}
+	return apiKey, nil
+}
+
+// IsTeamMember reports whether userID belongs to teamID.
+func (s *Service) IsTeamMember(teamID, userID uuid.UUID) (bool, error) {
+	return s.teamRepo.IsMember(teamID, userID)
+}
+
 // CheckPermission checks if an API key has permission for a specific resource
 // Returns true if the key has the requested permission
 func (s *Service) CheckPermission(apiKey *models.APIKey, resourceType string, resourceID *uuid.UUID, permission string) (bool, error) {

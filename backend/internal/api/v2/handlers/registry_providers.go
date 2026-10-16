@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -25,6 +26,7 @@ type RegistryProviderHandler struct {
 	gpgKeyRepo      *repository.GPGKeyRepository
 	authService     *auth.Service
 	orgRepo         *repository.OrganizationRepository
+	orgResolver     middleware.OrgResolver
 	storage         storage.Client
 }
 
@@ -34,12 +36,14 @@ func NewRegistryProviderHandler(
 	authService *auth.Service,
 	orgRepo *repository.OrganizationRepository,
 	storageClient storage.Client,
+	orgResolver middleware.OrgResolver,
 ) *RegistryProviderHandler {
 	return &RegistryProviderHandler{
 		providerService: providerService,
 		gpgKeyRepo:      gpgKeyRepo,
 		authService:     authService,
 		orgRepo:         orgRepo,
+		orgResolver:     orgResolver,
 		storage:         storageClient,
 	}
 }
@@ -54,7 +58,7 @@ func (h *RegistryProviderHandler) filterAccessibleProviders(c *gin.Context, prov
 			privateOrgIDs = append(privateOrgIDs, providers[i].OrganizationID)
 		}
 	}
-	accessible := registryAccessibleOrgs(c, h.authService, h.orgRepo, privateOrgIDs)
+	accessible := registryAccessibleOrgs(c, h.authService, h.orgRepo, h.orgResolver, privateOrgIDs)
 	kept := make([]models.Provider, 0, len(providers))
 	for _, p := range providers {
 		if p.RegistryName == "public" || accessible[p.OrganizationID] {
@@ -69,7 +73,7 @@ func (h *RegistryProviderHandler) filterAccessibleProviders(c *gin.Context, prov
 // whose user belongs to the provider's org (AUD-123). Writes the response and returns false
 // on denial.
 func (h *RegistryProviderHandler) authorizeProviderRead(c *gin.Context, provider *models.Provider) bool {
-	return authorizeRegistryRead(c, h.authService, h.orgRepo, provider.OrganizationID, provider.RegistryName == "public")
+	return authorizeRegistryRead(c, h.authService, h.orgRepo, h.orgResolver, provider.OrganizationID, provider.RegistryName == "public")
 }
 
 // authorizeArtifact gates a byte-stream fetch (binary / SHA256SUMS / .sig). A valid capability token

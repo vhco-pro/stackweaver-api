@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/services/logtoken"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
@@ -41,6 +43,11 @@ func shortTokenID(token string) string {
 type APIKeyVerifier interface {
 	VerifyAPIKey(key string) (*models.APIKey, error)
 	UpdateLastUsed(id uuid.UUID) error
+	// IsTeamMember reports whether a user belongs to a team, which decides whether a key
+	// scoped to that team acts as it.
+	IsTeamMember(teamID, userID uuid.UUID) (bool, error)
+	// ActiveAPIKey returns the key with this id while it exists and has not expired.
+	ActiveAPIKey(id uuid.UUID) (*models.APIKey, error)
 }
 
 // TeamSyncer interface for automatic team assignment based on SSO group claims
@@ -100,8 +107,8 @@ func (v *verifiedCache) has(subject string, now time.Time) bool {
 	return now.Before(v.until[subject])
 }
 
-// userFromJWT is the one place a verified JWT becomes a platform user, shared by
-// AuthenticateMiddleware and GetUserFromToken (#829 D5). It refuses an account whose email is
+// userFromJWT is the one place a verified JWT becomes a platform user, used by
+// Authenticate (#829 D5). It refuses an account whose email is
 // unverified before any users row is written, so an invitation placeholder for that address stays
 // unclaimed until the person verifies. Accounts without an email (machine users) are not subject
 // to the check: they cannot self-register or claim an invitation. When Zitadel cannot be reached,
@@ -200,49 +207,176 @@ func (s *Service) GetUserFromContext(c *gin.Context) (*models.User, error) {
 	return user, nil
 }
 
-// GetUserFromToken authenticates a token and returns the user
-// Supports programmatic tokens (tfe- prefix, both org-bound and
-// user-bound api_keys) and JWT tokens (Zitadel).
-func (s *Service) GetUserFromToken(ctx context.Context, tokenString string) (*models.User, error) {
-	// Programmatic tokens carry the "tfe-" prefix (Terraform Cloud
-	// compatible). Both org-bound and user-bound tokens are api_keys,
-	// so a single api-key lookup resolves them.
-	if strings.HasPrefix(tokenString, "tfe-") {
-		if s.apiKeyService != nil {
-			apiKey, err := s.apiKeyService.VerifyAPIKey(tokenString)
-			if err == nil && apiKey != nil {
-				// Update last used timestamp
-				_ = s.apiKeyService.UpdateLastUsed(apiKey.ID)
+// AuthError is an authentication failure and the response it calls for.
+type AuthError struct {
+	Status int
+	Title  string
+	Detail string
+}
 
-				// Get user
-				user, err := s.userRepo.GetByID(apiKey.UserID)
-				if err == nil {
-					return user, nil
-				}
-			}
-		}
-		// The "tfe-" prefix is authoritative (#503): an API token is never
-		// a JWT, so a lookup miss is terminal. Falling through to JWT
-		// verification surfaced revoked/unknown keys as "token is not a
-		// JWT (got opaque token)" - misdirecting operators toward Zitadel
-		// configuration instead of the token's lifecycle.
-		return nil, errors.New("invalid or revoked API token")
+func (e *AuthError) Error() string { return e.Detail }
+
+// Authenticate verifies a credential, a `tfe-` API token or a Zitadel JWT, and establishes the
+// caller on the request: the user, and for an API token its kind, its organization and the
+// subject it is judged as (rbac.Subject). Every place that accepts a credential, whether from the
+// Authorization header or elsewhere, goes through it, so a token is the same token wherever it
+// arrives. It sets nothing on failure and returns an *AuthError.
+func (s *Service) Authenticate(c *gin.Context, tokenString string) error {
+	logger.Debugf("auth: received token (id: %s) for %s %s", shortTokenID(tokenString), c.Request.Method, c.Request.URL.Path)
+
+	// Programmatic tokens carry the "tfe-" prefix (Terraform Cloud compatible). Both org-bound and
+	// user-bound tokens are api_keys, so a single api-key lookup resolves them.
+	if strings.HasPrefix(tokenString, "tfe-") {
+		return s.authenticateAPIKey(c, tokenString)
 	}
 
 	// Try JWT token (Zitadel)
 	if s.verifier == nil {
-		return nil, errors.New("authentication service not initialized")
+		return &AuthError{http.StatusInternalServerError, "Internal Server Error", "authentication service not initialized"}
+	}
+	claims, claimsMap, err := s.verifier.VerifyToken(c.Request.Context(), tokenString)
+	if err != nil {
+		// Log the actual error for debugging (but don't expose it to client for security)
+		logger.Warnf("auth: token verification failed: %v", err)
+		return &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid token"}
 	}
 
-	claims, claimsMap, err := s.verifier.VerifyToken(ctx, tokenString)
-	if err != nil {
-		return nil, fmt.Errorf("invalid token: %w", err)
+	user, userInfo, err := s.userFromJWT(c.Request.Context(), claims, claimsMap, tokenString)
+	switch {
+	case errors.Is(err, ErrEmailNotVerified):
+		return &AuthError{http.StatusForbidden, "Forbidden", "verify your email address to continue"}
+	case errors.Is(err, ErrIdentityUnavailable):
+		logger.Warnf("auth: %v", err)
+		return &AuthError{http.StatusServiceUnavailable, "Service Unavailable", "the identity provider could not be reached; try again shortly"}
+	case err != nil:
+		logger.Errorf("auth: %v", err)
+		return &AuthError{http.StatusInternalServerError, "Internal Server Error", "failed to get or create user"}
 	}
-	user, _, err := s.userFromJWT(ctx, claims, claimsMap, tokenString)
-	if err != nil {
-		return nil, err
+	logger.Infof("Auth: Subject=%s Email=%s Groups=%v", userInfo.Subject, userInfo.Email, userInfo.Groups)
+
+	// Store local user UUID in context (not Zitadel subject)
+	c.Set("user_id", user.ID)
+	c.Set("user_email", user.Email)
+	c.Set("user_name", user.Name)
+	c.Set("user_subject", userInfo.Subject)
+	c.Set("token_claims", claims)
+	c.Set("auth_method", "jwt")
+
+	// Store SSO groups in context for downstream team sync
+	if len(userInfo.Groups) > 0 {
+		c.Set("sso_groups", userInfo.Groups)
+
+		// Trigger automatic team sync based on SSO group claims
+		if s.teamSyncer != nil && s.teamSyncer.IsEnabled() {
+			if err := s.teamSyncer.SyncUserTeams(c.Request.Context(), user.ID, userInfo.Groups); err != nil {
+				logger.Errorf("TeamSync failed for user %s: %v", user.ID, err)
+				// Don't block authentication on team sync failure
+			}
+		}
 	}
-	return user, nil
+	return nil
+}
+
+func (s *Service) authenticateAPIKey(c *gin.Context, tokenString string) error {
+	// The "tfe-" prefix is authoritative (#503): an API token is never a JWT, so a lookup miss is
+	// terminal. Falling through to JWT verification surfaced revoked/unknown keys as "token is not
+	// a JWT (got opaque token)" - misdirecting operators toward Zitadel configuration instead of
+	// the token's lifecycle.
+	rejected := &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid or revoked API token"}
+	if s.apiKeyService == nil {
+		return rejected
+	}
+	apiKey, err := s.apiKeyService.VerifyAPIKey(tokenString)
+	if err != nil || apiKey == nil {
+		logger.Warnf("auth: api token rejected: unknown or revoked (id: %s)", shortTokenID(tokenString))
+		return rejected
+	}
+	return s.establishAPIKey(c, apiKey)
+}
+
+// establishAPIKey establishes a verified API key as the request's caller: its user, its kind, its
+// organization and the subject it is judged as.
+func (s *Service) establishAPIKey(c *gin.Context, apiKey *models.APIKey) error {
+	rejected := &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid or revoked API token"}
+	user, err := s.userRepo.GetByID(apiKey.UserID)
+	if err != nil {
+		return rejected
+	}
+	// The subject is resolved before anything is set, so a failure leaves the request untouched.
+	subj, scoped, err := rbac.SubjectForAPIKey(apiKey, s.apiKeyService.IsTeamMember)
+	if err != nil {
+		logger.Errorf("auth: resolving the scope of api token %s: %v", apiKey.ID, err)
+		return &AuthError{http.StatusInternalServerError, "Internal Server Error", "failed to resolve the token's scope"}
+	}
+	_ = s.apiKeyService.UpdateLastUsed(apiKey.ID)
+
+	c.Set("user_id", user.ID)
+	c.Set("user_email", user.Email)
+	c.Set("user_name", user.Name)
+	c.Set("auth_method", "api_key")
+	// Store API key details for runner registration and scope checks
+	c.Set("api_key_id", apiKey.ID)
+	c.Set("api_key_scopes", []string(apiKey.Scopes))
+	c.Set("api_key", apiKey)
+	// Org-resolution wall inputs: the token's kind drives how the target org is authorized. An
+	// org-bound token also carries its bound org id; a user-bound token carries none (authorized
+	// by the user's memberships at the wall instead).
+	c.Set("token_kind", apiKey.Kind)
+	if apiKey.OrganizationID != nil {
+		c.Set("token_org_id", *apiKey.OrganizationID)
+	}
+	// A token scoped to a team or a project is judged as that team or project by every permission
+	// check, not as its owner, whose id stays in user_id for attribution only. See rbac.Subject.
+	if scoped {
+		c.Request = c.Request.WithContext(rbac.WithSubject(c.Request.Context(), subj))
+	}
+	return nil
+}
+
+// authenticateLogToken establishes the credential a run-bound log token was minted for, as it
+// stands now: the API key while it exists and has not expired, judged with its current scope and
+// subject, or the session's user while the user exists. The token itself grants nothing, so a
+// revoked key reads no more logs, and the org wall and the run's authorization judge the
+// credential exactly as they would judge it in the Authorization header.
+func (s *Service) authenticateLogToken(c *gin.Context, cred logtoken.Credential) error {
+	rejected := &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid or revoked log token"}
+	if cred.APIKeyID != uuid.Nil {
+		if s.apiKeyService == nil {
+			return rejected
+		}
+		apiKey, err := s.apiKeyService.ActiveAPIKey(cred.APIKeyID)
+		if err != nil || apiKey == nil {
+			return rejected
+		}
+		if err := s.establishAPIKey(c, apiKey); err != nil {
+			return rejected
+		}
+		return nil
+	}
+	user, err := s.userRepo.GetByID(cred.UserID)
+	if err != nil {
+		return rejected
+	}
+	c.Set("user_id", user.ID)
+	c.Set("user_email", user.Email)
+	c.Set("user_name", user.Name)
+	c.Set("auth_method", "log_token")
+	return nil
+}
+
+// runIDFromLogPath returns the run id of a run log route.
+func runIDFromLogPath(path string) string {
+	parts := strings.Split(strings.TrimPrefix(path, "/api/v2/runs/"), "/")
+	return parts[0]
+}
+
+// isRunLogPath reports whether path is one of the run log routes, which also accept a credential
+// in ?token= (the TFE log-read-url the Terraform CLI fetches without its Authorization header).
+func isRunLogPath(path string) bool {
+	if !strings.HasPrefix(path, "/api/v2/runs/") {
+		return false
+	}
+	return strings.HasSuffix(path, "/logs") || strings.HasSuffix(path, "/logs/plan") || strings.HasSuffix(path, "/logs/apply")
 }
 
 func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
@@ -253,41 +387,36 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// TFE-compatible: For logs endpoint, allow token in query parameter OR Authorization header
-		// According to TFE docs, all endpoints use Authorization header, but Terraform CLI may call
-		// log-read-url without header if token is in URL. Support both methods for compatibility.
-		if strings.HasPrefix(c.Request.URL.Path, "/api/v2/runs/") && strings.HasSuffix(c.Request.URL.Path, "/logs") {
-			// Try token in query parameter first (for log-read-url with embedded token)
+		// TFE-compatible: the run log routes also take a credential in ?token=, either a credential
+		// itself or the run-bound log token of a log-read-url. Both are authenticated here exactly as
+		// a header credential is, so the org wall and every permission check judge them the same
+		// way; a log token re-establishes the credential it was minted for, as that credential
+		// stands now.
+		if isRunLogPath(c.Request.URL.Path) && c.Query("token") != "" {
 			tokenFromQuery := c.Query("token")
-			if tokenFromQuery != "" {
-				// Authenticate using token from query parameter
-				user, err := s.GetUserFromToken(c.Request.Context(), tokenFromQuery)
-				if err == nil {
-					c.Set("user_id", user.ID)
-					c.Set("user_email", user.Email)
-					c.Set("user_name", user.Name)
-					c.Set("auth_method", "query_token")
-					c.Next()
-					return
+			err := s.Authenticate(c, tokenFromQuery)
+			if err != nil {
+				if cred, ok := logtoken.Verify(tokenFromQuery, runIDFromLogPath(c.Request.URL.Path)); ok {
+					err = s.authenticateLogToken(c, cred)
 				}
 			}
-			// TFE-compatible: If no token in query and no Authorization header, allow the request to proceed
-			// The logs handler will validate the run exists (security check)
-			// Terraform CLI calls log-read-url without auth, relying on the URL being pre-authenticated
-			// Since we can't pre-authenticate the URL, we allow the request and validate in the handler
-			authHeader := c.GetHeader("Authorization")
-			if authHeader == "" {
-				// No auth provided - allow request to proceed to handler for validation
-				// The handler will check if the run exists and return appropriate response
+			if err == nil {
 				c.Next()
 				return
 			}
-			// If Authorization header is present, continue with normal auth flow below
+			if c.GetHeader("Authorization") == "" {
+				var authErr *AuthError
+				if !errors.As(err, &authErr) {
+					authErr = &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid token"}
+				}
+				jsonapi.WriteError(c, authErr.Status, authErr.Title, authErr.Detail)
+				c.Abort()
+				return
+			}
 		}
 
 		// Extract token from Authorization header (standard TFE authentication)
 		authHeader := c.GetHeader("Authorization")
-		logger.Debugf("auth: authorization header present: %v", authHeader != "")
 		if authHeader == "" {
 			logger.Debugf("auth: missing authorization header for path: %s", c.Request.URL.Path)
 			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "missing authorization header")
@@ -303,129 +432,15 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		tokenString := parts[1]
-
-		// Debug logging for authentication attempts.
-		// Round 25 hardening (item 16): never log raw token bytes - even
-		// the first 10 characters of a TFE-style API token (`tfe-…`)
-		// carry enough entropy to be useful in a log-correlation attack
-		// if Debug is ever enabled in production. Log a SHA-256-truncated
-		// token-id instead, which is opaque but stable enough to match
-		// against an audit log.
-		logger.Debugf("auth: received token (id: %s)", shortTokenID(tokenString))
-		logger.Debugf("auth: request path: %s", c.Request.URL.Path)
-		logger.Debugf("auth: request method: %s", c.Request.Method)
-
-		// Programmatic tokens carry the "tfe-" prefix (Terraform Cloud
-		// compatible). Both org-bound and user-bound tokens are api_keys,
-		// so a single api-key lookup resolves them.
-		if strings.HasPrefix(tokenString, "tfe-") {
-			logger.Debug("auth: token starts with 'tfe-', attempting api-key lookup")
-			if s.apiKeyService != nil {
-				apiKey, err := s.apiKeyService.VerifyAPIKey(tokenString)
-				if err == nil && apiKey != nil {
-					// Update last used timestamp
-					_ = s.apiKeyService.UpdateLastUsed(apiKey.ID)
-
-					// Get user
-					user, err := s.userRepo.GetByID(apiKey.UserID)
-					if err == nil {
-						// Store user in context
-						c.Set("user_id", user.ID)
-						c.Set("user_email", user.Email)
-						c.Set("user_name", user.Name)
-						c.Set("auth_method", "api_key")
-						// Store API key details for runner registration and scope checks
-						c.Set("api_key_id", apiKey.ID)
-						c.Set("api_key_scopes", []string(apiKey.Scopes))
-						c.Set("api_key", apiKey)
-						// Org-resolution wall inputs (Phase 2): the token's
-						// kind drives how the target org is authorized. An
-						// org-bound token also carries its bound org id; a
-						// user-bound token carries none (authorized by the
-						// user's memberships at the wall instead).
-						c.Set("token_kind", apiKey.Kind)
-						if apiKey.OrganizationID != nil {
-							c.Set("token_org_id", *apiKey.OrganizationID)
-						}
-						c.Next()
-						return
-					}
-				} else if err != nil {
-					logger.Debugf("auth: api-key lookup failed: %v", err)
-				}
+		if err := s.Authenticate(c, parts[1]); err != nil {
+			var authErr *AuthError
+			if !errors.As(err, &authErr) {
+				authErr = &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid token"}
 			}
-			// The "tfe-" prefix is authoritative (#503): an API token is
-			// never a JWT, so a lookup miss is terminal. Falling through
-			// to JWT verification surfaced revoked/unknown keys as "token
-			// is not a JWT (got opaque token)" - misdirecting operators
-			// toward Zitadel configuration instead of the token's
-			// lifecycle.
-			logger.Warnf("auth: api token rejected: unknown or revoked (id: %s)", shortTokenID(tokenString))
-			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid or revoked API token")
+			jsonapi.WriteError(c, authErr.Status, authErr.Title, authErr.Detail)
 			c.Abort()
 			return
 		}
-		logger.Debug("auth: token does not start with 'tfe-', attempting JWT verification")
-
-		// Try JWT token (Zitadel)
-		if s.verifier == nil {
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "authentication service not initialized")
-			c.Abort()
-			return
-		}
-
-		// Verify JWT token
-		claims, claimsMap, err := s.verifier.VerifyToken(c.Request.Context(), tokenString)
-		if err != nil {
-			// Log the actual error for debugging (but don't expose it to client for security)
-			logger.Warnf("auth: token verification failed: %v", err)
-			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid token")
-			c.Abort()
-			return
-		}
-
-		user, userInfo, err := s.userFromJWT(c.Request.Context(), claims, claimsMap, tokenString)
-		switch {
-		case errors.Is(err, ErrEmailNotVerified):
-			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "verify your email address to continue")
-			c.Abort()
-			return
-		case errors.Is(err, ErrIdentityUnavailable):
-			logger.Warnf("auth: %v", err)
-			jsonapi.WriteError(c, http.StatusServiceUnavailable, "Service Unavailable", "the identity provider could not be reached; try again shortly")
-			c.Abort()
-			return
-		case err != nil:
-			logger.Errorf("auth: %v", err)
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to get or create user")
-			c.Abort()
-			return
-		}
-		logger.Infof("Auth: Subject=%s Email=%s Groups=%v", userInfo.Subject, userInfo.Email, userInfo.Groups)
-
-		// Store local user UUID in context (not Zitadel subject)
-		c.Set("user_id", user.ID)
-		c.Set("user_email", user.Email)
-		c.Set("user_name", user.Name)
-		c.Set("user_subject", userInfo.Subject)
-		c.Set("token_claims", claims)
-		c.Set("auth_method", "jwt")
-
-		// Store SSO groups in context for downstream team sync
-		if len(userInfo.Groups) > 0 {
-			c.Set("sso_groups", userInfo.Groups)
-
-			// Trigger automatic team sync based on SSO group claims
-			if s.teamSyncer != nil && s.teamSyncer.IsEnabled() {
-				if err := s.teamSyncer.SyncUserTeams(c.Request.Context(), user.ID, userInfo.Groups); err != nil {
-					logger.Errorf("TeamSync failed for user %s: %v", user.ID, err)
-					// Don't block authentication on team sync failure
-				}
-			}
-		}
-
-		// Continue to next handler
 		c.Next()
 	}
 }

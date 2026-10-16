@@ -207,26 +207,18 @@ func (h *TeamWorkspaceAccessHandlerV2) List(c *gin.Context) {
 	}
 
 	// Verify user has access to the organization (team-based)
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return
 	}
 
 	// Callers who can manage teams see every access row; everyone else sees rows for
-	// organization-visible teams plus secret teams they belong to. See
-	// teamAccessVisible in team_access_visibility.go for the TFE rule this implements.
-	isTeamAdmin, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
-	if err != nil {
-		isTeamAdmin = false
-	}
-	var memberOf map[uuid.UUID]bool
-	if !isTeamAdmin {
-		memberOf, err = callerTeamIDs(h.teamRepo, user.ID, org.ID)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve team memberships")
-			return
-		}
+	// organization-visible teams plus secret teams they belong to, of a workspace they can read.
+	// See teamAccessVisible in team_access_visibility.go for the TFE rule this implements.
+	isTeamAdmin, memberOf, ok := h.teamAccessReader(c, user.ID, org.ID, workspace)
+	if !ok {
+		return
 	}
 
 	// Get team access for workspace
@@ -530,6 +522,32 @@ func (h *TeamWorkspaceAccessHandlerV2) accessFromRoute(c *gin.Context) (access *
 	return access, true
 }
 
+// teamAccessReader decides whether the caller may read the team access of workspace: a caller
+// who can manage teams may, as may anyone who can read the workspace. It returns whether the
+// caller manages teams and, if not, the teams it belongs to, which teamAccessVisible needs. It
+// writes the JSON:API error and returns false when refused.
+func (h *TeamWorkspaceAccessHandlerV2) teamAccessReader(c *gin.Context, userID, orgID uuid.UUID, workspace *models.Workspace) (isTeamAdmin bool, memberOf map[uuid.UUID]bool, ok bool) {
+	ctx := c.Request.Context()
+	isTeamAdmin, err := h.rbacService.CheckOrgManageTeams(ctx, userID, orgID)
+	if err != nil {
+		isTeamAdmin = false
+	}
+	if isTeamAdmin {
+		return true, nil, true
+	}
+	canRead, err := h.rbacService.CheckWorkspacePermission(ctx, userID, workspace.ID, rbac.PermissionWorkspaceRead, workspace.ProjectID)
+	if err != nil || !canRead {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this workspace")
+		return false, nil, false
+	}
+	memberOf, err = callerTeamIDs(ctx, h.rbacService, userID, orgID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve team memberships")
+		return false, nil, false
+	}
+	return false, memberOf, true
+}
+
 // Get retrieves a team workspace access by ID
 // GET /api/v2/team-workspaces/:id (TFE-compatible)
 // GET /api/v2/workspaces/:id/relationships/team-access/:access_id (legacy)
@@ -564,9 +582,18 @@ func (h *TeamWorkspaceAccessHandlerV2) Get(c *gin.Context) {
 		return
 	}
 
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
+		return
+	}
+	// The same rule as the listing: a workspace the caller can read, and a team it may see.
+	isTeamAdmin, memberOf, ok := h.teamAccessReader(c, user.ID, org.ID, workspace)
+	if !ok {
+		return
+	}
+	if !teamAccessVisible(access.Team, memberOf, isTeamAdmin) {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Team workspace access not found")
 		return
 	}
 

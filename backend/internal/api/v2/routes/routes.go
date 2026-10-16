@@ -18,6 +18,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/logtoken"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -89,7 +90,7 @@ func SetupV2Routes(
 	// AUD-045: sign run-scoped log-read tokens with the deployment's ENCRYPTION_KEY (stable across
 	// restarts). When unset, the log-read-url is emitted without a token and the CLI authenticates
 	// with its Authorization header.
-	terraformHandlers.SetLogTokenSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
+	logtoken.SetSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
 	// Run-task access tokens (webhook access_token → callback / plan-json / config download) use the
 	// same key; the orchestrator (which mints them at delivery) resolves the identical key.
 	terraformHandlers.SetTaskTokenSecret(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
@@ -1005,7 +1006,10 @@ func SetupV2Routes(
 				storageClient,
 				ansibleQueueForInstall,
 			)
+			// The App's user authorization returns to the SPA's /vcs/github/authorized page.
+			appHandler.SetAppURL(os.Getenv("STACKWEAVER_APP_URL"))
 			orgVCSConnections.GET("/github/install", appHandler.InitiateInstallation)
+			orgVCSConnections.GET("/github/installations/:installation_id/authorize", appHandler.AuthorizeInstallation)
 			orgVCSConnections.POST("/github/installations/:installation_id", appHandler.CreateConnectionFromInstallation)
 
 			// Azure DevOps OAuth2 installation flow (authenticated)
@@ -1066,7 +1070,7 @@ func SetupV2Routes(
 	// Registry Routes (Public - No Auth Required for Terraform CLI)
 	// These endpoints are outside the authenticated v2 group
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, storageClient)
-	moduleHandler := handlers.NewRegistryModuleHandler(moduleService, authService, orgRepo)
+	moduleHandler := handlers.NewRegistryModuleHandler(moduleService, authService, orgRepo, orgResolver)
 
 	// Initialize provider repositories and services
 	providerRepo := repository.NewProviderRepository(db)
@@ -1082,7 +1086,7 @@ func SetupV2Routes(
 
 	// v1 provider-install protocol handler (public download/discovery + signed SHA256SUMS streaming).
 	// authService + orgRepo let it gate PRIVATE providers on org membership (AUD-123).
-	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, authService, orgRepo, storageClient)
+	providerHandler := handlers.NewRegistryProviderHandler(providerService, gpgKeyRepo, authService, orgRepo, storageClient, orgResolver)
 
 	// AUD-147: sign short-TTL provider-artifact capability URLs so `terraform init` can fetch a
 	// private provider's binary/SHA256SUMS/.sig (Terraform sends no credentials to those URLs, which
@@ -1190,7 +1194,7 @@ func SetupV2Routes(
 	}
 
 	// Activity/Audit Log Routes (activityService already created above)
-	activityHandler := handlers.NewActivityHandlerV2(activityService, authService, orgRepo, workspaceRepo, projectRepo)
+	activityHandler := handlers.NewActivityHandlerV2(activityService, authService, orgRepo, workspaceRepo, projectRepo, orgResolver, rbacService)
 
 	activities := v2.Group("/activities")
 	{
@@ -1216,6 +1220,8 @@ func SetupV2Routes(
 		repository.NewDashboardRepository(db),
 		authService,
 		rbacService,
+		workspaceRepo,
+		projectRepo,
 	)
 
 	dashboard := v2.Group("/dashboard")
@@ -1237,6 +1243,7 @@ func SetupV2Routes(
 		ansibleInventoryRepo,
 		auditLogRepo,
 		authService,
+		rbacService,
 	)
 	v2.GET("/organizations/:name/analytics", analyticsHandler.GetOrganizationAnalytics)
 	v2.GET("/organizations/:name/analytics/executions", analyticsHandler.GetOrganizationExecutions)

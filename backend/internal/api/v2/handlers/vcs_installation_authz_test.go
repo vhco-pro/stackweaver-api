@@ -78,27 +78,34 @@ func TestVCSInstallationAuthz_SessionCallers(t *testing.T) {
 	router.Use(testUserAuth())
 	group := router.Group("/organizations/:name/vcs-connections")
 	group.GET("/github/install", h.InitiateInstallation)
+	group.GET("/github/installations/:installation_id/authorize", h.AuthorizeInstallation)
 	group.POST("/github/installations/:installation_id", h.CreateConnectionFromInstallation)
 	group.GET("/azure-devops/install", h.InitiateAzureDevOpsInstallation)
 
 	routes := []struct {
 		name, method, suffix string
+		// owner is what an owner is answered: 500 is "not configured", the answer that follows
+		// the permission check here. Authorizing and completing a GitHub installation also take
+		// a state issued by the step before, which these requests do not carry (no GitHub App is
+		// configured, so none can be issued), so an owner is let past the permission check and
+		// then refused for the state. vcs_github_installation_access_test.go covers the states.
+		owner int
 	}{
-		{"start a GitHub App installation", http.MethodGet, "/github/install"},
-		{"complete a GitHub App installation", http.MethodPost, "/github/installations/424242"},
-		{"start an Azure DevOps installation", http.MethodGet, "/azure-devops/install?ado_org=acme"},
-	}
-	callers := []struct {
-		name string
-		user uuid.UUID
-		want int
-	}{
-		{"someone who belongs to no team of the organization", outsider.ID, http.StatusForbidden},
-		{"nobody", uuid.Nil, http.StatusUnauthorized},
-		// 500 is "not configured", the answer that follows the permission check here.
-		{"an owner", owner.ID, http.StatusInternalServerError},
+		{"start a GitHub App installation", http.MethodGet, "/github/install", http.StatusInternalServerError},
+		{"authorize a GitHub App installation", http.MethodGet, "/github/installations/424242/authorize", http.StatusForbidden},
+		{"complete a GitHub App installation", http.MethodPost, "/github/installations/424242", http.StatusForbidden},
+		{"start an Azure DevOps installation", http.MethodGet, "/azure-devops/install?ado_org=acme", http.StatusInternalServerError},
 	}
 	for _, route := range routes {
+		callers := []struct {
+			name string
+			user uuid.UUID
+			want int
+		}{
+			{"someone who belongs to no team of the organization", outsider.ID, http.StatusForbidden},
+			{"nobody", uuid.Nil, http.StatusUnauthorized},
+			{"an owner", owner.ID, route.owner},
+		}
 		for _, caller := range callers {
 			t.Run(route.name+"/"+caller.name, func(t *testing.T) {
 				path := "/organizations/" + org.Name + "/vcs-connections" + route.suffix

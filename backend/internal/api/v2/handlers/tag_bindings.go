@@ -145,9 +145,10 @@ func (h *TagBindingHandlerV2) authProject(c *gin.Context, write bool) (*models.P
 			return nil, false
 		}
 	} else {
-		inOrg, err := h.orgRepo.UserInOrg(user.ID, project.OrganizationID)
-		if err != nil || !inOrg {
-			tagErr(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
+		ok, err := h.rbacService.CheckResourcePermission(c.Request.Context(), user.ID,
+			rbac.ResourceTypeProject, project.ID.String(), rbac.PermissionProjectRead, &project.ID)
+		if err != nil || !ok {
+			tagErr(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this project")
 			return nil, false
 		}
 	}

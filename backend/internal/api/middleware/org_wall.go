@@ -236,37 +236,63 @@ func AuthorizeBodyResolvedOrg(c *gin.Context, resolver OrgResolver, resolve func
 // It writes the error response and returns false on denial. On success it caches the
 // org as resolved_org_id for downstream handlers.
 func authorizeResolvedOrg(c *gin.Context, resolver OrgResolver, kind string, targetOrg uuid.UUID, fullPath string) bool {
+	if detail := resolvedOrgDenial(c, resolver, kind, targetOrg, fullPath); detail != "" {
+		denyWall(c, http.StatusForbidden, detail)
+		return false
+	}
+	// Cache the resolved org for downstream handlers.
+	c.Set("resolved_org_id", targetOrg)
+	return true
+}
+
+// TokenMayReachOrg reports whether the request's api-key identity may reach orgID, by the rules
+// the wall applies to every resolved organization, without writing a response. A request that is
+// not authenticated by an api key is out of the wall's scope and is reported true. It is for
+// routes outside the /api/v2 wall that accept a token, such as the registry protocol, and for
+// filtering a listing across organizations.
+func TokenMayReachOrg(c *gin.Context, resolver OrgResolver, orgID uuid.UUID) bool {
+	kindVal, isToken := c.Get("token_kind")
+	if !isToken {
+		return true
+	}
+	if resolver == nil {
+		return false
+	}
+	kind, _ := kindVal.(string)
+	return resolvedOrgDenial(c, resolver, kind, orgID, c.FullPath()) == ""
+}
+
+// resolvedOrgDenial is the wall's decision for a resolved org: "" when the identity may reach it,
+// otherwise the reason it may not.
+func resolvedOrgDenial(c *gin.Context, resolver OrgResolver, kind string, targetOrg uuid.UUID, fullPath string) string {
 	switch kind {
 	case models.APIKeyKindOrg:
 		boundVal, ok := c.Get("token_org_id")
 		boundOrg, _ := boundVal.(uuid.UUID)
 		if !ok || boundOrg != targetOrg {
 			logger.Warnf("org-wall: org-bound token (org %s) blocked from org %s on %s", boundOrg, targetOrg, fullPath)
-			denyWall(c, http.StatusForbidden, "this token is scoped to a different organization")
-			return false
+			return "this token is scoped to a different organization"
 		}
 		// Token-side scope enforcement: a read-only token may not perform
-		// a mutating request even within its own org. Only enforced when
-		// the token carries an org-level scope; project/team-scoped tokens
-		// are deferred to per-handler checks (the wall cannot match the
-		// resource to the scoped project/team here).
+		// a mutating request even within its own org. A project/team-scoped
+		// token is held here to its scope's level only; which resources it
+		// reaches is decided by the handlers' permission checks, which judge
+		// it as its project or team (the wall cannot match the resource to
+		// the scoped project/team here).
 		if !scopeAllowsMethod(c, targetOrg) {
 			logger.Warnf("org-wall: org-bound token scope denies %s on %s (org %s)", c.Request.Method, fullPath, targetOrg)
-			denyWall(c, http.StatusForbidden, "this token's scope does not permit this action")
-			return false
+			return "this token's scope does not permit this action"
 		}
 	case models.APIKeyKindUser:
 		userVal, ok := c.Get("user_id")
 		userID, _ := userVal.(uuid.UUID)
 		if !ok {
-			denyWall(c, http.StatusForbidden, "token is not associated with a user")
-			return false
+			return "token is not associated with a user"
 		}
 		member, memberErr := resolver.UserInOrg(userID, targetOrg)
 		if memberErr != nil || !member {
 			logger.Warnf("org-wall: user-bound token (user %s) blocked from org %s on %s", userID, targetOrg, fullPath)
-			denyWall(c, http.StatusForbidden, "you are not a member of this organization")
-			return false
+			return "you are not a member of this organization"
 		}
 		// tfe_organization user_tokens_enabled: an org may disable user-bound
 		// tokens entirely. Org owners stay exempt (anti-lockout - without an
@@ -275,25 +301,68 @@ func authorizeResolvedOrg(c *gin.Context, resolver OrgResolver, kind string, tar
 		restricted, restrictErr := resolver.OrgDisallowsUserTokens(targetOrg)
 		if restrictErr != nil {
 			logger.Warnf("org-wall: user-tokens policy lookup failed for org %s on %s: %v", targetOrg, fullPath, restrictErr)
-			denyWall(c, http.StatusForbidden, "unable to verify this organization's token policy")
-			return false
+			return "unable to verify this organization's token policy"
 		}
 		if restricted {
 			owner, ownerErr := resolver.UserIsOrgOwner(userID, targetOrg)
 			if ownerErr != nil || !owner {
 				logger.Warnf("org-wall: user-bound token (user %s) denied - user tokens disabled for org %s on %s", userID, targetOrg, fullPath)
-				denyWall(c, http.StatusForbidden, "user tokens are disabled for this organization")
-				return false
+				return "user tokens are disabled for this organization"
 			}
 		}
 	default:
-		denyWall(c, http.StatusForbidden, "unrecognized token kind")
+		return "unrecognized token kind"
+	}
+	return ""
+}
+
+// AuthorizeTokenOrgWrite holds an api-key caller to write scope on orgID, whatever the request's
+// method. It is for a read that hands out something a later request accepts as authority to
+// write, such as the signed state a VCS installation callback accepts in place of a caller: the
+// wall asks only read scope of a GET, so without this a read-only token could obtain what a
+// write takes.
+//
+// An org-bound token passes only when it is bound to orgID and its scopes grant write at the
+// organization level (or are unrestricted). A token scoped only to projects or teams holds no
+// organization-level write and is refused. The key owner's permissions are never consulted to
+// let a refused token through: the caller must not fall back on them.
+//
+// A user-bound token acts as its owner and carries no scopes, so it passes here and the
+// handler's own permission check decides. Non-token identities (JWT, session) pass untouched.
+//
+// Call it once the organization is known and before the handler's permission check. It writes
+// the error response and returns false when the token may not proceed.
+func AuthorizeTokenOrgWrite(c *gin.Context, orgID uuid.UUID) bool {
+	kindVal, isToken := c.Get("token_kind")
+	if !isToken {
+		return true
+	}
+	if kind, _ := kindVal.(string); kind != models.APIKeyKindOrg {
+		return true
+	}
+	boundVal, _ := c.Get("token_org_id")
+	if boundOrg, ok := boundVal.(uuid.UUID); !ok || boundOrg != orgID {
+		denyWall(c, http.StatusForbidden, "this token is scoped to a different organization")
 		return false
 	}
-
-	// Cache the resolved org for downstream handlers.
-	c.Set("resolved_org_id", targetOrg)
-	return true
+	apiKey, _ := c.Get("api_key")
+	key, ok := apiKey.(*models.APIKey)
+	if !ok {
+		denyWall(c, http.StatusForbidden, "this token's scope does not permit this action")
+		return false
+	}
+	checker, err := apikey.NewScopeChecker([]string(key.Scopes))
+	if err == nil && checker.IsUnrestricted() {
+		return true
+	}
+	if err == nil {
+		if granted, _ := checker.GrantsOrgLevel(orgID, "write"); granted {
+			return true
+		}
+	}
+	logger.Warnf("org-wall: org-bound token scope denies a write on org %s via %s %s", orgID, c.Request.Method, c.FullPath())
+	denyWall(c, http.StatusForbidden, "this token's scope does not permit this action")
+	return false
 }
 
 // scopeAllowsMethod reports whether the org-bound token in context may perform
@@ -305,9 +374,9 @@ func authorizeResolvedOrg(c *gin.Context, resolver OrgResolver, kind string, tar
 //   - malformed/unparseable scopes → deny mutations (allow reads);
 //   - unrestricted (empty or wildcard) scopes → allow (backward compatible);
 //   - an org-level scope for targetOrg → honor it (read < write < admin);
-//   - no org-level scope but a project/team scope → defer to per-handler
-//     authorization (the wall cannot match the resource to the scoped
-//     project/team here);
+//   - no org-level scope but a project/team scope → honor that scope's level,
+//     and leave to the handlers which resources it reaches: they judge the
+//     token as its project or team (rbac.Subject), never as its owner;
 //   - no org-level and no project/team scope → deny mutations (allow reads),
 //     rather than defer to a handler that may not check.
 func scopeAllowsMethod(c *gin.Context, targetOrg uuid.UUID) bool {
@@ -335,10 +404,12 @@ func scopeAllowsMethod(c *gin.Context, targetOrg uuid.UUID) bool {
 	if hasOrgScope {
 		return granted
 	}
-	// No org-level scope for targetOrg. Project/team-scoped tokens are deferred to
-	// per-handler authorization; a token with neither has no basis to mutate here.
+	// No org-level scope for targetOrg. A token scoped to a project or a team is judged by
+	// the handler's permission checks as that project or team, never as its owner
+	// (rbac.Subject, set by the auth middleware); here it is held only to its scope's level,
+	// so a read-level token cannot write at all. A token with neither has no basis to mutate.
 	if len(checker.GetScopedProjects()) > 0 || len(checker.GetScopedTeams()) > 0 {
-		return true
+		return checker.GrantsScopedLevel(required)
 	}
 	return !mutating
 }

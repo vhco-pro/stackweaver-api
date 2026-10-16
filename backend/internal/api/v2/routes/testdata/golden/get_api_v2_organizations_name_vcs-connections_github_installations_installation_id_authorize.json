@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/vcs-connections/github/installations/:installation_id/authorize",
+  "status": 403,
+  "body": {
+    "errors": [
+      {
+        "detail": "This GitHub installation cannot be completed here. Connect GitHub again from the organization's VCS settings and finish the installation within 15 minutes, signed in as the person who started it.",
+        "status": "403",
+        "title": "Forbidden"
+      }
+    ]
+  }
+}

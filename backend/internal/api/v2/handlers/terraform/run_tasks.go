@@ -165,7 +165,7 @@ func (h *RunTaskHandlerV2) authOrg(c *gin.Context, orgName string, write bool) (
 		taskError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage this organization's run tasks")
 		return nil, false
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !inOrg {
 		taskError(c, http.StatusNotFound, "Not Found", "Organization not found")
 		return nil, false

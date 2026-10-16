@@ -8,8 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
@@ -43,8 +45,13 @@ func registryCaller(c *gin.Context, authService *auth.Service) *models.User {
 	if token == "" {
 		return nil
 	}
-	user, err := authService.GetUserFromToken(c.Request.Context(), token)
-	if err != nil || user == nil {
+	// The same authentication every other route uses, so an API token here carries its kind, its
+	// organization and the subject it is judged as, and is held to them below.
+	if err := authService.Authenticate(c, token); err != nil {
+		return nil
+	}
+	user, err := authService.GetUserFromContext(c)
+	if err != nil {
 		return nil
 	}
 	return user
@@ -55,7 +62,7 @@ func registryCaller(c *gin.Context, authService *auth.Service) *models.User {
 // belongs to the owning org: a missing/invalid token yields 401, and a valid token for a
 // non-member yields 404 - a non-member must not be able to confirm a private artifact exists.
 // On denial it writes the response and returns false; otherwise it returns true.
-func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *repository.OrganizationRepository, orgID uuid.UUID, public bool) bool {
+func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *repository.OrganizationRepository, orgResolver middleware.OrgResolver, orgID uuid.UUID, public bool) bool {
 	if public {
 		return true
 	}
@@ -64,8 +71,8 @@ func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *r
 		jsonapi.WriteRegistryError(c, http.StatusUnauthorized, "authentication required for private registry")
 		return false
 	}
-	inOrg, err := orgRepo.UserInOrg(user.ID, orgID)
-	if err != nil || !inOrg {
+	inOrg, err := rbac.UserInOrg(c.Request.Context(), orgRepo, user.ID, orgID)
+	if err != nil || !inOrg || !middleware.TokenMayReachOrg(c, orgResolver, orgID) {
 		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Not found")
 		return false
 	}
@@ -76,7 +83,7 @@ func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *r
 // artifacts for - the orgs they are a member of. Used to filter list/search results so private
 // entries never leak to callers who are not members. An anonymous caller gets an empty set.
 // Membership is checked once per distinct org.
-func registryAccessibleOrgs(c *gin.Context, authService *auth.Service, orgRepo *repository.OrganizationRepository, orgIDs []uuid.UUID) map[uuid.UUID]bool {
+func registryAccessibleOrgs(c *gin.Context, authService *auth.Service, orgRepo *repository.OrganizationRepository, orgResolver middleware.OrgResolver, orgIDs []uuid.UUID) map[uuid.UUID]bool {
 	accessible := make(map[uuid.UUID]bool)
 	user := registryCaller(c, authService)
 	if user == nil {
@@ -88,7 +95,7 @@ func registryAccessibleOrgs(c *gin.Context, authService *auth.Service, orgRepo *
 			continue
 		}
 		checked[id] = true
-		if inOrg, err := orgRepo.UserInOrg(user.ID, id); err == nil && inOrg {
+		if inOrg, err := rbac.UserInOrg(c.Request.Context(), orgRepo, user.ID, id); err == nil && inOrg && middleware.TokenMayReachOrg(c, orgResolver, id) {
 			accessible[id] = true
 		}
 	}

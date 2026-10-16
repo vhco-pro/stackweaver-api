@@ -1482,24 +1482,6 @@ func (h *RunHandlerV2) fetchPhaseLogs(c *gin.Context, runID, phase string, offse
 
 func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 	logger.Infof("[LOGS DEBUG] GetLogs called for run ID: %s", c.Param("id"))
-	// TFE-compatible: Support token in query parameter (for Terraform CLI log-read-url)
-	// If token is in query, authenticate with it; otherwise rely on standard auth middleware
-	tokenFromQuery := c.Query("token")
-	if tokenFromQuery != "" {
-		// AUD-045: prefer a run-scoped log token (HMAC-bound to this run ID, short TTL). Fall back to
-		// full-token auth for any client still passing a bearer/API token in the query.
-		if uid, ok := verifyLogToken(tokenFromQuery, c.Param("id")); ok {
-			c.Set("user_id", uid)
-		} else {
-			user, err := h.authService.GetUserFromToken(c.Request.Context(), tokenFromQuery)
-			if err != nil {
-				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Invalid token")
-				return
-			}
-			// Store user in context for potential future use
-			c.Set("user_id", user.ID)
-		}
-	}
 
 	run, ok := h.authorizeRun(c, c.Param("id"), "read")
 	if !ok {
@@ -1623,16 +1605,6 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 // TFE-compatible: Supports token authentication via query parameter
 func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 	logger.Infof("[LOGS DEBUG] GetPlanLogs called for run ID: %s", c.Param("id"))
-	// TFE-compatible: Support token in query parameter (for Terraform CLI log-read-url)
-	tokenFromQuery := c.Query("token")
-	if tokenFromQuery != "" {
-		user, err := h.authService.GetUserFromToken(c.Request.Context(), tokenFromQuery)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Invalid token")
-			return
-		}
-		c.Set("user_id", user.ID)
-	}
 
 	run, ok := h.authorizeRun(c, c.Param("id"), "read")
 	if !ok {
@@ -1708,16 +1680,6 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 // TFE-compatible: Supports token authentication via query parameter
 func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 	logger.Infof("[LOGS DEBUG] GetApplyLogs called for run ID: %s", c.Param("id"))
-	// TFE-compatible: Support token in query parameter (for Terraform CLI log-read-url)
-	tokenFromQuery := c.Query("token")
-	if tokenFromQuery != "" {
-		user, err := h.authService.GetUserFromToken(c.Request.Context(), tokenFromQuery)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Invalid token")
-			return
-		}
-		c.Set("user_id", user.ID)
-	}
 
 	run, ok := h.authorizeRun(c, c.Param("id"), "read")
 	if !ok {
@@ -2182,42 +2144,63 @@ func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
 	c.Status(http.StatusAccepted)
 }
 
-// authorizeOrgRunList resolves the :name organization and gates the org-scoped
-// run listings on the caller belonging to it (AUD-010). Both listings return runs
-// from every workspace in the org, so without this any authenticated JWT caller
-// could read another tenant's run history and queue by org name: JWT and session
-// identities pass straight through the org-resolution wall. API-key identities
-// were already authorized against this org by the wall (the routes are
-// classified orgByName: an org-bound token must be bound to it, a user-bound
-// token's owner must be a member), so they are not re-checked here; re-checking
-// an org-bound token via its creator's membership would break the token once its
-// creator leaves the org. Writes 401/403/404 and returns false when refused.
-func (h *RunHandlerV2) authorizeOrgRunList(c *gin.Context) (*models.Organization, bool) {
+// authorizeOrgRunList resolves the :name organization for the org-scoped run listings and returns
+// the workspaces whose runs the caller may read there: all when readAll, else readable, which may
+// be empty. A run is read as a single read of it is (CheckRunPermission at "read"), so a listing
+// never holds a run its caller could not open. JWT and session identities pass straight through
+// the org-resolution wall, so the membership check here is the tenant boundary for them (AUD-010);
+// API-key identities were authorized against this org by the wall (orgByName), and are not
+// re-checked by their creator's membership, which would break an org-bound token once its creator
+// leaves. Writes 401/403/404/500 and returns false when refused.
+func (h *RunHandlerV2) authorizeOrgRunList(c *gin.Context) (org *models.Organization, readable []string, readAll, ok bool) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
-		return nil, false
+		return nil, nil, false, false
 	}
-	org, err := h.orgRepo.GetByName(c.Param("name"))
+	org, err = h.orgRepo.GetByName(c.Param("name"))
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
-		return nil, false
+		return nil, nil, false, false
 	}
-	if _, isToken := c.Get("token_kind"); isToken {
-		return org, true
+	ctx := c.Request.Context()
+	if _, isToken := c.Get("token_kind"); !isToken {
+		inOrg, err := h.rbacService.UserInOrg(ctx, user.ID, org.ID)
+		if err != nil || !inOrg {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
+			return nil, nil, false, false
+		}
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
-	if err != nil || !inOrg {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
-		return nil, false
+	// "View all workspaces", "manage all workspaces" and the owners team read every run.
+	readAll, err = h.rbacService.CheckOrgReadWorkspaces(ctx, user.ID, org.ID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+		return nil, nil, false, false
 	}
-	return org, true
+	if readAll {
+		return org, nil, true, true
+	}
+	candidates, _, err := h.workspaceRepo.WithContext(ctx).ListByOrganization(org.Name, -1, 0)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workspaces")
+		return nil, nil, false, false
+	}
+	workspaces, err := h.rbacService.ReadableWorkspaces(ctx, user.ID, org.ID, candidates, rbac.PermissionRunRead)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+		return nil, nil, false, false
+	}
+	readable = make([]string, 0, len(workspaces))
+	for i := range workspaces {
+		readable = append(readable, workspaces[i].ID)
+	}
+	return org, readable, false, true
 }
 
 // ListByOrganization lists runs for an organization (TFE-compatible)
 // GET /api/v2/organizations/:name/runs
 func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
-	org, ok := h.authorizeOrgRunList(c)
+	org, readable, readAll, ok := h.authorizeOrgRunList(c)
 	if !ok {
 		return
 	}
@@ -2228,7 +2211,15 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 	}
 	offset := (page - 1) * perPage
 
-	runs, total, err := h.runRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, perPage, offset)
+	runRepo := h.runRepo.WithContext(c.Request.Context())
+	var runs []models.Run
+	var total int64
+	var err error
+	if readAll {
+		runs, total, err = runRepo.ListByOrganization(org.ID, perPage, offset)
+	} else {
+		runs, total, err = runRepo.ListByOrganizationInWorkspaces(org.ID, readable, perPage, offset)
+	}
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list runs")
 		return
@@ -2246,7 +2237,7 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 // GetQueue returns the run queue for an organization (TFE-compatible)
 // GET /api/v2/organizations/:name/runs/queue
 func (h *RunHandlerV2) GetQueue(c *gin.Context) {
-	org, ok := h.authorizeOrgRunList(c)
+	org, readable, readAll, ok := h.authorizeOrgRunList(c)
 	if !ok {
 		return
 	}
@@ -2256,8 +2247,16 @@ func (h *RunHandlerV2) GetQueue(c *gin.Context) {
 	// `limit`, and a total-count describing the whole queue - which is what tells an operator
 	// whether they are seeing all of it. Reporting a total equal to the rows returned would be
 	// the lie that made the inventory-sources listing worse than a plain truncation (#761).
+	// For a caller who reads only some workspaces, the queue and its total are of those.
 	limit := 50 // Default limit for queue
-	runs, total, err := h.runRepo.ListQueued(org.ID, limit)
+	var runs []models.Run
+	var total int64
+	var err error
+	if readAll {
+		runs, total, err = h.runRepo.ListQueued(org.ID, limit)
+	} else {
+		runs, total, err = h.runRepo.ListQueuedInWorkspaces(org.ID, readable, limit)
+	}
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get run queue")
 		return

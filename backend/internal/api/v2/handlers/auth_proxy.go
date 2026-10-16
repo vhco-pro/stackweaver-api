@@ -3174,8 +3174,12 @@ func (p *AuthProxy) PasswordReset(c *gin.Context) {
 // refused here and never forwarded, because the proxy's service token is
 // what makes Zitadel honour an unverified password set: to Zitadel that is
 // an administrator resetting a password, to the public it would be a
-// password set on any user id. The refusal is decided before the user id
-// is looked at, so it cannot say whether the id exists, and it uses the
+// password set on any user id. The one exception is a user's first
+// password: the browser holds a fresh verification check this server signed
+// for that same user id, and Zitadel confirms the user has no authentication
+// method, so no existing password or factor can be replaced this way. Without
+// such a check the refusal is decided before the user id is looked at, so it
+// cannot say whether the id exists, and it uses the
 // same status and body the unknown-user canonicalisation below produces,
 // so a direct prober sees one shape whether the id is real, unknown, or
 // the body was simply empty.
@@ -3193,6 +3197,12 @@ func (p *AuthProxy) ChangePassword(c *gin.Context) {
 	}
 
 	if !passwordChangeCarriesProof(reqBody) {
+		// The one exception is a user's first password, on the proof of an
+		// email verification this browser just completed (see
+		// auth_proxy_verification_check.go).
+		if p.setFirstPassword(c, userID, reqBody) {
+			return
+		}
 		c.Data(http.StatusBadRequest, "application/json", canonicalCodeInvalidResponse())
 		return
 	}
@@ -3203,18 +3213,83 @@ func (p *AuthProxy) ChangePassword(c *gin.Context) {
 		respondError(c, http.StatusBadGateway, "failed to change password")
 		return
 	}
-	// Round 23 Finding 2 (MODERATE): canonicalize unknown-user 404
-	// to a "code is invalid" 4xx - same shape Zitadel emits for a
-	// wrong verificationCode (reset flow) or wrong currentPassword
-	// (in-app change flow) on a REAL user. Without this, an attacker
-	// can probe `/auth/users/<guessedId>/password` with a bogus body
-	// and read 404 (unknown user) vs 4xx-with-different-shape (known
-	// user with wrong creds) → enumeration leak.
-	if isLikelyUnknownUserResponse(statusCode, respBody) {
-		statusCode = http.StatusBadRequest
-		respBody = canonicalCodeInvalidResponse()
+	// A rejected proof gets one fixed answer per kind of proof, whatever
+	// Zitadel's reason was. Zitadel answers an unknown id, a user without a
+	// password and a wrong password or code with different errors, so
+	// forwarding them would tell a caller which ids exist.
+	if s, _ := reqBody["currentPassword"].(string); s != "" {
+		if passwordProofRejected(statusCode, respBody, currentPasswordRejections) {
+			statusCode, respBody = http.StatusBadRequest, canonicalPasswordInvalidResponse()
+		}
+	} else if passwordProofRejected(statusCode, respBody, verificationCodeRejections) {
+		statusCode, respBody = http.StatusBadRequest, canonicalCodeInvalidResponse()
 	}
 	c.Data(statusCode, "application/json", respBody)
+}
+
+// Zitadel's error identifiers (the `id` of an entry in the error's `details`)
+// for a password change whose proof it did not accept, from SetPassword in
+// Zitadel v4 (internal/command/user_human_password.go, internal/crypto/code.go).
+// The user-state identifiers belong to both sets because Zitadel checks the
+// user before it looks at the proof.
+var (
+	passwordChangeUserRejections = map[string]bool{
+		"COMMAND-G8dh3": true, // no user with this id
+		"COMMAND-M9dse": true, // the user has not been initialised
+	}
+	currentPasswordRejections = withUserRejections(map[string]bool{
+		"COMMAND-3M0fs": true, // the current password is wrong
+		"COMMAND-3nJ4t": true, // the user has no password
+		"COMMAND-Fds3s": true, // the user has no password
+		"COMMAND-3n77z": true, // no user with this id
+		"COMMAND-JLK35": true, // the user is locked
+	})
+	verificationCodeRejections = withUserRejections(map[string]bool{
+		"CODE-woT0xc":   true, // the code is wrong
+		"CODE-QvUQ4P":   true, // the code has expired
+		"COMMAND-2M9fs": true, // the user has no pending code
+	})
+)
+
+func withUserRejections(ids map[string]bool) map[string]bool {
+	for id := range passwordChangeUserRejections {
+		ids[id] = true
+	}
+	return ids
+}
+
+// passwordProofRejected reports whether a SetPassword answer from Zitadel
+// rejects the request's proof (or the user id) for one of the given reasons.
+func passwordProofRejected(statusCode int, body []byte, rejections map[string]bool) bool {
+	if isLikelyUnknownUserResponse(statusCode, body) {
+		return true
+	}
+	if statusCode < http.StatusBadRequest || statusCode >= http.StatusInternalServerError {
+		return false
+	}
+	var zitadelErr struct {
+		Details []struct {
+			ID string `json:"id"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(body, &zitadelErr); err != nil {
+		return false
+	}
+	for _, d := range zitadelErr.Details {
+		if rejections[d.ID] {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalPasswordInvalidResponse is the one answer to a password change
+// whose current password was not accepted, for any user id. Its message says
+// the password is invalid, which is what the password-change page shows its
+// user, and it carries no internal identifier, which the page's error filter
+// would replace with a generic failure.
+func canonicalPasswordInvalidResponse() []byte {
+	return []byte(`{"code":3,"message":"Password is invalid","details":[]}`)
 }
 
 // passwordChangeCarriesProof reports whether a SetPassword body names exactly
@@ -3381,17 +3456,26 @@ func (p *AuthProxy) VerifyTOTP(c *gin.Context) {
 	p.userScopedProxy(c, "/v2/users/"+userID+"/totp/verify")
 }
 
-// RegisterPasskey handles POST /auth/users/:id/passkeys.
+// RegisterPasskey handles POST /auth/users/:id/passkeys. A user's first passkey may be started
+// on the proof of a fresh verification check (firstPasskey); every other registration needs the
+// session gate.
 func (p *AuthProxy) RegisterPasskey(c *gin.Context) {
 	userID := c.Param("id")
-	p.userScopedProxy(c, "/v2/users/"+userID+"/passkeys")
+	path := "/v2/users/" + userID + "/passkeys"
+	if p.firstPasskey(c, userID, path, []string{"domain", "authenticator"}, false) {
+		return
+	}
+	p.userScopedProxy(c, path)
 }
 
-// VerifyPasskey handles POST /auth/users/:id/passkeys/:pkId.
+// VerifyPasskey handles POST /auth/users/:id/passkeys/:pkId, gated as RegisterPasskey is.
 func (p *AuthProxy) VerifyPasskey(c *gin.Context) {
 	userID := c.Param("id")
-	pkID := c.Param("pkId")
-	p.userScopedProxy(c, "/v2/users/"+userID+"/passkeys/"+pkID)
+	path := "/v2/users/" + userID + "/passkeys/" + c.Param("pkId")
+	if p.firstPasskey(c, userID, path, []string{"publicKeyCredential", "passkeyName"}, true) {
+		return
+	}
+	p.userScopedProxy(c, path)
 }
 
 // RegisterU2F handles POST /auth/users/:id/u2f.
@@ -3446,6 +3530,38 @@ func (p *AuthProxy) EnableOTPSMS(c *gin.Context) {
 // can't be used to probe whether the user is rate-limited (which
 // would otherwise leak "this user is being attacked").
 func (p *AuthProxy) VerifyEmail(c *gin.Context) {
+	p.verifyUserCode(c, userCodeEmail)
+}
+
+// userCodeKind names a code Zitadel mails to a user: the Zitadel endpoint that checks it and the
+// rate limiter namespace its attempts count under.
+type userCodeKind struct {
+	zitadelSuffix string // appended to /v2/users/{id}
+	limiterPrefix string
+	label         string // for logs and errors
+}
+
+var (
+	userCodeEmail  = userCodeKind{zitadelSuffix: "/email/verify", limiterPrefix: "verify-email:", label: "email"}
+	userCodeInvite = userCodeKind{zitadelSuffix: "/invite_code/verify", limiterPrefix: "verify-invite:", label: "invite code"}
+)
+
+// VerifyInviteCode handles POST /auth/users/:id/invite-code/verify.
+//
+// An invited user proves their address with the invite code Zitadel mailed them. Zitadel checks
+// it only at its invite-code endpoint, which also marks the email verified; the email-verify
+// endpoint does not accept it. It is gated exactly as VerifyEmail is, and a verified user with no
+// authentication method gets the same verification check to set a first password or passkey.
+func (p *AuthProxy) VerifyInviteCode(c *gin.Context) {
+	p.verifyUserCode(c, userCodeInvite)
+}
+
+// verifyUserCode checks an email or invite code for the user in :id. Both are gated the same
+// way: the session cross-user gate when a session cookie is present, the decoy short-circuit,
+// a per-user attempt limit, and one answer for every rejection. A verified user with no
+// authentication method gets a verification check (auth_proxy_verification_check.go) and is
+// told to set one up.
+func (p *AuthProxy) verifyUserCode(c *gin.Context, kind userCodeKind) {
 	userID := c.Param("id")
 	if userID == "" {
 		respondError(c, http.StatusBadRequest, "user ID is required")
@@ -3506,10 +3622,10 @@ func (p *AuthProxy) VerifyEmail(c *gin.Context) {
 	// namespace so a flood of bad codes for a single user trips the
 	// shared lockout machinery without crossing into the loginName
 	// counter.
-	rateLimitKey := "verify-email:" + userID
+	rateLimitKey := kind.limiterPrefix + userID
 	if !p.LoginNameLimiter.BeginAttempt(rateLimitKey) {
 		// Wave 15 observability mirror of the password-attempt path.
-		logger.Warnf("event=loginname_lockout_denied key=%q reason=too_many_failed_email_verification_attempts", rateLimitKey)
+		logger.Warnf("event=loginname_lockout_denied key=%q reason=too_many_failed_%s_verification_attempts", rateLimitKey, strings.ReplaceAll(kind.label, " ", "_"))
 		// Add jitter (10-50ms) so the rate-limit branch isn't a
 		// timing oracle for "this user is locked out".
 		jitterMs := 10 + (time.Now().UnixNano() % 41) // 10..50 ms
@@ -3518,22 +3634,24 @@ func (p *AuthProxy) VerifyEmail(c *gin.Context) {
 		return
 	}
 
-	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/users/"+userID+"/email/verify", reqBody)
+	// Only the code is forwarded: nothing else in the caller's body reaches the call the
+	// service token authorises.
+	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/users/"+userID+kind.zitadelSuffix,
+		map[string]any{"verificationCode": reqBody["verificationCode"]})
 	if err != nil {
 		// Transport error / 5xx - roll back the rate-limit slot so
 		// honest users aren't penalised for a Zitadel outage.
 		p.LoginNameLimiter.RollbackAttempt(rateLimitKey)
-		logger.Errorf("Failed to verify email: %v", err)
-		respondError(c, http.StatusBadGateway, "failed to verify email with identity provider")
+		logger.Errorf("verifying %s of user %s: %v", kind.label, userID, err)
+		respondError(c, http.StatusBadGateway, "failed to verify "+kind.label+" with identity provider")
 		return
 	}
-	// Round 23 Finding 3 (MODERATE): canonicalize unknown-user 404
-	// to a "code is invalid" 4xx so direct (non-SPA) probing can't
-	// enumerate user IDs derived from F-sec-7 decoy sessions. Same
-	// shape Zitadel emits for a wrong verification code on a REAL
-	// user, so the attacker can't distinguish "this id doesn't
-	// exist" from "this id exists but the code is wrong".
-	if isLikelyUnknownUserResponse(statusCode, respBody) {
+	// Every rejection of the user or the code gets one answer. Zitadel answers an unknown id
+	// with a 404 and a wrong, expired or missing code on a real user with a 400, each with its
+	// own message, so forwarding them would tell a caller which ids exist. A 401 or 403 is
+	// Zitadel refusing the proxy's own credential, which says nothing about the user and which
+	// an operator needs to see, so it passes through.
+	if statusCode == http.StatusBadRequest || statusCode == http.StatusNotFound {
 		statusCode = http.StatusBadRequest
 		respBody = canonicalCodeInvalidResponse()
 	}
@@ -3542,6 +3660,13 @@ func (p *AuthProxy) VerifyEmail(c *gin.Context) {
 	// they get it right.
 	if statusCode == http.StatusOK {
 		p.LoginNameLimiter.Reset(rateLimitKey)
+		// A verified user with no way to sign in yet sets one up next. The
+		// verification is recorded so the first password can be set without
+		// a current password or reset code (auth_proxy_verification_check.go).
+		if p.userHasNoAuthMethods(c.Request.Context(), userID) {
+			p.setVerificationCheckCookie(c, userID)
+			respBody = withAuthenticatorSetupRequired(respBody)
+		}
 	}
 	c.Data(statusCode, "application/json", respBody)
 }

@@ -280,74 +280,31 @@ func (h *ProjectHandlerV2) List(c *gin.Context) {
 	var projects []models.Project
 	var total int64
 
+	// Every caller, a user or a team or project token, lists exactly the projects it could read one
+	// by one. A caller who may view all projects reads every one, so its listing is the whole
+	// organization, paginated in the database; anyone else's is filtered by the same rbac evaluation
+	// the single-project read uses.
 	if hasOrgReadProjects {
-		// User has organization-level read-projects permission - show all projects
 		projects, total, err = h.projectRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, perPage, offset)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list projects")
 			return
 		}
 	} else {
-		// User does NOT have organization-level read-projects permission
-		// Filter projects to only those the user has team project access to
-		// Get all teams user is member of
-		teams, err := h.teamRepo.GetTeamsByUserID(user.ID, org.ID)
+		candidates, _, err := h.projectRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, 10000, 0)
 		if err != nil {
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get user teams")
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list projects")
 			return
 		}
-
-		// Collect all project IDs the user's teams have access to
-		accessibleProjectIDs := make(map[uuid.UUID]bool)
-		for _, team := range teams {
-			// Get team with project access preloaded
-			teamWithAccess, err := h.teamRepo.GetByID(team.ID)
-			if err != nil {
-				// Log error but continue with other teams
-				continue
-			}
-			// Collect project IDs from team's project access
-			for _, access := range teamWithAccess.ProjectAccess {
-				accessibleProjectIDs[access.ProjectID] = true
-			}
+		readable, err := h.rbacService.ReadableProjects(c.Request.Context(), user.ID, org.ID, candidates)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+			return
 		}
-
-		// If user has no team project access, return empty list
-		if len(accessibleProjectIDs) == 0 {
-			projects = []models.Project{}
-			total = 0
-		} else {
-			// Get all projects first to count total
-			allProjects, _, err := h.projectRepo.WithContext(c.Request.Context()).ListByOrganization(org.ID, 10000, 0)
-			if err != nil {
-				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list projects")
-				return
-			}
-
-			// Filter to only accessible projects
-			filteredProjects := make([]models.Project, 0)
-			for _, project := range allProjects {
-				if accessibleProjectIDs[project.ID] {
-					filteredProjects = append(filteredProjects, project)
-				}
-			}
-			total = int64(len(filteredProjects))
-
-			// Apply pagination
-			start := offset
-			if start > len(filteredProjects) {
-				start = len(filteredProjects)
-			}
-			end := start + perPage
-			if end > len(filteredProjects) {
-				end = len(filteredProjects)
-			}
-			if start < len(filteredProjects) {
-				projects = filteredProjects[start:end]
-			} else {
-				projects = []models.Project{}
-			}
-		}
+		total = int64(len(readable))
+		start := min(offset, len(readable))
+		end := min(start+perPage, len(readable))
+		projects = readable[start:end]
 	}
 
 	// Format projects in JSON:API format
@@ -384,9 +341,9 @@ func (h *ProjectHandlerV2) Get(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
-	if err != nil || !inOrg {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
+	// Read access to the project, as Terraform Enterprise judges it: a grant on the project, "view
+	// all projects" or "manage all projects", or the owners team.
+	if !h.authorizeProjectRead(c, user.ID, project) {
 		return
 	}
 
@@ -398,6 +355,17 @@ func (h *ProjectHandlerV2) Get(c *gin.Context) {
 	}
 
 	jsonapi.WriteDocument(c, http.StatusOK, formatProjectResponseWithCounts(projectWithResources, org.Name))
+}
+
+// authorizeProjectRead writes a 403 and returns false unless the caller may read the project.
+func (h *ProjectHandlerV2) authorizeProjectRead(c *gin.Context, userID uuid.UUID, project *models.Project) bool {
+	allowed, err := h.rbacService.CheckResourcePermission(c.Request.Context(), userID,
+		rbac.ResourceTypeProject, project.ID.String(), rbac.PermissionProjectRead, &project.ID)
+	if err != nil || !allowed {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this project")
+		return false
+	}
+	return true
 }
 
 // GetByID returns a single project by ID (TFE-compatible)
@@ -430,9 +398,9 @@ func (h *ProjectHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
-	if err != nil || !inOrg {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
+	// Read access to the project, as Terraform Enterprise judges it: a grant on the project, "view
+	// all projects" or "manage all projects", or the owners team.
+	if !h.authorizeProjectRead(c, user.ID, project) {
 		return
 	}
 

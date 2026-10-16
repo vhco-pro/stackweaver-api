@@ -1530,7 +1530,19 @@
       "method": "POST",
       "path": "/api/v2/organizations/:name/vcs-connections/github/installations/:installation_id",
       "mutating": true,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*VCSAppInstallationHandlerV2).CreateConnectionFromInstallation-fm"
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*VCSAppInstallationHandlerV2).CreateConnectionFromInstallation-fm",
+      "query": [
+        "state"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/vcs-connections/github/installations/:installation_id/authorize",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*VCSAppInstallationHandlerV2).AuthorizeInstallation-fm",
+      "query": [
+        "state"
+      ]
     },
     {
       "method": "GET",
@@ -1918,8 +1930,7 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetApplyLogs-fm",
       "query": [
         "limit",
-        "offset",
-        "token"
+        "offset"
       ]
     },
     {
@@ -1930,8 +1941,7 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetPlanLogs-fm",
       "query": [
         "limit",
-        "offset",
-        "token"
+        "offset"
       ]
     },
     {
@@ -2468,12 +2478,6 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*VCSAppInstallationHandlerV2).HandleAzureDevOpsWebhook-fm"
     },
     {
-      "method": "POST",
-      "path": "/api/v2/webhooks/github",
-      "mutating": true,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/handlers.(*GitHubWebhookHandler).HandleWebhook-fm"
-    },
-    {
       "method": "DELETE",
       "path": "/api/v2/workspaces/:id",
       "mutating": true,
@@ -2991,6 +2995,12 @@
       "path": "/auth/users/:id/email",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).VerifyEmail-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/users/:id/invite-code/verify",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).VerifyInviteCode-fm"
     },
     {
       "method": "POST",

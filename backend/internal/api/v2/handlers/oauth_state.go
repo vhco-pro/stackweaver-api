@@ -18,8 +18,25 @@ import (
 // instead of persisting the nonce we sign the state with the deployment's ENCRYPTION_KEY: the
 // callback recomputes the HMAC and rejects any state it did not mint. This makes the state
 // unforgeable and, via the embedded expiry, replay-bounded - mirroring the AUD-045 log-token model.
+//
+// The GitHub App installation flow uses the same envelope. Each flow signs under its own
+// purpose, so a state issued to start one flow is never accepted by the other.
 
 const oauthStateTTL = 15 * time.Minute
+
+// oauthStatePurpose names the flow a state was issued for. It is part of what is signed and is
+// not carried in the state, so the verifier must name the flow it expects.
+type oauthStatePurpose string
+
+const (
+	// stateAzureDevOpsInstall: payload "stackweaverOrg|adoOrg|returnPath|nonce".
+	stateAzureDevOpsInstall oauthStatePurpose = "azure-devops-install"
+	// stateGitHubAppInstall: payload "stackweaverOrg|returnPath|userID|nonce".
+	stateGitHubAppInstall oauthStatePurpose = "github-app-install"
+	// stateGitHubAppAuthorize: payload "stackweaverOrg|returnPath|userID|installationID|nonce",
+	// the state a person's authorization of the GitHub App comes back with.
+	stateGitHubAppAuthorize oauthStatePurpose = "github-app-authorize"
+)
 
 // oauthStateSecret is the HMAC key for signed OAuth state, set once at startup from ENCRYPTION_KEY.
 var oauthStateSecret []byte
@@ -30,19 +47,21 @@ var oauthStateSecret []byte
 func SetOAuthStateSecret(key []byte) { oauthStateSecret = key }
 
 // mintOAuthState wraps the business payload (e.g. "org|adoOrg|return|nonce") in a signed,
-// expiring envelope safe to pass through an OAuth redirect. Returns "" when signing is disabled.
-func mintOAuthState(payload string) string {
+// expiring envelope for the given flow, safe to pass through an OAuth redirect. Returns "" when
+// signing is disabled.
+func mintOAuthState(purpose oauthStatePurpose, payload string) string {
 	if len(oauthStateSecret) == 0 {
 		return ""
 	}
 	body := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
 		strconv.FormatInt(time.Now().Add(oauthStateTTL).Unix(), 10)
-	return body + "." + signOAuthState(body)
+	return body + "." + signOAuthState(purpose, body)
 }
 
 // verifyOAuthState returns the original payload when state is a valid, unexpired, correctly-signed
-// envelope minted by this deployment; otherwise ok is false. Fails closed when no secret is set.
-func verifyOAuthState(state string) (string, bool) {
+// envelope minted by this deployment for the given flow; otherwise ok is false. Fails closed when
+// no secret is set.
+func verifyOAuthState(purpose oauthStatePurpose, state string) (string, bool) {
 	if len(oauthStateSecret) == 0 {
 		return "", false
 	}
@@ -50,7 +69,7 @@ func verifyOAuthState(state string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if !hmac.Equal([]byte(sig), []byte(signOAuthState(body))) {
+	if !hmac.Equal([]byte(sig), []byte(signOAuthState(purpose, body))) {
 		return "", false
 	}
 	b64, expStr, ok := strings.Cut(body, ".")
@@ -68,8 +87,12 @@ func verifyOAuthState(state string) (string, bool) {
 	return string(payload), true
 }
 
-func signOAuthState(body string) string {
+// signOAuthState signs the purpose together with the body. The purposes are fixed constants
+// and the separator cannot occur in one, so no two (purpose, body) pairs sign the same input.
+func signOAuthState(purpose oauthStatePurpose, body string) string {
 	mac := hmac.New(sha256.New, oauthStateSecret)
+	mac.Write([]byte(purpose))
+	mac.Write([]byte{0})
 	mac.Write([]byte(body))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

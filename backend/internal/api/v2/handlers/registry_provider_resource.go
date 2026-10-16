@@ -73,7 +73,7 @@ func (h *RegistryProviderResourceHandler) requireMember(c *gin.Context, orgID uu
 		regProvErr(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, orgID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, orgID)
 	if err != nil || !inOrg {
 		regProvErr(c, http.StatusForbidden, "Forbidden", "You are not a member of this organization")
 		return false

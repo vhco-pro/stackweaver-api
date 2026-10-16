@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
 
@@ -34,6 +36,7 @@ type AnalyticsHandler struct {
 	inventoryRepo       *repository.AnsibleInventoryRepository
 	auditLogRepo        *repository.AuditLogRepository
 	authService         *auth.Service
+	rbacService         *rbac.Service
 }
 
 func NewAnalyticsHandler(
@@ -47,6 +50,7 @@ func NewAnalyticsHandler(
 	inventoryRepo *repository.AnsibleInventoryRepository,
 	auditLogRepo *repository.AuditLogRepository,
 	authService *auth.Service,
+	rbacService *rbac.Service,
 ) *AnalyticsHandler {
 	return &AnalyticsHandler{
 		orgRepo:             orgRepo,
@@ -59,7 +63,30 @@ func NewAnalyticsHandler(
 		inventoryRepo:       inventoryRepo,
 		auditLogRepo:        auditLogRepo,
 		authService:         authService,
+		rbacService:         rbacService,
 	}
+}
+
+// mayReadAnalytics writes a 403 and returns false unless the caller may read the organization's
+// usage, which spans every workspace and project in it. Terraform Enterprise restricts Explorer, its
+// equivalent, to "the owners team, teams with the "Read all workspaces" permission, teams with the
+// "Read all projects" permission, and the organization API token"; membership alone is not enough.
+func (h *AnalyticsHandler) mayReadAnalytics(c *gin.Context, userID, orgID uuid.UUID) bool {
+	ctx := c.Request.Context()
+	if kind, _ := c.Get("token_kind"); kind == models.APIKeyKindOrg {
+		return true // the org wall has bound an organization token to this organization
+	}
+	readWorkspaces, err := h.rbacService.CheckOrgReadWorkspaces(ctx, userID, orgID)
+	if err == nil && !readWorkspaces {
+		var readProjects bool
+		readProjects, err = h.rbacService.CheckOrgReadProjects(ctx, userID, orgID)
+		readWorkspaces = readProjects
+	}
+	if err != nil || !readWorkspaces {
+		analyticsError(c, http.StatusForbidden, "Forbidden", "Usage and analytics require the owners team, or permission to view all workspaces or all projects")
+		return false
+	}
+	return true
 }
 
 const (
@@ -92,9 +119,12 @@ func (h *AnalyticsHandler) GetOrganizationAnalytics(c *gin.Context) {
 
 	// AUD-139: JWT/browser identities bypass the org-resolution wall, so membership must be checked
 	// here too - the wall alone only covers api-key callers.
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := rbac.UserInOrg(c.Request.Context(), h.orgRepo, user.ID, org.ID)
 	if err != nil || !inOrg {
 		analyticsError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
+		return
+	}
+	if !h.mayReadAnalytics(c, user.ID, org.ID) {
 		return
 	}
 
@@ -257,9 +287,12 @@ func (h *AnalyticsHandler) GetOrganizationExecutions(c *gin.Context) {
 
 	// AUD-139: same membership check as the aggregate endpoint - browser identities bypass the
 	// org-resolution wall, so this drill-down must not become a way around it.
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := rbac.UserInOrg(c.Request.Context(), h.orgRepo, user.ID, org.ID)
 	if err != nil || !inOrg {
 		analyticsError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
+		return
+	}
+	if !h.mayReadAnalytics(c, user.ID, org.ID) {
 		return
 	}
 

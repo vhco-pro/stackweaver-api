@@ -237,7 +237,7 @@
           "can-force-delete": true,
           "can-force-unlock": true,
           "can-lock": true,
-          "can-queue-destroy": true,
+          "can-queue-destroy": false,
           "can-queue-run": true,
           "can-read-settings": true,
           "can-unlock": true,

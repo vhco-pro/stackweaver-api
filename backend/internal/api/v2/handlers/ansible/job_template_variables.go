@@ -255,6 +255,18 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 	jsonapi.WriteDocument(c, http.StatusCreated, h.formatVariableResponse(variable, templateID))
 }
 
+// templateVariable loads a variable of the given job template. A variable that does not exist
+// and one that belongs to another template get the same 404, so the answer says nothing about
+// which variable ids exist. It writes the answer itself and reports false when there is none.
+func (h *JobTemplateVariableHandlerV2) templateVariable(c *gin.Context, templateID uuid.UUID, variableID string) (*models.AnsibleJobTemplateVariable, bool) {
+	variable, err := h.templateVariableRepo.GetByID(variableID)
+	if err != nil || variable.JobTemplateID != templateID {
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Variable not found")
+		return nil, false
+	}
+	return variable, true
+}
+
 // Update updates a variable for a job template
 // PATCH /api/v2/ansible/job-templates/:id/vars/:variable_id
 func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
@@ -276,16 +288,8 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
-	// Get existing variable
-	variable, err := h.templateVariableRepo.GetByID(variableID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Variable not found")
-		return
-	}
-
-	// Verify variable belongs to this template
-	if variable.JobTemplateID != templateID {
-		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Variable does not belong to this job template")
+	variable, ok := h.templateVariable(c, templateID, variableID)
+	if !ok {
 		return
 	}
 
@@ -380,14 +384,7 @@ func (h *JobTemplateVariableHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	// Verify variable belongs to this template
-	variable, err := h.templateVariableRepo.GetByID(variableID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "Variable not found")
-		return
-	}
-	if variable.JobTemplateID != templateID {
-		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Variable does not belong to this job template")
+	if _, ok := h.templateVariable(c, templateID, variableID); !ok {
 		return
 	}
 

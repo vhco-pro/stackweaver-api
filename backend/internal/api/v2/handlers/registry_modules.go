@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -20,13 +21,15 @@ type RegistryModuleHandler struct {
 	moduleService *registry.ModuleService
 	authService   *auth.Service
 	orgRepo       *repository.OrganizationRepository
+	orgResolver   middleware.OrgResolver
 }
 
-func NewRegistryModuleHandler(moduleService *registry.ModuleService, authService *auth.Service, orgRepo *repository.OrganizationRepository) *RegistryModuleHandler {
+func NewRegistryModuleHandler(moduleService *registry.ModuleService, authService *auth.Service, orgRepo *repository.OrganizationRepository, orgResolver middleware.OrgResolver) *RegistryModuleHandler {
 	return &RegistryModuleHandler{
 		moduleService: moduleService,
 		authService:   authService,
 		orgRepo:       orgRepo,
+		orgResolver:   orgResolver,
 	}
 }
 
@@ -129,7 +132,7 @@ func (h *RegistryModuleHandler) GetModuleVersions(c *gin.Context) {
 		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
-	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, h.orgResolver, module.OrganizationID, false) {
 		return
 	}
 
@@ -179,7 +182,7 @@ func (h *RegistryModuleHandler) GetModule(c *gin.Context) {
 		return
 	}
 	// AUD-123: every module belongs to an org's private registry - gate on membership.
-	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, h.orgResolver, module.OrganizationID, false) {
 		return
 	}
 
@@ -205,7 +208,7 @@ func (h *RegistryModuleHandler) GetModuleVersion(c *gin.Context) {
 		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
-	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, h.orgResolver, module.OrganizationID, false) {
 		return
 	}
 
@@ -232,7 +235,7 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
-	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, h.orgResolver, module.OrganizationID, false) {
 		return
 	}
 
@@ -280,7 +283,7 @@ func (h *RegistryModuleHandler) GetModuleDownloadsSummary(c *gin.Context) {
 		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
 		return
 	}
-	if !authorizeRegistryRead(c, h.authService, h.orgRepo, module.OrganizationID, false) {
+	if !authorizeRegistryRead(c, h.authService, h.orgRepo, h.orgResolver, module.OrganizationID, false) {
 		return
 	}
 
@@ -318,7 +321,7 @@ func (h *RegistryModuleHandler) filterAccessibleModules(c *gin.Context, modules 
 	for i := range modules {
 		orgIDs = append(orgIDs, modules[i].OrganizationID)
 	}
-	accessible := registryAccessibleOrgs(c, h.authService, h.orgRepo, orgIDs)
+	accessible := registryAccessibleOrgs(c, h.authService, h.orgRepo, h.orgResolver, orgIDs)
 	kept := make([]models.Module, 0, len(modules))
 	for _, m := range modules {
 		if accessible[m.OrganizationID] {

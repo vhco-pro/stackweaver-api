@@ -10,7 +10,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -111,8 +110,8 @@ func (r *verifiedTestRig) viaMiddleware(t *testing.T, tok string) int {
 	return w.Code
 }
 
-// AC21: an unverified account gets 403 from the middleware and ErrEmailNotVerified from
-// GetUserFromToken, and no users row is created (no repository lookup at all).
+// AC21: an unverified account gets 403 from the middleware and from Authenticate, and no users
+// row is created (no repository lookup at all).
 func TestVerifiedEmailGate_UnverifiedRefusedOnBothPaths(t *testing.T) {
 	rig := newVerifiedTestRig(t)
 	rig.userinfo.Store(`{"sub":"u-unverified","email":"eve@example.com"}`)
@@ -121,8 +120,8 @@ func TestVerifiedEmailGate_UnverifiedRefusedOnBothPaths(t *testing.T) {
 	if code := rig.viaMiddleware(t, tok); code != http.StatusForbidden {
 		t.Errorf("middleware status = %d, want 403", code)
 	}
-	if _, err := rig.svc.GetUserFromToken(context.Background(), tok); !errors.Is(err, ErrEmailNotVerified) {
-		t.Errorf("GetUserFromToken err = %v, want ErrEmailNotVerified", err)
+	if _, err := authenticate(t, rig.svc, tok); err == nil || err.Status != http.StatusForbidden {
+		t.Errorf("Authenticate err = %v, want the 403 for an unverified email", err)
 	}
 	if n := rig.lookups.Load(); n != 0 {
 		t.Errorf("an unverified account must not reach the user repository (%d lookups)", n)
@@ -146,8 +145,8 @@ func TestVerifiedEmailGate_VerifiedReachesRepository(t *testing.T) {
 	if gotEmail != "ada@example.com" {
 		t.Fatalf("the verified email must reach GetOrCreateByZitadelSubject, got %q", gotEmail)
 	}
-	if _, err := rig.svc.GetUserFromToken(context.Background(), tok); err != nil {
-		t.Fatalf("GetUserFromToken: %v", err)
+	if _, err := authenticate(t, rig.svc, tok); err != nil {
+		t.Fatalf("Authenticate: %v", err)
 	}
 }
 
@@ -178,7 +177,7 @@ func TestVerifiedEmailGate_OutageUsesTheVerifiedCache(t *testing.T) {
 	if code := rig.viaMiddleware(t, rig.token(t, "u-stranger")); code != http.StatusServiceUnavailable {
 		t.Errorf("an uncached subject must get 503 during an outage, got %d", code)
 	}
-	if _, err := rig.svc.GetUserFromToken(context.Background(), rig.token(t, "u-stranger")); !errors.Is(err, ErrIdentityUnavailable) {
-		t.Errorf("GetUserFromToken err = %v, want ErrIdentityUnavailable", err)
+	if _, err := authenticate(t, rig.svc, rig.token(t, "u-stranger")); err == nil || err.Status != http.StatusServiceUnavailable {
+		t.Errorf("Authenticate err = %v, want the 503 for an unreachable identity provider", err)
 	}
 }

@@ -158,7 +158,7 @@ func infraUnauthenticated(w *writeRun, target, contentType string, body []byte) 
 	return req
 }
 
-// infraHMAC is the hex HMAC-SHA256 both GitHub and Zitadel sign a delivery with.
+// infraHMAC is the hex HMAC-SHA256 Zitadel signs a delivery with.
 func infraHMAC(secret string, signed []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(signed)
@@ -684,7 +684,7 @@ func init() {
 	nameWrites(map[string]namedWrite{
 		"POST /api/v2/organizations/:name/vcs-connections/github/installations/:installation_id": {
 			reason: needsOutsideSystem,
-			detail: "The server asks GitHub, as the GitHub App it is configured to be, which account the installation belongs to before it stores the connection. Success needs a real installation of that App and GitHub to answer for it.",
+			detail: "The server exchanges the code GitHub issued when a person authorized the GitHub App, confirms with GitHub that the person can access the installation, and asks GitHub which account the installation belongs to before it stores the connection. Success needs a browser sign-in at GitHub, a real installation of that App and GitHub to answer for it.",
 		},
 		"POST /api/v2/vcs-connections/azure-devops/callback": {
 			reason: needsOutsideSystem,
@@ -697,52 +697,6 @@ func init() {
 // routes no user token authenticates.
 func init() {
 	registerWriteCases(
-		writeCase{
-			// Authenticated by GitHub's signature over the body, with the secret the server was
-			// started with; which event it is travels in the X-GitHub-Event header. This is a
-			// push. A seeded playbook is pointed at the repository first, so the push is one the
-			// server has something to do with.
-			route: "POST /api/v2/webhooks/github",
-			env:   map[string]string{"GITHUB_WEBHOOK_SECRET": infraWebhookSecret},
-			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				if err := w.db.Exec("UPDATE ansible_playbooks SET vcs_repository = ?, vcs_branch = ? WHERE id = ?",
-					"acme-platform/ansible-playbooks", "main", w.id("playbooks")).Error; err != nil {
-					t.Fatalf("point a seeded playbook at the repository: %v", err)
-				}
-				const commit = "6dcb09b5b57875f334f61aebed695e2e4193db5e"
-				raw, err := json.Marshal(map[string]any{
-					"ref":    "refs/heads/main",
-					"before": "9049f1265b7d61be4a8904a9a27120d2064dab3b",
-					"after":  commit,
-					"repository": map[string]any{
-						"name":           "ansible-playbooks",
-						"full_name":      "acme-platform/ansible-playbooks",
-						"private":        true,
-						"default_branch": "main",
-						"owner":          map[string]any{"login": "acme-platform"},
-					},
-					"pusher": map[string]any{"name": "avery-diaz", "email": "avery.diaz@example.com"},
-					"head_commit": map[string]any{
-						"id":       commit,
-						"message":  "Raise the nginx worker limit",
-						"modified": []string{"site.yml", "roles/nginx/defaults/main.yml"},
-					},
-					"commits": []any{map[string]any{
-						"id":       commit,
-						"message":  "Raise the nginx worker limit",
-						"modified": []string{"site.yml", "roles/nginx/defaults/main.yml"},
-					}},
-				})
-				if err != nil {
-					t.Fatalf("marshal push event: %v", err)
-				}
-				req := infraUnauthenticated(w, "/api/v2/webhooks/github", "application/json", raw)
-				req.Header.Set("X-GitHub-Event", "push")
-				req.Header.Set("X-GitHub-Delivery", "72d3162e-cc78-11e3-81ab-4c9367dc0958")
-				req.Header.Set("X-Hub-Signature-256", "sha256="+infraHMAC(infraWebhookSecret, raw))
-				return req
-			},
-		},
 		writeCase{
 			// An Azure DevOps service hook carries no signature: it authenticates with the
 			// basic-auth password set on the subscription, which the server compares with the

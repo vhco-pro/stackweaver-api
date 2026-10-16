@@ -3,6 +3,6 @@
   "path": "/api/v2/organizations/:name/vcs-connections/github/installations/:installation_id",
   "named": {
     "reason": "needs a system outside the machine",
-    "detail": "The server asks GitHub, as the GitHub App it is configured to be, which account the installation belongs to before it stores the connection. Success needs a real installation of that App and GitHub to answer for it."
+    "detail": "The server exchanges the code GitHub issued when a person authorized the GitHub App, confirms with GitHub that the person can access the installation, and asks GitHub which account the installation belongs to before it stores the connection. Success needs a browser sign-in at GitHub, a real installation of that App and GitHub to answer for it."
   }
 }

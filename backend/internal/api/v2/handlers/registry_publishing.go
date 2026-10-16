@@ -85,7 +85,7 @@ func (h *RegistryPublishingHandler) requireModuleRead(c *gin.Context, orgName st
 	if !ok {
 		return nil, nil, false
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You are not a member of this organization")
 		return nil, nil, false

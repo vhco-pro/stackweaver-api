@@ -3,9 +3,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -47,14 +50,37 @@ func NewVCSConnectionHandlerV2(
 	}
 }
 
+// CreateVCSConnectionRequestV2 creates a connection from credentials the caller supplies. It names
+// no GitHub App installation: an installation is connected only through the installation flow
+// (CreateConnectionFromInstallation), which confirms the person can access it at GitHub.
 type CreateVCSConnectionRequestV2 struct {
-	Provider       string `json:"provider" binding:"required"` // "github", "gitlab", "bitbucket", "azure_devops"
-	InstallationID string `json:"installation_id,omitempty"`
+	Provider       string `json:"provider" binding:"required"`     // "github", "gitlab", "bitbucket", "azure_devops"
 	AccessToken    string `json:"access_token" binding:"required"` //nolint:gosec // G117: token field, encrypted before storage
 	RefreshToken   string `json:"refresh_token,omitempty"`         //nolint:gosec // G117: token field
 	TokenExpiresAt string `json:"token_expires_at,omitempty"`      // ISO 8601 format
 	AccountName    string `json:"account_name" binding:"required"`
 	AccountType    string `json:"account_type" binding:"required"` // "organization" or "user"
+}
+
+// installationIDRefusal answers a create request that names a GitHub App installation.
+const installationIDRefusal = "installation_id is not accepted here: a GitHub App installation is connected through the GitHub App installation flow (Connect GitHub in the organization's VCS settings)."
+
+// namesInstallation reports whether a create request body carries a non-empty installation_id.
+// A body that is not a JSON object is left to the binding that follows.
+func namesInstallation(raw []byte) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false
+	}
+	v, ok := fields["installation_id"]
+	if !ok {
+		return false
+	}
+	switch strings.TrimSpace(string(v)) {
+	case "null", `""`:
+		return false
+	}
+	return true
 }
 
 // List lists all VCS connections for an organization
@@ -102,6 +128,20 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
+	// An installation is connected only through the GitHub App installation flow, which confirms
+	// the person can access it. A request that names one is refused rather than answered with a
+	// connection that is not the one it asked for.
+	raw, err := c.GetRawData()
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to read the request body")
+		return
+	}
+	if namesInstallation(raw) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", installationIDRefusal)
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+
 	var req CreateVCSConnectionRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
@@ -142,7 +182,6 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 	connection := &models.VCSConnection{
 		OrganizationID: org.ID,
 		Provider:       provider,
-		InstallationID: req.InstallationID,
 		AccessToken:    req.AccessToken,
 		RefreshToken:   req.RefreshToken,
 		TokenExpiresAt: tokenExpiresAt,
@@ -270,7 +309,7 @@ func (h *VCSConnectionHandlerV2) requireOrgMembership(c *gin.Context, orgID uuid
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, orgID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, orgID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return false

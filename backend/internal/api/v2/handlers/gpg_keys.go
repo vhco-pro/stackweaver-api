@@ -70,7 +70,7 @@ func (h *GPGKeyHandler) requireOrgMember(c *gin.Context, org *models.Organizatio
 		gpgError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !inOrg {
 		gpgError(c, http.StatusForbidden, "Forbidden", "You are not a member of this organization")
 		return false
@@ -206,7 +206,7 @@ func (h *GPGKeyHandler) ListGPGKeys(c *gin.Context) {
 			continue
 		}
 		// AUD-103: only disclose keys for orgs the caller is a member of.
-		if inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID); err != nil || !inOrg {
+		if inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, org.ID); err != nil || !inOrg {
 			continue
 		}
 		keys, err := h.gpgKeyRepo.GetByOrganization(org.ID)

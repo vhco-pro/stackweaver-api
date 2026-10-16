@@ -101,7 +101,7 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, team.OrganizationID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, team.OrganizationID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You are not a member of this team's organization")
 		return

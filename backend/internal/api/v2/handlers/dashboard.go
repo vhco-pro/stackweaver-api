@@ -11,6 +11,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
 
@@ -26,6 +27,8 @@ type DashboardHandler struct {
 	dashboardRepo *repository.DashboardRepository
 	authService   *auth.Service
 	rbacService   *rbac.Service
+	workspaceRepo *repository.WorkspaceRepository
+	projectRepo   *repository.ProjectRepository
 }
 
 func NewDashboardHandler(
@@ -33,13 +36,84 @@ func NewDashboardHandler(
 	dashboardRepo *repository.DashboardRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
+	workspaceRepo *repository.WorkspaceRepository,
+	projectRepo *repository.ProjectRepository,
 ) *DashboardHandler {
 	return &DashboardHandler{
 		orgRepo:       orgRepo,
 		dashboardRepo: dashboardRepo,
 		authService:   authService,
 		rbacService:   rbacService,
+		workspaceRepo: workspaceRepo,
+		projectRepo:   projectRepo,
 	}
+}
+
+// visibleOrgs returns the organizations the caller may see on the dashboard. A user sees every
+// organization they belong to. A token sees less: an organization token only the organization it
+// is bound to, and a team or project token only its subject's organization (rbac.UserInOrg), so
+// the cross-organization roll-up never lends a token its owner's other memberships.
+func (h *DashboardHandler) visibleOrgs(c *gin.Context, userID uuid.UUID) ([]models.Organization, error) {
+	ctx := c.Request.Context()
+	orgs, err := h.orgRepo.WithContext(ctx).ListByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	kind, _ := c.Get("token_kind")
+	bound, isBound := c.Get("token_org_id")
+	visible := make([]models.Organization, 0, len(orgs))
+	for _, org := range orgs {
+		if kind == models.APIKeyKindOrg && (!isBound || bound != org.ID) {
+			continue
+		}
+		in, err := rbac.UserInOrg(ctx, h.orgRepo, userID, org.ID)
+		if err != nil {
+			return nil, err
+		}
+		if in {
+			visible = append(visible, org)
+		}
+	}
+	return visible, nil
+}
+
+// readScope returns what the caller can read in orgs, as the dashboard counts it. Every caller, a
+// user or a team or project token, is judged by the rule a single read is: a caller whose
+// organization-level permissions read the whole of every organization gets a nil scope, whose
+// roll-up is organization-wide; anyone else gets the workspaces, projects and Ansible resources it
+// can read in each.
+func (h *DashboardHandler) readScope(c *gin.Context, userID uuid.UUID, orgs []models.Organization) (scope *repository.DashboardScope, err error) {
+	ctx := c.Request.Context()
+	orgIDs := make([]uuid.UUID, 0, len(orgs))
+	for _, org := range orgs {
+		orgIDs = append(orgIDs, org.ID)
+	}
+	perms, err := h.rbacService.OrgPermissionsForOrganizations(ctx, userID, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+	whole := true
+	for _, org := range orgs {
+		whole = whole && rbac.ReadsWholeOrganization(perms[org.ID])
+	}
+	if whole {
+		return scope, nil
+	}
+	scope = &repository.DashboardScope{}
+	for _, org := range orgs {
+		workspaces, _, err := h.workspaceRepo.WithContext(ctx).ListByOrganization(org.Name, -1, 0)
+		if err != nil {
+			return nil, err
+		}
+		projects, _, err := h.projectRepo.WithContext(ctx).ListByOrganization(org.ID, 10000, 0)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.rbacService.AddDashboardScope(ctx, userID, org.ID, workspaces, projects, scope); err != nil {
+			return nil, err
+		}
+	}
+	return scope, nil
 }
 
 const (
@@ -55,9 +129,10 @@ const (
 // GET /api/v2/dashboard/stats
 //
 // Scope: the organizations are the caller's memberships, and every count within an organization is
-// organization-wide. Runs and jobs used to be filtered to the requesting user while projects,
-// workspaces and playbooks were not, so "active operations" meant *my* operations sitting beside a
-// workspace count that meant everyone's. One organization, one population: what the team has.
+// of what the caller can read there, the same population its listings hold: the whole organization
+// for an owner or a member who may view all of it. Runs and jobs used to be filtered to the
+// requesting user while projects, workspaces and playbooks were not, so "active operations" meant
+// *my* operations sitting beside a workspace count that meant everyone's.
 func (h *DashboardHandler) GetStats(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
@@ -66,9 +141,14 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	orgs, err := h.orgRepo.WithContext(ctx).ListByUser(user.ID)
+	orgs, err := h.visibleOrgs(c, user.ID)
 	if err != nil {
 		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load organizations")
+		return
+	}
+	scope, err := h.readScope(c, user.ID, orgs)
+	if err != nil {
+		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve permissions")
 		return
 	}
 
@@ -84,7 +164,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	firstDayOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 
 	repo := h.dashboardRepo.WithContext(ctx)
-	summaries, err := repo.OrgSummaries(orgIDs, firstDayOfMonth, now.Add(-recentFailureWindow))
+	summaries, err := repo.OrgSummariesScoped(orgIDs, firstDayOfMonth, now.Add(-recentFailureWindow), scope)
 	if err != nil {
 		// A partial roll-up would under-report exactly the thing the page exists to surface, so the
 		// whole request fails loudly rather than rendering a plausible lie.
@@ -199,9 +279,14 @@ func (h *DashboardHandler) GetOperations(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	orgs, err := h.orgRepo.WithContext(ctx).ListByUser(user.ID)
+	orgs, err := h.visibleOrgs(c, user.ID)
 	if err != nil {
 		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load organizations")
+		return
+	}
+	scope, err := h.readScope(c, user.ID, orgs)
+	if err != nil {
+		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve permissions")
 		return
 	}
 	orgIDs := make([]uuid.UUID, 0, len(orgs))
@@ -209,7 +294,7 @@ func (h *DashboardHandler) GetOperations(c *gin.Context) {
 		orgIDs = append(orgIDs, org.ID)
 	}
 
-	executions, err := h.dashboardRepo.WithContext(ctx).LiveExecutions(orgIDs, liveExecutionLimit)
+	executions, err := h.dashboardRepo.WithContext(ctx).LiveExecutionsScoped(orgIDs, liveExecutionLimit, scope)
 	if err != nil {
 		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load live operations")
 		return

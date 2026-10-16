@@ -7,7 +7,12 @@
 // (including JWT identities, which bypass the org wall) could read another tenant's
 // workspace config by name or UUID. These tests drive the real handler + real
 // Postgres and assert cross-tenant and unauthenticated callers are denied while a
-// legitimate org member is allowed.
+// member with read access to the workspace is allowed.
+//
+// The reader used to be any member of the organization. Reading a workspace now requires read
+// access to it, as in Terraform Enterprise: a grant on the workspace or its project, "view all
+// workspaces" or "manage all workspaces", or the owners team. A member with none of those is
+// refused, which TestWorkspaceReadAuthz_MemberWithoutAccessDenied asserts.
 //
 // Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Cleanup is
 // strictly row-scoped (the DB may be live). Run with:
@@ -40,7 +45,8 @@ type wsReadFixture struct {
 	orgName       string
 	workspaceName string
 	workspaceID   string
-	member        *models.User // org A member
+	member        *models.User // org A member whose team reads the workspace
+	plain         *models.User // org A member with no access to it
 	outsider      *models.User // org B only
 }
 
@@ -57,6 +63,7 @@ func setupWorkspaceReadAuthz(t *testing.T) *wsReadFixture {
 	if err := db.AutoMigrate(
 		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
 		&models.Project{}, &models.Workspace{},
+		&models.Team{}, &models.TeamMember{}, &models.TeamWorkspaceAccess{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -68,10 +75,16 @@ func setupWorkspaceReadAuthz(t *testing.T) *wsReadFixture {
 	outsider := &models.User{ID: uuid.New(), ZitadelSubject: "wsr-out-" + sfx, Email: "wsr-out-" + sfx + "@test.local"}
 	projA := &models.Project{ID: uuid.New(), OrganizationID: orgA.ID, Name: "projA-" + sfx}
 	wsA := &models.Workspace{ID: "ws-" + sfx + "0000000", ProjectID: projA.ID, Name: "wsA-" + sfx}
+	plain := &models.User{ID: uuid.New(), ZitadelSubject: "wsr-pln-" + sfx, Email: "wsr-pln-" + sfx + "@test.local"}
+	readers := &models.Team{ID: uuid.New(), OrganizationID: orgA.ID, Name: "wsr-read-" + sfx}
+	read := "read"
 
 	seed := []interface{}{
-		orgA, orgB, member, outsider, projA, wsA,
+		orgA, orgB, member, outsider, plain, projA, wsA, readers,
+		&models.TeamMember{ID: uuid.New(), TeamID: readers.ID, UserID: member.ID},
+		&models.TeamWorkspaceAccess{ID: uuid.New(), TeamID: readers.ID, WorkspaceID: wsA.ID, Access: &read},
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgA.ID, UserID: member.ID},
+		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgA.ID, UserID: plain.ID},
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgB.ID, UserID: outsider.ID},
 	}
 	for _, obj := range seed {
@@ -80,11 +93,14 @@ func setupWorkspaceReadAuthz(t *testing.T) *wsReadFixture {
 		}
 	}
 	t.Cleanup(func() {
+		db.Where("team_id = ?", readers.ID).Delete(&models.TeamWorkspaceAccess{})
+		db.Where("team_id = ?", readers.ID).Delete(&models.TeamMember{})
+		db.Where("id = ?", readers.ID).Delete(&models.Team{})
 		db.Where("id = ?", wsA.ID).Delete(&models.Workspace{})
 		db.Where("id = ?", projA.ID).Delete(&models.Project{})
 		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.OrganizationMember{})
 		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.Organization{})
-		db.Where("id IN ?", []uuid.UUID{member.ID, outsider.ID}).Delete(&models.User{})
+		db.Where("id IN ?", []uuid.UUID{member.ID, outsider.ID, plain.ID}).Delete(&models.User{})
 	})
 
 	orgRepo := repository.NewOrganizationRepository(db)
@@ -115,6 +131,7 @@ func setupWorkspaceReadAuthz(t *testing.T) *wsReadFixture {
 		workspaceName: wsA.Name,
 		workspaceID:   wsA.ID,
 		member:        member,
+		plain:         plain,
 		outsider:      outsider,
 	}
 }
@@ -153,8 +170,8 @@ func TestWorkspaceReadAuthz_CrossTenantDenied(t *testing.T) {
 	}
 }
 
-// TestWorkspaceReadAuthz_MemberAllowed confirms a legitimate org member still reads
-// their own workspace by name and by ID.
+// TestWorkspaceReadAuthz_MemberAllowed confirms a member whose team reads the workspace reads
+// it by name and by ID.
 func TestWorkspaceReadAuthz_MemberAllowed(t *testing.T) {
 	f := setupWorkspaceReadAuthz(t)
 	paths := []string{
@@ -164,6 +181,21 @@ func TestWorkspaceReadAuthz_MemberAllowed(t *testing.T) {
 	for _, p := range paths {
 		if code := wsReadReq(t, f, p, f.member.ID); code != http.StatusOK {
 			t.Fatalf("member GET %s = %d, want 200", p, code)
+		}
+	}
+}
+
+// TestWorkspaceReadAuthz_MemberWithoutAccessDenied confirms membership of the organization
+// alone reads no workspace.
+func TestWorkspaceReadAuthz_MemberWithoutAccessDenied(t *testing.T) {
+	f := setupWorkspaceReadAuthz(t)
+	paths := []string{
+		"/organizations/" + f.orgName + "/workspaces/" + f.workspaceName,
+		"/workspaces/" + f.workspaceID,
+	}
+	for _, p := range paths {
+		if code := wsReadReq(t, f, p, f.plain.ID); code != http.StatusForbidden {
+			t.Fatalf("member without access GET %s = %d, want 403", p, code)
 		}
 	}
 }
