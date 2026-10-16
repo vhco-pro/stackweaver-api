@@ -206,6 +206,8 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 	router.GET("/ansible/inventory-sources/:source_id", sourceHandler.Get)
 	router.POST("/ansible/inventory-sources/:source_id/sync", sourceHandler.Sync)
 	router.GET("/ansible/job-templates/:id/vars", tvarHandler.ListByJobTemplate)
+	router.PATCH("/ansible/job-templates/:id/vars/:variable_id", tvarHandler.Update)
+	router.DELETE("/ansible/job-templates/:id/vars/:variable_id", tvarHandler.Delete)
 
 	return &ansibleAuthzFixture{
 		router:      router,

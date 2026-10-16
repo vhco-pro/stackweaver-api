@@ -5,7 +5,13 @@
 // no membership check - unlike its sibling GetByID, which gates on UserInOrg - so
 // any authenticated user could read another tenant's project config by name. This
 // test drives the real handler + real Postgres and asserts cross-tenant and
-// unauthenticated callers are denied while a legitimate member is allowed.
+// unauthenticated callers are denied while a member with read access to the project is
+// allowed.
+//
+// The reader used to be any member of the organization. Reading a project now requires read
+// access to it, as in Terraform Enterprise: a grant on the project, "view all projects" or
+// "manage all projects", or the owners team. A member with none of those is refused, which
+// this test also asserts.
 //
 // Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Cleanup is
 // strictly row-scoped (the DB may be live). Run with:
@@ -44,6 +50,7 @@ func TestProjectReadAuthz(t *testing.T) {
 	}
 	if err := db.AutoMigrate(
 		&models.User{}, &models.Organization{}, &models.OrganizationMember{}, &models.Project{},
+		&models.Team{}, &models.TeamMember{}, &models.TeamProjectAccess{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -53,11 +60,17 @@ func TestProjectReadAuthz(t *testing.T) {
 	orgB := &models.Organization{ID: uuid.New(), Name: "prread-b-" + sfx}
 	member := &models.User{ID: uuid.New(), ZitadelSubject: "pr-mem-" + sfx, Email: "pr-mem-" + sfx + "@test.local"}
 	outsider := &models.User{ID: uuid.New(), ZitadelSubject: "pr-out-" + sfx, Email: "pr-out-" + sfx + "@test.local"}
+	plain := &models.User{ID: uuid.New(), ZitadelSubject: "pr-pln-" + sfx, Email: "pr-pln-" + sfx + "@test.local"}
 	projA := &models.Project{ID: uuid.New(), OrganizationID: orgA.ID, Name: "projA-" + sfx}
+	readers := &models.Team{ID: uuid.New(), OrganizationID: orgA.ID, Name: "pr-read-" + sfx}
+	read := "read"
 
 	seed := []interface{}{
-		orgA, orgB, member, outsider, projA,
+		orgA, orgB, member, outsider, plain, projA, readers,
+		&models.TeamMember{ID: uuid.New(), TeamID: readers.ID, UserID: member.ID},
+		&models.TeamProjectAccess{ID: uuid.New(), TeamID: readers.ID, ProjectID: projA.ID, Access: &read},
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgA.ID, UserID: member.ID},
+		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgA.ID, UserID: plain.ID},
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgB.ID, UserID: outsider.ID},
 	}
 	for _, obj := range seed {
@@ -66,10 +79,13 @@ func TestProjectReadAuthz(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
+		db.Where("team_id = ?", readers.ID).Delete(&models.TeamProjectAccess{})
+		db.Where("team_id = ?", readers.ID).Delete(&models.TeamMember{})
+		db.Where("id = ?", readers.ID).Delete(&models.Team{})
 		db.Where("id = ?", projA.ID).Delete(&models.Project{})
 		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.OrganizationMember{})
 		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.Organization{})
-		db.Where("id IN ?", []uuid.UUID{member.ID, outsider.ID}).Delete(&models.User{})
+		db.Where("id IN ?", []uuid.UUID{member.ID, outsider.ID, plain.ID}).Delete(&models.User{})
 	})
 
 	orgRepo := repository.NewOrganizationRepository(db)
@@ -106,6 +122,9 @@ func TestProjectReadAuthz(t *testing.T) {
 		t.Fatalf("anon GET project = %d, want 401", code)
 	}
 	if code := do(member.ID); code != http.StatusOK {
-		t.Fatalf("member GET project = %d, want 200", code)
+		t.Fatalf("member with read access GET project = %d, want 200", code)
+	}
+	if code := do(plain.ID); code != http.StatusForbidden {
+		t.Fatalf("member without access GET project = %d, want 403", code)
 	}
 }

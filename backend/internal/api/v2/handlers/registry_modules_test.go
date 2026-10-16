@@ -32,6 +32,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -194,7 +195,7 @@ func TestListModules(t *testing.T) {
 	// AUD-123: modules are org-private; the /v1 list handler filters to modules the caller can
 	// access, so the handler needs the auth + org deps and the request must come from an org member.
 	authService := auth.NewService(repository.NewUserRepository(db))
-	handler := NewRegistryModuleHandler(moduleService, authService, orgRepo)
+	handler := NewRegistryModuleHandler(moduleService, authService, orgRepo, middleware.NewDBOrgResolver(db))
 
 	owner := createRegistryTestUser(t, db)
 	makeUserOrgOwner(t, db, org, owner)
@@ -274,7 +275,7 @@ func TestGetModuleVersions(t *testing.T) {
 	// AUD-123: the versions endpoint gates on org membership; construct with the auth deps and
 	// authenticate the request as an org owner.
 	authService := auth.NewService(repository.NewUserRepository(db))
-	handler := NewRegistryModuleHandler(moduleService, authService, orgRepo)
+	handler := NewRegistryModuleHandler(moduleService, authService, orgRepo, middleware.NewDBOrgResolver(db))
 
 	owner := createRegistryTestUser(t, db)
 	makeUserOrgOwner(t, db, org, owner)

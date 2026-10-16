@@ -3,11 +3,12 @@
 package handlers
 
 import (
+	"context"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/repository"
 )
 
 // Team access reads follow the rule Terraform Enterprise documents identically for
@@ -38,8 +39,8 @@ func teamIsOrganizationVisible(team models.Team) bool {
 
 // callerTeamIDs returns the set of teams within an organization that a user belongs to.
 // Used to decide which secret teams' access rows that user is allowed to see.
-func callerTeamIDs(teamRepo *repository.TeamRepository, userID, orgID uuid.UUID) (map[uuid.UUID]bool, error) {
-	teams, err := teamRepo.GetTeamsByUserID(userID, orgID)
+func callerTeamIDs(ctx context.Context, rbacService *rbac.Service, userID, orgID uuid.UUID) (map[uuid.UUID]bool, error) {
+	teams, err := rbacService.TeamsInOrg(ctx, userID, orgID)
 	if err != nil {
 		return nil, err
 	}

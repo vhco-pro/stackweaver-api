@@ -89,6 +89,40 @@ func buildAnsibleConfigResponse(config *models.AnsibleConfig) jsonapi.Resource[A
 	return resp
 }
 
+// authorizeConfigRead gates a read of an Ansible configuration. An ansible.cfg can hold
+// credentials, so reading one requires reading the organization's Ansible resources or managing
+// its workspaces, which is what writing one requires. For a project's configuration (projectID
+// set), Ansible read access in that project is also enough. A signed-in session is not held by
+// the org wall, so this is the only check it meets. It writes the error response and returns
+// false when the caller may not read.
+func (h *AnsibleConfigHandler) authorizeConfigRead(c *gin.Context, orgID uuid.UUID, projectID *uuid.UUID) bool {
+	userVal, exists := c.Get("user_id")
+	userID, ok := userVal.(uuid.UUID)
+	if !exists || !ok {
+		jsonapi.WriteErrorNoDetail(c, http.StatusUnauthorized, "Unauthorized")
+		return false
+	}
+	ctx := c.Request.Context()
+	allowed, err := h.rbacService.CheckOrgReadAnsible(ctx, userID, orgID)
+	if err == nil && !allowed {
+		allowed, err = h.rbacService.CheckOrgManageWorkspaces(ctx, userID, orgID)
+	}
+	if err == nil && !allowed && projectID != nil {
+		allowed, err = h.rbacService.CheckAnsibleResourcePermission(
+			ctx, userID, rbac.ResourceTypeAnsibleJobTemplate, "", rbac.PermissionAnsibleJobTemplateRead, projectID,
+		)
+	}
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return false
+	}
+	if !allowed {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Ansible read permission required")
+		return false
+	}
+	return true
+}
+
 // GetByOrganization returns the org-level ansible config
 // GET /api/v2/organizations/:name/ansible-config
 func (h *AnsibleConfigHandler) GetByOrganization(c *gin.Context) {
@@ -101,6 +135,10 @@ func (h *AnsibleConfigHandler) GetByOrganization(c *gin.Context) {
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
+		return
+	}
+
+	if !h.authorizeConfigRead(c, org.ID, nil) {
 		return
 	}
 
@@ -242,6 +280,20 @@ func (h *AnsibleConfigHandler) GetByProject(c *gin.Context) {
 	projectID, err := uuid.Parse(projectIDStr)
 	if err != nil {
 		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid project ID")
+		return
+	}
+
+	project, err := h.projectRepo.GetByID(projectID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Project not found")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return
+	}
+
+	if !h.authorizeConfigRead(c, project.OrganizationID, &project.ID) {
 		return
 	}
 
@@ -403,12 +455,40 @@ func (h *AnsibleConfigHandler) GetEffective(c *gin.Context) {
 		return
 	}
 
+	if !h.authorizeConfigRead(c, org.ID, nil) {
+		return
+	}
+
 	projectIDStr := c.Query("project_id")
 	workspaceID := c.Query("workspace_id")
 
 	var projectID uuid.UUID
 	if projectIDStr != "" {
 		projectID, _ = uuid.Parse(projectIDStr)
+	}
+
+	// The configuration is resolved within the organization the route names, which is the one
+	// the caller was authorized for: a project or workspace of another organization is not
+	// found here.
+	if projectID != uuid.Nil {
+		if project, err := h.projectRepo.GetByID(projectID); err != nil || project.OrganizationID != org.ID {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Project not found")
+			return
+		}
+	}
+	if workspaceID != "" {
+		var inOrg int64
+		if err := h.db.Model(&models.Workspace{}).
+			Joins("JOIN projects ON projects.id = workspaces.project_id").
+			Where("workspaces.id = ? AND projects.organization_id = ?", workspaceID, org.ID).
+			Count(&inOrg).Error; err != nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		if inOrg == 0 {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Workspace not found")
+			return
+		}
 	}
 
 	config, err := h.configRepo.GetForWorkspace(workspaceID, projectID, org.ID)

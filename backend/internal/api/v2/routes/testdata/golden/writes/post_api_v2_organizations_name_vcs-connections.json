@@ -23,9 +23,6 @@
         "account_type": {
           "type": "string"
         },
-        "installation_id": {
-          "type": "string"
-        },
         "provider": {
           "type": "string"
         },

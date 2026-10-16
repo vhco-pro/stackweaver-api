@@ -944,6 +944,9 @@ func init() {
 			// channel is whatever URL its template names. This one names a listener the case
 			// starts on this machine, so the delivery is real and goes nowhere else.
 			route: "POST /api/v2/ansible/notification-templates/:id/test",
+			// The server refuses to deliver to a loopback or private address unless it was
+			// started with this, and the listener is on loopback.
+			env: map[string]string{"STACKWEAVER_ANSIBLE_NOTIFICATIONS_ALLOW_PRIVATE": "true"},
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				receiver := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
 					rw.WriteHeader(http.StatusNoContent)

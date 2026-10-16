@@ -20,7 +20,7 @@ import (
 // Plan contract (docs/internal/plans/security/api-key-org-scoping-enforcement-plan.md):
 // all programmatic tokens - org-bound automation keys and user-bound
 // (`terraform login`) tokens - are now `tfe-`-prefixed api_keys. The
-// legacy separate `tfe_tokens` table was retired, so `GetUserFromToken`
+// legacy separate `tfe_tokens` table was retired, so `Authenticate`
 // resolves a `tfe-`-prefixed token through a single api-key lookup.
 //
 // These tests pin that routing contract so a future refactor (swapping
@@ -31,7 +31,7 @@ import (
 // # Why mocks instead of a real Postgres
 //
 // The auth service's lookup interfaces (`UserLookup`, `APIKeyVerifier`)
-// are narrow - exactly the methods `GetUserFromToken` calls. Mocks here
+// are narrow - exactly the methods `Authenticate` calls. Mocks here
 // exercise the SAME code path the production service runs, just with
 // deterministic repos. bcrypt-of-API-key and gorm have their own
 // upstream coverage.
@@ -88,9 +88,41 @@ func (m *mockAPIKeyService) UpdateLastUsed(id uuid.UUID) error {
 	return nil
 }
 
+// IsTeamMember answers no: none of these tests mints a team-scoped key.
+func (m *mockAPIKeyService) IsTeamMember(_, _ uuid.UUID) (bool, error) { return false, nil }
+
+// ActiveAPIKey finds nothing: none of these tests reads a log token.
+func (m *mockAPIKeyService) ActiveAPIKey(uuid.UUID) (*models.APIKey, error) {
+	return nil, errors.New("not found")
+}
+
+// authenticate runs Authenticate on a fresh request and returns the user id it established, or
+// the AuthError it returned. Every route that accepts a credential goes through Authenticate.
+func authenticate(t *testing.T, svc *Service, token string) (uuid.UUID, *AuthError) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v2/probe", http.NoBody)
+	if err := svc.Authenticate(c, token); err != nil {
+		var authErr *AuthError
+		if !errors.As(err, &authErr) {
+			t.Fatalf("Authenticate returned %T (%v), want *AuthError", err, err)
+		}
+		if _, set := c.Get("user_id"); set {
+			t.Errorf("a failed Authenticate must establish no user")
+		}
+		return uuid.Nil, authErr
+	}
+	id, ok := c.Get("user_id")
+	if !ok {
+		t.Fatalf("Authenticate succeeded but established no user")
+	}
+	return id.(uuid.UUID), nil
+}
+
 // --- Programmatic-token (api-key) auth ---
 
-func TestGetUserFromToken_APIKeyTokenSucceeds(t *testing.T) {
+func TestAuthenticate_APIKeyTokenSucceeds(t *testing.T) {
 	userID := uuid.New()
 	apiKeyID := uuid.New()
 	wantUser := &models.User{ID: userID, Email: "apikey-user@example.com", Name: "API User"}
@@ -116,15 +148,12 @@ func TestGetUserFromToken_APIKeyTokenSucceeds(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
-	got, err := svc.GetUserFromToken(context.Background(), validToken)
-	if err != nil {
-		t.Fatalf("expected success, got error: %v", err)
+	got, authErr := authenticate(t, svc, validToken)
+	if authErr != nil {
+		t.Fatalf("expected success, got error: %v", authErr)
 	}
-	if got.ID != wantUser.ID {
-		t.Errorf("returned user id: want %s, got %s", wantUser.ID, got.ID)
-	}
-	if got.Email != wantUser.Email {
-		t.Errorf("returned user email: want %s, got %s", wantUser.Email, got.Email)
+	if got != wantUser.ID {
+		t.Errorf("established user id: want %s, got %s", wantUser.ID, got)
 	}
 
 	// Lookup fired exactly once with the full token.
@@ -137,7 +166,7 @@ func TestGetUserFromToken_APIKeyTokenSucceeds(t *testing.T) {
 	}
 }
 
-func TestGetUserFromToken_NonTFEPrefixSkipsAPIKey(t *testing.T) {
+func TestAuthenticate_NonTFEPrefixSkipsAPIKey(t *testing.T) {
 	// Token without the `tfe-` prefix must NOT touch the api-key
 	// lookup path. Without a JWT verifier set, the call falls through
 	// to the "authentication service not initialized" error. What
@@ -149,7 +178,7 @@ func TestGetUserFromToken_NonTFEPrefixSkipsAPIKey(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
-	_, err := svc.GetUserFromToken(context.Background(), "eyJhbGciOi...not-a-tfe-token")
+	_, err := authenticate(t, svc, "eyJhbGciOi...not-a-tfe-token")
 	if err == nil {
 		t.Fatal("non-tfe token without JWT verifier must return an error")
 	}
@@ -158,7 +187,7 @@ func TestGetUserFromToken_NonTFEPrefixSkipsAPIKey(t *testing.T) {
 	}
 }
 
-func TestGetUserFromToken_APIKeyMissingServiceFailsCleanly(t *testing.T) {
+func TestAuthenticate_APIKeyMissingServiceFailsCleanly(t *testing.T) {
 	// `tfe-` prefix but no APIKeyService set must fall through cleanly
 	// without panicking on a nil pointer.
 	userRepo := &mockUserRepo{}
@@ -166,13 +195,13 @@ func TestGetUserFromToken_APIKeyMissingServiceFailsCleanly(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	// Deliberately do NOT call SetAPIKeyService - apiKeyService stays nil.
 
-	_, err := svc.GetUserFromToken(context.Background(), "tfe-something")
+	_, err := authenticate(t, svc, "tfe-something")
 	if err == nil {
 		t.Fatal("missing api-key service must error, not silently succeed")
 	}
 }
 
-func TestGetUserFromToken_UnknownTFETokenIsTerminal(t *testing.T) {
+func TestAuthenticate_UnknownTFETokenIsTerminal(t *testing.T) {
 	// #503: a `tfe-` token that fails api-key lookup must be rejected
 	// outright, NOT handed to JWT verification. With no verifier set,
 	// the legacy fallthrough returned "authentication service not
@@ -183,8 +212,8 @@ func TestGetUserFromToken_UnknownTFETokenIsTerminal(t *testing.T) {
 	svc := NewServiceWithLookups(&mockUserRepo{})
 	svc.SetAPIKeyService(apiKey)
 
-	_, err := svc.GetUserFromToken(context.Background(), "tfe-revoked-or-unknown")
-	if err == nil || !strings.Contains(err.Error(), "invalid or revoked API token") {
+	_, err := authenticate(t, svc, "tfe-revoked-or-unknown")
+	if err == nil || err.Status != http.StatusUnauthorized || !strings.Contains(err.Detail, "invalid or revoked API token") {
 		t.Fatalf("want terminal invalid-or-revoked error, got: %v", err)
 	}
 	if len(apiKey.verifyCalls) != 1 {
@@ -192,7 +221,7 @@ func TestGetUserFromToken_UnknownTFETokenIsTerminal(t *testing.T) {
 	}
 }
 
-func TestGetUserFromToken_APIKeyValidButOrphanedUser(t *testing.T) {
+func TestAuthenticate_APIKeyValidButOrphanedUser(t *testing.T) {
 	// API key matches but the linked user is gone (e.g. orphaned key
 	// after a user delete). Service must NOT return a nil-user with
 	// nil-error - the contract is "either valid user or error".
@@ -213,12 +242,9 @@ func TestGetUserFromToken_APIKeyValidButOrphanedUser(t *testing.T) {
 	svc := NewServiceWithLookups(userRepo)
 	svc.SetAPIKeyService(apiKey)
 
-	got, err := svc.GetUserFromToken(context.Background(), "tfe-validkey-orphanuser")
+	got, err := authenticate(t, svc, "tfe-validkey-orphanuser")
 	if err == nil {
-		t.Fatalf("orphaned-key case must return an error, got user: %+v", got)
-	}
-	if got != nil {
-		t.Errorf("orphaned-key case must return a nil user, got: %+v", got)
+		t.Fatalf("orphaned-key case must return an error, got user: %s", got)
 	}
 }
 

@@ -8,9 +8,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
 
@@ -20,6 +23,8 @@ type ActivityHandlerV2 struct {
 	orgRepo         *repository.OrganizationRepository
 	workspaceRepo   *repository.WorkspaceRepository
 	projectRepo     *repository.ProjectRepository
+	orgResolver     middleware.OrgResolver
+	rbacService     *rbac.Service
 }
 
 func NewActivityHandlerV2(
@@ -28,6 +33,8 @@ func NewActivityHandlerV2(
 	orgRepo *repository.OrganizationRepository,
 	workspaceRepo *repository.WorkspaceRepository,
 	projectRepo *repository.ProjectRepository,
+	orgResolver middleware.OrgResolver,
+	rbacService *rbac.Service,
 ) *ActivityHandlerV2 {
 	return &ActivityHandlerV2{
 		activityService: activityService,
@@ -35,14 +42,65 @@ func NewActivityHandlerV2(
 		orgRepo:         orgRepo,
 		workspaceRepo:   workspaceRepo,
 		projectRepo:     projectRepo,
+		orgResolver:     orgResolver,
+		rbacService:     rbacService,
 	}
+}
+
+// visibleActivity returns what the caller may read of orgID's activity: nil when it can read every
+// workspace and project there, else the workspaces and projects it can read, each judged as a
+// single read of it is.
+func (h *ActivityHandlerV2) visibleActivity(c *gin.Context, userID uuid.UUID, org *models.Organization) (visible *repository.AuditVisibility, err error) {
+	ctx := c.Request.Context()
+	allWorkspaces, err := h.rbacService.CheckOrgReadWorkspaces(ctx, userID, org.ID)
+	if err != nil {
+		return nil, err
+	}
+	allProjects, err := h.rbacService.CheckOrgReadProjects(ctx, userID, org.ID)
+	if err != nil {
+		return nil, err
+	}
+	if allWorkspaces && allProjects {
+		return visible, nil
+	}
+	workspaces, _, err := h.workspaceRepo.WithContext(ctx).ListByOrganization(org.Name, -1, 0)
+	if err != nil {
+		return nil, err
+	}
+	readableWorkspaces, err := h.rbacService.ReadableWorkspaces(ctx, userID, org.ID, workspaces, rbac.PermissionWorkspaceRead)
+	if err != nil {
+		return nil, err
+	}
+	projects, _, err := h.projectRepo.WithContext(ctx).ListByOrganization(org.ID, 10000, 0)
+	if err != nil {
+		return nil, err
+	}
+	readableProjects, err := h.rbacService.ReadableProjects(ctx, userID, org.ID, projects)
+	if err != nil {
+		return nil, err
+	}
+	v := &repository.AuditVisibility{}
+	for i := range readableWorkspaces {
+		v.WorkspaceIDs = append(v.WorkspaceIDs, readableWorkspaces[i].ID)
+	}
+	for i := range readableProjects {
+		v.ProjectIDs = append(v.ProjectIDs, readableProjects[i].ID)
+	}
+	return v, nil
 }
 
 // requireOrgMembership writes a 403 and returns false when userID is not a member
 // of orgID. JWT/browser identities bypass the org-resolution wall, so this
 // per-handler check is the only defense for them (AUD-139).
+//
+// This route is agnostic at the org wall because the organization arrives in the query, so an
+// api-key caller is first held here to the organizations the wall would let it reach: a token
+// bound to one organization reads no other, whatever its owner belongs to.
 func (h *ActivityHandlerV2) requireOrgMembership(c *gin.Context, userID, orgID uuid.UUID) bool {
-	inOrg, err := h.orgRepo.UserInOrg(userID, orgID)
+	if !middleware.AuthorizeBodyResolvedOrg(c, h.orgResolver, func(middleware.OrgResolver) (uuid.UUID, error) { return orgID, nil }) {
+		return false
+	}
+	inOrg, err := rbac.UserInOrg(c.Request.Context(), h.orgRepo, userID, orgID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
 		return false
@@ -112,9 +170,26 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		if !h.requireOrgMembership(c, user.ID, project.OrganizationID) {
 			return
 		}
+		canRead, err := h.rbacService.CheckWorkspacePermission(c.Request.Context(), user.ID, workspace.ID, rbac.PermissionWorkspaceRead, workspace.ProjectID)
+		if err != nil || !canRead {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this workspace")
+			return
+		}
 	}
+	// An organization's activity names its workspaces and projects, so its feed holds only the
+	// rows about ones the caller can read.
+	var visible *repository.AuditVisibility
 	if orgID != nil {
 		if !h.requireOrgMembership(c, user.ID, *orgID) {
+			return
+		}
+		org, err := h.orgRepo.GetByID(*orgID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+			return
+		}
+		if visible, err = h.visibleActivity(c, user.ID, org); err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 			return
 		}
 	}
@@ -129,6 +204,7 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		UserID:         userID,
 		OrganizationID: orgID,
 		WorkspaceID:    workspaceID,
+		Visible:        visible,
 		Action:         c.Query("action"),
 		ResourceType:   c.Query("resource_type"),
 	}

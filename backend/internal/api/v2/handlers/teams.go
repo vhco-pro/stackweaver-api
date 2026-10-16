@@ -371,7 +371,7 @@ func (h *TeamHandlerV2) requireOrgMembership(c *gin.Context, orgID uuid.UUID) (u
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return uuid.Nil, false
 	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, orgID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, orgID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
 		return uuid.Nil, false

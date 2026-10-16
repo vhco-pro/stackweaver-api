@@ -69,7 +69,10 @@ func TestGetPermissionsFromOrganizationAccess(t *testing.T) {
 			description: "When ManageWorkspaces is true, it should grant all workspace-level permissions (TFE-compatible)",
 		},
 		{
-			name: "ReadWorkspaces grants workspace read permissions",
+			// TFE's "View all workspaces" lets a member "view information and features relevant to each
+			// workspace, such as runs, state versions, variables": the workspace "read" level on every
+			// workspace, not the workspace record alone.
+			name: "ReadWorkspaces grants the workspace read level",
 			orgAccess: &models.TeamOrganizationAccess{
 				TeamID:         uuid.New(),
 				ReadWorkspaces: true,
@@ -77,8 +80,12 @@ func TestGetPermissionsFromOrganizationAccess(t *testing.T) {
 			expectedPerms: map[Permission]bool{
 				PermissionOrgReadWorkspaces: true,
 				PermissionWorkspaceRead:     true,
+				PermissionRunRead:           true,
+				PermissionStateVersions:     true,
+				PermissionVariables:         true,
+				PermissionSentinelMocks:     true,
 			},
-			description: "When ReadWorkspaces is true, it should grant PermissionOrgReadWorkspaces and PermissionWorkspaceRead",
+			description: "When ReadWorkspaces is true, it should grant the workspace read level on every workspace",
 		},
 		{
 			name: "ManageMembership grants membership permission",

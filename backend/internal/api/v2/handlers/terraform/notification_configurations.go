@@ -298,7 +298,7 @@ func (h *NotificationConfigurationHandlerV2) respondList(c *gin.Context, configs
 }
 
 // authProject loads the project named by :id and checks the caller's permission (org-manage-projects for
-// write, org membership for read), mirroring the project tag-bindings handler.
+// write, read access to the project for read), mirroring the project tag-bindings handler.
 func (h *NotificationConfigurationHandlerV2) authProject(c *gin.Context, write bool) (*models.Project, bool) {
 	projectID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -326,9 +326,10 @@ func (h *NotificationConfigurationHandlerV2) authProjectByID(c *gin.Context, pro
 			return nil, false
 		}
 	} else {
-		inOrg, err := h.orgRepo.UserInOrg(user.ID, project.OrganizationID)
-		if err != nil || !inOrg {
-			ncError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
+		ok, err := h.rbacService.CheckResourcePermission(c.Request.Context(), user.ID,
+			rbac.ResourceTypeProject, project.ID.String(), rbac.PermissionProjectRead, &project.ID)
+		if err != nil || !ok {
+			ncError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this project")
 			return nil, false
 		}
 	}
@@ -365,7 +366,7 @@ func (h *NotificationConfigurationHandlerV2) authTeamByID(c *gin.Context, teamID
 			return nil, false
 		}
 	} else {
-		inOrg, err := h.orgRepo.UserInOrg(user.ID, team.OrganizationID)
+		inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, team.OrganizationID)
 		if err != nil || !inOrg {
 			ncError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization")
 			return nil, false

@@ -15496,9 +15496,6 @@
           "account_type": {
             "type": "string"
           },
-          "installation_id": {
-            "type": "string"
-          },
           "provider": {
             "type": "string"
           },
@@ -17257,107 +17254,6 @@
           }
         }
       },
-      "post-api-v2-webhooks-github-0fe66f": {
-        "type": "object",
-        "properties": {
-          "commit": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "synced_count": {
-            "type": "integer"
-          }
-        }
-      },
-      "post-api-v2-webhooks-github-request": {
-        "type": "object",
-        "properties": {
-          "after": {
-            "type": "string"
-          },
-          "before": {
-            "type": "string"
-          },
-          "commits": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                },
-                "modified": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          },
-          "head_commit": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              },
-              "modified": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "pusher": {
-            "type": "object",
-            "properties": {
-              "email": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              }
-            }
-          },
-          "ref": {
-            "type": "string"
-          },
-          "repository": {
-            "type": "object",
-            "properties": {
-              "default_branch": {
-                "type": "string"
-              },
-              "full_name": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "object",
-                "properties": {
-                  "login": {
-                    "type": "string"
-                  }
-                }
-              },
-              "private": {
-                "type": "boolean"
-              }
-            }
-          }
-        }
-      },
       "post-api-v2-workspaces-id-actions-lock-request": {
         "type": "object",
         "properties": {
@@ -18283,6 +18179,65 @@
       "post-auth-users-id-email-response": {
         "type": "object",
         "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "changeDate": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "resourceOwner": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post-auth-users-id-invite-code-verify-6c612e": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "@type": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-users-id-invite-code-verify-request": {
+        "type": "object",
+        "properties": {
+          "verificationCode": {
+            "type": "string"
+          }
+        }
+      },
+      "post-auth-users-id-invite-code-verify-response": {
+        "type": "object",
+        "properties": {
+          "authenticatorSetupRequired": {
+            "type": "boolean"
+          },
           "details": {
             "type": "object",
             "properties": {
@@ -34394,7 +34349,7 @@
     },
     "/api/v2/organizations/{name}/vcs-connections/github/installations/{installation_id}": {
       "post": {
-        "description": "Not recorded: a successful call needs a system outside the machine. The server asks GitHub, as the GitHub App it is configured to be, which account the installation belongs to before it stores the connection. Success needs a real installation of that App and GitHub to answer for it. No request was sent, so this operation's request body and success response are not described.",
+        "description": "Not recorded: a successful call needs a system outside the machine. The server exchanges the code GitHub issued when a person authorized the GitHub App, confirms with GitHub that the person can access the installation, and asks GitHub which account the installation belongs to before it stores the connection. Success needs a browser sign-in at GitHub, a real installation of that App and GitHub to answer for it. No request was sent, so this operation's request body and success response are not described.",
         "operationId": "post-api-v2-organizations-name-vcs-connections-github-installations-installation_id",
         "parameters": [
           {
@@ -34409,6 +34364,14 @@
             "in": "path",
             "name": "installation_id",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -34427,6 +34390,53 @@
           }
         },
         "summary": "POST /api/v2/organizations/:name/vcs-connections/github/installations/:installation_id",
+        "tags": [
+          "vcs-connections"
+        ]
+      }
+    },
+    "/api/v2/organizations/{name}/vcs-connections/github/installations/{installation_id}/authorize": {
+      "get": {
+        "operationId": "get-api-v2-organizations-name-vcs-connections-github-installations-installation_id-authorize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /api/v2/organizations/:name/vcs-connections/github/installations/:installation_id/authorize",
         "tags": [
           "vcs-connections"
         ]
@@ -37030,14 +37040,6 @@
             "schema": {
               "type": "integer"
             }
-          },
-          {
-            "in": "query",
-            "name": "token",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -37087,14 +37089,6 @@
             "required": false,
             "schema": {
               "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "token",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -40577,73 +40571,6 @@
         ]
       }
     },
-    "/api/v2/webhooks/github": {
-      "post": {
-        "operationId": "post-api-v2-webhooks-github",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "after": "6dcb09b5b57875f334f61aebed695e2e4193db5e",
-                "before": "9049f1265b7d61be4a8904a9a27120d2064dab3b",
-                "commits": [
-                  {
-                    "id": "6dcb09b5b57875f334f61aebed695e2e4193db5e",
-                    "message": "Raise the nginx worker limit",
-                    "modified": [
-                      "site.yml",
-                      "roles/nginx/defaults/main.yml"
-                    ]
-                  }
-                ],
-                "head_commit": {
-                  "id": "6dcb09b5b57875f334f61aebed695e2e4193db5e",
-                  "message": "Raise the nginx worker limit",
-                  "modified": [
-                    "site.yml",
-                    "roles/nginx/defaults/main.yml"
-                  ]
-                },
-                "pusher": {
-                  "email": "avery.diaz@example.com",
-                  "name": "avery-diaz"
-                },
-                "ref": "refs/heads/main",
-                "repository": {
-                  "default_branch": "main",
-                  "full_name": "acme-platform/ansible-playbooks",
-                  "name": "ansible-playbooks",
-                  "owner": {
-                    "login": "acme-platform"
-                  },
-                  "private": true
-                }
-              },
-              "schema": {
-                "$ref": "#/components/schemas/post-api-v2-webhooks-github-request"
-              }
-            }
-          },
-          "description": "Described from one accepted request rather than from a type: a member this example does not send may still be accepted. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-webhooks-github-0fe66f"
-                }
-              }
-            },
-            "description": "Success"
-          }
-        },
-        "summary": "POST /api/v2/webhooks/github",
-        "tags": [
-          "webhooks"
-        ]
-      }
-    },
     "/api/v2/workspaces/change-requests/{id}": {
       "delete": {
         "description": "Takes no request body.",
@@ -43854,6 +43781,60 @@
           }
         },
         "summary": "POST /auth/users/:id/email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/users/{id}/invite-code/verify": {
+      "post": {
+        "operationId": "post-auth-users-id-invite-code-verify",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "verificationCode": "\u003csecret\u003e"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-auth-users-id-invite-code-verify-request"
+              }
+            }
+          },
+          "description": "Described from one accepted request rather than from a type: a member this example does not send may still be accepted. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-users-id-invite-code-verify-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-auth-users-id-invite-code-verify-6c612e"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /auth/users/:id/invite-code/verify",
         "tags": [
           "auth"
         ]

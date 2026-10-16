@@ -12,7 +12,7 @@
 // Two things enforce the rule rather than trusting every case to keep it. identityGuard looks at
 // each request before it reaches the router and refuses one that names an identity the run did
 // not create. ownerClient, the only holder of a token that could change an instance-wide
-// setting, can reach four operations and nothing else.
+// setting, can reach five operations and nothing else.
 
 //go:build integration
 // +build integration
@@ -150,11 +150,12 @@ func (id writeIdentity) harness() harnessIdentity {
 // --- the owner client ------------------------------------------------------------------------
 
 var (
-	ownerUserPath  = regexp.MustCompile(`^/v2/users/[0-9]+$`)
-	ownerEmailPath = regexp.MustCompile(`^/v2/users/[0-9]+/email$`)
+	ownerUserPath   = regexp.MustCompile(`^/v2/users/[0-9]+$`)
+	ownerEmailPath  = regexp.MustCompile(`^/v2/users/[0-9]+/email$`)
+	ownerInvitePath = regexp.MustCompile(`^/v2/users/[0-9]+/invite_code$`)
 )
 
-// ownerOperation names the one of the four things the owner token may do that a request is, or
+// ownerOperation names the one of the five things the owner token may do that a request is, or
 // "" for anything else.
 func ownerOperation(method, path string) string {
 	switch {
@@ -164,6 +165,8 @@ func ownerOperation(method, path string) string {
 		return "delete a user"
 	case method == http.MethodPost && ownerEmailPath.MatchString(path):
 		return "issue an email code"
+	case method == http.MethodPost && ownerInvitePath.MatchString(path):
+		return "issue an invite code"
 	case method == http.MethodPost && path == "/v2/users":
 		return "search users"
 	}
@@ -174,7 +177,7 @@ func ownerOperation(method, path string) string {
 //
 // That token can change anything on the instance, which every session on the machine shares, so
 // this is deliberately not a general client. Every request goes through do, and do refuses
-// whatever is not one of four operations.
+// whatever is not one of five operations.
 type ownerClient struct {
 	base  string
 	host  string
@@ -251,12 +254,20 @@ const identityPassword = "Golden-write-1!" //nolint:gosec // G101: a throwaway u
 // phone, when not empty, is given to the user as an already verified number: what a second
 // factor by text message requires, and something no route of the proxy can set.
 func (o *ownerClient) createUser(ctx context.Context, username string, emailVerified bool, phone string) (identityUser, error) {
-	u := identityUser{Username: username, Email: username + "@stackweaver.local", Password: identityPassword}
+	return o.createUserWith(ctx, username, emailVerified, phone, identityPassword)
+}
+
+// createUserWith is createUser with the password to give the user; "" creates a user with no
+// password, which is the user an invitation is for.
+func (o *ownerClient) createUserWith(ctx context.Context, username string, emailVerified bool, phone, password string) (identityUser, error) {
+	u := identityUser{Username: username, Email: username + "@stackweaver.local", Password: password}
 	body := map[string]any{
 		"username": username,
 		"profile":  map[string]any{"givenName": "Golden", "familyName": "Write"},
 		"email":    map[string]any{"email": u.Email, "isVerified": emailVerified},
-		"password": map[string]any{"password": u.Password, "changeRequired": false},
+	}
+	if password != "" {
+		body["password"] = map[string]any{"password": password, "changeRequired": false}
 	}
 	if phone != "" {
 		body["phone"] = map[string]any{"phone": phone, "isVerified": true}
@@ -391,6 +402,22 @@ func (o *ownerClient) emailCode(ctx context.Context, id, newEmail string) (strin
 	code, _ := data["verificationCode"].(string)
 	if status != http.StatusOK || code == "" {
 		return "", fmt.Errorf("issuing an email code for %s answered %d with no code: %v", id, status, data)
+	}
+	return code, nil
+}
+
+// inviteCode issues an invite code for a user the run created, returned rather than mailed.
+func (o *ownerClient) inviteCode(ctx context.Context, id string) (string, error) {
+	if !o.created[id] {
+		return "", fmt.Errorf("user %s was not created by this run", id)
+	}
+	status, data, err := o.do(ctx, http.MethodPost, "/v2/users/"+id+"/invite_code", map[string]any{"returnCode": map[string]any{}})
+	if err != nil {
+		return "", err
+	}
+	code, _ := data["inviteCode"].(string)
+	if status != http.StatusOK || code == "" {
+		return "", fmt.Errorf("issuing an invite code for %s answered %d with no code: %v", id, status, data)
 	}
 	return code, nil
 }
@@ -714,13 +741,30 @@ func (w *writeRun) newUserWithPhone() identityUser {
 	return w.makeUser(true, identityPhone)
 }
 
+// newInvitedUser is a user with no password and an unverified email, the user an invitation is
+// for, together with the invite code the provider issued for it.
+func (w *writeRun) newInvitedUser() (identityUser, string) {
+	w.t.Helper()
+	u := w.makeUserWith(false, "", "")
+	code, err := w.rec.owner.inviteCode(context.Background(), u.ID)
+	if err != nil {
+		w.t.Fatalf("issue an invite code: %v", err)
+	}
+	return u, code
+}
+
 func (w *writeRun) makeUser(emailVerified bool, phone string) identityUser {
+	w.t.Helper()
+	return w.makeUserWith(emailVerified, phone, identityPassword)
+}
+
+func (w *writeRun) makeUserWith(emailVerified bool, phone, password string) identityUser {
 	w.t.Helper()
 	if w.rec.owner == nil {
 		w.t.Fatalf("this case needs the identity provider, and the recorder has no settings for it; %s", identityAdvice)
 	}
 	username := fmt.Sprintf("%s%s-%03d-%d", identityUserRoot, w.rec.runID, w.n, len(w.users))
-	u, err := w.rec.owner.createUser(context.Background(), username, emailVerified, phone)
+	u, err := w.rec.owner.createUserWith(context.Background(), username, emailVerified, phone, password)
 	if u.ID != "" {
 		// Registered even when the wait for it failed, so that it is still deleted.
 		w.users = append(w.users, u)
@@ -1020,18 +1064,19 @@ func TestIdentityGuard(t *testing.T) {
 	}
 }
 
-// TestOwnerClientReach pins AC15's second half: the owner token reaches four operations and
+// TestOwnerClientReach pins AC15's second half: the owner token reaches five operations and
 // nothing else, and a refused request is never sent.
 func TestOwnerClientReach(t *testing.T) {
 	allowed := []struct{ method, path string }{
 		{http.MethodPost, "/v2/users/human"},
 		{http.MethodDelete, "/v2/users/345678901234567890"},
 		{http.MethodPost, "/v2/users/345678901234567890/email"},
+		{http.MethodPost, "/v2/users/345678901234567890/invite_code"},
 		{http.MethodPost, "/v2/users"},
 	}
 	for _, a := range allowed {
 		if ownerOperation(a.method, a.path) == "" {
-			t.Errorf("%s %s is one of the four operations and was refused", a.method, a.path)
+			t.Errorf("%s %s is one of the five operations and was refused", a.method, a.path)
 		}
 	}
 
@@ -1048,6 +1093,8 @@ func TestOwnerClientReach(t *testing.T) {
 		{http.MethodDelete, "/v2/users/../../admin/v1/idps/1"},
 		{http.MethodPost, "/v2/users/human/../../../admin/v1/policies/login"},
 		{http.MethodPost, "/v2/users/abc/email"},
+		{http.MethodPost, "/v2/users/abc/invite_code"},
+		{http.MethodPost, "/v2/users/345678901234567890/invite_code/verify"},
 		{http.MethodPost, "/management/v1/orgs"},
 	}
 	// A client pointed at an address nothing listens on: a request that got as far as being
@@ -1069,6 +1116,9 @@ func TestOwnerClientReach(t *testing.T) {
 	}
 	if _, err := o.emailCode(context.Background(), "100000000000000001", "x@example.com"); err == nil || !strings.Contains(err.Error(), "not created by this run") {
 		t.Errorf("an email code for a user the run did not create: got %v", err)
+	}
+	if _, err := o.inviteCode(context.Background(), "100000000000000001"); err == nil || !strings.Contains(err.Error(), "not created by this run") {
+		t.Errorf("an invite code for a user the run did not create: got %v", err)
 	}
 	if _, err := o.searchPrefix(context.Background(), "admin"); err == nil {
 		t.Error("a search outside the recorder's prefix was allowed")

@@ -263,24 +263,30 @@ func (h *TeamProjectAccessHandlerV2) List(c *gin.Context) {
 		return
 	}
 
-	// Reading team access is gated on organization membership, not team-management
+	// Reading team access is gated on read access to the project, not team-management
 	// permission - see teamAccessVisible in team_access_visibility.go for the TFE rule
 	// this implements. Writes below remain admin-only.
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, org.ID)
+	inOrg, err := h.rbacService.UserInOrg(c.Request.Context(), user.ID, org.ID)
 	if err != nil || !inOrg {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
 		return
 	}
 
 	// Callers who can manage teams see every access row; everyone else sees rows for
-	// organization-visible teams plus secret teams they belong to.
+	// organization-visible teams plus secret teams they belong to, of a project they can read.
 	isTeamAdmin, err := h.rbacService.CheckOrgManageTeams(c.Request.Context(), user.ID, org.ID)
 	if err != nil {
 		isTeamAdmin = false
 	}
 	var memberOf map[uuid.UUID]bool
 	if !isTeamAdmin {
-		memberOf, err = callerTeamIDs(h.teamRepo, user.ID, org.ID)
+		canRead, err := h.rbacService.CheckResourcePermission(c.Request.Context(), user.ID,
+			rbac.ResourceTypeProject, project.ID.String(), rbac.PermissionProjectRead, &project.ID)
+		if err != nil || !canRead {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this project")
+			return
+		}
+		memberOf, err = callerTeamIDs(c.Request.Context(), h.rbacService, user.ID, org.ID)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve team memberships")
 			return

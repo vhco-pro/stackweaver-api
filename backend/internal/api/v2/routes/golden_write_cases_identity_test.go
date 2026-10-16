@@ -229,6 +229,17 @@ func init() {
 			requestSecrets: []string{"verificationCode"},
 		},
 		writeCase{
+			// An invite code is what the provider mails a user invited without a password. Nobody
+			// is signed in yet, so this too is sent without a session cookie. The user has no way
+			// to sign in yet, so the answer says to set one up and records the verification.
+			route: "POST /auth/users/:id/invite-code/verify",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				u, code := w.newInvitedUser()
+				return publicJSON(t, http.MethodPost, "/auth/users/"+u.ID+"/invite-code/verify", map[string]any{"verificationCode": code})
+			},
+			requestSecrets: []string{"verificationCode"},
+		},
+		writeCase{
 			route: "POST /auth/users/:id/totp",
 			prepare: func(_ *testing.T, w *writeRun) *http.Request {
 				s := w.beginSignIn(w.newUser(true))

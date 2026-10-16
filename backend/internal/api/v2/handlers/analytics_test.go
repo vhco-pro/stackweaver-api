@@ -27,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -37,8 +38,11 @@ type analyticsFixture struct {
 	db       *gorm.DB
 	orgName  string
 	emptyOrg string
-	member   *models.User
+	member   *models.User // may view all workspaces in the fixture's organizations
 	outsider *models.User
+	// plain is a member of the organization with no permission to view all of it, whom Terraform
+	// Enterprise's Explorer rule refuses.
+	plain *models.User
 	// dayStart is midnight UTC of the day every seeded row falls in. Tests that need an exact window
 	// derive it from here rather than from wall-clock arithmetic, so they do not depend on what time
 	// of day the suite happens to run.
@@ -132,6 +136,18 @@ func setupAnalyticsFixture(t *testing.T) *analyticsFixture {
 	orgEmpty := &models.Organization{ID: uuid.New(), Name: "analytics-empty-" + sfx}
 	member := &models.User{ID: uuid.New(), ZitadelSubject: "an-mem-" + sfx, Email: "an-mem-" + sfx + "@test.local"}
 	outsider := &models.User{ID: uuid.New(), ZitadelSubject: "an-out-" + sfx, Email: "an-out-" + sfx + "@test.local"}
+	plain := &models.User{ID: uuid.New(), ZitadelSubject: "an-pln-" + sfx, Email: "an-pln-" + sfx + "@test.local"}
+	// Usage spans the whole organization, so the member reads it through "view all workspaces", as
+	// Terraform Enterprise's Explorer requires; membership alone reads nothing.
+	viewersA := &models.Team{ID: uuid.New(), OrganizationID: orgA.ID, Name: "an-view-" + sfx}
+	viewersEmpty := &models.Team{ID: uuid.New(), OrganizationID: orgEmpty.ID, Name: "an-view-" + sfx}
+	viewerRows := []interface{}{
+		viewersA, viewersEmpty,
+		&models.TeamOrganizationAccess{ID: uuid.New(), TeamID: viewersA.ID, ReadWorkspaces: true},
+		&models.TeamOrganizationAccess{ID: uuid.New(), TeamID: viewersEmpty.ID, ReadWorkspaces: true},
+		&models.TeamMember{ID: uuid.New(), TeamID: viewersA.ID, UserID: member.ID},
+		&models.TeamMember{ID: uuid.New(), TeamID: viewersEmpty.ID, UserID: member.ID},
+	}
 
 	projA := &models.Project{ID: uuid.New(), OrganizationID: orgA.ID, Name: "proj-" + sfx}
 	wsA := &models.Workspace{ID: "ws-" + sfx + "0000000", ProjectID: projA.ID, Name: "ws-" + sfx}
@@ -211,12 +227,14 @@ func setupAnalyticsFixture(t *testing.T) *analyticsFixture {
 	}
 
 	seed := []interface{}{
-		orgA, orgB, orgEmpty, member, outsider,
+		orgA, orgB, orgEmpty, member, outsider, plain,
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgA.ID, UserID: member.ID},
+		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgA.ID, UserID: plain.ID},
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgEmpty.ID, UserID: member.ID},
 		&models.OrganizationMember{ID: uuid.New(), OrganizationID: orgB.ID, UserID: outsider.ID},
 		projA, wsA, invA, playbookA, templateA,
 	}
+	seed = append(seed, viewerRows...)
 	for _, obj := range seed {
 		if err := db.Create(obj).Error; err != nil {
 			t.Fatalf("seed %T: %v", obj, err)
@@ -259,9 +277,13 @@ func setupAnalyticsFixture(t *testing.T) *analyticsFixture {
 		db.Where("id = ?", invA.ID).Delete(&models.AnsibleInventory{})
 		db.Where("id = ?", wsA.ID).Delete(&models.Workspace{})
 		db.Where("id = ?", projA.ID).Delete(&models.Project{})
+		teamIDs := []uuid.UUID{viewersA.ID, viewersEmpty.ID}
+		db.Where("team_id IN ?", teamIDs).Delete(&models.TeamMember{})
+		db.Where("team_id IN ?", teamIDs).Delete(&models.TeamOrganizationAccess{})
+		db.Where("id IN ?", teamIDs).Delete(&models.Team{})
 		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID, orgEmpty.ID}).Delete(&models.OrganizationMember{})
 		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID, orgEmpty.ID}).Delete(&models.Organization{})
-		db.Where("id IN ?", []uuid.UUID{member.ID, outsider.ID}).Delete(&models.User{})
+		db.Where("id IN ?", []uuid.UUID{member.ID, outsider.ID, plain.ID}).Delete(&models.User{})
 	})
 
 	h := NewAnalyticsHandler(
@@ -275,6 +297,7 @@ func setupAnalyticsFixture(t *testing.T) *analyticsFixture {
 		repository.NewAnsibleInventoryRepository(db),
 		repository.NewAuditLogRepository(db),
 		auth.NewService(repository.NewUserRepository(db)),
+		rbac.NewServiceWithTeams(repository.NewOrganizationRepository(db), repository.NewTeamRepository(db), repository.NewProjectRepository(db)),
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -290,6 +313,7 @@ func setupAnalyticsFixture(t *testing.T) *analyticsFixture {
 		emptyOrg: orgEmpty.Name,
 		member:   member,
 		outsider: outsider,
+		plain:    plain,
 		dayStart: dayStart,
 		wsID:     wsA.ID,
 	}
@@ -335,6 +359,9 @@ func TestAnalyticsAuthz(t *testing.T) {
 	}
 	if code, _ := analyticsGet(t, f, f.orgName, "", f.member.ID); code != http.StatusOK {
 		t.Fatalf("member GET analytics = %d, want 200", code)
+	}
+	if code, _ := analyticsGet(t, f, f.orgName, "", f.plain.ID); code != http.StatusForbidden {
+		t.Fatalf("a member who may not view all workspaces or projects GET analytics = %d, want 403", code)
 	}
 	if code, _ := analyticsGet(t, f, "no-such-org-"+uuid.NewString()[:8], "", f.member.ID); code != http.StatusNotFound {
 		t.Fatalf("GET analytics for unknown org = %d, want 404", code)

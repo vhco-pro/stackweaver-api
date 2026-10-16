@@ -233,6 +233,21 @@ func (sc *ScopeChecker) GrantsOrgLevel(orgID uuid.UUID, required string) (grante
 	return granted, hasOrgScope
 }
 
+// GrantsScopedLevel reports whether any of the token's project or team scopes grants at least
+// the requested coarse access level (read < write < admin).
+func (sc *ScopeChecker) GrantsScopedLevel(required string) bool {
+	reqRank, ok := coarseRank[required]
+	if !ok {
+		return false
+	}
+	for _, scope := range sc.scopes {
+		if (scope.Type == "project" || scope.Type == "team") && scope.ResourceID != nil && coarseRank[scope.Permission] >= reqRank {
+			return true
+		}
+	}
+	return false
+}
+
 // HasProjectPermission checks if the scopes grant permission for a project
 func (sc *ScopeChecker) HasProjectPermission(projectID uuid.UUID, permission string) bool {
 	return sc.HasPermission("project", &projectID, permission)

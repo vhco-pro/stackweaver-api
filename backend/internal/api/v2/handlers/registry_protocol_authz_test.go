@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
@@ -115,8 +116,8 @@ func TestRegistryProtocolReadAuthz(t *testing.T) {
 	moduleService := registry.NewModuleService(
 		repository.NewModuleRepository(db), repository.NewModuleVersionRepository(db),
 		repository.NewModuleDownloadRepository(db), orgRepo, storageClient)
-	provH := NewRegistryProviderHandler(providerService, repository.NewGPGKeyRepository(db), authService, orgRepo, storageClient)
-	modH := NewRegistryModuleHandler(moduleService, authService, orgRepo)
+	provH := NewRegistryProviderHandler(providerService, repository.NewGPGKeyRepository(db), authService, orgRepo, storageClient, middleware.NewDBOrgResolver(db))
+	modH := NewRegistryModuleHandler(moduleService, authService, orgRepo, middleware.NewDBOrgResolver(db))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

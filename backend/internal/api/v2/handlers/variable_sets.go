@@ -116,6 +116,27 @@ func (h *VariableSetHandlerV2) authorizeVarset(c *gin.Context, userID uuid.UUID,
 	return true
 }
 
+// varsetInRouteOrganization reports whether the set belongs to the organization the route names
+// in :name, when it names one. On /organizations/:name/varsets/:id the org wall authorizes the
+// request by :name, so a set of another organization is answered as not found and the handler
+// acts only on what the wall authorized. It writes the JSON:API error and returns false otherwise.
+func (h *VariableSetHandlerV2) varsetInRouteOrganization(c *gin.Context, variableSet *models.VariableSet) bool {
+	orgName := c.Param("name")
+	if orgName == "" {
+		return true
+	}
+	org, err := h.orgRepo.GetByName(orgName)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+		return false
+	}
+	if variableSet.OrganizationID != org.ID {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
+		return false
+	}
+	return true
+}
+
 // CreateVariableSetRequestV2 uses JSON:API format (TFE-compatible)
 // Reference: https://developer.hashicorp.com/terraform/enterprise/api-docs/variable-sets#create-a-variable-set
 type CreateVariableSetRequestV2 struct {
@@ -777,6 +798,9 @@ func (h *VariableSetHandlerV2) AssignWorkspace(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
+	if !h.varsetInRouteOrganization(c, variableSet) {
+		return
+	}
 
 	// AUD-150: only organization-owned variable sets can be attached to workspaces. Project-owned sets
 	// (ProjectID set) apply to their whole project and are not individually workspace-attachable.
@@ -864,6 +888,9 @@ func (h *VariableSetHandlerV2) UnassignWorkspace(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
+	if !h.varsetInRouteOrganization(c, variableSet) {
+		return
+	}
 
 	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
@@ -928,6 +955,9 @@ func (h *VariableSetHandlerV2) AssignProject(c *gin.Context) {
 	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
+		return
+	}
+	if !h.varsetInRouteOrganization(c, variableSet) {
 		return
 	}
 
@@ -1016,6 +1046,9 @@ func (h *VariableSetHandlerV2) UnassignProject(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
 		return
 	}
+	if !h.varsetInRouteOrganization(c, variableSet) {
+		return
+	}
 
 	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
 		return
@@ -1036,146 +1069,6 @@ func (h *VariableSetHandlerV2) UnassignProject(c *gin.Context) {
 
 		if err := h.variableSetRepo.RemoveProject(variableSetID, projectUUID); err != nil {
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to unassign variable set from project: %v", err))
-			return
-		}
-	}
-
-	c.Status(http.StatusNoContent)
-}
-
-// AssignJobTemplate handles POST /api/v2/varsets/:id/relationships/job-templates (StackWeaver-specific, not TFE)
-func (h *VariableSetHandlerV2) AssignJobTemplate(c *gin.Context) {
-	variableSetID := c.Param("id")
-
-	var req struct {
-		Data []struct {
-			Type string `json:"type"` // Must be "job-templates"
-			ID   string `json:"id"`   // Job Template ID (UUID)
-		} `json:"data"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-
-	if len(req.Data) == 0 {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
-		return
-	}
-
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
-		return
-	}
-
-	if variableSetID == "" {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
-		return
-	}
-
-	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
-		return
-	}
-
-	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
-		return
-	}
-
-	// Process each job template in the request
-	for _, templateRef := range req.Data {
-		if templateRef.Type != "job-templates" {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'job-templates'")
-			return
-		}
-
-		templateUUID, err := uuid.Parse(templateRef.ID)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid job template ID: %s", templateRef.ID))
-			return
-		}
-
-		template, err := h.jobTemplateRepo.GetByID(templateUUID)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", fmt.Sprintf("Job template not found: %s", templateRef.ID))
-			return
-		}
-
-		// Verify job template belongs to same organization as variable set
-		project, err := h.projectRepo.GetByID(template.ProjectID)
-		if err != nil || project.OrganizationID != variableSet.OrganizationID {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Job template does not belong to the same organization as variable set: %s", templateRef.ID))
-			return
-		}
-
-		if err := h.variableSetRepo.AddJobTemplate(variableSetID, templateUUID); err != nil {
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to assign variable set to job template: %v", err))
-			return
-		}
-	}
-
-	c.Status(http.StatusNoContent)
-}
-
-// UnassignJobTemplate handles DELETE /api/v2/varsets/:id/relationships/job-templates (StackWeaver-specific, not TFE)
-func (h *VariableSetHandlerV2) UnassignJobTemplate(c *gin.Context) {
-	variableSetID := c.Param("id")
-
-	var req struct {
-		Data []struct {
-			Type string `json:"type"` // Must be "job-templates"
-			ID   string `json:"id"`   // Job Template ID (UUID)
-		} `json:"data"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-
-	if len(req.Data) == 0 {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data array cannot be empty")
-		return
-	}
-
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
-		return
-	}
-
-	if variableSetID == "" {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid variable set ID")
-		return
-	}
-
-	// Verify variable set exists
-	variableSet, err := h.variableSetRepo.GetByID(variableSetID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Variable set not found")
-		return
-	}
-
-	if !h.authorizeVarset(c, user.ID, variableSet, "write") {
-		return
-	}
-
-	// Process each job template in the request
-	for _, templateRef := range req.Data {
-		if templateRef.Type != "job-templates" {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data[].type must be 'job-templates'")
-			return
-		}
-
-		templateUUID, err := uuid.Parse(templateRef.ID)
-		if err != nil {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid job template ID: %s", templateRef.ID))
-			return
-		}
-
-		if err := h.variableSetRepo.RemoveJobTemplate(variableSetID, templateUUID); err != nil {
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to unassign variable set from job template: %v", err))
 			return
 		}
 	}

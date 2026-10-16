@@ -62,6 +62,7 @@ import (
 	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/vcs"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -475,6 +476,13 @@ func identityFromEnv() harnessIdentity {
 // alternative is a harness that refuses to record anything at all when Zitadel is down.
 func buildHarnessRouter(t *testing.T, db *gorm.DB, authService *auth.Service, id harnessIdentity) *gin.Engine {
 	t.Helper()
+	return buildHarnessRouterWithGitHub(t, db, authService, id, nil)
+}
+
+// buildHarnessRouterWithGitHub is buildHarnessRouter with a GitHub App, which the harness
+// otherwise runs without. Tests that need one point it at a fake GitHub.
+func buildHarnessRouterWithGitHub(t *testing.T, db *gorm.DB, authService *auth.Service, id harnessIdentity, githubApp *vcs.GitHubAppManager) *gin.Engine {
+	t.Helper()
 
 	// The recording pass drives every route back to back from one address, which is exactly the
 	// shape the per-IP limiters exist to stop: AUTH_RATE_LIMIT defaults to 10rps/burst 20 and the
@@ -528,11 +536,18 @@ func buildHarnessRouter(t *testing.T, db *gorm.DB, authService *auth.Service, id
 	// aborts the binary and discards every fixture recorded so far, instead of producing the 500
 	// a real client sees.
 	return routes.SetupRoutes(
-		db, authService, totpService, profileService, sessionsService, apiKeyService, nil, authProxy,
+		db, authService, totpService, profileService, sessionsService, apiKeyService, githubApp, authProxy,
 	)
 }
 
 func setupGoldenHarness(t *testing.T) *goldenHarness {
+	t.Helper()
+	return setupGoldenHarnessWithGitHub(t, nil)
+}
+
+// setupGoldenHarnessWithGitHub is setupGoldenHarness with a GitHub App (see
+// buildHarnessRouterWithGitHub).
+func setupGoldenHarnessWithGitHub(t *testing.T, githubApp *vcs.GitHubAppManager) *goldenHarness {
 	t.Helper()
 	if os.Getenv("DEV_INSECURE_KEY") == "" {
 		// SetupV2Routes initialises the OIDC signing key and refuses an absent one.
@@ -594,7 +609,7 @@ func setupGoldenHarness(t *testing.T) *goldenHarness {
 	grantHarnessAccess(t, db, seedUser.ID)
 
 	gin.SetMode(gin.TestMode)
-	router := buildHarnessRouter(t, db, authService, identityFromEnv())
+	router := buildHarnessRouterWithGitHub(t, db, authService, identityFromEnv(), githubApp)
 
 	return &goldenHarness{
 		db:       db,

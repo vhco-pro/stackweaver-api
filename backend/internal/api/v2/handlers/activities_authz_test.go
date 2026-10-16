@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -87,7 +88,8 @@ func setupActivitiesAuthzFixture(t *testing.T) *activitiesAuthzFixture {
 	authService := auth.NewService(repository.NewUserRepository(db))
 	activityService := activity.NewService(repository.NewAuditLogRepository(db))
 	h := NewActivityHandlerV2(activityService, authService, orgRepo,
-		repository.NewWorkspaceRepository(db), repository.NewProjectRepository(db))
+		repository.NewWorkspaceRepository(db), repository.NewProjectRepository(db), nil,
+		rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db)))
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

@@ -44,6 +44,7 @@ const (
 	ResourceTypeAnsibleJob         ResourceType = "ansible:job"
 	ResourceTypeAnsibleSchedule    ResourceType = "ansible:schedule"
 	ResourceTypeVariableSet        ResourceType = "terraform:variable-set"
+	ResourceTypeProject            ResourceType = "project"
 )
 
 type Permission string
@@ -128,6 +129,13 @@ func (s *Service) CheckResourcePermission(
 		// This will be implemented per resource type as needed
 		return false, fmt.Errorf("project ID required for resource permission check")
 	}
+	// A project-scoped key holds, within its project and level, what its owner holds.
+	if subj, ok := subjectFrom(ctx); ok && subj.kind == subjectProject {
+		if !subj.projectScopeAllows(permission, projectID) {
+			return false, nil
+		}
+		ctx = withoutSubject(ctx)
+	}
 
 	project, err := s.projectRepo.GetByID(*projectID)
 	if err != nil {
@@ -136,60 +144,25 @@ func (s *Service) CheckResourcePermission(
 	organizationID = project.OrganizationID
 
 	// 1. Tenant isolation: User must have at least one team in the org (team-based access)
-	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
 		return false, nil // Not in any team in org = no access
 	}
-
-	// 2. Collect ALL permissions from ALL team memberships (additive model)
-	allPermissions := make(map[Permission]bool)
 
 	if s.teamRepo == nil {
 		return false, fmt.Errorf("team repository not available")
 	}
 
-	// Get all teams user is member of in this organization
-	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	// 2. Collect ALL permissions from ALL team memberships (additive model): the teams'
+	// organization access, their access to the project, and to the workspace itself.
+	teams, err := s.teamsOf(ctx, userID, organizationID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get user teams: %w", err)
 	}
-
-	// Collect permissions from each team
-	for _, team := range teams {
-		// Team organization access permissions (org-level permissions)
-		// GetTeamsByUserID already preloads OrganizationAccess, so use it directly
-		if team.OrganizationAccess != nil {
-			teamOrgPerms := s.getPermissionsFromOrganizationAccess(team.OrganizationAccess)
-			for perm := range teamOrgPerms {
-				allPermissions[perm] = true
-			}
-		}
-
-		// Team project access permissions (if projectID provided)
-		if projectID != nil {
-			projectAccess, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, *projectID)
-			if err == nil && projectAccess != nil {
-				teamProjectPerms := s.getPermissionsFromProjectAccess(projectAccess, resourceType)
-				for perm := range teamProjectPerms {
-					allPermissions[perm] = true
-				}
-			}
-		}
-
-		// Team workspace/resource-specific access (overrides project access for this specific resource)
-		if resourceID != "" && resourceType == ResourceTypeTerraformWorkspace {
-			workspaceAccess, err := s.teamRepo.GetWorkspaceAccessByTeamAndWorkspace(team.ID, resourceID)
-			if err == nil && workspaceAccess != nil {
-				teamWorkspacePerms := s.getPermissionsFromWorkspaceAccess(workspaceAccess)
-				for perm := range teamWorkspacePerms {
-					allPermissions[perm] = true
-				}
-			}
-		}
-	}
+	grants := s.grantsFor(teams, *projectID, resourceType, resourceID)
 
 	// 3. Check if permission is in union
-	return allPermissions[permission], nil
+	return s.permits(grants, resourceType, resourceID, *projectID, permission), nil
 }
 
 // TeamAnsibleTemplateAccess summarizes one team's effective permissions on an
@@ -385,8 +358,14 @@ func (s *Service) getPermissionsFromOrganizationAccess(orgAccess *models.TeamOrg
 		perms[PermissionVariableSetsRead] = true
 	}
 	if orgAccess.ReadWorkspaces {
+		// TFE "View all workspaces": read access to every workspace, which is the workspace "read"
+		// level: the workspace itself, its runs, state versions and variables.
 		perms[PermissionOrgReadWorkspaces] = true
-		perms[PermissionWorkspaceRead] = true // Implies workspace read
+		perms[PermissionWorkspaceRead] = true
+		perms[PermissionRunRead] = true
+		perms[PermissionStateVersions] = true
+		perms[PermissionVariables] = true
+		perms[PermissionSentinelMocks] = true
 	}
 	if orgAccess.ReadProjects {
 		perms[PermissionOrgReadProjects] = true
@@ -817,7 +796,7 @@ func (s *Service) CheckVariablePermission(
 //
 // level is "read" or "write".
 func (s *Service) CheckVariableSetPermission(ctx context.Context, userID uuid.UUID, variableSet *models.VariableSet, level string) (bool, error) {
-	// Owners team shortcut (CheckResourcePermission has no owner bypass of its own).
+	// Owners team shortcut: an organization-owned set below is judged without CheckResourcePermission.
 	if owner, err := s.IsOrgOwner(ctx, userID, variableSet.OrganizationID); err != nil {
 		return false, err
 	} else if owner {
@@ -830,7 +809,11 @@ func (s *Service) CheckVariableSetPermission(ctx context.Context, userID uuid.UU
 			return s.CheckResourcePermission(ctx, userID, ResourceTypeVariableSet, variableSet.ID, PermissionVariableSetsRead, variableSet.ProjectID)
 		}
 		// Organization-owned: any member of the org may view (sensitive values are masked).
-		return s.orgRepo.UserInOrg(userID, variableSet.OrganizationID)
+		// A project-scoped key is not a member beyond its project.
+		if isProjectSubject(ctx) {
+			return false, nil
+		}
+		return s.inOrg(ctx, userID, variableSet.OrganizationID)
 	case "write":
 		if variableSet.ProjectID != nil {
 			return s.CheckResourcePermission(ctx, userID, ResourceTypeVariableSet, variableSet.ID, PermissionVariableSets, variableSet.ProjectID)
@@ -883,6 +866,52 @@ func (s *Service) CheckWorkspaceLockingPermission(
 	return s.CheckWorkspacePermission(ctx, userID, workspaceID, PermissionWorkspaceLocking, projectID)
 }
 
+// CheckWorkspaceAdminPermission reports whether the user holds admin access on a workspace,
+// which TFE requires to force-unlock it. Admin access comes from the owners team, a team with
+// "Manage all workspaces", admin or maintain access on the workspace's project, or admin access
+// on the workspace itself. The lock permission alone, which plan and write access also carry,
+// is not enough: it lets a user lock and unlock, not remove a lock someone else holds.
+func (s *Service) CheckWorkspaceAdminPermission(
+	ctx context.Context,
+	userID uuid.UUID,
+	workspaceID string,
+	projectID uuid.UUID,
+) (bool, error) {
+	// A project-scoped key reaches admin access only through an admin scope on this project,
+	// and then holds what its owner holds.
+	if subj, ok := subjectFrom(ctx); ok && subj.kind == subjectProject {
+		if subj.projectID != projectID || subj.level != "admin" {
+			return false, nil
+		}
+		ctx = withoutSubject(ctx)
+	}
+	project, err := s.projectRepo.GetByID(projectID)
+	if err != nil {
+		return false, fmt.Errorf("getting project %s: %w", projectID, err)
+	}
+	// Covers the owners team and "Manage all workspaces", within the organization only.
+	if manageAll, err := s.CheckOrgManageWorkspaces(ctx, userID, project.OrganizationID); err != nil || manageAll {
+		return manageAll, err
+	}
+	teams, err := s.teamsOf(ctx, userID, project.OrganizationID)
+	if err != nil {
+		return false, fmt.Errorf("getting teams of user %s: %w", userID, err)
+	}
+	for _, team := range teams {
+		if pa, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && pa != nil && pa.Access != nil {
+			if *pa.Access == "admin" || *pa.Access == "maintain" {
+				return true, nil
+			}
+		}
+		if wa, err := s.teamRepo.GetWorkspaceAccessByTeamAndWorkspace(team.ID, workspaceID); err == nil && wa != nil && wa.Access != nil {
+			if *wa.Access == "admin" {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // CheckRunTasksPermission checks if user can manage run tasks
 func (s *Service) CheckRunTasksPermission(
 	ctx context.Context,
@@ -908,8 +937,12 @@ func (s *Service) CheckAnsibleResourcePermission(
 // CheckOrgManageMembership checks if user can manage organization memberships (add/remove users)
 // Team-based: User must be in "owners" team OR have team with manage-membership permission
 func (s *Service) CheckOrgManageMembership(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	// A project-scoped key holds no organization-level permission.
+	if isProjectSubject(ctx) {
+		return false, nil
+	}
 	// Tenant isolation: user must have at least one team in the org (team-based access)
-	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
 		return false, nil
 	}
@@ -919,7 +952,7 @@ func (s *Service) CheckOrgManageMembership(ctx context.Context, userID, organiza
 	}
 
 	// Get all teams user is member of
-	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	teams, err := s.teamsOf(ctx, userID, organizationID)
 	if err != nil {
 		return false, err
 	}
@@ -943,8 +976,12 @@ func (s *Service) CheckOrgManageMembership(ctx context.Context, userID, organiza
 // CheckOrgManageTeams checks if user can manage teams (create/update/delete teams)
 // Team-based: User must be in "owners" team OR have team with manage-teams permission
 func (s *Service) CheckOrgManageTeams(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	// A project-scoped key holds no organization-level permission.
+	if isProjectSubject(ctx) {
+		return false, nil
+	}
 	// Tenant isolation: user must have at least one team in the org (team-based access)
-	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
 		return false, nil
 	}
@@ -954,7 +991,7 @@ func (s *Service) CheckOrgManageTeams(ctx context.Context, userID, organizationI
 	}
 
 	// Get all teams user is member of
-	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	teams, err := s.teamsOf(ctx, userID, organizationID)
 	if err != nil {
 		return false, err
 	}
@@ -980,8 +1017,12 @@ func (s *Service) CheckOrgManageTeams(ctx context.Context, userID, organizationI
 // or ManageMembership grants - e.g. managing the owners team's own membership, where
 // anything weaker allows privilege escalation to owner (AUD-003).
 func (s *Service) IsOrgOwner(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	// A project-scoped key holds no organization-level permission.
+	if isProjectSubject(ctx) {
+		return false, nil
+	}
 	// Tenant isolation: user must have at least one team in the org (team-based access)
-	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
 		return false, nil
 	}
@@ -990,7 +1031,7 @@ func (s *Service) IsOrgOwner(ctx context.Context, userID, organizationID uuid.UU
 		return false, fmt.Errorf("team repository not available")
 	}
 
-	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	teams, err := s.teamsOf(ctx, userID, organizationID)
 	if err != nil {
 		return false, err
 	}
@@ -1065,7 +1106,18 @@ func (s *Service) OrgPermissionsForOrganizations(
 		return nil, fmt.Errorf("team repository not available")
 	}
 
-	teams, err := s.teamRepo.GetTeamsByUserIDForOrganizations(userID, orgIDs)
+	var teams []models.Team
+	var err error
+	if subj, ok := subjectFrom(ctx); ok {
+		// A scoped token belongs to one organization, as its team or not at all.
+		if subj.kind == subjectTeam {
+			if _, asked := byOrg[subj.organizationID]; asked {
+				teams, err = s.teamsOf(ctx, userID, subj.organizationID)
+			}
+		}
+	} else {
+		teams, err = s.teamRepo.GetTeamsByUserIDForOrganizations(userID, orgIDs)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1159,7 +1211,11 @@ func (s *Service) CheckOrgReadAnsible(ctx context.Context, userID, organizationI
 // This is the union of all permissions from all teams the user is a member of.
 // Used by the /effective-permissions endpoint for frontend permission enforcement.
 func (s *Service) GetEffectivePermissions(ctx context.Context, userID, organizationID uuid.UUID) (map[Permission]bool, error) {
-	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	// A project-scoped key holds no organization-level permission.
+	if isProjectSubject(ctx) {
+		return map[Permission]bool{}, nil
+	}
+	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
 		return nil, fmt.Errorf("user not in organization")
 	}
@@ -1168,7 +1224,7 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userID, organizat
 		return nil, fmt.Errorf("team repository not available")
 	}
 
-	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	teams, err := s.teamsOf(ctx, userID, organizationID)
 	if err != nil {
 		return nil, err
 	}
@@ -1202,9 +1258,26 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userID, organizat
 	return allPermissions, nil
 }
 
+// memberOfOwnersTeam reports whether one of the user's teams in an organization is its owners
+// team, which holds every permission in that organization whatever access rows it has. The
+// organization-level check (checkOrgPermission) and the resource-level check
+// (CheckResourcePermission) both judge it here, so they cannot disagree about an owner.
+func memberOfOwnersTeam(teams []models.Team) bool {
+	for i := range teams {
+		if teams[i].Name == "owners" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) checkOrgPermission(ctx context.Context, userID, organizationID uuid.UUID, permission Permission) (bool, error) {
+	// A project-scoped key holds no organization-level permission.
+	if isProjectSubject(ctx) {
+		return false, nil
+	}
 	// Tenant isolation: user must have at least one team in the org (team-based access)
-	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
 		return false, nil
 	}
@@ -1214,16 +1287,14 @@ func (s *Service) checkOrgPermission(ctx context.Context, userID, organizationID
 	}
 
 	// Get all teams user is member of
-	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	teams, err := s.teamsOf(ctx, userID, organizationID)
 	if err != nil {
 		return false, err
 	}
 
-	// Check if user is in "owners" team (always has full permissions)
-	for _, team := range teams {
-		if team.Name == "owners" {
-			return true, nil
-		}
+	// The owners team holds every permission (memberOfOwnersTeam, shared with CheckResourcePermission).
+	if memberOfOwnersTeam(teams) {
+		return true, nil
 	}
 
 	// Collect all permissions from all teams

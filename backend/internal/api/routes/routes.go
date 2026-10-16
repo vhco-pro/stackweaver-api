@@ -90,19 +90,6 @@ func SetupRoutes(
 	setupOAuthLoginRoutes(r, authService, apiKeyService)
 
 	// ==========================================
-	// Webhook Routes (no auth - uses signature validation)
-	// ==========================================
-	webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
-	playbookRepo := repository.NewAnsiblePlaybookRepository(db)
-	vcsRepo := repository.NewVCSConnectionRepository(db)
-	githubWebhookHandler := handlers.NewGitHubWebhookHandler(playbookRepo, vcsRepo, nil, webhookSecret)
-
-	webhooks := r.Group("/api/v2/webhooks")
-	{
-		webhooks.POST("/github", githubWebhookHandler.HandleWebhook)
-	}
-
-	// ==========================================
 	// Auth Proxy Routes (unauthenticated - login flow, /auth/* at root per DR-5)
 	// These routes proxy requests to Zitadel for the custom login UI.
 	// NOT under /api/v2/* - responses use Zitadel's v2 API shape, not JSON:API.
@@ -268,6 +255,7 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 			users.POST("/:id/otp-email", proxy.EnableOTPEmail)
 			users.POST("/:id/otp-sms", proxy.EnableOTPSMS)
 			users.POST("/:id/email", proxy.VerifyEmail)
+			users.POST("/:id/invite-code/verify", proxy.VerifyInviteCode)
 			users.GET("/:id/authentication_methods", proxy.ListAuthMethods)
 		}
 

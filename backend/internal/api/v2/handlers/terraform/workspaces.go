@@ -349,7 +349,7 @@ func wsTagBindingIncluded(bindings []models.TagBinding, resourceType string) []j
 // relationship + included resources when ?include=effective-tag-bindings was requested (how the tfe
 // provider resource + data.tfe_workspace read a workspace's effective tags).
 func (h *WorkspaceHandlerV2) workspaceResponseWithTags(c *gin.Context, workspace *models.Workspace) jsonapi.Document {
-	data := formatWorkspaceResponse(workspace, h.vcsConnectionRepo)
+	data := h.workspaceResponse(c, workspace)
 	resp := jsonapi.Document{Data: data}
 	if wsEffectiveTagBindingsRequested(c) {
 		eff, _ := repository.NewTagBindingRepository(h.db).EffectiveForWorkspace(workspace.ID)
@@ -660,51 +660,34 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 	var workspaces []models.Workspace
 	var total int64
 
+	// Every caller, a user or a team or project token, lists exactly the workspaces it could read one
+	// by one. A caller who may view all workspaces reads every one, so its listing is the whole
+	// organization, paginated in the database; anyone else's is filtered by the same rbac evaluation
+	// the single-workspace read uses.
 	if hasOrgReadWorkspaces {
-		// User has organization-level read-workspaces permission - show all workspaces
 		workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganization(orgName, repoLimit, repoOffset)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workspaces")
 			return
 		}
 	} else {
-		// User does NOT have organization-level read-workspaces permission
-		// Filter workspaces to only those the user has team workspace access to
-		// Get all teams user is member of
-		teams, err := h.teamRepo.GetTeamsByUserID(user.ID, org.ID)
+		candidates, _, err := h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganization(orgName, -1, 0)
 		if err != nil {
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get user teams")
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workspaces")
 			return
 		}
-
-		// Collect all workspace IDs the user's teams have access to
-		accessibleWorkspaceIDs := make(map[string]bool)
-		for _, team := range teams {
-			// Get team with workspace access preloaded
-			teamWithAccess, err := h.teamRepo.GetByID(team.ID)
-			if err != nil {
-				// Log error but continue with other teams
-				continue
-			}
-			// Collect workspace IDs from team's workspace access
-			for _, access := range teamWithAccess.WorkspaceAccess {
-				accessibleWorkspaceIDs[access.WorkspaceID] = true
-			}
+		readable, err := h.rbacService.ReadableWorkspaces(c.Request.Context(), user.ID, org.ID, candidates, rbac.PermissionWorkspaceRead)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+			return
 		}
-
-		// If user has no team workspace access, return empty list
-		if len(accessibleWorkspaceIDs) == 0 {
-			workspaces = []models.Workspace{}
-			total = 0
-		} else {
-			// Convert map keys to slice for SQL IN clause
-			workspaceIDList := make([]string, 0, len(accessibleWorkspaceIDs))
-			for id := range accessibleWorkspaceIDs {
-				workspaceIDList = append(workspaceIDList, id)
-			}
-
-			// Query workspaces that are in the accessible list
-			workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganizationAndIDs(orgName, workspaceIDList, repoLimit, repoOffset)
+		ids := make([]string, len(readable))
+		for i := range readable {
+			ids[i] = readable[i].ID
+		}
+		workspaces, total = []models.Workspace{}, 0
+		if len(ids) > 0 {
+			workspaces, total, err = h.workspaceRepo.WithContext(c.Request.Context()).ListByOrganizationAndIDs(orgName, ids, repoLimit, repoOffset)
 			if err != nil {
 				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list workspaces")
 				return
@@ -766,8 +749,10 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 	}
 
 	var included []any
+	permissions := h.permissionResolver(c).withOrganization(org.ID, workspaces)
 	for i := range workspaces {
 		wsData := formatWorkspaceResponse(&workspaces[i], h.vcsConnectionRepo)
+		permissions.apply(wsData, &workspaces[i])
 
 		// Add current-run relationship if a run exists
 		if run, ok := latestRuns[workspaces[i].ID]; ok {
@@ -832,12 +817,18 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		StructuredRunOutputEnabled: workspace.StructuredRunOutputEnabled,
 		LatestChangeAt:             workspace.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		Operations:                 true, // workspace is operational
-		Permissions: WorkspacePermissions{
-			CanUpdate: true, CanDestroy: true, CanQueueDestroy: true, CanQueueRun: true,
-			CanUpdateVariable: true, CanLock: true, CanUnlock: true, CanForceUnlock: true,
-			CanReadSettings: true, CanForceDelete: true,
-		},
-		RunTimeout: workspace.RunTimeout, // StackWeaver extension; omitted at 0
+		// Every flag but can-force-delete depends on the caller and is set by
+		// workspacePermissionResolver.apply (h.workspaceResponse); they start false so a response
+		// that skips the resolver promises nothing.
+		//
+		// can-force-delete is constant. terraform-provider-tfe reads whether the attribute is
+		// present (go-tfe makes it a *bool for that reason) to learn that this server has
+		// safe-delete, and without it `terraform destroy` refuses unless force_delete is set; its
+		// value is not read. Whether a force delete succeeds depends on whether the workspace
+		// still manages resources (HasActiveInfrastructure, a query per workspace) and, if it
+		// does, on organization owner permission, which DeleteByID checks when it is asked.
+		Permissions: WorkspacePermissions{CanForceDelete: true},
+		RunTimeout:  workspace.RunTimeout, // StackWeaver extension; omitted at 0
 	}
 
 	if workspace.AgentPoolID != nil {
@@ -1345,7 +1336,7 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		_ = h.activityService.LogCreate(c.Request.Context(), "workspace", createdWorkspace.ID, createdWorkspace.Name, activityCtx)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusCreated, formatWorkspaceResponse(createdWorkspace, h.vcsConnectionRepo))
+	jsonapi.WriteDocument(c, http.StatusCreated, h.workspaceResponse(c, createdWorkspace))
 }
 
 // Update updates a workspace by organization name and workspace name (TFE-compatible)
@@ -1695,7 +1686,7 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		_ = h.activityService.LogUpdate(c.Request.Context(), "workspace", workspace.ID, workspace.Name, changes, activityCtx)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, formatWorkspaceResponse(workspace, h.vcsConnectionRepo))
+	jsonapi.WriteDocument(c, http.StatusOK, h.workspaceResponse(c, workspace))
 }
 
 // Delete deletes a workspace by organization name and workspace name (TFE-compatible)
@@ -1830,26 +1821,21 @@ func (h *WorkspaceHandlerV2) authorizeWorkspaceWriteByID(c *gin.Context, workspa
 	return true
 }
 
-// authorizeWorkspaceRead gates a read of a workspace on organization membership,
-// resolving the owning org from the workspace's project. It mirrors
-// ProjectHandlerV2.GetByID's UserInOrg check. It writes the JSON:API error and
-// returns false when unauthorized - 401 (no auth), 403 (not a member), 500 (lookup
-// failure). AUD-046: the read-by-name/ID endpoints returned workspace configuration
-// (VCS repo, agent pool, execution mode) to any authenticated user cross-tenant.
+// authorizeWorkspaceRead gates a read of a workspace on read access to it, as Terraform
+// Enterprise does: a grant on the workspace or its project, "view all workspaces" or "manage all
+// workspaces", or the owners team. Membership of the organization alone reads nothing. It writes
+// the JSON:API error and returns false when unauthorized - 401 (no auth), 403 (no read access).
+// AUD-046: the read-by-name/ID endpoints returned workspace configuration (VCS repo, agent pool,
+// execution mode) to any authenticated user cross-tenant.
 func (h *WorkspaceHandlerV2) authorizeWorkspaceRead(c *gin.Context, workspace *models.Workspace) bool {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return false
 	}
-	project, err := h.projectRepo.GetByID(workspace.ProjectID)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to resolve workspace organization")
-		return false
-	}
-	inOrg, err := h.orgRepo.UserInOrg(user.ID, project.OrganizationID)
-	if err != nil || !inOrg {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You must be a member of this organization (via team membership)")
+	allowed, err := h.rbacService.CheckWorkspacePermission(c.Request.Context(), user.ID, workspace.ID, rbac.PermissionWorkspaceRead, workspace.ProjectID)
+	if err != nil || !allowed {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this workspace")
 		return false
 	}
 	return true
@@ -2022,11 +2008,16 @@ func (h *WorkspaceHandlerV2) Lock(c *gin.Context) {
 	// Reload to get updated workspace
 	workspace, _ = h.workspaceRepo.GetByID(workspaceID)
 
-	jsonapi.WriteDocument(c, http.StatusOK, formatWorkspaceResponse(workspace, h.vcsConnectionRepo))
+	jsonapi.WriteDocument(c, http.StatusOK, h.workspaceResponse(c, workspace))
 }
 
-// Unlock unlocks a workspace manually
+// Unlock removes the caller's own lock on a workspace.
 // POST /api/v2/workspaces/:id/actions/unlock
+//
+// As in TFE it needs the lock permission, and it removes only a lock the caller holds: a lock
+// held by anyone else is refused with 409 whatever the caller's access, because removing it is
+// force-unlock, which needs admin access on the workspace. The caller is authorized before the
+// lock state is read.
 func (h *WorkspaceHandlerV2) Unlock(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
@@ -2037,11 +2028,6 @@ func (h *WorkspaceHandlerV2) Unlock(c *gin.Context) {
 	workspace, err := h.workspaceRepo.GetByID(workspaceID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
-		return
-	}
-
-	if !workspace.Locked {
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is not locked")
 		return
 	}
 
@@ -2063,15 +2049,17 @@ func (h *WorkspaceHandlerV2) Unlock(c *gin.Context) {
 		return
 	}
 
-	// TFE behavior: normal unlock can only be done by the user who locked it (unless they have admin permissions)
-	// Check if current user matches the locker or has admin permissions
-	if workspace.LockedBy != nil && *workspace.LockedBy != user.ID {
-		// Check if user has admin permissions (org admin or workspace write)
-		hasAdmin, err := h.rbacService.CheckWorkspacePermission(c.Request.Context(), user.ID, workspaceID, rbac.PermissionWorkspaceWrite, workspace.ProjectID)
-		if err != nil || !hasAdmin {
-			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is locked by a different user")
-			return
-		}
+	if !workspace.Locked {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is not locked")
+		return
+	}
+
+	// Only the holder unlocks. go-tfe recognises "is locked by User" in this answer
+	// (ErrWorkspaceLockedByUser), and the web app offers force-unlock on "different user".
+	if workspace.LockedBy == nil || *workspace.LockedBy != user.ID {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict",
+			"Workspace is locked by a different user. The workspace is locked by User and only that user can unlock it; removing the lock is force-unlock, which needs admin access on the workspace.")
+		return
 	}
 
 	workspace.Locked = false
@@ -2087,11 +2075,15 @@ func (h *WorkspaceHandlerV2) Unlock(c *gin.Context) {
 	// Reload to get updated workspace
 	workspace, _ = h.workspaceRepo.GetByID(workspaceID)
 
-	jsonapi.WriteDocument(c, http.StatusOK, formatWorkspaceResponse(workspace, h.vcsConnectionRepo))
+	jsonapi.WriteDocument(c, http.StatusOK, h.workspaceResponse(c, workspace))
 }
 
-// ForceUnlock force unlocks a workspace (admin only)
+// ForceUnlock removes a workspace's lock whoever holds it.
 // POST /api/v2/workspaces/:id/actions/force-unlock
+//
+// It requires admin access on the workspace, as TFE does. The caller is authorized before the
+// lock state is read, so a caller without access learns nothing about the lock. The org wall
+// holds API tokens to the workspace's organization; a signed-in session meets only this check.
 func (h *WorkspaceHandlerV2) ForceUnlock(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
@@ -2105,12 +2097,26 @@ func (h *WorkspaceHandlerV2) ForceUnlock(c *gin.Context) {
 		return
 	}
 
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return
+	}
+	isAdmin, err := h.rbacService.CheckWorkspaceAdminPermission(c.Request.Context(), user.ID, workspace.ID, workspace.ProjectID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+		return
+	}
+	if !isAdmin {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "Force-unlocking a workspace requires admin access to the workspace")
+		return
+	}
+
 	if !workspace.Locked {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is already unlocked")
 		return
 	}
 
-	// Force unlock - no user check, requires admin permissions (handled by middleware/permissions)
 	workspace.Locked = false
 	workspace.LockedBy = nil
 	workspace.LockedAt = nil
@@ -2124,7 +2130,7 @@ func (h *WorkspaceHandlerV2) ForceUnlock(c *gin.Context) {
 	// Reload to get updated workspace
 	workspace, _ = h.workspaceRepo.GetByID(workspaceID)
 
-	jsonapi.WriteDocument(c, http.StatusOK, formatWorkspaceResponse(workspace, h.vcsConnectionRepo))
+	jsonapi.WriteDocument(c, http.StatusOK, h.workspaceResponse(c, workspace))
 }
 
 // GetByID gets a workspace by ID (internal API)

@@ -148,6 +148,27 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 	}, workspace.ID, uploadURL))
 }
 
+// authorizeWorkspaceRead writes the JSON:API error and returns false unless the caller may read the
+// workspace a configuration version belongs to, as the download of one requires.
+func (h *ConfigurationVersionHandlerV2) authorizeWorkspaceRead(c *gin.Context, workspaceID string) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return false
+	}
+	ws, err := h.workspaceRepo.GetByID(workspaceID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
+		return false
+	}
+	allowed, err := h.rbacService.CheckWorkspacePermission(c.Request.Context(), user.ID, ws.ID, rbac.PermissionWorkspaceRead, ws.ProjectID)
+	if err != nil || !allowed {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this workspace")
+		return false
+	}
+	return true
+}
+
 // Get retrieves a configuration version by ID (TFE-compatible)
 // GET /api/v2/configuration-versions/:id
 func (h *ConfigurationVersionHandlerV2) Get(c *gin.Context) {
@@ -160,6 +181,9 @@ func (h *ConfigurationVersionHandlerV2) Get(c *gin.Context) {
 	configVersion, err := h.configVersionRepo.GetByID(id)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Configuration version not found")
+		return
+	}
+	if !h.authorizeWorkspaceRead(c, configVersion.WorkspaceID) {
 		return
 	}
 
@@ -299,6 +323,9 @@ func (h *ConfigurationVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if workspaceID == "" {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workspace ID")
+		return
+	}
+	if !h.authorizeWorkspaceRead(c, workspaceID) {
 		return
 	}
 

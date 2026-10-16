@@ -26,12 +26,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
 // vcsInstallAuthzFixture is two organizations and two people.
@@ -49,14 +51,20 @@ type vcsInstallAuthzFixture struct {
 func setupVCSInstallAuthz(t *testing.T) *vcsInstallAuthzFixture {
 	t.Helper()
 	// No GitHub App, so a caller who is let through reaches the handler's "not configured"
-	// answer instead of GitHub. Azure DevOps is configured, with values that are never used to
-	// call it: starting that flow only builds a URL.
-	t.Setenv("GITHUB_APP_ID", "")
+	// answer instead of GitHub.
+	return setupVCSInstallAuthzWithGitHub(t, nil)
+}
+
+// setupVCSInstallAuthzWithGitHub is the fixture with the given GitHub App, or none. Azure DevOps
+// is configured, with values that are never used to call it: starting that flow only builds a
+// URL.
+func setupVCSInstallAuthzWithGitHub(t *testing.T, githubApp *vcs.GitHubAppManager) *vcsInstallAuthzFixture {
+	t.Helper()
 	t.Setenv("AZURE_DEVOPS_CLIENT_ID", "vcs-install-authz-test")
 	t.Setenv("AZURE_DEVOPS_CLIENT_SECRET", "not-a-real-secret")
 	t.Setenv("AZURE_DEVOPS_REDIRECT_URI", "http://localhost:5173/vcs/azure-devops/callback")
 
-	h := setupGoldenHarness(t)
+	h := setupGoldenHarnessWithGitHub(t, githubApp)
 	f := &vcsInstallAuthzFixture{h: h}
 
 	// The harness database is a throwaway, dropped when the test ends.
@@ -130,7 +138,11 @@ type vcsInstallRoute struct {
 
 var vcsInstallRoutes = []vcsInstallRoute{
 	{"start a GitHub App installation", http.MethodGet, "/vcs-connections/github/install", http.StatusInternalServerError},
-	{"complete a GitHub App installation", http.MethodPost, "/vcs-connections/github/installations/424242", http.StatusInternalServerError},
+	// Past the permission check, completing a GitHub installation takes the state its start
+	// issued to the caller. No GitHub App is configured here, so no such state can be issued,
+	// and the answer after the permission check is the refusal for the missing state. That
+	// refusal is pinned in TestGitHubInstallation_CompletionTakesTheStateItsStartIssued.
+	{"complete a GitHub App installation", http.MethodPost, "/vcs-connections/github/installations/424242", http.StatusForbidden},
 	{"start an Azure DevOps installation", http.MethodGet, "/vcs-connections/azure-devops/install?ado_org=acme", http.StatusOK},
 }
 
@@ -183,6 +195,10 @@ func TestVCSInstallation_RequiresTheVCSSettingsPermission(t *testing.T) {
 				if rec.Code != route.past {
 					t.Fatalf("got %d, want %d (the answer that follows the permission check here).\nbody: %s",
 						rec.Code, route.past, rec.Body.String())
+				}
+				// A 403 that follows the permission check must not be the permission refusal.
+				if rec.Code == http.StatusForbidden && rec.Body.String() == refusedLikeCreate.Body.String() {
+					t.Errorf("a caller with the permission was given the permission refusal: %s", rec.Body.String())
 				}
 			})
 		})
@@ -253,26 +269,149 @@ func TestAzureDevOpsInstallation_IssuesStateOnlyWithThePermission(t *testing.T) 
 	f := setupVCSInstallAuthz(t)
 	path := vcsInstallPath(f.org.Name, "/vcs-connections/azure-devops/install?ado_org=acme")
 
-	authURL := func(t *testing.T, rec *httptest.ResponseRecorder) string {
-		t.Helper()
-		var doc struct {
-			Data struct {
-				AuthURL string `json:"auth_url"`
-			} `json:"data"`
-			AuthURL string `json:"auth_url"`
-		}
-		// A refusal has no such member; an unparseable body leaves both empty.
-		_ = json.Unmarshal(rec.Body.Bytes(), &doc)
-		if doc.Data.AuthURL != "" {
-			return doc.Data.AuthURL
-		}
-		return doc.AuthURL
-	}
-
-	if got := authURL(t, f.do(t, http.MethodGet, path, f.member)); got != "" {
+	if got := providerURL(f.do(t, http.MethodGet, path, f.member)); got != "" {
 		t.Errorf("a member without the permission was issued an authorization URL carrying a signed state: %s", got)
 	}
-	if got := authURL(t, f.do(t, http.MethodGet, path, f.manager)); got == "" {
+	if got := providerURL(f.do(t, http.MethodGet, path, f.manager)); got == "" {
 		t.Errorf("a caller with the permission was issued no authorization URL")
+	}
+}
+
+// providerURL is the URL a start answers with, the GitHub install URL or the Azure DevOps
+// authorization URL, or "" for a refusal.
+func providerURL(rec *httptest.ResponseRecorder) string {
+	var doc struct {
+		Data struct {
+			InstallURL string `json:"install_url"`
+			AuthURL    string `json:"auth_url"`
+		} `json:"data"`
+	}
+	// A refusal has no such member; an unparseable body leaves both empty.
+	_ = json.Unmarshal(rec.Body.Bytes(), &doc)
+	return doc.Data.InstallURL + doc.Data.AuthURL
+}
+
+// Completing a GitHub App installation takes the state the caller's own start issued, on top of
+// the permission. GitHub hands the installation id back through the browser, so the state is
+// what ties a completion to the start it belongs to.
+//
+// No GitHub App is configured in this harness, so no GitHub state can be issued here; the state
+// that gets past the check is covered in handlers/vcs_installation_authz_test.go. What this pins
+// through the real router is that a caller who holds the permission is refused without that
+// state, whatever stands in for it, and that nothing is written.
+func TestGitHubInstallation_CompletionTakesTheStateItsStartIssued(t *testing.T) {
+	f := setupVCSInstallAuthz(t)
+
+	adoState := func(t *testing.T) string {
+		t.Helper()
+		raw := providerURL(f.do(t, http.MethodGet, vcsInstallPath(f.org.Name, "/vcs-connections/azure-devops/install?ado_org=acme"), f.manager))
+		u, err := url.Parse(raw)
+		if err != nil || u.Query().Get("state") == "" {
+			t.Fatalf("the Azure DevOps start issued no state: %q", raw)
+		}
+		return u.Query().Get("state")
+	}
+
+	for _, tc := range []struct {
+		name  string
+		state func(t *testing.T) string
+	}{
+		{"no state", func(*testing.T) string { return "" }},
+		{"a state this deployment did not sign", func(*testing.T) string {
+			return f.org.Name + "|%2F|" + uuid.NewString()
+		}},
+		{"a state issued for the Azure DevOps flow", adoState},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := vcsInstallPath(f.org.Name, "/vcs-connections/github/installations/424242")
+			if s := tc.state(t); s != "" {
+				path += "?state=" + url.QueryEscape(s)
+			}
+			rec := f.do(t, http.MethodPost, path, f.manager)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("got %d, want 403.\nbody: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	if n := f.connections(t); n != 0 {
+		t.Errorf("the two organizations hold %d VCS connection(s) after these requests, want none", n)
+	}
+}
+
+// Starting either installation issues a state that a later request accepts in place of asking
+// again, and the Azure DevOps callback writes the connection with nothing else to go on. So a
+// start is a write, whatever its method: an organization-bound key needs write scope on the
+// organization to make one, and the permission its owner holds is not consulted to make up for
+// a narrower key. The owner of every key here but one holds manage-vcs-settings in the
+// organization, so a check that fell back on the owner would let them all through.
+func TestVCSInstallation_StartingTakesWriteScope(t *testing.T) {
+	f := setupVCSInstallAuthz(t)
+
+	var manager, member models.User
+	for _, p := range []struct {
+		team string
+		into *models.User
+	}{{"vcs-admins", &manager}, {"members", &member}} {
+		if err := f.h.db.Raw(`
+			SELECT u.* FROM users u JOIN team_members tm ON tm.user_id = u.id
+			JOIN teams t ON t.id = tm.team_id
+			WHERE t.organization_id = ? AND t.name = ? LIMIT 1`, f.org.ID, p.team).Scan(p.into).Error; err != nil || p.into.ID == uuid.Nil {
+			t.Fatalf("find the %s user: %v", p.team, err)
+		}
+	}
+	var vcsAdmins models.Team
+	if err := f.h.db.Where("organization_id = ? AND name = ?", f.org.ID, "vcs-admins").First(&vcsAdmins).Error; err != nil {
+		t.Fatalf("find the vcs-admins team: %v", err)
+	}
+	keys := apikey.NewService(
+		repository.NewAPIKeyRepository(f.h.db),
+		repository.NewOrganizationRepository(f.h.db),
+		repository.NewProjectRepository(f.h.db),
+		repository.NewTeamRepository(f.h.db),
+	)
+	mint := func(t *testing.T, owner uuid.UUID, name, scope string) string {
+		t.Helper()
+		_, token, err := keys.CreateAPIKey(owner, name, []string{scope}, nil)
+		if err != nil {
+			t.Fatalf("mint %s: %v", name, err)
+		}
+		return token
+	}
+	org := f.org.ID.String()
+	readOnly := mint(t, manager.ID, "vcs-start-read", "org:"+org+":read")
+	teamScoped := mint(t, manager.ID, "vcs-start-team", "team:"+vcsAdmins.ID.String()+":admin")
+	writeScoped := mint(t, manager.ID, "vcs-start-write", "org:"+org+":write")
+	memberWrite := mint(t, member.ID, "vcs-start-member-write", "org:"+org+":write")
+
+	starts := []vcsInstallRoute{vcsInstallRoutes[0], vcsInstallRoutes[2]}
+	for _, route := range starts {
+		t.Run(route.name, func(t *testing.T) {
+			for _, refused := range []struct{ name, token string }{
+				{"a read-only key", readOnly},
+				{"a key scoped to a team, not the organization", teamScoped},
+				{"a write-scoped key whose owner lacks the permission", memberWrite},
+			} {
+				t.Run(refused.name+" is refused", func(t *testing.T) {
+					rec := f.do(t, route.method, vcsInstallPath(f.org.Name, route.suffix), refused.token)
+					if rec.Code != http.StatusForbidden {
+						t.Fatalf("got %d, want 403.\nbody: %s", rec.Code, rec.Body.String())
+					}
+					if got := providerURL(rec); got != "" {
+						t.Errorf("the refusal carries a provider URL: %s", got)
+					}
+				})
+			}
+			t.Run("a write-scoped key whose owner holds the permission gets past the check", func(t *testing.T) {
+				rec := f.do(t, route.method, vcsInstallPath(f.org.Name, route.suffix), writeScoped)
+				if rec.Code != route.past {
+					t.Fatalf("got %d, want %d (the answer that follows the checks here).\nbody: %s", rec.Code, route.past, rec.Body.String())
+				}
+			})
+		})
+	}
+
+	if n := f.connections(t); n != 0 {
+		t.Errorf("the two organizations hold %d VCS connection(s) after these requests, want none", n)
 	}
 }
