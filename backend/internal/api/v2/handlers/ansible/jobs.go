@@ -1046,6 +1046,8 @@ func formatJobResponse(job *models.AnsibleJob) jsonapi.Resource[JobAttributes] {
 		WarningsCount:    job.WarningsCount,
 		CreatedAt:        job.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:        job.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+
+		InventorySyncWarnings: formatInventorySyncWarnings(job.InventorySyncWarnings),
 	}
 
 	if job.JobType == models.AnsibleJobTypeAdHoc {
@@ -1120,6 +1122,25 @@ func formatJobResponse(job *models.AnsibleJob) jsonapi.Resource[JobAttributes] {
 		Attributes:    attributes,
 		Relationships: relationships,
 	}
+}
+
+// formatInventorySyncWarnings renders a job's inventory sync warnings, always as a list.
+func formatInventorySyncWarnings(warnings models.InventorySyncWarnings) []JobInventorySyncWarning {
+	out := make([]JobInventorySyncWarning, 0, len(warnings))
+	for _, w := range warnings {
+		entry := JobInventorySyncWarning{
+			SourceID:   w.SourceID.String(),
+			SourceName: w.SourceName,
+			FailedAt:   w.FailedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Error:      w.Error,
+		}
+		if w.LastSuccessfulSyncAt != nil {
+			v := w.LastSuccessfulSyncAt.UTC().Format("2006-01-02T15:04:05Z")
+			entry.LastSuccessfulSyncAt = &v
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // formatJobsResponse formats multiple jobs for JSON:API response

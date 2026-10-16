@@ -91,6 +91,7 @@
         "hosts-skipped": 0,
         "hosts-total": 0,
         "hosts-unreachable": 0,
+        "inventory-sync-warnings": [],
         "job-type": "adhoc",
         "limit": "webservers",
         "module": "shell",
