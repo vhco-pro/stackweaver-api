@@ -3,6 +3,9 @@
 package terraform
 
 import (
+	"crypto/md5" //nolint:gosec // TFE's integrity check of a pushed state is an MD5, not a security boundary
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -68,10 +71,93 @@ func (h *StateVersionHandlerV2) outputCrypto() *crypto.CryptoService {
 	return h.stateService.Crypto()
 }
 
+// CreateStateVersionRequestV2 is the document go-tfe marshals for StateVersionCreateOptions
+// (#858, D7): md5 and serial are required, the state travels base64-encoded, and a run
+// relationship names the run the state belongs to. The two-step upload flow
+// (hosted-state-upload-url) is not served, so the state is required here.
 type CreateStateVersionRequestV2 struct {
-	StateData map[string]interface{} `json:"state_data" binding:"required"`
-	Serial    *int                   `json:"serial,omitempty"`
-	Lineage   string                 `json:"lineage,omitempty"`
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Lineage          *string `json:"lineage"`
+			MD5              *string `json:"md5" binding:"required"`
+			Serial           *int64  `json:"serial" binding:"required"`
+			State            *string `json:"state"`
+			Force            *bool   `json:"force"`
+			JSONState        *string `json:"json-state"`
+			JSONStateOutputs *string `json:"json-state-outputs"`
+		} `json:"attributes"`
+		Relationships struct {
+			Run *jsonapi.Relationship `json:"run"`
+		} `json:"relationships"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *CreateStateVersionRequestV2) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
+}
+
+// RemoveResourceRequest is the state-versions document that removes one resource from the
+// latest state, which writes a new state version.
+type RemoveResourceRequest struct {
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Address string `json:"address" binding:"required"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *RemoveResourceRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
+}
+
+const stateVersionsType = "state-versions"
+
+// stateVersionResource is the one projection of a state version every endpoint answers with
+// (#858, D7): TFE's attributes, which go-tfe decodes into a StateVersion, plus the committer
+// Stackweaver records beside them, and the workspace, run and outputs relationships.
+func (h *StateVersionHandlerV2) stateVersionResource(c *gin.Context, v *models.StateVersion) jsonapi.Resource[StateVersionAttributes] {
+	status := v.Status
+	if status == "" {
+		status = "finalized"
+	}
+	rels := StateVersionRelationships{
+		Workspace: jsonapi.ToOne(v.WorkspaceID, "workspaces"),
+		Outputs:   jsonapi.ManyRelationship{Data: []jsonapi.ResourceID{}},
+	}
+	if v.RunID != nil && *v.RunID != "" {
+		r := jsonapi.ToOne(*v.RunID, "runs")
+		rels.Run = &r
+	}
+	for _, o := range materializedOutputs(h.stateOutputRepo, v, true, h.outputCrypto()) {
+		rels.Outputs.Data = append(rels.Outputs.Data, jsonapi.ResourceID{ID: o.ID, Type: o.Type})
+	}
+	return jsonapi.Resource[StateVersionAttributes]{
+		ID:   v.ID,
+		Type: stateVersionsType,
+		Attributes: StateVersionAttributes{
+			HostedStateDownloadURL: h.hostedStateDownloadURL(c, v),
+			Serial:                 v.Serial,
+			Lineage:                v.Lineage,
+			CreatedAt:              v.CreatedAt,
+			Status:                 status,
+			Size:                   v.Size,
+			ResourcesProcessed:     v.ResourcesProcessed == nil || *v.ResourcesProcessed,
+			StateVersion:           v.Version,
+			VCSCommitSHA:           v.CommitHash,
+			Committer:              v.Committer,
+		},
+		Relationships: rels,
+	}
 }
 
 // hostedStateDownloadURL returns the API URL for downloading state (TFE hosted-state-download-url).
@@ -133,8 +219,11 @@ func (h *StateVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 		return
 	}
 
-	// TFE-compatible response format
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, versions, jsonapi.NewPaginationMeta(page, perPage, total))
+	data := make([]jsonapi.Resource[StateVersionAttributes], 0, len(versions))
+	for i := range versions {
+		data = append(data, h.stateVersionResource(c, &versions[i]))
+	}
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, perPage, total))
 }
 
 // CurrentStateVersion returns the latest state version for a workspace (TFE-compatible).
@@ -171,15 +260,7 @@ func (h *StateVersionHandlerV2) CurrentStateVersion(c *gin.Context) {
 		return
 	}
 
-	attrs := buildStateVersionAttributes(version)
-	attrs["hosted-state-download-url"] = h.hostedStateDownloadURL(c, version)
-
-	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[map[string]interface{}]{
-		ID:            version.ID,
-		Type:          "state-versions",
-		Attributes:    attrs,
-		Relationships: WorkspaceOnlyRelationships{Workspace: jsonapi.ToOne(version.WorkspaceID, "workspaces")},
-	})
+	jsonapi.WriteDocument(c, http.StatusOK, h.stateVersionResource(c, version))
 }
 
 // Get returns a single state version by ID (TFE-compatible)
@@ -221,29 +302,7 @@ func (h *StateVersionHandlerV2) Get(c *gin.Context) {
 		return
 	}
 
-	attrs := buildStateVersionAttributes(version)
-	attrs["hosted-state-download-url"] = h.hostedStateDownloadURL(c, version)
-
-	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[map[string]interface{}]{
-		ID:            version.ID,
-		Type:          "state-versions",
-		Attributes:    attrs,
-		Relationships: WorkspaceOnlyRelationships{Workspace: jsonapi.ToOne(version.WorkspaceID, "workspaces")},
-	})
-}
-
-// buildStateVersionAttributes returns attributes map for state version (JSON:API).
-func buildStateVersionAttributes(v *models.StateVersion) map[string]interface{} {
-	var m map[string]interface{}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return map[string]interface{}{}
-	}
-	_ = json.Unmarshal(b, &m)
-	if m == nil {
-		m = make(map[string]interface{})
-	}
-	return m
+	jsonapi.WriteDocument(c, http.StatusOK, h.stateVersionResource(c, version))
 }
 
 // Download streams the raw state JSON for a state version (TFE hosted-state-download-url target).
@@ -529,44 +588,72 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Check if workspace is manually locked (TFE-compatible)
-	if workspace.Locked {
-		detail := "Workspace is locked. Unlock the workspace to create state versions."
-		if workspace.LockedReason != "" {
-			detail = fmt.Sprintf("Workspace is locked: %s", workspace.LockedReason)
-		}
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", detail)
-		return
-	}
-
-	// Check if state is locked by an active run (TFE-compatible)
-	if h.stateService != nil {
-		existingLock, lockErr := h.stateService.GetStateLock(c.Request.Context(), workspaceID)
-		if lockErr == nil && existingLock != nil && !existingLock.IsExpired() {
-			jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("State is locked by run %v (lock ID: %s)", existingLock.LockedBy, existingLock.LockID))
-			return
-		}
-	}
-
 	var req CreateStateVersionRequestV2
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	if !jsonapi.BindDocument(c, &req, stateVersionsType) {
+		return
+	}
+	attrs := req.Data.Attributes
+	runID, ok := jsonapi.RelationshipID(c, req.Data.Relationships.Run, "run", "runs")
+	if !ok {
+		return
+	}
+	if attrs.State == nil || *attrs.State == "" {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "state is required: the state travels base64-encoded in the state attribute (the hosted-state-upload-url flow is not supported)")
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(*attrs.State)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "state is not base64: "+err.Error())
+		return
+	}
+	sum := md5.Sum(raw) //nolint:gosec // TFE's integrity check of the pushed state is an MD5, not a security boundary
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), *attrs.MD5) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "md5 does not match the state")
+		return
+	}
+	var stateData map[string]interface{}
+	if err := json.Unmarshal(raw, &stateData); err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "state is not a JSON state document: "+err.Error())
 		return
 	}
 
-	// Marshal the state for storage first (validation), then reserve the version + write the object.
-	stateJSON, err := json.Marshal(req.StateData)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to marshal state data")
+	// TFE's rule (#858, D7): a state version is created only while the workspace is locked by the
+	// caller, or its state is locked by the run the document names. That is why the CLI's remote
+	// backend locks before it pushes. A lock held by anyone else, or no lock, refuses the push.
+	var stateLock *models.StateLock
+	if h.stateService != nil {
+		if l, lockErr := h.stateService.GetStateLock(c.Request.Context(), workspaceID); lockErr == nil && l != nil && !l.IsExpired() {
+			stateLock = l
+		}
+	}
+	lockedByRun := runID != "" && stateLock != nil && stateLock.LockedBy != nil && *stateLock.LockedBy == runID
+	lockedByCaller := workspace.Locked && workspace.LockedBy != nil && *workspace.LockedBy == user.ID
+	switch {
+	case stateLock != nil && !lockedByRun:
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("The state is locked by run %s; a state version is created only by the run that holds the lock", derefString(stateLock.LockedBy)))
+		return
+	case !lockedByCaller && !lockedByRun:
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Creating a state version requires the workspace to be locked by you, or its state to be locked by the run the document names. Lock the workspace first.")
 		return
 	}
 
 	// AUD-018: atomically reserve the next version through the shared path (retry on the
 	// unique-violation, reject a serial regression with 409), row-first then object storage.
+	serial := int(*attrs.Serial)
+	processed := true
 	stateVersion := &models.StateVersion{
-		WorkspaceID: workspaceID,
-		Serial:      req.Serial,
-		Lineage:     req.Lineage,
+		WorkspaceID:        workspaceID,
+		Serial:             &serial,
+		MD5:                strings.ToLower(*attrs.MD5),
+		Size:               int64(len(raw)),
+		Status:             "finalized",
+		ResourcesProcessed: &processed,
+	}
+	if attrs.Lineage != nil {
+		stateVersion.Lineage = *attrs.Lineage
+	}
+	if runID != "" {
+		stateVersion.RunID = &runID
 	}
 	nextVersion, err := h.stateVersionRepo.CreateNextVersion(stateVersion)
 	if err != nil {
@@ -578,31 +665,37 @@ func (h *StateVersionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Store the state object (encrypted at rest via the state service), keyed on the reserved
-	// version. On failure roll back the reserved row so no dangling version remains.
+	// Store the state exactly as pushed (encrypted at rest by the state service), keyed on the
+	// reserved version, so the md5 the client sent stays true of what is served back. On failure
+	// roll back the reserved row so no dangling version remains.
 	if h.stateService != nil {
-		if err := h.stateService.PutStateObject(c.Request.Context(), workspaceID, nextVersion, stateJSON); err != nil {
+		if err := h.stateService.PutStateObject(c.Request.Context(), workspaceID, nextVersion, raw); err != nil {
 			_ = h.stateVersionRepo.Delete(stateVersion.ID)
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to store state in object storage: %v", err))
 			return
 		}
-	}
-
-	// Materialize outputs/resources from the pushed state (State Storage Rework).
-	// Best-effort: the raw state is already persisted in object storage authoritatively.
-	if h.stateService != nil {
-		if err := h.stateService.Materialize(stateVersion.ID, req.StateData); err != nil {
+		// Materialize outputs/resources from the pushed state (State Storage Rework). The raw
+		// state is already persisted authoritatively, so a failure is recorded, not returned.
+		if err := h.stateService.Materialize(stateVersion.ID, stateData); err != nil {
 			logger.Warnf("Failed to materialize outputs/resources for state version %s: %v", stateVersion.ID, err)
+			processed = false
+			_ = h.stateVersionRepo.SetResourcesProcessed(stateVersion.ID, false)
 		}
 	}
 
-	// TFE-compatible response format
-	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[*models.StateVersion]{
-		ID:            stateVersion.ID,
-		Type:          "state-versions",
-		Attributes:    stateVersion,
-		Relationships: WorkspaceOnlyRelationships{Workspace: jsonapi.ToOne(workspaceID, "workspaces")},
-	})
+	stored, err := h.stateVersionRepo.GetByID(stateVersion.ID)
+	if err != nil {
+		stored = stateVersion
+	}
+	jsonapi.WriteDocument(c, http.StatusCreated, h.stateVersionResource(c, stored))
+}
+
+// derefString reads an optional identifier for a message.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // RemoveResource removes a resource from the latest state version by address
@@ -639,14 +732,11 @@ func (h *StateVersionHandlerV2) RemoveResource(c *gin.Context) {
 		return
 	}
 
-	// Parse request body
-	var req struct {
-		Address string `json:"address" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid request: %v", err))
+	var body RemoveResourceRequest
+	if !jsonapi.BindDocument(c, &body, stateVersionsType) {
 		return
 	}
+	req := body.Data.Attributes
 
 	// Remove resource from state
 	if h.stateService == nil {
@@ -671,10 +761,14 @@ func (h *StateVersionHandlerV2) RemoveResource(c *gin.Context) {
 		return
 	}
 
-	// Return success
-	jsonapi.WriteDocument(c, http.StatusOK, response.MessageResponse{
-		Message: fmt.Sprintf("Resource %s removed from state", req.Address),
-	})
+	// Removing a resource writes a new state version; answer with it, read back as the latest
+	// (RemoveResourceFromState saves it and returns only an error).
+	latest, err := h.stateVersionRepo.GetLatest(workspaceID)
+	if err != nil || latest == nil {
+		apierror.Internal(c, "Failed to read the state version the removal wrote", err)
+		return
+	}
+	jsonapi.WriteDocument(c, http.StatusCreated, h.stateVersionResource(c, latest))
 }
 
 // Delete deletes a state version (StackWeaver-specific feature)

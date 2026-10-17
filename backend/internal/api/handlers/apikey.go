@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 type APIKeyHandler struct {
@@ -30,47 +30,80 @@ func NewAPIKeyHandler(apiKeyService *apikey.Service, authService *auth.Service, 
 	}
 }
 
-// CreateAPIKeyRequest represents the request to create an API key
+// CreateAPIKeyRequest is the api-keys document a personal API key is created from (#858, D8).
 type CreateAPIKeyRequest struct {
-	Name      string   `json:"name" binding:"required"`
-	Scopes    []string `json:"scopes,omitempty"`     // Optional scopes array
-	ExpiresAt *string  `json:"expires_at,omitempty"` // ISO 8601 date string
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Name      string   `json:"name" binding:"required"`
+			Scopes    []string `json:"scopes,omitempty"`
+			ExpiresAt *string  `json:"expires-at,omitempty"` // ISO 8601 date string
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
 }
 
-// CreateAPIKeyResponse represents the response when creating an API key
-type CreateAPIKeyResponse struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Key            string    `json:"key"` // Only shown once during creation
-	KeyPrefix      string    `json:"key_prefix"`
-	Scopes         []string  `json:"scopes"`
-	OrganizationID *string   `json:"organization_id,omitempty"`
-	ProjectID      *string   `json:"project_id,omitempty"`
-	ExpiresAt      *string   `json:"expires_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *CreateAPIKeyRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
 }
 
-// APIKeyResponse represents an API key in responses (without the actual key)
-type APIKeyResponse struct {
-	ID             string     `json:"id"`
-	Name           string     `json:"name"`
-	KeyPrefix      string     `json:"key_prefix"`
-	Scopes         []string   `json:"scopes"`
-	OrganizationID *string    `json:"organization_id,omitempty"`
-	ProjectID      *string    `json:"project_id,omitempty"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+// APIKeyAttributes describe one of the caller's API keys. Key is the plaintext key, present only
+// in the answer to the create, the one time it is shown.
+type APIKeyAttributes struct {
+	Name       string     `json:"name"`
+	Key        string     `json:"key,omitempty"`
+	KeyPrefix  string     `json:"key-prefix"`
+	Scopes     []string   `json:"scopes"`
+	ExpiresAt  *time.Time `json:"expires-at"`
+	LastUsedAt *time.Time `json:"last-used-at"`
+	CreatedAt  time.Time  `json:"created-at"`
+}
+
+// APIKeyRelationships name the organization or project a scoped key is limited to.
+type APIKeyRelationships struct {
+	Organization *jsonapi.Relationship `json:"organization,omitempty"`
+	Project      *jsonapi.Relationship `json:"project,omitempty"`
+}
+
+// apiKeyResource is one key as the api-keys resource; plainKey is set only on create.
+func apiKeyResource(key *models.APIKey, plainKey string) jsonapi.Resource[APIKeyAttributes] {
+	res := jsonapi.Resource[APIKeyAttributes]{
+		ID:   key.ID.String(),
+		Type: "api-keys",
+		Attributes: APIKeyAttributes{
+			Name: key.Name, Key: plainKey, KeyPrefix: key.KeyPrefix, Scopes: []string(key.Scopes),
+			ExpiresAt: key.ExpiresAt, LastUsedAt: key.LastUsedAt, CreatedAt: key.CreatedAt,
+		},
+	}
+	if res.Attributes.Scopes == nil {
+		res.Attributes.Scopes = []string{}
+	}
+	var rels APIKeyRelationships
+	if key.OrganizationID != nil {
+		r := jsonapi.ToOne(key.OrganizationID.String(), "organizations")
+		rels.Organization = &r
+	}
+	if key.ProjectID != nil {
+		r := jsonapi.ToOne(key.ProjectID.String(), "projects")
+		rels.Project = &r
+	}
+	if rels.Organization != nil || rels.Project != nil {
+		res.Relationships = rels
+	}
+	return res
 }
 
 // CreateAPIKey creates a new API key
 // POST /api/v2/settings/api-keys
 func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
-	var req CreateAPIKeyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+	var body CreateAPIKeyRequest
+	if !jsonapi.BindDocument(c, &body, "api-keys") {
 		return
 	}
+	req := body.Data.Attributes
 
 	// Get user from context
 	user, err := h.authService.GetUserFromContext(c)
@@ -84,7 +117,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
 		parsed, err := time.Parse(time.RFC3339, *req.ExpiresAt)
 		if err != nil {
-			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "invalid expires_at format, use ISO 8601 (RFC3339)")
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "invalid expires-at format, use ISO 8601 (RFC3339)")
 			return
 		}
 		expiresAt = &parsed
@@ -110,34 +143,8 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	}
 
 	// Format response
-	expiresAtStr := ""
-	if apiKey.ExpiresAt != nil {
-		expiresAtStr = apiKey.ExpiresAt.Format(time.RFC3339)
-	}
-
-	var orgIDStr *string
-	if apiKey.OrganizationID != nil {
-		s := apiKey.OrganizationID.String()
-		orgIDStr = &s
-	}
-
-	var projectIDStr *string
-	if apiKey.ProjectID != nil {
-		s := apiKey.ProjectID.String()
-		projectIDStr = &s
-	}
-
-	c.JSON(http.StatusCreated, CreateAPIKeyResponse{
-		ID:             apiKey.ID.String(),
-		Name:           apiKey.Name,
-		Key:            plainKey, // Only time the full key is shown
-		KeyPrefix:      apiKey.KeyPrefix,
-		Scopes:         []string(apiKey.Scopes),
-		OrganizationID: orgIDStr,
-		ProjectID:      projectIDStr,
-		ExpiresAt:      &expiresAtStr,
-		CreatedAt:      apiKey.CreatedAt,
-	})
+	// The only time the plaintext key is shown.
+	jsonapi.WriteDocument(c, http.StatusCreated, apiKeyResource(apiKey, plainKey))
 }
 
 // ListAPIKeys lists all API keys for the current user
@@ -158,34 +165,11 @@ func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 	}
 
 	// Convert to response format
-	responses := make([]APIKeyResponse, len(apiKeys))
-	for i, key := range apiKeys {
-		var orgIDStr *string
-		if key.OrganizationID != nil {
-			s := key.OrganizationID.String()
-			orgIDStr = &s
-		}
-
-		var projectIDStr *string
-		if key.ProjectID != nil {
-			s := key.ProjectID.String()
-			projectIDStr = &s
-		}
-
-		responses[i] = APIKeyResponse{
-			ID:             key.ID.String(),
-			Name:           key.Name,
-			KeyPrefix:      key.KeyPrefix,
-			Scopes:         []string(key.Scopes),
-			OrganizationID: orgIDStr,
-			ProjectID:      projectIDStr,
-			ExpiresAt:      key.ExpiresAt,
-			LastUsedAt:     key.LastUsedAt,
-			CreatedAt:      key.CreatedAt,
-		}
+	data := make([]jsonapi.Resource[APIKeyAttributes], 0, len(apiKeys))
+	for _, key := range apiKeys {
+		data = append(data, apiKeyResource(key, ""))
 	}
-
-	c.JSON(http.StatusOK, APIKeyListResponse{APIKeys: responses})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // DeleteAPIKey deletes an API key
@@ -205,8 +189,12 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 		return
 	}
 
-	// Get API key before deletion for activity logging
-	apiKey, _ := h.apiKeyService.GetAPIKey(id, user.ID)
+	// A key that is not the caller's, or does not exist, is not found.
+	apiKey, err := h.apiKeyService.GetAPIKey(id, user.ID)
+	if err != nil || apiKey == nil {
+		jsonapi.WriteError(c, http.StatusNotFound, jsonapi.TitleNotFound, "API key not found")
+		return
+	}
 
 	// Delete the API key
 	if err := h.apiKeyService.DeleteAPIKey(id, user.ID); err != nil {
@@ -226,10 +214,5 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 		_ = h.activityService.LogAPIKeyDelete(c.Request.Context(), apiKey.ID, apiKey.Name, activityCtx)
 	}
 
-	response.Message(c, http.StatusOK, "API key deleted successfully")
-}
-
-// APIKeyListResponse is the body of GET /api/v2/settings/api-keys.
-type APIKeyListResponse struct {
-	APIKeys []APIKeyResponse `json:"api_keys"`
+	c.Status(http.StatusNoContent)
 }

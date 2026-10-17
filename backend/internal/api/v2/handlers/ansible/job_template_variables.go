@@ -172,7 +172,7 @@ func (h *JobTemplateVariableHandlerV2) ListByJobTemplate(c *gin.Context) {
 		data = append(data, h.formatVariableResponse(&v, templateID))
 	}
 
-	c.JSON(http.StatusOK, jsonapi.Document{Data: data, Meta: jsonapi.NewFullPageMeta(len(data)), Links: jsonapi.SelfLink{
+	jsonapi.WriteDoc(c, http.StatusOK, jsonapi.Document{Data: data, Meta: jsonapi.NewFullPageMeta(len(data)), Links: jsonapi.SelfLink{
 		Self: fmt.Sprintf("/api/v2/ansible/job-templates/%s/vars", templateIDStr),
 	}})
 }
@@ -200,7 +200,7 @@ func (h *JobTemplateVariableHandlerV2) Create(c *gin.Context) {
 	}
 
 	if req.Data.Type != "vars" {
-		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid type: must be 'vars'")
+		jsonapi.WriteWrongType(c, "vars", req.Data.Type)
 		return
 	}
 
@@ -301,7 +301,7 @@ func (h *JobTemplateVariableHandlerV2) Update(c *gin.Context) {
 	}
 
 	if req.Data.Type != "vars" {
-		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid type: must be 'vars'")
+		jsonapi.WriteWrongType(c, "vars", req.Data.Type)
 		return
 	}
 

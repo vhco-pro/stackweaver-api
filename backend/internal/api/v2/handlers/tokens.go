@@ -32,18 +32,24 @@ func NewTokenHandlerV2(
 	}
 }
 
+// CreateTokenRequestV2 is the tokens document a personal token is minted from (#858, D6). Its
+// attributes keep the snake_case spelling the tokens resource answers with (D3).
 type CreateTokenRequestV2 struct {
-	Description string     `json:"description"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Description string     `json:"description"`
+			ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
 }
 
-type TokenResponseV2 struct {
-	ID          uuid.UUID  `json:"id"`
-	Token       string     `json:"token"` // Only returned on creation
-	Description string     `json:"description"`
-	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *CreateTokenRequestV2) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
 }
 
 // Create creates a new user-bound token for the authenticated user
@@ -55,11 +61,11 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	var req CreateTokenRequestV2
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	var body CreateTokenRequestV2
+	if !jsonapi.BindDocument(c, &body, "tokens") {
 		return
 	}
+	req := body.Data.Attributes
 
 	// Mint a user-bound token (kind="user") via the unified apikey service.
 	// The description is stored as the key name.

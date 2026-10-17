@@ -6,8 +6,14 @@
     "data": {
       "attributes": {
         "avatar-url": "",
+        "bio": "",
+        "company": "",
+        "created-at": "\u003ctimestamp\u003e",
         "email": "avery.diaz@example.com",
         "is-service-account": false,
+        "location": "",
+        "name": "Avery Diaz",
+        "updated-at": "\u003ctimestamp\u003e",
         "username": "avery.diaz@example.com",
         "v2-only": true
       },

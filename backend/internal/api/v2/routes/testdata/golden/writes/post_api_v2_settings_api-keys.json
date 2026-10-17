@@ -4,32 +4,54 @@
   "request": {
     "content_type": "application/json",
     "body": {
-      "expires_at": "\u003ctimestamp\u003e",
-      "name": "ci-pipeline",
-      "scopes": [
-        "org:\u003cuuid\u003e:read",
-        "org:\u003cuuid\u003e:write"
-      ]
+      "data": {
+        "attributes": {
+          "expires-at": "\u003ctimestamp\u003e",
+          "name": "ci-pipeline",
+          "scopes": [
+            "org:\u003cuuid\u003e:read",
+            "org:\u003cuuid\u003e:write"
+          ]
+        },
+        "type": "api-keys"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "expires_at": {
-          "type": "string",
-          "nullable": true
-        },
-        "name": {
-          "type": "string"
-        },
-        "scopes": {
-          "type": "array",
-          "items": {
-            "type": "string"
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "expires-at": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string"
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
           }
         }
       },
       "required": [
-        "name"
+        "data"
       ]
     },
     "schema_source": "type",
@@ -37,16 +59,29 @@
   },
   "status": 201,
   "response": {
-    "created_at": "\u003ctimestamp\u003e",
-    "expires_at": "\u003ctimestamp\u003e",
-    "id": "\u003cuuid\u003e",
-    "key": "\u003csecret\u003e",
-    "key_prefix": "\u003csecret\u003e",
-    "name": "ci-pipeline",
-    "organization_id": "\u003cuuid\u003e",
-    "scopes": [
-      "org:\u003cuuid\u003e:read",
-      "org:\u003cuuid\u003e:write"
-    ]
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "expires-at": "\u003ctimestamp\u003e",
+        "key": "\u003csecret\u003e",
+        "key-prefix": "\u003csecret\u003e",
+        "last-used-at": null,
+        "name": "ci-pipeline",
+        "scopes": [
+          "org:\u003cuuid\u003e:read",
+          "org:\u003cuuid\u003e:write"
+        ]
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "api-keys"
+    }
   }
 }

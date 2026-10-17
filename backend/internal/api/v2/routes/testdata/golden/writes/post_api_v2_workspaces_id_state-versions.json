@@ -4,55 +4,92 @@
   "request": {
     "content_type": "application/vnd.api+json",
     "body": {
-      "lineage": "\u003cuuid\u003e",
-      "serial": 1,
-      "state_data": {
-        "lineage": "\u003cuuid\u003e",
-        "outputs": {
-          "endpoint": {
-            "type": "string",
-            "value": "https://warehouse.example.com"
-          }
+      "data": {
+        "attributes": {
+          "lineage": "\u003cuuid\u003e",
+          "md5": "c860b089b9b156aa1496134c8f4782d0",
+          "serial": 1,
+          "state": "eyJsaW5lYWdlIjoiOGYyYzFkN2UtM2I0YS00YzVkLTllNmYtMGExYjJjM2Q0ZTVmIiwib3V0cHV0cyI6eyJlbmRwb2ludCI6eyJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiJodHRwczovL3dhcmVob3VzZS5leGFtcGxlLmNvbSJ9fSwicmVzb3VyY2VzIjpbeyJpbnN0YW5jZXMiOlt7ImF0dHJpYnV0ZXMiOnsiaWQiOiI1NTc3MDA2NzkxOTQ3Nzc5NDEwIiwidHJpZ2dlcnMiOm51bGx9LCJzY2hlbWFfdmVyc2lvbiI6MH1dLCJtb2RlIjoibWFuYWdlZCIsIm5hbWUiOiJleGFtcGxlIiwicHJvdmlkZXIiOiJwcm92aWRlcltcInJlZ2lzdHJ5Lm9wZW50b2Z1Lm9yZy9oYXNoaWNvcnAvbnVsbFwiXSIsInR5cGUiOiJudWxsX3Jlc291cmNlIn1dLCJzZXJpYWwiOjEsInRlcnJhZm9ybV92ZXJzaW9uIjoiMS4xMC42IiwidmVyc2lvbiI6NH0="
         },
-        "resources": [
-          {
-            "instances": [
-              {
-                "attributes": {
-                  "id": "5577006791947779410",
-                  "triggers": null
-                },
-                "schema_version": 0
-              }
-            ],
-            "mode": "managed",
-            "name": "example",
-            "provider": "provider[\"registry.opentofu.org/hashicorp/null\"]",
-            "type": "null_resource"
-          }
-        ],
-        "serial": 1,
-        "terraform_version": "1.10.6",
-        "version": 4
+        "type": "state-versions"
       }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "lineage": {
-          "type": "string"
-        },
-        "serial": {
-          "type": "integer",
-          "nullable": true
-        },
-        "state_data": {
+        "data": {
           "type": "object",
-          "additionalProperties": true
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "force": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "json-state": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "json-state-outputs": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "lineage": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "md5": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "serial": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "state": {
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "required": [
+                "md5",
+                "serial"
+              ]
+            },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "run": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "links": {}
+                  }
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
       },
       "required": [
-        "state_data"
+        "data"
       ]
     },
     "schema_source": "type",
@@ -62,99 +99,26 @@
   "response": {
     "data": {
       "attributes": {
-        "created_at": "\u003ctimestamp\u003e",
-        "id": "\u003cid\u003e",
+        "created-at": "\u003ctimestamp\u003e",
+        "hosted-state-download-url": "http://example.com/api/v2/state-versions/\u003cid\u003e/download",
         "lineage": "\u003cuuid\u003e",
+        "resources-processed": true,
         "serial": 1,
-        "version": 1,
-        "workspace": {
-          "agent_pool": {
-            "created_at": "\u003ctimestamp\u003e",
-            "id": "\u003cuuid\u003e",
-            "name": "",
-            "organization": {
-              "aggregated_commit_status_enabled": false,
-              "allow_force_delete_workspaces": false,
-              "ansible_adhoc_modules": "",
-              "ansible_job_retention_days": 0,
-              "assessments_enforced": false,
-              "collaborator_auth_policy": "",
-              "cost_estimation_enabled": false,
-              "created_at": "\u003ctimestamp\u003e",
-              "default_execution_mode": "",
-              "default_tofu_version": "",
-              "description": "",
-              "email": "",
-              "id": "\u003cuuid\u003e",
-              "name": "",
-              "send_passing_statuses_for_untriggered_speculative_plans": false,
-              "updated_at": "\u003ctimestamp\u003e"
-            },
-            "organization_id": "\u003cuuid\u003e",
-            "organization_scoped": false
-          },
-          "allow_destroy_plan": false,
-          "assessments_enabled": false,
-          "auto_apply": false,
-          "auto_apply_run_trigger": false,
-          "auto_queue_runs": false,
-          "created_at": "\u003ctimestamp\u003e",
-          "description": "",
-          "drift_detection_enabled": false,
-          "drift_detection_timezone": "",
-          "execution_mode": "",
-          "file_triggers_enabled": false,
-          "force_delete": false,
-          "global_remote_state": false,
-          "id": "",
-          "locked": false,
-          "name": "",
-          "project": {
-            "created_at": "\u003ctimestamp\u003e",
-            "default_execution_mode": "",
-            "description": "",
-            "id": "\u003cuuid\u003e",
-            "name": "",
-            "organization": {
-              "aggregated_commit_status_enabled": false,
-              "allow_force_delete_workspaces": false,
-              "ansible_adhoc_modules": "",
-              "ansible_job_retention_days": 0,
-              "assessments_enforced": false,
-              "collaborator_auth_policy": "",
-              "cost_estimation_enabled": false,
-              "created_at": "\u003ctimestamp\u003e",
-              "default_execution_mode": "",
-              "default_tofu_version": "",
-              "description": "",
-              "email": "",
-              "id": "\u003cuuid\u003e",
-              "name": "",
-              "send_passing_statuses_for_untriggered_speculative_plans": false,
-              "updated_at": "\u003ctimestamp\u003e"
-            },
-            "organization_id": "\u003cuuid\u003e",
-            "settings_overwritten": false,
-            "updated_at": "\u003ctimestamp\u003e"
-          },
-          "project_id": "\u003cuuid\u003e",
-          "queue_all_runs": false,
-          "resource_count": 0,
-          "run_timeout": 0,
-          "speculative_enabled": false,
-          "structured_run_output_enabled": false,
-          "tofu_version": "",
-          "updated_at": "\u003ctimestamp\u003e",
-          "vcs_branch": "",
-          "vcs_ingress_submodules": false,
-          "vcs_provider": "",
-          "vcs_repository": "",
-          "working_directory": ""
-        },
-        "workspace_id": "\u003cid\u003e"
+        "size": 413,
+        "state-version": 1,
+        "status": "finalized",
+        "vcs-commit-sha": ""
       },
       "id": "\u003cid\u003e",
       "relationships": {
+        "outputs": {
+          "data": [
+            {
+              "id": "\u003cid\u003e",
+              "type": "state-version-outputs"
+            }
+          ]
+        },
         "workspace": {
           "data": {
             "id": "\u003cid\u003e",

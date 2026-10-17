@@ -389,17 +389,17 @@ func init() {
 			route: "POST /api/v2/organizations/:name/ansible/playbooks/actions/bulk-import",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/ansible/playbooks/actions/bulk-import"),
-					map[string]any{
-						"project_id":        w.id("projects"),
-						"vcs_connection_id": ansibleVCSConnection(t, w),
+					document("ansible-playbooks", map[string]any{
+						"project-id":        w.id("projects"),
+						"vcs-connection-id": ansibleVCSConnection(t, w),
 						"repository":        ansiblePlaybookRepository,
 						"branch":            "main",
-						"source_mode":       "cached",
+						"source-mode":       "cached",
 						"playbooks": []map[string]any{
 							{"path": "playbooks/webservers.yml", "name": "golden-write-webservers"},
 							{"path": "playbooks/databases.yml", "name": "golden-write-databases"},
 						},
-					})
+					}))
 			},
 		},
 		writeCase{
@@ -408,15 +408,15 @@ func init() {
 			route: "POST /api/v2/organizations/:name/ansible/playbooks/actions/find-or-create",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/ansible/playbooks/actions/find-or-create"),
-					map[string]any{
-						"project_id":        w.id("projects"),
-						"vcs_connection_id": ansibleVCSConnection(t, w),
+					document("ansible-playbooks", map[string]any{
+						"project-id":        w.id("projects"),
+						"vcs-connection-id": ansibleVCSConnection(t, w),
 						"repository":        ansiblePlaybookRepository,
 						"branch":            "main",
 						"path":              "playbooks/hardening.yml",
 						"name":              "golden-write-hardening",
-						"source_mode":       "fresh",
-					})
+						"source-mode":       "fresh",
+					}))
 			},
 		},
 	)
@@ -535,14 +535,14 @@ func init() {
 			route: "POST /api/v2/ansible/job-templates/:id/credentials",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/ansible/job-templates/:id/credentials"),
-					map[string]any{"credential_id": w.id("credentials")})
+					map[string]any{"data": map[string]any{"type": "ansible-credentials", "id": w.id("credentials")}})
 			},
 		},
 		writeCase{
 			route: "DELETE /api/v2/ansible/job-templates/:id/credentials/:credential_id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/ansible/job-templates/:id/credentials"),
-					map[string]any{"credential_id": w.id("credentials")}))
+					map[string]any{"data": map[string]any{"type": "ansible-credentials", "id": w.id("credentials")}}))
 				return w.jsonRequest(t, http.MethodDelete, w.path("/api/v2/ansible/job-templates/:id/credentials/:credential_id"), nil)
 			},
 		},
@@ -653,17 +653,17 @@ func init() {
 			},
 		},
 		writeCase{
-			// Unlike the create, an update is a bare object with snake_case members.
+			// Like the create, an update is a schedules document; an omitted attribute is left as it is.
 			route: "PATCH /api/v2/ansible/schedules/:schedule_id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/ansible/schedules/:schedule_id"),
-					map[string]any{
+					document("schedules", map[string]any{
 						"name":            "nightly-patch-baseline",
 						"description":     "Updated by the golden write harness",
-						"cron_expression": "15 1 * * *",
+						"cron-expression": "15 1 * * *",
 						"timezone":        "Europe/Brussels",
 						"config":          map[string]any{"extra_vars": map[string]any{"reboot": false}},
-					})
+					}))
 			},
 		},
 		writeCase{
@@ -690,14 +690,6 @@ func init() {
 			route: "POST /api/v2/ansible/schedules/:schedule_id/actions/run-now",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/ansible/schedules/:schedule_id/actions/run-now"), nil)
-			},
-		},
-		writeCase{
-			// Changes nothing: it answers whether the expression parses and when it next fires.
-			route: "POST /api/v2/ansible/schedules/validate-cron",
-			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				return w.jsonRequest(t, http.MethodPost, "/api/v2/ansible/schedules/validate-cron",
-					map[string]any{"cron_expression": "30 3 * * 1-5", "timezone": "Europe/Brussels"})
 			},
 		},
 	)
@@ -743,7 +735,7 @@ func ansibleAwaitingApproval(t *testing.T, w *writeRun) string {
 			"identifier":       "approve-rollout",
 			"approval-message": "Approve the production rollout",
 		}))
-	run := ansibleCreated(t, w, "/api/v2/ansible/workflows/"+workflow+"/launch", map[string]any{})
+	run := ansibleCreated(t, w, "/api/v2/ansible/workflows/"+workflow+"/launch", document("ansible-workflow-jobs", nil))
 	detail := w.mustSend(t, w.jsonRequest(t, http.MethodGet, "/api/v2/ansible/workflow-jobs/"+run, nil))
 	included, _ := detail["included"].([]any)
 	if len(included) != 1 {
@@ -804,7 +796,7 @@ func init() {
 			route: "POST /api/v2/ansible/workflows/:id/launch",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/ansible/workflows/:id/launch"),
-					map[string]any{"extra_vars": map[string]any{"release": "1.4.2", "canary": true}})
+					document("ansible-workflow-jobs", map[string]any{"extra-vars": map[string]any{"release": "1.4.2", "canary": true}}))
 			},
 		},
 		writeCase{
@@ -884,24 +876,23 @@ func init() {
 func ansibleWebhookTemplate(t *testing.T, w *writeRun, url string) string {
 	t.Helper()
 	return ansibleCreated(t, w, w.path("/api/v2/organizations/:name/ansible/notification-templates"),
-		map[string]any{"name": "golden-write-webhook", "type": "webhook", "config": map[string]any{"url": url}})
+		document("ansible-notification-templates", map[string]any{"name": "golden-write-webhook", "notification-type": "webhook", "config": map[string]any{"url": url}}))
 }
 
-// Write cases for the Ansible notification templates and their attachments. Their bodies are
-// bare objects, not JSON:API documents.
+// Write cases for the Ansible notification templates and their attachments.
 func init() {
 	registerWriteCases(
 		writeCase{
-			// type is webhook, email or teams, and config holds that channel's settings. The
+			// notification-type is webhook, email or teams, and config holds that channel's settings. The
 			// secret is the channel's password and is never returned. A webhook sends it as HTTP
 			// basic auth together with config.username.
 			route: "POST /api/v2/organizations/:name/ansible/notification-templates",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/ansible/notification-templates"),
-					map[string]any{
-						"name":        "golden-write-deploy-hook",
-						"description": "Recorded by the golden write harness",
-						"type":        "webhook",
+					document("ansible-notification-templates", map[string]any{
+						"name":              "golden-write-deploy-hook",
+						"description":       "Recorded by the golden write harness",
+						"notification-type": "webhook",
 						"config": map[string]any{
 							"url":      "https://hooks.example.com/stackweaver/deploys",
 							"method":   "POST",
@@ -909,16 +900,16 @@ func init() {
 							"username": "stackweaver",
 						},
 						"secret": "golden-write-webhook-password",
-					})
+					}))
 			},
-			requestSecrets: []string{"secret"},
+			requestSecrets: []string{"data.attributes.secret"},
 		},
 		writeCase{
 			route: "PATCH /api/v2/ansible/notification-templates/:id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				id := ansibleWebhookTemplate(t, w, "https://hooks.example.com/stackweaver/deploys")
 				return w.jsonRequest(t, http.MethodPatch, "/api/v2/ansible/notification-templates/"+id,
-					map[string]any{
+					document("ansible-notification-templates", map[string]any{
 						"name":        "golden-write-webhook",
 						"description": "Updated by the golden write harness",
 						"config": map[string]any{
@@ -928,9 +919,9 @@ func init() {
 							"skip_tls_verify": false,
 						},
 						"secret": "golden-write-rotated-password",
-					})
+					}))
 			},
-			requestSecrets: []string{"secret"},
+			requestSecrets: []string{"data.attributes.secret"},
 		},
 		writeCase{
 			route: "DELETE /api/v2/ansible/notification-templates/:id",
@@ -958,27 +949,25 @@ func init() {
 		},
 		writeCase{
 			// An attachment hangs a template on exactly one of a job template and a workflow:
-			// job_template_id or workflow_id, never both.
+			// the job-template or the workflow relationship, never both.
 			route: "POST /api/v2/organizations/:name/ansible/notification-attachments",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/ansible/notification-attachments"),
-					map[string]any{
-						"notification_template_id": ansibleWebhookTemplate(t, w, "https://hooks.example.com/stackweaver/deploys"),
-						"job_template_id":          w.id("job-templates"),
-						"on_started":               true,
-						"on_success":               false,
-						"on_failure":               true,
-					})
+					related(related(document("ansible-notification-attachments", map[string]any{
+						"on-started": true,
+						"on-success": false,
+						"on-failure": true,
+					}), "notification-template", "ansible-notification-templates", ansibleWebhookTemplate(t, w, "https://hooks.example.com/stackweaver/deploys")),
+						"job-template", "ansible-job-templates", w.id("job-templates")))
 			},
 		},
 		writeCase{
 			route: "DELETE /api/v2/organizations/:name/ansible/notification-attachments/:attachment_id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				attachments := w.path("/api/v2/organizations/:name/ansible/notification-attachments")
-				id := ansibleCreated(t, w, attachments, map[string]any{
-					"notification_template_id": ansibleWebhookTemplate(t, w, "https://hooks.example.com/stackweaver/deploys"),
-					"workflow_id":              w.id("workflows"),
-				})
+				id := ansibleCreated(t, w, attachments, related(related(document("ansible-notification-attachments", nil),
+					"notification-template", "ansible-notification-templates", ansibleWebhookTemplate(t, w, "https://hooks.example.com/stackweaver/deploys")),
+					"workflow", "ansible-workflows", w.id("workflows")))
 				return w.jsonRequest(t, http.MethodDelete, attachments+"/"+id, nil)
 			},
 		},

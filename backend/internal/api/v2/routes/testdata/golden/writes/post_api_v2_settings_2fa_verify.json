@@ -4,17 +4,39 @@
   "request": {
     "content_type": "application/json",
     "body": {
-      "code": "\u003csecret\u003e"
+      "data": {
+        "attributes": {
+          "code": "\u003csecret\u003e"
+        },
+        "type": "two-factor"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "code": {
-          "type": "string"
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
       },
       "required": [
-        "code"
+        "data"
       ]
     },
     "schema_source": "type",
@@ -22,6 +44,12 @@
   },
   "status": 200,
   "response": {
-    "message": "TOTP verified successfully"
+    "data": {
+      "attributes": {
+        "enabled": true
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "two-factor"
+    }
   }
 }

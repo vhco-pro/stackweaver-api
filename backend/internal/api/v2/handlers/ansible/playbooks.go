@@ -49,6 +49,15 @@ type PlaybookHandler struct {
 	// jobService owns the rule about what a job template may name
 	// (JobService.CheckTemplateReferents): it is what later launches the template.
 	jobService *ansible.JobService
+	// providers resolves a connection's VCS provider for the playbook file listing. It is the
+	// registry in production; a test serves a fixed listing through it.
+	providers providerSource
+}
+
+// providerSource is the one method of vcs.ProviderRegistry the playbook file listing calls,
+// declared where it is used so a test can stand in for the provider.
+type providerSource interface {
+	GetProvider(conn *models.VCSConnection) (vcs.ProviderService, error)
 }
 
 // NewPlaybookHandler creates a new playbook handler
@@ -66,7 +75,7 @@ func NewPlaybookHandler(
 	vcsConnectionRepo *repository.VCSConnectionRepository,
 	jobService *ansible.JobService,
 ) *PlaybookHandler {
-	return &PlaybookHandler{
+	h := &PlaybookHandler{
 		jobService:        jobService,
 		playbookRepo:      playbookRepo,
 		templateRepo:      templateRepo,
@@ -81,6 +90,10 @@ func NewPlaybookHandler(
 		vcsConnectionRepo: vcsConnectionRepo,
 		syncRequester:     ansible.NewPlaybookSyncRequester(vcsRegistry, vcsConnectionRepo, playbookRepo, redisQueue),
 	}
+	if vcsRegistry != nil {
+		h.providers = vcsRegistry
+	}
+	return h
 }
 
 // SetAgentPoolRepo wires the agent pool repository used to verify pool

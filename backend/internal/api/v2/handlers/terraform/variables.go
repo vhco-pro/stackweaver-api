@@ -676,6 +676,12 @@ func (h *VariableHandlerV2) GetPlatformVariableKeys(c *gin.Context) {
 		return
 	}
 
-	// Return simple JSON array of keys
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, keys, jsonapi.NewFullPageMeta(len(keys)))
+	// The fixed names are not addressable things, so they are meta, not resources (#858, D6).
+	jsonapi.WriteMeta(c, http.StatusOK, PlatformVariableKeysMeta{Keys: keys})
+}
+
+// PlatformVariableKeysMeta lists the variable names the platform sets on every run of a
+// workspace, which a workspace variable of the same name would shadow.
+type PlatformVariableKeysMeta struct {
+	Keys []string `json:"platform-variable-keys"`
 }

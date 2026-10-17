@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,15 @@ type VCSConnectionHandlerV2 struct {
 	authService       *auth.Service
 	vcsRegistry       *vcs.ProviderRegistry
 	rbacService       *rbac.Service
+	// providers resolves a connection's VCS provider for the listings. It is the registry in
+	// production; a test serves fixed listings through it.
+	providers vcsProviderSource
+}
+
+// vcsProviderSource is the one method of vcs.ProviderRegistry the listings call, declared where
+// it is used so a test can stand in for the provider.
+type vcsProviderSource interface {
+	GetProvider(conn *models.VCSConnection) (vcs.ProviderService, error)
 }
 
 func NewVCSConnectionHandlerV2(
@@ -41,19 +51,34 @@ func NewVCSConnectionHandlerV2(
 	vcsRegistry *vcs.ProviderRegistry,
 	rbacService *rbac.Service,
 ) *VCSConnectionHandlerV2 {
-	return &VCSConnectionHandlerV2{
+	h := &VCSConnectionHandlerV2{
 		vcsConnectionRepo: vcsConnectionRepo,
 		orgRepo:           orgRepo,
 		authService:       authService,
 		vcsRegistry:       vcsRegistry,
 		rbacService:       rbacService,
 	}
+	if vcsRegistry != nil {
+		h.providers = vcsRegistry
+	}
+	return h
 }
 
 // CreateVCSConnectionRequestV2 creates a connection from credentials the caller supplies. It names
 // no GitHub App installation: an installation is connected only through the installation flow
 // (CreateConnectionFromInstallation), which confirms the person can access it at GitHub.
+//
+// It is a vcs-connections document (#858, D6) whose attributes keep the snake_case spelling the
+// vcs-connections resource answers with (D3).
 type CreateVCSConnectionRequestV2 struct {
+	Data *struct {
+		Type       string                        `json:"type"`
+		Attributes CreateVCSConnectionAttributes `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// CreateVCSConnectionAttributes are the credentials a connection is created from.
+type CreateVCSConnectionAttributes struct {
 	Provider       string `json:"provider" binding:"required"`     // "github", "gitlab", "bitbucket", "azure_devops"
 	AccessToken    string `json:"access_token" binding:"required"` //nolint:gosec // G117: token field, encrypted before storage
 	RefreshToken   string `json:"refresh_token,omitempty"`         //nolint:gosec // G117: token field
@@ -62,17 +87,33 @@ type CreateVCSConnectionRequestV2 struct {
 	AccountType    string `json:"account_type" binding:"required"` // "organization" or "user"
 }
 
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *CreateVCSConnectionRequestV2) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
+}
+
+// vcsConnectionsType is the resource type of the two connection request documents.
+const vcsConnectionsType = "vcs-connections"
+
 // installationIDRefusal answers a create request that names a GitHub App installation.
 const installationIDRefusal = "installation_id is not accepted here: a GitHub App installation is connected through the GitHub App installation flow (Connect GitHub in the organization's VCS settings)."
 
-// namesInstallation reports whether a create request body carries a non-empty installation_id.
-// A body that is not a JSON object is left to the binding that follows.
+// namesInstallation reports whether a create document carries a non-empty installation_id among
+// its data.attributes. A body that is not such a document is left to the binding that follows,
+// which refuses it.
 func namesInstallation(raw []byte) bool {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	var doc struct {
+		Data struct {
+			Attributes map[string]json.RawMessage `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		return false
 	}
-	v, ok := fields["installation_id"]
+	v, ok := doc.Data.Attributes["installation_id"]
 	if !ok {
 		return false
 	}
@@ -142,11 +183,11 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
 
-	var req CreateVCSConnectionRequestV2
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	var body CreateVCSConnectionRequestV2
+	if !jsonapi.BindDocument(c, &body, vcsConnectionsType) {
 		return
 	}
+	req := body.Data.Attributes
 
 	provider := models.VCSProvider(req.Provider)
 	if provider != models.VCSProviderGitHub &&
@@ -334,7 +375,11 @@ func (h *VCSConnectionHandlerV2) getProvider(c *gin.Context, connection *models.
 	if !h.authorizeVCSConnectionRead(c, connection) {
 		return nil
 	}
-	provider, err := h.vcsRegistry.GetProvider(connection)
+	if h.providers == nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "VCS providers are not configured")
+		return nil
+	}
+	provider, err := h.providers.GetProvider(connection)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to resolve VCS provider: %v", err))
 		return nil
@@ -401,7 +446,19 @@ func (h *VCSConnectionHandlerV2) ListRepositories(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, repos, LegacyPageMeta{Pagination: LegacyPage{Page: page, PerPage: perPage}})
+	data := make([]jsonapi.Resource[VCSRepositoryAttributes], 0, len(repos))
+	for _, r := range repos {
+		data = append(data, jsonapi.Resource[VCSRepositoryAttributes]{
+			ID:   strconv.FormatInt(r.ID, 10),
+			Type: "vcs-repositories",
+			Attributes: VCSRepositoryAttributes{
+				Name: r.Name, FullName: r.FullName, Description: r.Description, Private: r.Private,
+				DefaultBranch: r.DefaultBranch, URL: r.URL, CloneURL: r.CloneURL, SSHURL: r.SSHURL,
+			},
+		})
+	}
+	// The provider reports no total: the block states the page asked for and whether it was full.
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewProviderPageMeta(page, perPage, len(repos)))
 }
 
 // ListProjects lists projects for a VCS connection.
@@ -449,7 +506,11 @@ func (h *VCSConnectionHandlerV2) ListProjects(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, projects, LegacyPageMeta{Pagination: LegacyPage{Page: page, PerPage: perPage}})
+	data := make([]jsonapi.Resource[VCSProjectAttributes], 0, len(projects))
+	for _, p := range projects {
+		data = append(data, jsonapi.Resource[VCSProjectAttributes]{ID: p.ID, Type: "vcs-projects", Attributes: VCSProjectAttributes{Name: p.Name}})
+	}
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewProviderPageMeta(page, perPage, len(projects)))
 }
 
 // ListBranches lists branches for a repository
@@ -490,7 +551,15 @@ func (h *VCSConnectionHandlerV2) ListBranches(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, branches, LegacyPageMeta{Pagination: LegacyPage{Page: page, PerPage: perPage}})
+	data := make([]jsonapi.Resource[VCSBranchAttributes], 0, len(branches))
+	for _, b := range branches {
+		data = append(data, jsonapi.Resource[VCSBranchAttributes]{
+			ID:         b.Name,
+			Type:       "vcs-branches",
+			Attributes: VCSBranchAttributes{Protected: b.Protected, CommitSHA: b.Commit.SHA, CommitURL: b.Commit.URL},
+		})
+	}
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewProviderPageMeta(page, perPage, len(branches)))
 }
 
 // GetFileContent retrieves file content from a repository
@@ -531,7 +600,11 @@ func (h *VCSConnectionHandlerV2) GetFileContent(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, VCSFileContentResponse{Content: content, Path: path, Ref: ref})
+	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[VCSFileAttributes]{
+		ID:         path,
+		Type:       "vcs-files",
+		Attributes: VCSFileAttributes{Content: &content, Ref: &ref},
+	})
 }
 
 // ListYamlFiles lists all .yaml and .yml files in a repository
@@ -568,7 +641,7 @@ func (h *VCSConnectionHandlerV2) ListYamlFiles(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, files)
+	writeVCSFiles(c, files)
 }
 
 // ListInventoryFiles lists the inventory candidate files in a repository: the
@@ -609,7 +682,7 @@ func (h *VCSConnectionHandlerV2) ListInventoryFiles(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, files)
+	writeVCSFiles(c, files)
 }
 
 // inventoryExtensions are the file types ansible-inventory parses through its
@@ -634,4 +707,15 @@ func listInventoryCandidates(ctx context.Context, lister fileLister, conn *model
 		candidates = []string{}
 	}
 	return candidates, nil
+}
+
+// writeVCSFiles answers a file listing: a vcs-files resource per path, with the block for a
+// provider listing that does not page (the provider returns the tree whole, or truncates it
+// without saying by how much).
+func writeVCSFiles(c *gin.Context, files []string) {
+	data := make([]jsonapi.Resource[VCSFileAttributes], 0, len(files))
+	for _, f := range files {
+		data = append(data, jsonapi.Resource[VCSFileAttributes]{ID: f, Type: "vcs-files"})
+	}
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewProviderListMeta(len(files)))
 }

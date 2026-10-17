@@ -192,14 +192,14 @@ func infraGCPOIDCConfig() map[string]any {
 // infraVCSConnectionBody is a connection made from a token the caller already holds, the one
 // kind that needs no exchange with the provider. The seed has no connection of any kind.
 func infraVCSConnectionBody() map[string]any {
-	return map[string]any{
+	return document("vcs-connections", map[string]any{
 		"provider":         "gitlab",
 		"account_name":     "acme-platform",
 		"account_type":     "organization",
 		"access_token":     "golden-write-access-token",
 		"refresh_token":    "golden-write-refresh-token",
 		"token_expires_at": "2030-01-01T00:00:00Z",
-	}
+	})
 }
 
 // infraCreateVCSConnection gives the seeded organization a connection and returns its identifier.
@@ -556,13 +556,13 @@ func init() {
 			// vcs_repository to publish from a repository's tags, which needs the provider.
 			route: "POST /api/v2/organizations/:name/registry/modules",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				return infraPlainRequest(t, w, http.MethodPost, w.path("/api/v2/organizations/:name/registry/modules"),
-					map[string]any{
+				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/registry/modules"),
+					document("registry-modules", map[string]any{
 						"name":              "golden-write",
 						"provider":          "aws",
 						"description":       "Recorded by the golden write harness",
 						"auto_publish_tags": false,
-					})
+					}))
 			},
 		},
 		writeCase{
@@ -671,7 +671,7 @@ func init() {
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/vcs-connections"), infraVCSConnectionBody())
 			},
-			requestSecrets: []string{"access_token", "refresh_token"},
+			requestSecrets: []string{"data.attributes.access_token", "data.attributes.refresh_token"},
 		},
 		writeCase{
 			route: "DELETE /api/v2/vcs-connections/:id",

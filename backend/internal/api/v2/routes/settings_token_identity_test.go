@@ -155,9 +155,10 @@ func (f *settingsGuardFixture) settingsRoutes(t *testing.T) gin.RoutesInfo {
 			out = append(out, rt)
 		}
 	}
-	// The key and profile routes register unconditionally. Without them the loop below would
-	// pass by asserting nothing.
-	for _, want := range []string{"POST " + settingsPrefix + "api-keys", "PATCH " + settingsPrefix + "profile"} {
+	// The key routes register unconditionally. Without them the loop below would pass by
+	// asserting nothing. (The profile moved to the account surface in #858, whose update is
+	// guarded the same way and is pinned by TestAccountUpdate_TokenIdentitiesAreRefused.)
+	for _, want := range []string{"POST " + settingsPrefix + "api-keys", "DELETE " + settingsPrefix + "api-keys/:id"} {
 		found := false
 		for _, rt := range out {
 			if rt.Method+" "+rt.Path == want {
@@ -175,19 +176,21 @@ func (f *settingsGuardFixture) settingsRoutes(t *testing.T) gin.RoutesInfo {
 // would go on to do its work rather than stop at validation and look denied.
 func (f *settingsGuardFixture) body(t *testing.T, route, identity string) []byte {
 	t.Helper()
+	// The documents each settings write takes since #858.
+	doc := func(resourceType string, attrs map[string]any) map[string]any {
+		return map[string]any{"data": map[string]any{"type": resourceType, "attributes": attrs}}
+	}
 	var v any = map[string]any{}
 	switch route {
 	case "POST " + settingsPrefix + "api-keys":
-		v = map[string]any{
+		v = doc("api-keys", map[string]any{
 			"name":   f.mintPrefix + " " + identity,
 			"scopes": []string{"org:" + f.orgB.ID.String() + ":admin"},
-		}
-	case "PATCH " + settingsPrefix + "profile":
-		v = map[string]any{"bio": "rewritten through a token"}
+		})
 	case "POST " + settingsPrefix + "2fa/verify":
-		v = map[string]any{"code": "000000"}
+		v = doc("two-factor", map[string]any{"code": "000000"})
 	case "POST " + settingsPrefix + "password":
-		v = map[string]any{"current_password": "not-the-password", "new_password": "not-a-password-either"}
+		v = doc("users", map[string]any{"current-password": "not-the-password", "new-password": "not-a-password-either"})
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -258,7 +261,7 @@ func TestSettings_TokenIdentitiesAreRefused(t *testing.T) {
 func TestSettings_UnauthenticatedCallerStillGets401(t *testing.T) {
 	f := setupSettingsGuard(t)
 
-	w := f.do(http.MethodGet, settingsPrefix+"profile", "", nil)
+	w := f.do(http.MethodGet, settingsPrefix+"api-keys", "", nil)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("got %d, want 401.\nbody: %s", w.Code, w.Body.String())

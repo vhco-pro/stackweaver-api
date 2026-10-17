@@ -74,7 +74,7 @@ func (f *neighbourScopeFixture) templateWrites() (orgTemplates, projectTemplates
 		{"a job template update naming a playbook", update("playbook"), f.otherPlaybook, "playbook not found"},
 		{"a template credential attach", func(t *testing.T, id string) (int, []byte) {
 			t.Helper()
-			return f.call(t, http.MethodPost, template+"/credentials", `{"credential_id":"`+id+`"}`)
+			return f.call(t, http.MethodPost, template+"/credentials", `{"data":{"type":"ansible-credentials","id":"`+id+`"}}`)
 		}, f.otherSSH, "credential not found"},
 	}
 }
@@ -149,7 +149,7 @@ func TestJobTemplateReferents_OwnOrganizationIsAccepted(t *testing.T) {
 		}
 	})
 	t.Run("a template credential attach of its organization's credential", func(t *testing.T) {
-		code, body := f.call(t, http.MethodPost, template+"/credentials", `{"credential_id":"`+f.vaultCred+`"}`)
+		code, body := f.call(t, http.MethodPost, template+"/credentials", `{"data":{"type":"ansible-credentials","id":"`+f.vaultCred+`"}}`)
 		if code != http.StatusCreated {
 			t.Fatalf("status = %d, want 201 (%s)", code, body)
 		}

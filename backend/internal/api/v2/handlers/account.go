@@ -8,18 +8,38 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/profile"
+	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 )
 
-// AccountHandlerV2 serves the TFE-compatible current-account endpoint (`/api/v2/account/details`),
-// the target of go-tfe's Users.ReadCurrent and the tfe_current_user data source. It returns the
-// authenticated caller as a JSON:API `users` resource. It is account-level (no target organization),
-// so the org-wall classifies it as agnostic.
+// AccountHandlerV2 serves the signed-in person's own account as the TFE `users` resource:
+// `GET /api/v2/account/details`, the target of go-tfe's Users.ReadCurrent and the
+// tfe_current_user data source, and `PATCH /api/v2/account/update`, go-tfe's Users.Update. The
+// profile the settings pages edit is part of the same resource (#858, D8): name, bio, company and
+// location extend `users` the way description extends organizations. It is account-level (no
+// target organization), so the org wall classifies both routes as agnostic.
 type AccountHandlerV2 struct {
 	authService *auth.Service
+	userRepo    *repository.UserRepository
+	// profiles is the identity provider's copy of the name and email, kept in step with the
+	// account; nil when the identity provider's profile API is not configured.
+	profiles accountProfileSource
 }
 
-func NewAccountHandlerV2(authService *auth.Service) *AccountHandlerV2 {
-	return &AccountHandlerV2{authService: authService}
+// accountProfileSource is the part of profile.Service the account calls, declared where it is
+// used.
+type accountProfileSource interface {
+	GetUserProfile(userID string) (*profile.UserProfile, error)
+	UpdateUserProfile(userID string, req *profile.UpdateProfileRequest) error
+}
+
+func NewAccountHandlerV2(authService *auth.Service, userRepo *repository.UserRepository, profiles *profile.Service) *AccountHandlerV2 {
+	h := &AccountHandlerV2{authService: authService, userRepo: userRepo}
+	if profiles != nil {
+		h.profiles = profiles
+	}
+	return h
 }
 
 // Details returns the authenticated user's account (tfe_current_user).
@@ -30,22 +50,124 @@ func (h *AccountHandlerV2) Details(c *gin.Context) {
 		jsonAPIError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
 		return
 	}
+	jsonapi.WriteDocument(c, http.StatusOK, h.accountResource(c, user))
+}
 
-	// TFE requires a username; fall back to the email local-part when the profile has none.
-	username := user.Username
-	if username == "" {
-		username = user.Email
+// UpdateAccountRequest is the users document go-tfe marshals for UserUpdateOptions (username,
+// email), with the profile attributes beside them. Every attribute is a pointer: an omitted one is
+// left as it is, and an empty string clears it.
+type UpdateAccountRequest struct {
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Username *string `json:"username"`
+			Email    *string `json:"email"`
+			Name     *string `json:"name"`
+			Bio      *string `json:"bio"`
+			Company  *string `json:"company"`
+			Location *string `json:"location"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *UpdateAccountRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
+}
+
+// Update changes the signed-in person's account and answers the users resource. It is mounted
+// behind InteractiveOnly: it acts on the signed-in person, and a token acting on its owner's
+// account is refused, as the settings surface refuses it.
+// PATCH /api/v2/account/update
+func (h *AccountHandlerV2) Update(c *gin.Context) {
+	var req UpdateAccountRequest
+	if !jsonapi.BindDocument(c, &req, "users") {
+		return
+	}
+	attrs := req.Data.Attributes
+
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonAPIError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[AccountAttributes]{
-		ID:   user.ID.String(),
-		Type: "users",
-		Attributes: AccountAttributes{
-			Username:         username,
-			Email:            user.Email,
-			IsServiceAccount: false,
-			AvatarURL:        "",
-			V2Only:           true,
-		},
-	})
+	// The identity provider holds the name and email too; a non-empty new value goes there first,
+	// so the two copies cannot disagree after a failure.
+	if h.profiles != nil {
+		if subject, err := h.authService.GetUserSubject(c); err == nil {
+			update := &profile.UpdateProfileRequest{}
+			changed := false
+			if attrs.Name != nil && *attrs.Name != "" {
+				update.Name, changed = *attrs.Name, true
+			}
+			if attrs.Email != nil && *attrs.Email != "" {
+				update.Email, changed = *attrs.Email, true
+			}
+			if changed {
+				if err := h.profiles.UpdateUserProfile(subject, update); err != nil {
+					jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "failed to update the profile at the identity provider: "+err.Error())
+					return
+				}
+			}
+		}
+	}
+
+	for _, field := range []struct {
+		value *string
+		into  *string
+	}{
+		{attrs.Username, &user.Username},
+		{attrs.Email, &user.Email},
+		{attrs.Name, &user.Name},
+		{attrs.Bio, &user.Bio},
+		{attrs.Company, &user.Company},
+		{attrs.Location, &user.Location},
+	} {
+		if field.value != nil {
+			*field.into = *field.value
+		}
+	}
+	if err := h.userRepo.Update(user); err != nil {
+		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "failed to update the account: "+err.Error())
+		return
+	}
+	jsonapi.WriteDocument(c, http.StatusOK, h.accountResource(c, user))
+}
+
+// accountResource is the caller's users resource: the stored account, with the identity
+// provider's name and email where it has them and the avatar from the caller's sign-in.
+func (h *AccountHandlerV2) accountResource(c *gin.Context, user *models.User) jsonapi.Resource[AccountAttributes] {
+	attrs := AccountAttributes{
+		Username:  user.Username,
+		Email:     user.Email,
+		Name:      user.Name,
+		Bio:       user.Bio,
+		Company:   user.Company,
+		Location:  user.Location,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		V2Only:    true,
+	}
+	if h.profiles != nil {
+		if subject, err := h.authService.GetUserSubject(c); err == nil {
+			if p, err := h.profiles.GetUserProfile(subject); err == nil && p != nil {
+				if p.Email != "" {
+					attrs.Email = p.Email
+				}
+				if p.Name != "" {
+					attrs.Name = p.Name
+				}
+			}
+		}
+	}
+	// TFE requires a username; fall back to the email when the profile has none.
+	if attrs.Username == "" {
+		attrs.Username = attrs.Email
+	}
+	attrs.AvatarURL = h.authService.FetchUserInfoPicture(c.Request.Context(), c)
+	return jsonapi.Resource[AccountAttributes]{ID: user.ID.String(), Type: "users", Attributes: attrs}
 }

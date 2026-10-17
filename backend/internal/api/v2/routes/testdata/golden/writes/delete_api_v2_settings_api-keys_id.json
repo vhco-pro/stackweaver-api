@@ -4,8 +4,5 @@
   "request": {
     "takes_none": true
   },
-  "status": 200,
-  "response": {
-    "message": "API key deleted successfully"
-  }
+  "status": 204
 }

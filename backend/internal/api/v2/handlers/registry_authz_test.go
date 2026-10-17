@@ -122,7 +122,8 @@ func TestAuthzRegistryModules_Manage(t *testing.T) {
 		{"outsider wipes registry -> 403", http.MethodDelete, f.outsider.ID, nil, http.StatusForbidden},
 		{"anonymous wipes registry -> 401", http.MethodDelete, uuid.Nil, nil, http.StatusUnauthorized},
 		// The owner (manage-modules) may wipe (no modules seeded -> 200).
-		{"owner wipes registry -> 200", http.MethodDelete, f.owner.ID, nil, http.StatusOK},
+		// #858: delete-all answers 204 with no body, as the other registry deletes do.
+		{"owner wipes registry -> 204", http.MethodDelete, f.owner.ID, nil, http.StatusNoContent},
 	}
 
 	for _, tc := range cases {

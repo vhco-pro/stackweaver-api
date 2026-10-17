@@ -135,19 +135,24 @@ func TestNotificationAttachment_FlagsAreStoredAsSent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// The attach body is flat JSON with snake_case keys; the response is JSON:API with
-			// kebab-case attributes.
-			req := map[string]any{
-				"notification_template_id": channel.ID.String(),
-				"job_template_id":          templateID.String(),
-				"on_started":               true,
-			}
+			// The attach body is an ansible-notification-attachments document (#858): the flags
+			// are attributes spelled as the response spells them, and what is attached to what
+			// travels as relationships.
+			attrs := map[string]any{"on-started": true}
 			if tc.onSuccess != nil {
-				req["on_success"] = *tc.onSuccess
+				attrs["on-success"] = *tc.onSuccess
 			}
 			if tc.onFailure != nil {
-				req["on_failure"] = *tc.onFailure
+				attrs["on-failure"] = *tc.onFailure
 			}
+			req := map[string]any{"data": map[string]any{
+				"type":       "ansible-notification-attachments",
+				"attributes": attrs,
+				"relationships": map[string]any{
+					"notification-template": map[string]any{"data": map[string]any{"type": "ansible-notification-templates", "id": channel.ID.String()}},
+					"job-template":          map[string]any{"data": map[string]any{"type": "ansible-job-templates", "id": templateID.String()}},
+				},
+			}}
 			raw, err := json.Marshal(req)
 			if err != nil {
 				t.Fatalf("marshal request: %v", err)

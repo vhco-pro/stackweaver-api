@@ -198,7 +198,7 @@ func (h *TagBindingHandlerV2) GetProjectTagBindings(c *gin.Context) {
 		tagErr(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list tag bindings")
 		return
 	}
-	c.JSON(http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
+	jsonapi.WriteDoc(c, http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
 }
 
 // GetProjectEffectiveTagBindings - GET /projects/:id/effective-tag-bindings
@@ -213,7 +213,7 @@ func (h *TagBindingHandlerV2) GetProjectEffectiveTagBindings(c *gin.Context) {
 		tagErr(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list effective tag bindings")
 		return
 	}
-	c.JSON(http.StatusOK, formatTagBindings(bindings, "effective-tag-bindings"))
+	jsonapi.WriteDoc(c, http.StatusOK, formatTagBindings(bindings, "effective-tag-bindings"))
 }
 
 // PatchProjectTagBindings - PATCH /projects/:id/tag-bindings (replace the project's bindings)
@@ -232,7 +232,7 @@ func (h *TagBindingHandlerV2) PatchProjectTagBindings(c *gin.Context) {
 		return
 	}
 	bindings, _ := h.tagRepo.ListByProject(project.ID)
-	c.JSON(http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
+	jsonapi.WriteDoc(c, http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
 }
 
 // ---- workspace endpoints ----------------------------------------------------
@@ -248,7 +248,7 @@ func (h *TagBindingHandlerV2) GetWorkspaceTagBindings(c *gin.Context) {
 		tagErr(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list tag bindings")
 		return
 	}
-	c.JSON(http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
+	jsonapi.WriteDoc(c, http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
 }
 
 // GetWorkspaceEffectiveTagBindings - GET /workspaces/:id/effective-tag-bindings
@@ -263,7 +263,7 @@ func (h *TagBindingHandlerV2) GetWorkspaceEffectiveTagBindings(c *gin.Context) {
 		tagErr(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list effective tag bindings")
 		return
 	}
-	c.JSON(http.StatusOK, formatTagBindings(bindings, "effective-tag-bindings"))
+	jsonapi.WriteDoc(c, http.StatusOK, formatTagBindings(bindings, "effective-tag-bindings"))
 }
 
 // PatchWorkspaceTagBindings - PATCH /workspaces/:id/tag-bindings (replace the workspace's bindings)
@@ -282,5 +282,5 @@ func (h *TagBindingHandlerV2) PatchWorkspaceTagBindings(c *gin.Context) {
 		return
 	}
 	bindings, _ := h.tagRepo.ListByWorkspace(ws.ID)
-	c.JSON(http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
+	jsonapi.WriteDoc(c, http.StatusOK, formatTagBindings(bindings, "tag-bindings"))
 }

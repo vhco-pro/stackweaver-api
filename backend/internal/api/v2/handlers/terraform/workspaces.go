@@ -782,7 +782,7 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 	if len(included) > 0 {
 		response.Included = included
 	}
-	c.JSON(http.StatusOK, response)
+	jsonapi.WriteDoc(c, http.StatusOK, response)
 }
 
 // formatWorkspaceResponse formats a workspace model into TFE-compatible JSON:API format
@@ -1017,7 +1017,7 @@ func (h *WorkspaceHandlerV2) GetByOrganizationAndName(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
+	jsonapi.WriteDoc(c, http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
 
 // Create creates a workspace in an organization (TFE-compatible)
@@ -2152,7 +2152,7 @@ func (h *WorkspaceHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
+	jsonapi.WriteDoc(c, http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }
 
 // UpdateByID updates a workspace by its ID (TFE-compatible)
@@ -2378,5 +2378,5 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 
 	h.maybeRegisterADOWebhook(storedVCSConnection(h.vcsConnectionRepo, workspace), workspace.VCSRepository)
 
-	c.JSON(http.StatusOK, h.workspaceResponseWithTags(c, workspace))
+	jsonapi.WriteDoc(c, http.StatusOK, h.workspaceResponseWithTags(c, workspace))
 }

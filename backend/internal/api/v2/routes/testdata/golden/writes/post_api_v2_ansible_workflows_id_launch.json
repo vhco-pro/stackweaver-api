@@ -4,22 +4,44 @@
   "request": {
     "content_type": "application/vnd.api+json",
     "body": {
-      "extra_vars": {
-        "canary": true,
-        "release": "1.4.2"
+      "data": {
+        "attributes": {
+          "extra-vars": {
+            "canary": true,
+            "release": "1.4.2"
+          }
+        },
+        "type": "ansible-workflow-jobs"
       }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "extra_vars": {
+        "data": {
           "type": "object",
-          "additionalProperties": true
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "extra-vars": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
-      }
+      },
+      "required": [
+        "data"
+      ]
     },
     "schema_source": "type",
-    "bound_type": "struct { ExtraVars map[string]interface {} \"json:\\\"extra_vars\\\"\" }"
+    "bound_type": "ansible.WorkflowLaunchRequest"
   },
   "status": 201,
   "response": {

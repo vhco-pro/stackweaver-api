@@ -4,41 +4,63 @@
   "request": {
     "content_type": "application/vnd.api+json",
     "body": {
-      "config": {
-        "extra_vars": {
-          "reboot": false
-        }
-      },
-      "cron_expression": "15 1 * * *",
-      "description": "Updated by the golden write harness",
-      "name": "nightly-patch-baseline",
-      "timezone": "Europe/Brussels"
+      "data": {
+        "attributes": {
+          "config": {
+            "extra_vars": {
+              "reboot": false
+            }
+          },
+          "cron-expression": "15 1 * * *",
+          "description": "Updated by the golden write harness",
+          "name": "nightly-patch-baseline",
+          "timezone": "Europe/Brussels"
+        },
+        "type": "schedules"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "config": {
+        "data": {
           "type": "object",
           "nullable": true,
-          "additionalProperties": true
-        },
-        "cron_expression": {
-          "type": "string",
-          "nullable": true
-        },
-        "description": {
-          "type": "string",
-          "nullable": true
-        },
-        "name": {
-          "type": "string",
-          "nullable": true
-        },
-        "timezone": {
-          "type": "string",
-          "nullable": true
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "nullable": true,
+                  "additionalProperties": true
+                },
+                "cron-expression": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "timezone": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
-      }
+      },
+      "required": [
+        "data"
+      ]
     },
     "schema_source": "type",
     "bound_type": "ansible.UpdateScheduleRequest"

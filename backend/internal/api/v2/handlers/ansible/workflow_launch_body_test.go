@@ -111,10 +111,10 @@ func TestLaunchWorkflow_UnreadableBodyIsRefused(t *testing.T) {
 	}{
 		{"no body", "", workflowVars},
 		{"a body of whitespace", " \n", workflowVars},
-		{"an empty object", "{}", workflowVars},
 		{
-			"extra_vars are merged over the workflow's",
-			`{"extra_vars":{"shared":"launch","from_launch":"yes"}}`,
+			// #858: the launch body is an ansible-workflow-jobs document with extra-vars.
+			"extra-vars are merged over the workflow's",
+			`{"data":{"type":"ansible-workflow-jobs","attributes":{"extra-vars":{"shared":"launch","from_launch":"yes"}}}}`,
 			map[string]any{"from_workflow": "yes", "shared": "launch", "from_launch": "yes"},
 		},
 	}
@@ -148,9 +148,13 @@ func TestLaunchWorkflow_UnreadableBodyIsRefused(t *testing.T) {
 		name string
 		body string
 	}{
-		{"a body that is not JSON", `{"extra_vars":`},
+		{"a body that is not JSON", `{"data":`},
 		{"a body that is not an object", `[]`},
-		{"extra_vars that is not an object", `{"extra_vars":"region=eu"}`},
+		{"extra-vars that is not an object", `{"data":{"type":"ansible-workflow-jobs","attributes":{"extra-vars":"region=eu"}}}`},
+		// #858: a body that is present must be the document, so an empty object and a flat
+		// body are refused rather than launching without the variables their sender meant.
+		{"an empty object", `{}`},
+		{"a flat body", `{"extra_vars":{"shared":"launch"}}`},
 	}
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {

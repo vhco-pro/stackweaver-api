@@ -63,8 +63,10 @@ func TestDeleteAllModulesEmptiesTheWholeRegistry(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+h.token)
 	rec := httptest.NewRecorder()
 	h.router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("DELETE returned %d, want 200: %s", rec.Code, rec.Body.String())
+	// #858: delete-all answers 204 with no body; the count below is what proves the registry
+	// is empty, rather than a message saying so.
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE returned %d, want 204: %s", rec.Code, rec.Body.String())
 	}
 
 	var after int64

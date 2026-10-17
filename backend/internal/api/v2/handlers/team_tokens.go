@@ -137,7 +137,7 @@ func (h *TeamTokenHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, teamTokenResource(key, token))
+	jsonapi.WriteDoc(c, http.StatusCreated, teamTokenResource(key, token))
 }
 
 // Read returns the team token's metadata (no plaintext).
@@ -158,7 +158,7 @@ func (h *TeamTokenHandlerV2) Read(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, teamTokenResource(key, ""))
+	jsonapi.WriteDoc(c, http.StatusOK, teamTokenResource(key, ""))
 }
 
 // Delete revokes the team token.

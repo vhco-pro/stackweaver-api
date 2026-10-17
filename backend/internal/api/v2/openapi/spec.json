@@ -2715,6 +2715,23 @@
                           }
                         }
                       }
+                    },
+                    "vcs-connection": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 },
@@ -2727,6 +2744,19 @@
           "meta": {
             "type": "object",
             "properties": {
+              "created": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "failed-rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
               "pagination": {
                 "type": "object",
                 "properties": {
@@ -2749,6 +2779,9 @@
                     "type": "integer"
                   }
                 }
+              },
+              "skipped": {
+                "type": "integer"
               }
             }
           }
@@ -3739,6 +3772,76 @@
           }
         }
       },
+      "api-keys-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expires-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "key-prefix": {
+                    "type": "string"
+                  },
+                  "last-used-at": {
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "authentication-tokens-response": {
         "type": "object",
         "properties": {
@@ -4106,14 +4209,6 @@
           }
         }
       },
-      "delete-api-v2-organizations-name-registry-modules-5d9c54": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
-      },
       "delete-api-v2-organizations-name-varsets-id-relationships-projects-request": {
         "type": "object",
         "properties": {
@@ -4149,30 +4244,6 @@
                 }
               }
             }
-          }
-        }
-      },
-      "delete-api-v2-settings-2fa-6f3043": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "delete-api-v2-settings-api-keys-id-2b5a86": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "delete-api-v2-settings-sessions-sessionId-f4fd8b": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
           }
         }
       },
@@ -4728,13 +4799,22 @@
               "pagination": {
                 "type": "object",
                 "properties": {
-                  "limit": {
+                  "current-page": {
                     "type": "integer"
                   },
-                  "offset": {
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
                     "type": "integer"
                   },
-                  "total": {
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
                     "type": "integer"
                   }
                 }
@@ -5083,62 +5163,7 @@
         }
       },
       "get-api-v2-ansible-jobs-id-output-02cdaf": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "string"
-          }
-        }
-      },
-      "get-api-v2-ansible-schedules-cron-presets-421f7e": {
-        "type": "object",
-        "properties": {
-          "daily_6am": {
-            "type": "string"
-          },
-          "daily_midnight": {
-            "type": "string"
-          },
-          "daily_noon": {
-            "type": "string"
-          },
-          "every_12_hours": {
-            "type": "string"
-          },
-          "every_15_minutes": {
-            "type": "string"
-          },
-          "every_2_hours": {
-            "type": "string"
-          },
-          "every_30_minutes": {
-            "type": "string"
-          },
-          "every_6_hours": {
-            "type": "string"
-          },
-          "every_hour": {
-            "type": "string"
-          },
-          "monthly_15th": {
-            "type": "string"
-          },
-          "monthly_first_day": {
-            "type": "string"
-          },
-          "weekdays_9am": {
-            "type": "string"
-          },
-          "weekends_10am": {
-            "type": "string"
-          },
-          "weekly_monday_6am": {
-            "type": "string"
-          },
-          "weekly_sunday_midnight": {
-            "type": "string"
-          }
-        }
+        "nullable": true
       },
       "get-api-v2-ansible-workflows-id-edges-555fc9": {
         "type": "object",
@@ -5900,39 +5925,16 @@
           }
         }
       },
-      "get-api-v2-workspaces-id-platform-variables-40c39d": {
+      "get-api-v2-workspaces-id-platform-variables-meta": {
         "type": "object",
         "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "meta": {
             "type": "object",
             "properties": {
-              "pagination": {
-                "type": "object",
-                "properties": {
-                  "current-page": {
-                    "type": "integer"
-                  },
-                  "next-page": {
-                    "nullable": true
-                  },
-                  "page-size": {
-                    "type": "integer"
-                  },
-                  "prev-page": {
-                    "nullable": true
-                  },
-                  "total-count": {
-                    "type": "integer"
-                  },
-                  "total-pages": {
-                    "type": "integer"
-                  }
+              "platform-variable-keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
                 }
               }
             }
@@ -8376,6 +8378,52 @@
           }
         }
       },
+      "patch-api-v2-account-update-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "bio": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "company": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "email": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "location": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "username": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
       "patch-api-v2-admin-terraform-versions-id-request": {
         "type": "object",
         "properties": {
@@ -9158,24 +9206,41 @@
       "patch-api-v2-ansible-notification-templates-id-request": {
         "type": "object",
         "properties": {
-          "config": {
+          "data": {
             "type": "object",
-            "additionalProperties": true
-          },
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "secret": {
-            "type": "string",
-            "nullable": true
-          },
-          "type": {
-            "type": "string"
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "notification-type": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "patch-api-v2-ansible-playbooks-id-request": {
         "type": "object",
@@ -9247,28 +9312,45 @@
       "patch-api-v2-ansible-schedules-schedule_id-request": {
         "type": "object",
         "properties": {
-          "config": {
+          "data": {
             "type": "object",
             "nullable": true,
-            "additionalProperties": true
-          },
-          "cron_expression": {
-            "type": "string",
-            "nullable": true
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          },
-          "name": {
-            "type": "string",
-            "nullable": true
-          },
-          "timezone": {
-            "type": "string",
-            "nullable": true
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": true
+                  },
+                  "cron-expression": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "patch-api-v2-ansible-workflow-nodes-id-request": {
         "type": "object",
@@ -10608,64 +10690,6 @@
                 "type": "string"
               }
             }
-          }
-        }
-      },
-      "patch-api-v2-settings-profile-06a430": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "profile": {
-            "type": "object",
-            "properties": {
-              "bio": {
-                "type": "string"
-              },
-              "company": {
-                "type": "string"
-              },
-              "email": {
-                "type": "string"
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "location": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "username": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      },
-      "patch-api-v2-settings-profile-request": {
-        "type": "object",
-        "properties": {
-          "bio": {
-            "type": "string"
-          },
-          "company": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "location": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "username": {
-            "type": "string"
           }
         }
       },
@@ -12486,10 +12510,25 @@
       "post-api-v2-ansible-job-templates-id-credentials-request": {
         "type": "object",
         "properties": {
-          "credential_id": {
-            "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ]
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "post-api-v2-ansible-job-templates-id-launch-request": {
         "type": "object",
@@ -13275,62 +13314,6 @@
           }
         }
       },
-      "post-api-v2-ansible-schedules-schedule_id-actions-disable-7e5a17": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "post-api-v2-ansible-schedules-schedule_id-actions-enable-685d73": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "post-api-v2-ansible-schedules-schedule_id-actions-run-now-a6930c": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "post-api-v2-ansible-schedules-validate-cron-c0f0d2": {
-        "type": "object",
-        "properties": {
-          "cron_expression": {
-            "type": "string"
-          },
-          "next_run_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "timezone": {
-            "type": "string"
-          },
-          "valid": {
-            "type": "boolean"
-          }
-        }
-      },
-      "post-api-v2-ansible-schedules-validate-cron-request": {
-        "type": "object",
-        "properties": {
-          "cron_expression": {
-            "type": "string"
-          },
-          "timezone": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "cron_expression"
-        ]
-      },
       "post-api-v2-ansible-workflows-id-edges-request": {
         "type": "object",
         "properties": {
@@ -13386,11 +13369,28 @@
       "post-api-v2-ansible-workflows-id-launch-request": {
         "type": "object",
         "properties": {
-          "extra_vars": {
+          "data": {
             "type": "object",
-            "additionalProperties": true
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "extra-vars": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "post-api-v2-ansible-workflows-id-nodes-request": {
         "type": "object",
@@ -14454,149 +14454,230 @@
       "post-api-v2-organizations-name-ansible-notification-attachments-request": {
         "type": "object",
         "properties": {
-          "job_template_id": {
-            "type": "string"
-          },
-          "notification_template_id": {
-            "type": "string"
-          },
-          "on_failure": {
-            "type": "boolean",
-            "nullable": true
-          },
-          "on_started": {
-            "type": "boolean"
-          },
-          "on_success": {
-            "type": "boolean",
-            "nullable": true
-          },
-          "workflow_id": {
-            "type": "string"
-          }
-        }
-      },
-      "post-api-v2-organizations-name-ansible-notification-templates-request": {
-        "type": "object",
-        "properties": {
-          "config": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "secret": {
-            "type": "string",
-            "nullable": true
-          },
-          "type": {
-            "type": "string"
-          }
-        }
-      },
-      "post-api-v2-organizations-name-ansible-playbooks-actions-bulk-import-485ce3": {
-        "type": "object",
-        "properties": {
           "data": {
             "type": "object",
+            "nullable": true,
             "properties": {
-              "created": {
-                "type": "integer"
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "on-failure": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "on-started": {
+                    "type": "boolean"
+                  },
+                  "on-success": {
+                    "type": "boolean",
+                    "nullable": true
+                  }
+                }
               },
-              "failed": {
-                "type": "integer"
-              },
-              "results": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "name": {
-                      "type": "string"
-                    },
-                    "path": {
-                      "type": "string"
-                    },
-                    "playbook_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "status": {
-                      "type": "string"
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "job-template": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "links": {}
+                    }
+                  },
+                  "notification-template": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "links": {}
+                    }
+                  },
+                  "workflow": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "links": {}
                     }
                   }
                 }
               },
-              "skipped": {
-                "type": "integer"
+              "type": {
+                "type": "string"
               }
             }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "post-api-v2-organizations-name-ansible-notification-templates-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "notification-type": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
       },
       "post-api-v2-organizations-name-ansible-playbooks-actions-bulk-import-request": {
         "type": "object",
         "properties": {
-          "branch": {
-            "type": "string"
-          },
-          "playbooks": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "playbooks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "project-id": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string"
+                  },
+                  "source-mode": {
+                    "type": "string"
+                  },
+                  "vcs-connection-id": {
+                    "type": "string"
+                  }
                 }
+              },
+              "type": {
+                "type": "string"
               }
             }
-          },
-          "project_id": {
-            "type": "string"
-          },
-          "repository": {
-            "type": "string"
-          },
-          "source_mode": {
-            "type": "string"
-          },
-          "vcs_connection_id": {
-            "type": "string"
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "post-api-v2-organizations-name-ansible-playbooks-actions-find-or-create-request": {
         "type": "object",
         "properties": {
-          "branch": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": "string"
-          },
-          "repository": {
-            "type": "string"
-          },
-          "source_mode": {
-            "type": "string"
-          },
-          "vcs_connection_id": {
-            "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "project-id": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string"
+                  },
+                  "source-mode": {
+                    "type": "string"
+                  },
+                  "vcs-connection-id": {
+                    "type": "string"
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "post-api-v2-organizations-name-ansible-playbooks-request": {
         "type": "object",
@@ -15052,29 +15133,46 @@
       "post-api-v2-organizations-name-registry-modules-request": {
         "type": "object",
         "properties": {
-          "auto_publish_tags": {
-            "type": "boolean",
-            "nullable": true
-          },
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "vcs_connection_id": {
-            "nullable": true
-          },
-          "vcs_repository": {
-            "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "auto_publish_tags": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "vcs_connection_id": {
+                    "nullable": true
+                  },
+                  "vcs_repository": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "provider"
+                ]
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [
-          "name",
-          "provider"
+          "data"
         ]
       },
       "post-api-v2-organizations-name-registry-providers-registry_name-namespace-provider_name-versions-version-platforms-request": {
@@ -15536,30 +15634,47 @@
       "post-api-v2-organizations-name-vcs-connections-request": {
         "type": "object",
         "properties": {
-          "access_token": {
-            "type": "string"
-          },
-          "account_name": {
-            "type": "string"
-          },
-          "account_type": {
-            "type": "string"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "refresh_token": {
-            "type": "string"
-          },
-          "token_expires_at": {
-            "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "access_token": {
+                    "type": "string"
+                  },
+                  "account_name": {
+                    "type": "string"
+                  },
+                  "account_type": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "refresh_token": {
+                    "type": "string"
+                  },
+                  "token_expires_at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "access_token",
+                  "account_name",
+                  "account_type",
+                  "provider"
+                ]
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [
-          "access_token",
-          "account_name",
-          "account_type",
-          "provider"
+          "data"
         ]
       },
       "post-api-v2-organizations-name-workspaces-request": {
@@ -16584,114 +16699,118 @@
           "data"
         ]
       },
-      "post-api-v2-settings-2fa-start-e46f1f": {
+      "post-api-v2-settings-2fa-start-meta": {
         "type": "object",
         "properties": {
-          "secret": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          }
-        }
-      },
-      "post-api-v2-settings-2fa-verify-448d78": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
+          "meta": {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            }
           }
         }
       },
       "post-api-v2-settings-2fa-verify-request": {
         "type": "object",
         "properties": {
-          "code": {
-            "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [
-          "code"
+          "data"
         ]
-      },
-      "post-api-v2-settings-api-keys-b1d45f": {
-        "type": "object",
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "key": {
-            "type": "string"
-          },
-          "key_prefix": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "organization_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "scopes": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
       },
       "post-api-v2-settings-api-keys-request": {
         "type": "object",
         "properties": {
-          "expires_at": {
-            "type": "string",
-            "nullable": true
-          },
-          "name": {
-            "type": "string"
-          },
-          "scopes": {
-            "type": "array",
-            "items": {
-              "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "expires-at": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              },
+              "type": {
+                "type": "string"
+              }
             }
           }
         },
         "required": [
-          "name"
+          "data"
         ]
-      },
-      "post-api-v2-settings-password-3829a0": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        }
       },
       "post-api-v2-settings-password-request": {
         "type": "object",
         "properties": {
-          "current_password": {
-            "type": "string"
-          },
-          "new_password": {
-            "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "current-password": {
+                    "type": "string"
+                  },
+                  "new-password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "current-password",
+                  "new-password"
+                ]
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [
-          "current_password",
-          "new_password"
+          "data"
         ]
       },
       "post-api-v2-task-stages-id-actions-override-request": {
@@ -17117,15 +17236,32 @@
       "post-api-v2-tokens-request": {
         "type": "object",
         "properties": {
-          "description": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "post-api-v2-varsets-id-relationships-projects-request": {
         "type": "object",
@@ -17510,47 +17646,110 @@
           }
         }
       },
-      "post-api-v2-workspaces-id-state-versions-remove-resource-a707e5": {
+      "post-api-v2-workspaces-id-state-versions-remove-resource-request": {
         "type": "object",
         "properties": {
           "data": {
             "type": "object",
+            "nullable": true,
             "properties": {
-              "message": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "address"
+                ]
+              },
+              "type": {
                 "type": "string"
               }
             }
           }
-        }
-      },
-      "post-api-v2-workspaces-id-state-versions-remove-resource-request": {
-        "type": "object",
-        "properties": {
-          "address": {
-            "type": "string"
-          }
         },
         "required": [
-          "address"
+          "data"
         ]
       },
       "post-api-v2-workspaces-id-state-versions-request": {
         "type": "object",
         "properties": {
-          "lineage": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "integer",
-            "nullable": true
-          },
-          "state_data": {
+          "data": {
             "type": "object",
-            "additionalProperties": true
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "force": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "json-state": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "json-state-outputs": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "lineage": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "md5": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "serial": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "state": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "md5",
+                  "serial"
+                ]
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "run": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "links": {}
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [
-          "state_data"
+          "data"
         ]
       },
       "post-api-v2-workspaces-id-tasks-request": {
@@ -20284,12 +20483,22 @@
                     "type": "string",
                     "format": "date-time"
                   },
+                  "last-run-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "last-run-status": {
+                    "type": "string"
+                  },
                   "name": {
                     "type": "string"
                   },
                   "next-run-at": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "run-count": {
+                    "type": "integer"
                   },
                   "schedule-type": {
                     "type": "string"
@@ -20351,6 +20560,23 @@
                       }
                     }
                   },
+                  "last-job": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
                   "organization": {
                     "type": "object",
                     "properties": {
@@ -20386,287 +20612,34 @@
               "attributes": {
                 "type": "object",
                 "properties": {
-                  "created_at": {
+                  "created-at": {
                     "type": "string",
                     "format": "date-time"
                   },
-                  "id": {
+                  "hosted-state-download-url": {
                     "type": "string"
                   },
                   "lineage": {
                     "type": "string",
                     "format": "uuid"
                   },
+                  "resources-processed": {
+                    "type": "boolean"
+                  },
                   "serial": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "size": {
                     "type": "integer"
                   },
-                  "version": {
+                  "state-version": {
                     "type": "integer"
                   },
-                  "workspace": {
-                    "type": "object",
-                    "properties": {
-                      "agent_pool": {
-                        "type": "object",
-                        "properties": {
-                          "created_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "organization": {
-                            "type": "object",
-                            "properties": {
-                              "aggregated_commit_status_enabled": {
-                                "type": "boolean"
-                              },
-                              "allow_force_delete_workspaces": {
-                                "type": "boolean"
-                              },
-                              "ansible_adhoc_modules": {
-                                "type": "string"
-                              },
-                              "ansible_job_retention_days": {
-                                "type": "integer"
-                              },
-                              "assessments_enforced": {
-                                "type": "boolean"
-                              },
-                              "collaborator_auth_policy": {
-                                "type": "string"
-                              },
-                              "cost_estimation_enabled": {
-                                "type": "boolean"
-                              },
-                              "created_at": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "default_execution_mode": {
-                                "type": "string"
-                              },
-                              "default_tofu_version": {
-                                "type": "string"
-                              },
-                              "description": {
-                                "type": "string"
-                              },
-                              "email": {
-                                "type": "string"
-                              },
-                              "id": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "send_passing_statuses_for_untriggered_speculative_plans": {
-                                "type": "boolean"
-                              },
-                              "updated_at": {
-                                "type": "string",
-                                "format": "date-time"
-                              }
-                            }
-                          },
-                          "organization_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "organization_scoped": {
-                            "type": "boolean"
-                          }
-                        }
-                      },
-                      "allow_destroy_plan": {
-                        "type": "boolean"
-                      },
-                      "assessments_enabled": {
-                        "type": "boolean"
-                      },
-                      "auto_apply": {
-                        "type": "boolean"
-                      },
-                      "auto_apply_run_trigger": {
-                        "type": "boolean"
-                      },
-                      "auto_queue_runs": {
-                        "type": "boolean"
-                      },
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "drift_detection_enabled": {
-                        "type": "boolean"
-                      },
-                      "drift_detection_timezone": {
-                        "type": "string"
-                      },
-                      "execution_mode": {
-                        "type": "string"
-                      },
-                      "file_triggers_enabled": {
-                        "type": "boolean"
-                      },
-                      "force_delete": {
-                        "type": "boolean"
-                      },
-                      "global_remote_state": {
-                        "type": "boolean"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "locked": {
-                        "type": "boolean"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "project": {
-                        "type": "object",
-                        "properties": {
-                          "created_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "default_execution_mode": {
-                            "type": "string"
-                          },
-                          "description": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "organization": {
-                            "type": "object",
-                            "properties": {
-                              "aggregated_commit_status_enabled": {
-                                "type": "boolean"
-                              },
-                              "allow_force_delete_workspaces": {
-                                "type": "boolean"
-                              },
-                              "ansible_adhoc_modules": {
-                                "type": "string"
-                              },
-                              "ansible_job_retention_days": {
-                                "type": "integer"
-                              },
-                              "assessments_enforced": {
-                                "type": "boolean"
-                              },
-                              "collaborator_auth_policy": {
-                                "type": "string"
-                              },
-                              "cost_estimation_enabled": {
-                                "type": "boolean"
-                              },
-                              "created_at": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "default_execution_mode": {
-                                "type": "string"
-                              },
-                              "default_tofu_version": {
-                                "type": "string"
-                              },
-                              "description": {
-                                "type": "string"
-                              },
-                              "email": {
-                                "type": "string"
-                              },
-                              "id": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "send_passing_statuses_for_untriggered_speculative_plans": {
-                                "type": "boolean"
-                              },
-                              "updated_at": {
-                                "type": "string",
-                                "format": "date-time"
-                              }
-                            }
-                          },
-                          "organization_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "settings_overwritten": {
-                            "type": "boolean"
-                          },
-                          "updated_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        }
-                      },
-                      "project_id": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "queue_all_runs": {
-                        "type": "boolean"
-                      },
-                      "resource_count": {
-                        "type": "integer"
-                      },
-                      "run_timeout": {
-                        "type": "integer"
-                      },
-                      "speculative_enabled": {
-                        "type": "boolean"
-                      },
-                      "structured_run_output_enabled": {
-                        "type": "boolean"
-                      },
-                      "tofu_version": {
-                        "type": "string"
-                      },
-                      "updated_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "vcs_branch": {
-                        "type": "string"
-                      },
-                      "vcs_ingress_submodules": {
-                        "type": "boolean"
-                      },
-                      "vcs_provider": {
-                        "type": "string"
-                      },
-                      "vcs_repository": {
-                        "type": "string"
-                      },
-                      "working_directory": {
-                        "type": "string"
-                      }
-                    }
+                  "status": {
+                    "type": "string"
                   },
-                  "workspace_id": {
+                  "vcs-commit-sha": {
                     "type": "string"
                   }
                 }
@@ -20677,6 +20650,25 @@
               "relationships": {
                 "type": "object",
                 "properties": {
+                  "outputs": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
                   "workspace": {
                     "type": "object",
                     "properties": {
@@ -22231,6 +22223,31 @@
           }
         }
       },
+      "two-factor-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "users-response": {
         "type": "object",
         "properties": {
@@ -22243,11 +22260,31 @@
                   "avatar-url": {
                     "type": "string"
                   },
+                  "bio": {
+                    "type": "string"
+                  },
+                  "company": {
+                    "type": "string"
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
                   "email": {
                     "type": "string"
                   },
                   "is-service-account": {
                     "type": "boolean"
+                  },
+                  "location": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
                   },
                   "username": {
                     "type": "string"
@@ -24037,6 +24074,61 @@
         ]
       }
     },
+    "/api/v2/account/update": {
+      "patch": {
+        "operationId": "patch-api-v2-account-update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "bio": "Recorded by the golden write harness",
+                    "company": "VH \u0026 Co",
+                    "email": "golden.recorder@stackweaver.local",
+                    "location": "Antwerp, Belgium",
+                    "name": "Golden Recorder",
+                    "username": "\u003clogin-name\u003e"
+                  },
+                  "type": "users"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/patch-api-v2-account-update-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/users-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "PATCH /api/v2/account/update",
+        "tags": [
+          "account"
+        ]
+      }
+    },
     "/api/v2/activities": {
       "get": {
         "operationId": "get-api-v2-activities",
@@ -24050,29 +24142,29 @@
             }
           },
           {
-            "description": "The most to return in one response.",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "description": "How far in to start, counted from 0.",
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
             "in": "query",
             "name": "organization_id",
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           },
           {
@@ -26363,14 +26455,18 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "credential_id": "\u003cuuid\u003e"
+                "data": {
+                  "id": "\u003cuuid\u003e",
+                  "type": "ansible-credentials"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-ansible-job-templates-id-credentials-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "201": {
@@ -27126,22 +27222,28 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "config": {
-                  "method": "PUT",
-                  "skip_tls_verify": false,
-                  "url": "https://hooks.example.com/stackweaver/releases",
-                  "username": "stackweaver"
-                },
-                "description": "Updated by the golden write harness",
-                "name": "golden-write-webhook",
-                "secret": "\u003csecret\u003e"
+                "data": {
+                  "attributes": {
+                    "config": {
+                      "method": "PUT",
+                      "skip_tls_verify": false,
+                      "url": "https://hooks.example.com/stackweaver/releases",
+                      "username": "stackweaver"
+                    },
+                    "description": "Updated by the golden write harness",
+                    "name": "golden-write-webhook",
+                    "secret": "\u003csecret\u003e"
+                  },
+                  "type": "ansible-notification-templates"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/patch-api-v2-ansible-notification-templates-id-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "200": {
@@ -27380,73 +27482,6 @@
         ]
       }
     },
-    "/api/v2/ansible/schedules/cron-presets": {
-      "get": {
-        "operationId": "get-api-v2-ansible-schedules-cron-presets",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-ansible-schedules-cron-presets-421f7e"
-                }
-              }
-            },
-            "description": "Success"
-          }
-        },
-        "summary": "GET /api/v2/ansible/schedules/cron-presets",
-        "tags": [
-          "ansible/schedules"
-        ]
-      }
-    },
-    "/api/v2/ansible/schedules/validate-cron": {
-      "post": {
-        "operationId": "post-api-v2-ansible-schedules-validate-cron",
-        "requestBody": {
-          "content": {
-            "application/vnd.api+json": {
-              "example": {
-                "cron_expression": "30 3 * * 1-5",
-                "timezone": "Europe/Brussels"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/post-api-v2-ansible-schedules-validate-cron-request"
-              }
-            }
-          },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-ansible-schedules-validate-cron-c0f0d2"
-                }
-              }
-            },
-            "description": "Success"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/error-400"
-                }
-              }
-            },
-            "description": "Bad Request"
-          }
-        },
-        "summary": "POST /api/v2/ansible/schedules/validate-cron",
-        "tags": [
-          "ansible/schedules"
-        ]
-      }
-    },
     "/api/v2/ansible/schedules/{schedule_id}": {
       "delete": {
         "description": "Takes no request body.",
@@ -27526,22 +27561,28 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "config": {
-                  "extra_vars": {
-                    "reboot": false
-                  }
-                },
-                "cron_expression": "15 1 * * *",
-                "description": "Updated by the golden write harness",
-                "name": "nightly-patch-baseline",
-                "timezone": "Europe/Brussels"
+                "data": {
+                  "attributes": {
+                    "config": {
+                      "extra_vars": {
+                        "reboot": false
+                      }
+                    },
+                    "cron-expression": "15 1 * * *",
+                    "description": "Updated by the golden write harness",
+                    "name": "nightly-patch-baseline",
+                    "timezone": "Europe/Brussels"
+                  },
+                  "type": "schedules"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/patch-api-v2-ansible-schedules-schedule_id-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "200": {
@@ -27590,7 +27631,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-ansible-schedules-schedule_id-actions-disable-7e5a17"
+                  "$ref": "#/components/schemas/schedules-response"
                 }
               }
             },
@@ -27632,7 +27673,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-ansible-schedules-schedule_id-actions-enable-685d73"
+                  "$ref": "#/components/schemas/schedules-response"
                 }
               }
             },
@@ -27674,7 +27715,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-ansible-schedules-schedule_id-actions-run-now-a6930c"
+                  "$ref": "#/components/schemas/schedules-response"
                 }
               }
             },
@@ -28223,9 +28264,14 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "extra_vars": {
-                  "canary": true,
-                  "release": "1.4.2"
+                "data": {
+                  "attributes": {
+                    "extra-vars": {
+                      "canary": true,
+                      "release": "1.4.2"
+                    }
+                  },
+                  "type": "ansible-workflow-jobs"
                 }
               },
               "schema": {
@@ -28233,7 +28279,8 @@
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "201": {
@@ -30494,18 +30541,36 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "job_template_id": "\u003cuuid\u003e",
-                "notification_template_id": "\u003cuuid\u003e",
-                "on_failure": true,
-                "on_started": true,
-                "on_success": false
+                "data": {
+                  "attributes": {
+                    "on-failure": true,
+                    "on-started": true,
+                    "on-success": false
+                  },
+                  "relationships": {
+                    "job-template": {
+                      "data": {
+                        "id": "\u003cuuid\u003e",
+                        "type": "ansible-job-templates"
+                      }
+                    },
+                    "notification-template": {
+                      "data": {
+                        "id": "\u003cuuid\u003e",
+                        "type": "ansible-notification-templates"
+                      }
+                    }
+                  },
+                  "type": "ansible-notification-attachments"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-organizations-name-ansible-notification-attachments-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "201": {
@@ -30624,25 +30689,31 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "config": {
-                  "headers": {
-                    "X-Source": "stackweaver"
+                "data": {
+                  "attributes": {
+                    "config": {
+                      "headers": {
+                        "X-Source": "stackweaver"
+                      },
+                      "method": "POST",
+                      "url": "https://hooks.example.com/stackweaver/deploys",
+                      "username": "stackweaver"
+                    },
+                    "description": "Recorded by the golden write harness",
+                    "name": "golden-write-deploy-hook",
+                    "notification-type": "webhook",
+                    "secret": "\u003csecret\u003e"
                   },
-                  "method": "POST",
-                  "url": "https://hooks.example.com/stackweaver/deploys",
-                  "username": "stackweaver"
-                },
-                "description": "Recorded by the golden write harness",
-                "name": "golden-write-deploy-hook",
-                "secret": "\u003csecret\u003e",
-                "type": "webhook"
+                  "type": "ansible-notification-templates"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-organizations-name-ansible-notification-templates-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "201": {
@@ -30814,35 +30885,41 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "branch": "main",
-                "playbooks": [
-                  {
-                    "name": "golden-write-webservers",
-                    "path": "playbooks/webservers.yml"
+                "data": {
+                  "attributes": {
+                    "branch": "main",
+                    "playbooks": [
+                      {
+                        "name": "golden-write-webservers",
+                        "path": "playbooks/webservers.yml"
+                      },
+                      {
+                        "name": "golden-write-databases",
+                        "path": "playbooks/databases.yml"
+                      }
+                    ],
+                    "project-id": "\u003cuuid\u003e",
+                    "repository": "stackweaver-demo/ansible-playbooks",
+                    "source-mode": "cached",
+                    "vcs-connection-id": "\u003cuuid\u003e"
                   },
-                  {
-                    "name": "golden-write-databases",
-                    "path": "playbooks/databases.yml"
-                  }
-                ],
-                "project_id": "\u003cuuid\u003e",
-                "repository": "stackweaver-demo/ansible-playbooks",
-                "source_mode": "cached",
-                "vcs_connection_id": "\u003cuuid\u003e"
+                  "type": "ansible-playbooks"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-organizations-name-ansible-playbooks-actions-bulk-import-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-organizations-name-ansible-playbooks-actions-bulk-import-485ce3"
+                  "$ref": "#/components/schemas/ansible-playbooks-collection"
                 }
               }
             },
@@ -30882,20 +30959,26 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "branch": "main",
-                "name": "golden-write-hardening",
-                "path": "playbooks/hardening.yml",
-                "project_id": "\u003cuuid\u003e",
-                "repository": "stackweaver-demo/ansible-playbooks",
-                "source_mode": "fresh",
-                "vcs_connection_id": "\u003cuuid\u003e"
+                "data": {
+                  "attributes": {
+                    "branch": "main",
+                    "name": "golden-write-hardening",
+                    "path": "playbooks/hardening.yml",
+                    "project-id": "\u003cuuid\u003e",
+                    "repository": "stackweaver-demo/ansible-playbooks",
+                    "source-mode": "fresh",
+                    "vcs-connection-id": "\u003cuuid\u003e"
+                  },
+                  "type": "ansible-playbooks"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-organizations-name-ansible-playbooks-actions-find-or-create-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "201": {
@@ -32407,15 +32490,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/delete-api-v2-organizations-name-registry-modules-5d9c54"
-                }
-              }
-            },
-            "description": "Success"
+          "204": {
+            "description": "Success. No content."
           },
           "404": {
             "content": {
@@ -32494,12 +32570,17 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/vnd.api+json": {
               "example": {
-                "auto_publish_tags": false,
-                "description": "Recorded by the golden write harness",
-                "name": "golden-write",
-                "provider": "aws"
+                "data": {
+                  "attributes": {
+                    "auto_publish_tags": false,
+                    "description": "Recorded by the golden write harness",
+                    "name": "golden-write",
+                    "provider": "aws"
+                  },
+                  "type": "registry-modules"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-organizations-name-registry-modules-request"
@@ -34259,12 +34340,17 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "access_token": "\u003csecret\u003e",
-                "account_name": "acme-platform",
-                "account_type": "organization",
-                "provider": "gitlab",
-                "refresh_token": "\u003csecret\u003e",
-                "token_expires_at": "\u003ctimestamp\u003e"
+                "data": {
+                  "attributes": {
+                    "access_token": "\u003csecret\u003e",
+                    "account_name": "acme-platform",
+                    "account_type": "organization",
+                    "provider": "gitlab",
+                    "refresh_token": "\u003csecret\u003e",
+                    "token_expires_at": "\u003ctimestamp\u003e"
+                  },
+                  "type": "vcs-connections"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-organizations-name-vcs-connections-request"
@@ -37275,15 +37361,8 @@
         "description": "Takes no request body.",
         "operationId": "delete-api-v2-settings-2fa",
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/delete-api-v2-settings-2fa-6f3043"
-                }
-              }
-            },
-            "description": "Success"
+          "204": {
+            "description": "Success. No content."
           },
           "403": {
             "content": {
@@ -37311,7 +37390,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-settings-2fa-start-e46f1f"
+                  "$ref": "#/components/schemas/post-api-v2-settings-2fa-start-meta"
                 }
               }
             },
@@ -37362,7 +37441,12 @@
           "content": {
             "application/json": {
               "example": {
-                "code": "\u003csecret\u003e"
+                "data": {
+                  "attributes": {
+                    "code": "\u003csecret\u003e"
+                  },
+                  "type": "two-factor"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-settings-2fa-verify-request"
@@ -37377,7 +37461,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-settings-2fa-verify-448d78"
+                  "$ref": "#/components/schemas/two-factor-response"
                 }
               }
             },
@@ -37426,12 +37510,17 @@
           "content": {
             "application/json": {
               "example": {
-                "expires_at": "\u003ctimestamp\u003e",
-                "name": "ci-pipeline",
-                "scopes": [
-                  "org:\u003cuuid\u003e:read",
-                  "org:\u003cuuid\u003e:write"
-                ]
+                "data": {
+                  "attributes": {
+                    "expires-at": "\u003ctimestamp\u003e",
+                    "name": "ci-pipeline",
+                    "scopes": [
+                      "org:\u003cuuid\u003e:read",
+                      "org:\u003cuuid\u003e:write"
+                    ]
+                  },
+                  "type": "api-keys"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-settings-api-keys-request"
@@ -37446,7 +37535,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-settings-api-keys-b1d45f"
+                  "$ref": "#/components/schemas/api-keys-response"
                 }
               }
             },
@@ -37484,15 +37573,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/delete-api-v2-settings-api-keys-id-2b5a86"
-                }
-              }
-            },
-            "description": "Success"
+          "204": {
+            "description": "Success. No content."
           },
           "403": {
             "content": {
@@ -37539,8 +37621,13 @@
           "content": {
             "application/json": {
               "example": {
-                "current_password": "\u003csecret\u003e",
-                "new_password": "\u003csecret\u003e"
+                "data": {
+                  "attributes": {
+                    "current-password": "\u003csecret\u003e",
+                    "new-password": "\u003csecret\u003e"
+                  },
+                  "type": "users"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-settings-password-request"
@@ -37551,15 +37638,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-settings-password-3829a0"
-                }
-              }
-            },
-            "description": "Success"
+          "204": {
+            "description": "Success. No content."
           },
           "403": {
             "content": {
@@ -37573,74 +37653,6 @@
           }
         },
         "summary": "POST /api/v2/settings/password",
-        "tags": [
-          "settings"
-        ]
-      }
-    },
-    "/api/v2/settings/profile": {
-      "get": {
-        "operationId": "get-api-v2-settings-profile",
-        "responses": {
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/error-403"
-                }
-              }
-            },
-            "description": "Forbidden"
-          }
-        },
-        "summary": "GET /api/v2/settings/profile",
-        "tags": [
-          "settings"
-        ]
-      },
-      "patch": {
-        "operationId": "patch-api-v2-settings-profile",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "bio": "Recorded by the golden write harness",
-                "company": "VH \u0026 Co",
-                "email": "golden.recorder@stackweaver.local",
-                "location": "Antwerp, Belgium",
-                "name": "Golden Recorder",
-                "username": "\u003clogin-name\u003e"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/patch-api-v2-settings-profile-request"
-              }
-            }
-          },
-          "description": "Described from one accepted request rather than from a type: a member this example does not send may still be accepted. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/patch-api-v2-settings-profile-06a430"
-                }
-              }
-            },
-            "description": "Success"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/error-403"
-                }
-              }
-            },
-            "description": "Forbidden"
-          }
-        },
-        "summary": "PATCH /api/v2/settings/profile",
         "tags": [
           "settings"
         ]
@@ -37682,15 +37694,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/delete-api-v2-settings-sessions-sessionId-f4fd8b"
-                }
-              }
-            },
-            "description": "Success"
+          "204": {
+            "description": "Success. No content."
           },
           "403": {
             "content": {
@@ -39391,15 +39396,21 @@
           "content": {
             "application/json": {
               "example": {
-                "description": "Laptop CLI",
-                "expires_at": "\u003ctimestamp\u003e"
+                "data": {
+                  "attributes": {
+                    "description": "Laptop CLI",
+                    "expires_at": "\u003ctimestamp\u003e"
+                  },
+                  "type": "tokens"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-tokens-request"
               }
             }
           },
-          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
         },
         "responses": {
           "201": {
@@ -41489,7 +41500,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/get-api-v2-workspaces-id-platform-variables-40c39d"
+                  "$ref": "#/components/schemas/get-api-v2-workspaces-id-platform-variables-meta"
                 }
               }
             },
@@ -42003,36 +42014,14 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "lineage": "\u003cuuid\u003e",
-                "serial": 1,
-                "state_data": {
-                  "lineage": "\u003cuuid\u003e",
-                  "outputs": {
-                    "endpoint": {
-                      "type": "string",
-                      "value": "https://warehouse.example.com"
-                    }
+                "data": {
+                  "attributes": {
+                    "lineage": "\u003cuuid\u003e",
+                    "md5": "c860b089b9b156aa1496134c8f4782d0",
+                    "serial": 1,
+                    "state": "eyJsaW5lYWdlIjoiOGYyYzFkN2UtM2I0YS00YzVkLTllNmYtMGExYjJjM2Q0ZTVmIiwib3V0cHV0cyI6eyJlbmRwb2ludCI6eyJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiJodHRwczovL3dhcmVob3VzZS5leGFtcGxlLmNvbSJ9fSwicmVzb3VyY2VzIjpbeyJpbnN0YW5jZXMiOlt7ImF0dHJpYnV0ZXMiOnsiaWQiOiI1NTc3MDA2NzkxOTQ3Nzc5NDEwIiwidHJpZ2dlcnMiOm51bGx9LCJzY2hlbWFfdmVyc2lvbiI6MH1dLCJtb2RlIjoibWFuYWdlZCIsIm5hbWUiOiJleGFtcGxlIiwicHJvdmlkZXIiOiJwcm92aWRlcltcInJlZ2lzdHJ5Lm9wZW50b2Z1Lm9yZy9oYXNoaWNvcnAvbnVsbFwiXSIsInR5cGUiOiJudWxsX3Jlc291cmNlIn1dLCJzZXJpYWwiOjEsInRlcnJhZm9ybV92ZXJzaW9uIjoiMS4xMC42IiwidmVyc2lvbiI6NH0="
                   },
-                  "resources": [
-                    {
-                      "instances": [
-                        {
-                          "attributes": {
-                            "id": "5577006791947779410",
-                            "triggers": null
-                          },
-                          "schema_version": 0
-                        }
-                      ],
-                      "mode": "managed",
-                      "name": "example",
-                      "provider": "provider[\"registry.opentofu.org/hashicorp/null\"]",
-                      "type": "null_resource"
-                    }
-                  ],
-                  "serial": 1,
-                  "terraform_version": "1.10.6",
-                  "version": 4
+                  "type": "state-versions"
                 }
               },
               "schema": {
@@ -42088,7 +42077,12 @@
           "content": {
             "application/vnd.api+json": {
               "example": {
-                "address": "null_resource.example"
+                "data": {
+                  "attributes": {
+                    "address": "null_resource.example"
+                  },
+                  "type": "state-versions"
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/post-api-v2-workspaces-id-state-versions-remove-resource-request"
@@ -42099,11 +42093,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-workspaces-id-state-versions-remove-resource-a707e5"
+                  "$ref": "#/components/schemas/state-versions-response"
                 }
               }
             },

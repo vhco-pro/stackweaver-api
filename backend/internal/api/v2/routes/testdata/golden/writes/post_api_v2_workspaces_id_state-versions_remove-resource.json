@@ -4,26 +4,76 @@
   "request": {
     "content_type": "application/vnd.api+json",
     "body": {
-      "address": "null_resource.example"
+      "data": {
+        "attributes": {
+          "address": "null_resource.example"
+        },
+        "type": "state-versions"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "address": {
-          "type": "string"
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "address"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
       },
       "required": [
-        "address"
+        "data"
       ]
     },
     "schema_source": "type",
-    "bound_type": "struct { Address string \"json:\\\"address\\\" binding:\\\"required\\\"\" }"
+    "bound_type": "terraform.RemoveResourceRequest"
   },
-  "status": 200,
+  "status": 201,
   "response": {
     "data": {
-      "message": "Resource null_resource.example removed from state"
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "hosted-state-download-url": "http://example.com/api/v2/state-versions/\u003cid\u003e/download",
+        "lineage": "\u003cuuid\u003e",
+        "resources-processed": true,
+        "serial": null,
+        "size": 0,
+        "state-version": 2,
+        "status": "finalized",
+        "vcs-commit-sha": ""
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "outputs": {
+          "data": [
+            {
+              "id": "\u003cid\u003e",
+              "type": "state-version-outputs"
+            }
+          ]
+        },
+        "workspace": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "workspaces"
+          }
+        }
+      },
+      "type": "state-versions"
     }
   }
 }

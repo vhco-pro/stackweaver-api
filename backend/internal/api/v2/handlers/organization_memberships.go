@@ -201,7 +201,7 @@ func (h *OrganizationMembershipHandlerV2) List(c *gin.Context) {
 	}
 
 	logger.Debugf("OrganizationMembershipHandlerV2.List - Returning %d memberships with %d included users", len(data), len(included))
-	c.JSON(http.StatusOK, response)
+	jsonapi.WriteDoc(c, http.StatusOK, response)
 }
 
 // Create creates a new organization membership
@@ -469,7 +469,7 @@ func (h *OrganizationMembershipHandlerV2) GetByID(c *gin.Context) {
 		response.Included = included
 	}
 
-	c.JSON(http.StatusOK, response)
+	jsonapi.WriteDoc(c, http.StatusOK, response)
 }
 
 // Update updates an organization membership role by ID
@@ -583,7 +583,7 @@ func (h *OrganizationMembershipHandlerV2) Update(c *gin.Context) {
 		response.Included = included
 	}
 
-	c.JSON(http.StatusOK, response)
+	jsonapi.WriteDoc(c, http.StatusOK, response)
 }
 
 // Delete deletes an organization membership by ID

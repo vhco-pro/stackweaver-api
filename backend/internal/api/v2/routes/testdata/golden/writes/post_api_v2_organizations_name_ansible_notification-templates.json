@@ -4,43 +4,65 @@
   "request": {
     "content_type": "application/vnd.api+json",
     "body": {
-      "config": {
-        "headers": {
-          "X-Source": "stackweaver"
+      "data": {
+        "attributes": {
+          "config": {
+            "headers": {
+              "X-Source": "stackweaver"
+            },
+            "method": "POST",
+            "url": "https://hooks.example.com/stackweaver/deploys",
+            "username": "stackweaver"
+          },
+          "description": "Recorded by the golden write harness",
+          "name": "golden-write-deploy-hook",
+          "notification-type": "webhook",
+          "secret": "\u003csecret\u003e"
         },
-        "method": "POST",
-        "url": "https://hooks.example.com/stackweaver/deploys",
-        "username": "stackweaver"
-      },
-      "description": "Recorded by the golden write harness",
-      "name": "golden-write-deploy-hook",
-      "secret": "\u003csecret\u003e",
-      "type": "webhook"
+        "type": "ansible-notification-templates"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "config": {
+        "data": {
           "type": "object",
-          "additionalProperties": true
-        },
-        "description": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "secret": {
-          "type": "string",
-          "nullable": true
-        },
-        "type": {
-          "type": "string"
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "notification-type": {
+                  "type": "string"
+                },
+                "secret": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
-      }
+      },
+      "required": [
+        "data"
+      ]
     },
     "schema_source": "type",
-    "bound_type": "ansible.notificationTemplateRequest"
+    "bound_type": "ansible.NotificationTemplateRequest"
   },
   "status": 201,
   "response": {

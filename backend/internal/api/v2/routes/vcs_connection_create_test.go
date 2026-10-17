@@ -48,12 +48,12 @@ func TestVCSConnectionCreate_ConflictsOnlyWithAnExistingConnection(t *testing.T)
 
 	create := func(t *testing.T, provider models.VCSProvider, account string) *httptest.ResponseRecorder {
 		t.Helper()
-		body, err := json.Marshal(map[string]string{
+		body, err := json.Marshal(map[string]any{"data": map[string]any{"type": "vcs-connections", "attributes": map[string]string{
 			"provider":     string(provider),
 			"access_token": "not-a-real-token",
 			"account_name": account,
 			"account_type": "organization",
-		})
+		}}})
 		if err != nil {
 			t.Fatalf("marshal body: %v", err)
 		}

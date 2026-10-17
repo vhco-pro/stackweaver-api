@@ -228,16 +228,22 @@ func (f *githubFlowFixture) providerState(t *testing.T, path string, user uuid.U
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s = %d, want 200.\nbody: %s", path, rec.Code, rec.Body.String())
 	}
+	// A URL computed for this request has no identity of its own, so it travels as meta in a
+	// document with no data (#858, D6).
 	var doc struct {
-		Data struct {
-			InstallURL string `json:"install_url"`
-			AuthURL    string `json:"auth_url"`
-		} `json:"data"`
+		Data *json.RawMessage `json:"data"`
+		Meta struct {
+			InstallURL string `json:"install-url"`
+			AuthURL    string `json:"auth-url"`
+		} `json:"meta"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatalf("decode %s: %v", path, err)
 	}
-	raw := doc.Data.InstallURL + doc.Data.AuthURL
+	if doc.Data != nil {
+		t.Fatalf("GET %s answered a data member; a provider URL is meta alone: %s", path, rec.Body.String())
+	}
+	raw := doc.Meta.InstallURL + doc.Meta.AuthURL
 	u, err := url.Parse(raw)
 	if err != nil {
 		t.Fatalf("parse provider URL %q: %v", raw, err)
@@ -276,10 +282,9 @@ func (f *githubFlowFixture) complete(t *testing.T, user uuid.UUID, installation,
 	if state != "" {
 		path += "?state=" + url.QueryEscape(state)
 	}
-	var body any
-	if code != "" {
-		body = map[string]string{"code": code}
-	}
+	// The code travels in a vcs-connections document (#858, D6); an empty code is still sent,
+	// in the document, so that GitHub's refusal of it is what answers.
+	body := map[string]any{"data": map[string]any{"type": "vcs-connections", "attributes": map[string]string{"code": code}}}
 	return authzRequest(t, f.router, http.MethodPost, path, user, body)
 }
 
@@ -456,4 +461,66 @@ func TestGitHubInstallation_ConnectsWhenTheTokenRevocationFails(t *testing.T) {
 	if rows := f.connections(t); len(rows) != 1 || rows[0].InstallationID != "111" {
 		t.Fatalf("connections = %+v, want installation 111", rows)
 	}
+}
+
+// The installation completion takes a vcs-connections document carrying the code (#858, D6).
+// The state check comes first, so these cases hold a valid authorization state.
+func TestGitHubInstallation_CompletionTakesAVCSConnectionsDocument(t *testing.T) {
+	f := setupGitHubFlow(t, map[string][]int64{"code-owner": {111}})
+	path := func(state string) string {
+		return "/organizations/" + f.org.Name + "/vcs-connections/github/installations/111?state=" + url.QueryEscape(state)
+	}
+	detail := func(t *testing.T, rec *httptest.ResponseRecorder) string {
+		t.Helper()
+		var doc struct {
+			Errors []struct {
+				Detail string `json:"detail"`
+			} `json:"errors"`
+		}
+		if rec.Code != http.StatusBadRequest || json.Unmarshal(rec.Body.Bytes(), &doc) != nil || len(doc.Errors) != 1 {
+			t.Fatalf("got %d %s, want a 400 errors document", rec.Code, rec.Body.String())
+		}
+		return doc.Errors[0].Detail
+	}
+
+	t.Run("a flat code is refused with the document sentence", func(t *testing.T) {
+		rec := authzRequest(t, f.router, http.MethodPost, path(f.authorizationState(t, "111", f.owner.ID)), f.owner.ID, map[string]string{"code": "code-owner"})
+		if got, want := detail(t, rec), `request body must be a JSON:API document: {"data": {"type": "vcs-connections", "attributes": {...}}}`; got != want {
+			t.Errorf("detail %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a wrong type is refused", func(t *testing.T) {
+		body := map[string]any{"data": map[string]any{"type": "oauth-clients", "attributes": map[string]string{"code": "code-owner"}}}
+		rec := authzRequest(t, f.router, http.MethodPost, path(f.authorizationState(t, "111", f.owner.ID)), f.owner.ID, body)
+		if got, want := detail(t, rec), `data.type must be "vcs-connections" (got "oauth-clients")`; got != want {
+			t.Errorf("detail %q, want %q", got, want)
+		}
+	})
+
+	if rows := f.connections(t); len(rows) != 0 {
+		t.Fatalf("refused requests left %d connection(s)", len(rows))
+	}
+
+	t.Run("the document connects the installation", func(t *testing.T) {
+		rec := f.complete(t, f.owner.ID, "111", "code-owner", f.authorizationState(t, "111", f.owner.ID))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("got %d, want 201.\nbody: %s", rec.Code, rec.Body.String())
+		}
+		var doc struct {
+			Data struct {
+				Type string `json:"type"`
+				ID   string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || doc.Data.Type != "vcs-connections" || doc.Data.ID == "" {
+			t.Errorf("answered %s, want a vcs-connections resource", rec.Body.String())
+		}
+	})
+}
+
+// The Azure DevOps start answers its authorization URL as meta alone, as the GitHub start does.
+func TestAzureDevOpsInstallation_StartAnswersMetaAlone(t *testing.T) {
+	f := setupGitHubFlow(t, nil)
+	f.providerState(t, "/organizations/"+f.org.Name+"/vcs-connections/azure-devops/install?ado_org=acme", f.owner.ID)
 }

@@ -504,32 +504,32 @@ type ConfigurableRelationship struct {
 	Configurable jsonapi.Relationship `json:"configurable"`
 }
 
-// DiscoveredPlaybook is one candidate file found in a repository scan. The playbook members
-// appear only for candidates already registered, which is how the UI greys them out.
-type DiscoveredPlaybook struct {
-	Path         string `json:"path"`
-	Name         string `json:"name"`
-	Registered   bool   `json:"registered"`
-	PlaybookID   string `json:"playbook_id,omitempty"`
-	PlaybookName string `json:"playbook_name,omitempty"`
+// PlaybookFileAttributes describe one candidate playbook file of a repository scan, an
+// ansible-playbook-files resource keyed by its path (#858, D5).
+type PlaybookFileAttributes struct {
+	Name       string `json:"name"`
+	Registered bool   `json:"registered"`
 }
 
-// BulkImportResult is one row of the bulk-import outcome. Exactly one of error (status
-// "failed") or the playbook members (status "created"/"skipped") is populated.
-type BulkImportResult struct {
-	Path       string `json:"path"`
-	Status     string `json:"status"`
-	Error      string `json:"error,omitempty"`
-	PlaybookID string `json:"playbook_id,omitempty"`
-	Name       string `json:"name,omitempty"`
+// PlaybookFileRelationships relate a registered file to its playbook, which is how the UI
+// greys it out.
+type PlaybookFileRelationships struct {
+	Playbook jsonapi.Relationship `json:"playbook"`
 }
 
-// BulkImportResponse is the import summary: the per-file results plus the tallies.
-type BulkImportResponse struct {
-	Results []BulkImportResult `json:"results"`
-	Created int                `json:"created"`
-	Skipped int                `json:"skipped"`
-	Failed  int                `json:"failed"`
+// BulkImportMeta is the outcome of a bulk import beside the playbooks it answers with: the
+// tallies, and each file that failed with why.
+type BulkImportMeta struct {
+	Created    int                 `json:"created"`
+	Skipped    int                 `json:"skipped"`
+	Failed     int                 `json:"failed"`
+	FailedRows []BulkImportFailure `json:"failed-rows"`
+}
+
+// BulkImportFailure is one file the import could not register.
+type BulkImportFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
 }
 
 // FindOrCreateMeta reports whether the find-or-create action created the playbook or found

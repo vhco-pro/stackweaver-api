@@ -5,7 +5,7 @@
   "body": {
     "errors": [
       {
-        "detail": "json: cannot unmarshal array into Go value of type ansible.UpdateScheduleRequest",
+        "detail": "request body must be a JSON:API document: {\"data\": {\"type\": \"schedules\", \"attributes\": {...}}}",
         "status": "400",
         "title": "Bad Request"
       }

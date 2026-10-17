@@ -99,7 +99,7 @@ func SetupRoutes(
 	}
 
 	// Setup v2 API routes
-	v2routes.SetupV2Routes(r, db, authService, githubAppManager)
+	v2routes.SetupV2Routes(r, db, authService, githubAppManager, v2routes.WithProfileService(profileService))
 
 	// Settings endpoints (v2). This is the signed-in person's own account: every handler below
 	// acts on whoever AuthMiddleware resolved, and a token resolves to its owner with none of
@@ -122,11 +122,8 @@ func SetupRoutes(
 			settings.GET("/mfa-devices", totpHandler.ListMFADevices)
 		}
 
-		// Profile Settings
-		userRepo := repository.NewUserRepository(db)
-		profileHandler := handlers.NewProfileHandler(profileService, authService, userRepo)
-		settings.GET("/profile", profileHandler.GetProfile)
-		settings.PATCH("/profile", profileHandler.UpdateProfile)
+		// The profile is part of the account: GET /api/v2/account/details and
+		// PATCH /api/v2/account/update on the v2 router.
 
 		// Sessions Settings (only if sessions service is available)
 		if sessionsService != nil {

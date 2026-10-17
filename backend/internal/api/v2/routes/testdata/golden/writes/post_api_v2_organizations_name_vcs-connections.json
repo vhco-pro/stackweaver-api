@@ -4,40 +4,62 @@
   "request": {
     "content_type": "application/vnd.api+json",
     "body": {
-      "access_token": "\u003csecret\u003e",
-      "account_name": "acme-platform",
-      "account_type": "organization",
-      "provider": "gitlab",
-      "refresh_token": "\u003csecret\u003e",
-      "token_expires_at": "\u003ctimestamp\u003e"
+      "data": {
+        "attributes": {
+          "access_token": "\u003csecret\u003e",
+          "account_name": "acme-platform",
+          "account_type": "organization",
+          "provider": "gitlab",
+          "refresh_token": "\u003csecret\u003e",
+          "token_expires_at": "\u003ctimestamp\u003e"
+        },
+        "type": "vcs-connections"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "access_token": {
-          "type": "string"
-        },
-        "account_name": {
-          "type": "string"
-        },
-        "account_type": {
-          "type": "string"
-        },
-        "provider": {
-          "type": "string"
-        },
-        "refresh_token": {
-          "type": "string"
-        },
-        "token_expires_at": {
-          "type": "string"
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "access_token": {
+                  "type": "string"
+                },
+                "account_name": {
+                  "type": "string"
+                },
+                "account_type": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "refresh_token": {
+                  "type": "string"
+                },
+                "token_expires_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "access_token",
+                "account_name",
+                "account_type",
+                "provider"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
       },
       "required": [
-        "access_token",
-        "account_name",
-        "account_type",
-        "provider"
+        "data"
       ]
     },
     "schema_source": "type",

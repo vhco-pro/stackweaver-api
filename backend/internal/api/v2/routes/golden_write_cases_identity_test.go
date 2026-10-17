@@ -353,7 +353,8 @@ func identityJSON(t *testing.T, sess identitySession, method, target string, bod
 func identityEnrolTOTP(t *testing.T, w *writeRun, sess identitySession) string {
 	t.Helper()
 	started, _ := w.sendJSON(identityJSON(t, sess, http.MethodPost, "/api/v2/settings/2fa/start", nil))
-	secret, _ := started["secret"].(string)
+	meta, _ := started["meta"].(map[string]any)
+	secret, _ := meta["secret"].(string)
 	if secret == "" {
 		t.Fatalf("starting TOTP enrolment returned no secret: %v", keysOf(started))
 	}
@@ -366,8 +367,8 @@ func identityEnrolTOTP(t *testing.T, w *writeRun, sess identitySession) string {
 func identityJoinOrganization(t *testing.T, w *writeRun, sess identitySession) string {
 	t.Helper()
 	// The first authenticated request is what gives the user a row here.
-	profile, _ := w.sendJSON(identityJSON(t, sess, http.MethodGet, "/api/v2/settings/profile", nil))
-	userID, _ := profile["id"].(string)
+	account, _ := w.sendJSON(identityJSON(t, sess, http.MethodGet, "/api/v2/account/details", nil))
+	userID := dataID(t, account)
 	var orgID string
 	if err := w.db.Raw(`SELECT id::text FROM organizations WHERE name = ?`, w.org()).Scan(&orgID).Error; err != nil || orgID == "" || userID == "" {
 		t.Fatalf("resolve the seeded organization (%q) and the signed-in user (%q): %v", orgID, userID, err)
@@ -380,66 +381,67 @@ func identityJoinOrganization(t *testing.T, w *writeRun, sess identitySession) s
 	return orgID
 }
 
-// identityAPIKey is the body the settings page sends for a key that may read and write one
+// identityAPIKey is the document the settings page sends for a key that may read and write one
 // organization.
 func identityAPIKey(orgID string) map[string]any {
-	return map[string]any{
+	return document("api-keys", map[string]any{
 		"name":       "ci-pipeline",
 		"scopes":     []string{"org:" + orgID + ":read", "org:" + orgID + ":write"},
-		"expires_at": "2030-01-01T00:00:00Z",
-	}
+		"expires-at": "2030-01-01T00:00:00Z",
+	})
 }
 
 // A person's own account, from the settings pages.
 func init() {
 	registerWriteCases(
 		writeCase{
-			route: "PATCH /api/v2/settings/profile",
+			// The profile is part of the account's users resource (#858, D8).
+			route: "PATCH /api/v2/account/update",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				sess := w.signIn(w.newUser(true))
-				return identityJSON(t, sess, http.MethodPatch, "/api/v2/settings/profile", map[string]any{
+				return identityJSON(t, sess, http.MethodPatch, "/api/v2/account/update", document("users", map[string]any{
 					"name":     "Golden Recorder",
 					"email":    "golden.recorder@stackweaver.local",
 					"username": sess.User.Username,
 					"bio":      "Recorded by the golden write harness",
 					"company":  "VH & Co",
 					"location": "Antwerp, Belgium",
-				})
+				}))
 			},
 		},
 		writeCase{
 			route: "POST /api/v2/settings/password",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				sess := w.signIn(w.newUser(true))
-				return identityJSON(t, sess, http.MethodPost, "/api/v2/settings/password", map[string]any{
-					"current_password": sess.User.Password,
-					"new_password":     "Golden-write-2!",
-				})
+				return identityJSON(t, sess, http.MethodPost, "/api/v2/settings/password", document("users", map[string]any{
+					"current-password": sess.User.Password,
+					"new-password":     "Golden-write-2!",
+				}))
 			},
-			requestSecrets: []string{"current_password", "new_password"},
+			requestSecrets: []string{"data.attributes.current-password", "data.attributes.new-password"},
 		},
 		writeCase{
 			route: "POST /api/v2/settings/2fa/start",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return identityJSON(t, w.signIn(w.newUser(true)), http.MethodPost, "/api/v2/settings/2fa/start", nil)
 			},
-			responseSecrets: []string{"secret", "url"},
+			responseSecrets: []string{"meta.secret", "meta.url"},
 		},
 		writeCase{
 			route: "POST /api/v2/settings/2fa/verify",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				sess := w.signIn(w.newUser(true))
 				return identityJSON(t, sess, http.MethodPost, "/api/v2/settings/2fa/verify",
-					map[string]any{"code": identityEnrolTOTP(t, w, sess)})
+					document("two-factor", map[string]any{"code": identityEnrolTOTP(t, w, sess)}))
 			},
-			requestSecrets: []string{"code"},
+			requestSecrets: []string{"data.attributes.code"},
 		},
 		writeCase{
 			route: "DELETE /api/v2/settings/2fa",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				sess := w.signIn(w.newUser(true))
 				w.sendJSON(identityJSON(t, sess, http.MethodPost, "/api/v2/settings/2fa/verify",
-					map[string]any{"code": identityEnrolTOTP(t, w, sess)}))
+					document("two-factor", map[string]any{"code": identityEnrolTOTP(t, w, sess)})))
 				return identityJSON(t, sess, http.MethodDelete, "/api/v2/settings/2fa", nil)
 			},
 		},
@@ -475,7 +477,7 @@ func init() {
 					identityAPIKey(identityJoinOrganization(t, w, sess)))
 			},
 			// The prefix is the first characters of the key itself.
-			responseSecrets: []string{"key", "key_prefix"},
+			responseSecrets: []string{"data.attributes.key", "data.attributes.key-prefix"},
 		},
 		writeCase{
 			route: "DELETE /api/v2/settings/api-keys/:id",
@@ -483,10 +485,7 @@ func init() {
 				sess := w.signIn(w.newUser(true))
 				created, _ := w.sendJSON(identityJSON(t, sess, http.MethodPost, "/api/v2/settings/api-keys",
 					identityAPIKey(identityJoinOrganization(t, w, sess))))
-				id, _ := created["id"].(string)
-				if id == "" {
-					t.Fatalf("creating an API key returned no id: %v", keysOf(created))
-				}
+				id := dataID(t, created)
 				return identityJSON(t, sess, http.MethodDelete, "/api/v2/settings/api-keys/"+id, nil)
 			},
 		},
@@ -516,10 +515,10 @@ func init() {
 		writeCase{
 			route: "POST /api/v2/tokens",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				return identityJSON(t, w.signIn(w.newUser(true)), http.MethodPost, "/api/v2/tokens", map[string]any{
+				return identityJSON(t, w.signIn(w.newUser(true)), http.MethodPost, "/api/v2/tokens", document("tokens", map[string]any{
 					"description": "Laptop CLI",
 					"expires_at":  "2030-01-01T00:00:00Z",
-				})
+				}))
 			},
 			responseSecrets: []string{"data.attributes.token"},
 		},
@@ -528,7 +527,7 @@ func init() {
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				sess := w.signIn(w.newUser(true))
 				created, _ := w.sendJSON(identityJSON(t, sess, http.MethodPost, "/api/v2/tokens",
-					map[string]any{"description": "Laptop CLI"}))
+					document("tokens", map[string]any{"description": "Laptop CLI"})))
 				return identityJSON(t, sess, http.MethodDelete, "/api/v2/tokens/"+dataID(t, created), nil)
 			},
 		},

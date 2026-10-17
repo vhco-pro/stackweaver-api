@@ -102,6 +102,7 @@ func TestWorkspaceVariableUpdate(t *testing.T) {
 	})
 	router.POST("/workspaces/:id/vars", h.Create)
 	router.PATCH("/workspaces/:id/vars/:variable_id", h.Update)
+	router.GET("/workspaces/:id/platform-variables", h.GetPlatformVariableKeys)
 
 	base := "/workspaces/" + workspace.ID + "/vars"
 	do := func(method, path, body string) (int, map[string]any) {
@@ -269,6 +270,33 @@ func TestWorkspaceVariableUpdate(t *testing.T) {
 		v = load(id)
 		if !v.Encrypted || plaintext(v) != "s3cret" {
 			t.Errorf("after non-sensitive->sensitive: encrypted=%v plaintext=%q, want true/s3cret", v.Encrypted, plaintext(v))
+		}
+	})
+
+	// #858, D6: the platform variable names are fixed, not addressable things, so they are meta
+	// alone, with no data member and no pagination block.
+	t.Run("platform variable names are meta alone", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.ID+"/platform-variables", nil)
+		req.Header.Set("X-Test-User", owner.ID.String())
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+		}
+		var doc map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if _, hasData := doc["data"]; hasData {
+			t.Errorf("answered a data member: %s", rec.Body.String())
+		}
+		// The names depend on the deployment's platform settings, so the list may be empty; it
+		// must be there, and be a list of names.
+		var meta struct {
+			Keys *[]string `json:"platform-variable-keys"`
+		}
+		if err := json.Unmarshal(doc["meta"], &meta); err != nil || meta.Keys == nil {
+			t.Errorf("meta.platform-variable-keys is not a list of names: %s", rec.Body.String())
 		}
 	})
 }

@@ -101,14 +101,35 @@ func formatNotificationTemplate(t *models.AnsibleNotificationTemplate) jsonapi.R
 	}
 }
 
-type notificationTemplateRequest struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Type        string                 `json:"type"`
-	Config      map[string]interface{} `json:"config"`
-	// Secret is the channel's sensitive value (webhook basic-auth password /
-	// SMTP password); stored encrypted, never returned.
-	Secret *string `json:"secret"`
+// The JSON:API resource types of the notification request documents.
+const (
+	notificationTemplatesType   = "ansible-notification-templates"
+	notificationAttachmentsType = "ansible-notification-attachments"
+)
+
+// NotificationTemplateRequest is the create and update document of a notification template
+// (#858, D5), its attributes spelled as the resource spells them.
+type NotificationTemplateRequest struct {
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Name             string                 `json:"name"`
+			Description      string                 `json:"description"`
+			NotificationType string                 `json:"notification-type"`
+			Config           map[string]interface{} `json:"config"`
+			// Secret is the channel's sensitive value (webhook basic-auth password /
+			// SMTP password); stored encrypted, never returned.
+			Secret *string `json:"secret"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *NotificationTemplateRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
 }
 
 // List notification templates.
@@ -137,14 +158,18 @@ func (h *NotificationHandler) Create(c *gin.Context) {
 	if org == nil {
 		return
 	}
-	var req notificationTemplateRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
+	var body NotificationTemplateRequest
+	if !jsonapi.BindDocument(c, &body, notificationTemplatesType) {
+		return
+	}
+	req := body.Data.Attributes
+	if req.Name == "" {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "name is required")
 		return
 	}
-	nType := models.NotificationType(req.Type)
+	nType := models.NotificationType(req.NotificationType)
 	if nType != models.NotificationTypeWebhook && nType != models.NotificationTypeEmail && nType != models.NotificationTypeTeams {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "type must be webhook, email, or teams")
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "notification-type must be webhook, email, or teams")
 		return
 	}
 	configJSON, err := json.Marshal(req.Config)
@@ -180,11 +205,11 @@ func (h *NotificationHandler) Update(c *gin.Context) {
 	if template == nil {
 		return
 	}
-	var req notificationTemplateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	var body NotificationTemplateRequest
+	if !jsonapi.BindDocument(c, &body, notificationTemplatesType) {
 		return
 	}
+	req := body.Data.Attributes
 	if req.Name != "" {
 		template.Name = req.Name
 	}
@@ -273,13 +298,32 @@ func (h *NotificationHandler) resolveTemplate(c *gin.Context, write bool) *model
 // attachRequest is the flat JSON body of an attach. OnSuccess and OnFailure are pointers so an
 // absent key can default to on while a sent false is stored as false; OnStarted defaults to off,
 // which a plain bool already gives.
-type attachRequest struct {
-	NotificationTemplateID string `json:"notification_template_id"`
-	JobTemplateID          string `json:"job_template_id"`
-	WorkflowID             string `json:"workflow_id"`
-	OnStarted              bool   `json:"on_started"`
-	OnSuccess              *bool  `json:"on_success"`
-	OnFailure              *bool  `json:"on_failure"`
+// NotificationAttachmentRequest is the attach document (#858, D5). The three flags keep the
+// Go types the flat body had, which is what their defaults rest on: on-started is off when
+// omitted, on-success and on-failure are on when omitted. What is attached to what travels as
+// the relationships the attachment resource already answers with.
+type NotificationAttachmentRequest struct {
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			OnStarted bool  `json:"on-started"`
+			OnSuccess *bool `json:"on-success"`
+			OnFailure *bool `json:"on-failure"`
+		} `json:"attributes"`
+		Relationships struct {
+			NotificationTemplate *jsonapi.Relationship `json:"notification-template"`
+			JobTemplate          *jsonapi.Relationship `json:"job-template"`
+			Workflow             *jsonapi.Relationship `json:"workflow"`
+		} `json:"relationships"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *NotificationAttachmentRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
 }
 
 // Attach binds a notification template to a job template or workflow.
@@ -289,16 +333,32 @@ func (h *NotificationHandler) Attach(c *gin.Context) {
 	if org == nil {
 		return
 	}
-	var req attachRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.NotificationTemplateID == "" {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "notification_template_id is required")
+	var body NotificationAttachmentRequest
+	if !jsonapi.BindDocument(c, &body, notificationAttachmentsType) {
 		return
 	}
-	if (req.JobTemplateID == "") == (req.WorkflowID == "") {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "exactly one of job_template_id or workflow_id is required")
+	attrs, rels := body.Data.Attributes, body.Data.Relationships
+	notificationTemplateID, ok := jsonapi.RelationshipID(c, rels.NotificationTemplate, "notification-template", notificationTemplatesType)
+	if !ok {
 		return
 	}
-	ntID, err := uuid.Parse(req.NotificationTemplateID)
+	jobTemplateID, ok := jsonapi.RelationshipID(c, rels.JobTemplate, "job-template", "ansible-job-templates")
+	if !ok {
+		return
+	}
+	workflowID, ok := jsonapi.RelationshipID(c, rels.Workflow, "workflow", "ansible-workflows")
+	if !ok {
+		return
+	}
+	if notificationTemplateID == "" {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "the notification-template relationship is required")
+		return
+	}
+	if (jobTemplateID == "") == (workflowID == "") {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "exactly one of the job-template or workflow relationships is required")
+		return
+	}
+	ntID, err := uuid.Parse(notificationTemplateID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid notification template ID")
 		return
@@ -311,18 +371,18 @@ func (h *NotificationHandler) Attach(c *gin.Context) {
 
 	attachment := &models.AnsibleNotificationAttachment{
 		NotificationTemplateID: ntID,
-		OnStarted:              req.OnStarted,
+		OnStarted:              attrs.OnStarted,
 		OnSuccess:              true,
 		OnFailure:              true,
 	}
-	if req.OnSuccess != nil {
-		attachment.OnSuccess = *req.OnSuccess
+	if attrs.OnSuccess != nil {
+		attachment.OnSuccess = *attrs.OnSuccess
 	}
-	if req.OnFailure != nil {
-		attachment.OnFailure = *req.OnFailure
+	if attrs.OnFailure != nil {
+		attachment.OnFailure = *attrs.OnFailure
 	}
-	if req.JobTemplateID != "" {
-		jtID, err := uuid.Parse(req.JobTemplateID)
+	if jobTemplateID != "" {
+		jtID, err := uuid.Parse(jobTemplateID)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid job template ID")
 			return
@@ -334,7 +394,7 @@ func (h *NotificationHandler) Attach(c *gin.Context) {
 		}
 		attachment.JobTemplateID = &jtID
 	} else {
-		wfID, err := uuid.Parse(req.WorkflowID)
+		wfID, err := uuid.Parse(workflowID)
 		if err != nil {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid workflow ID")
 			return
