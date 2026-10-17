@@ -123,6 +123,6 @@
   },
   "status": 200,
   "response": {
-    "message": "No workspaces found for this repository and branch"
+    "message": "Azure DevOps push event processed: No workspace, playbook or inventory tracks the changed files"
   }
 }

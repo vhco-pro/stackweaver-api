@@ -700,8 +700,9 @@ func init() {
 		writeCase{
 			// An Azure DevOps service hook carries no signature: it authenticates with the
 			// basic-auth password set on the subscription, which the server compares with the
-			// secret it was started with. This is a git.push for a repository no workspace
-			// tracks. A push that matches one makes the server clone from Azure DevOps.
+			// secret it was started with. This is a git.push for a repository no workspace,
+			// playbook or inventory tracks. A push that matches one makes the server clone from
+			// Azure DevOps.
 			route: "POST /api/v2/vcs-connections/azure-devops/webhook",
 			env:   map[string]string{"AZURE_DEVOPS_WEBHOOK_SECRET": infraWebhookSecret},
 			prepare: func(t *testing.T, w *writeRun) *http.Request {

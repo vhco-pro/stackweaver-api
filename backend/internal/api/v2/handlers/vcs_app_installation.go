@@ -444,21 +444,16 @@ func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
 
 // handleAzureDevOpsPushEvent handles Azure DevOps git.push events - triggers plan-and-apply runs.
 func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context, wp *vcs.WebhookPayload, payload []byte) {
+	// Finding no workspace does not end the delivery: the repository's playbooks and inventories
+	// are synced below either way, because an Ansible resource is linked to its repository, not to
+	// a workspace.
 	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(wp.Repository, wp.Branch)
 	if err != nil {
 		logger.Errorf("Error finding workspaces for %s/%s: %v", wp.Repository, wp.Branch, err)
-		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces found: %v", err))
-		return
+		workspaces = nil
 	}
 	// AUD-102 (ADO residual): only trigger workspaces connected through THIS delivery's ADO org.
 	workspaces = h.filterWorkspacesByADOOrg(workspaces, wp.Organization)
-
-	if len(workspaces) == 0 {
-		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
-			"No workspaces with AutoQueueRuns enabled", http.StatusOK, string(payload))
-		response.Message(c, http.StatusOK, "No workspaces found for this repository and branch")
-		return
-	}
 
 	filteredWorkspaces := make([]models.Workspace, 0, len(workspaces))
 	for _, workspace := range workspaces {
@@ -467,13 +462,6 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 		} else {
 			logger.Infof("Workspace %s skipped (no changed files in its path)", workspace.ID)
 		}
-	}
-
-	if len(filteredWorkspaces) == 0 {
-		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
-			fmt.Sprintf("No workspaces match changed files (%d exist)", len(workspaces)), http.StatusOK, string(payload))
-		response.Message(c, http.StatusOK, "No workspaces match the changed files")
-		return
 	}
 
 	commitHash := wp.Commit
@@ -637,12 +625,24 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 		}(workspace)
 	}
 
-	// Sync inventories and playbooks for matching repo+branch
+	// Sync inventories and playbooks for the repo and branch, whether or not a workspace matched.
+	// When the delivery lists the changed files, the same path checks as a GitHub push apply
+	// (Azure DevOps paths start with "/"); a delivery that lists none syncs every one, as it
+	// triggers every workspace.
+	changed := make([]string, 0, len(wp.ChangedFiles))
+	for _, f := range wp.ChangedFiles {
+		changed = append(changed, strings.TrimPrefix(f, "/"))
+	}
+	changedCommits := []pushCommitFiles{{Modified: changed}}
+	syncedInventories, syncedPlaybooks := 0, 0
 	inventories, _ := h.inventoryRepo.FindByVCSRepositoryAndBranch(wp.Repository, branchName)
 	// AUD-102 (ADO residual): only sync inventories connected through THIS delivery's ADO org.
-	inventories = h.filterInventoriesByADOOrg(inventories, wp.Organization)
-	for _, inventory := range inventories {
+	for _, inventory := range h.filterInventoriesByADOOrg(inventories, wp.Organization) {
+		if len(changed) > 0 && !h.isInventoryAffected(inventory, changedCommits) {
+			continue
+		}
 		inv := inventory
+		syncedInventories++
 		if h.ansibleQueue != nil {
 			go func() {
 				syncMsg := h.inventorySyncPayload(context.Background(), &inv)
@@ -655,9 +655,12 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	if h.playbookRepo != nil {
 		playbooks, _ := h.playbookRepo.ListByVCSRepositoryAndBranch(wp.Repository, branchName)
 		// Only sync playbooks connected through THIS delivery's Azure DevOps organization.
-		playbooks = h.filterPlaybooksByADOOrg(playbooks, wp.Organization)
-		for _, playbook := range playbooks {
+		for _, playbook := range h.filterPlaybooksByADOOrg(playbooks, wp.Organization) {
+			if len(changed) > 0 && !h.isPlaybookAffected(playbook, changedCommits) {
+				continue
+			}
 			pb := playbook
+			syncedPlaybooks++
 			if h.ansibleQueue != nil {
 				go func() {
 					syncMsg := h.playbookSyncPayload(context.Background(), &pb)
@@ -670,15 +673,11 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 		}
 	}
 
-	var triggeredNames []string
-	for _, ws := range filteredWorkspaces {
-		triggeredNames = append(triggeredNames, ws.Name)
-	}
-	h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, branchName, commitHash, "success",
-		fmt.Sprintf("%d workspace(s) triggered: %s", len(filteredWorkspaces), strings.Join(triggeredNames, ", ")),
-		http.StatusOK, string(payload))
+	status, eventMessage := pushEventSummary(filteredWorkspaces, syncedPlaybooks, syncedInventories)
+	h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, branchName, commitHash, status,
+		eventMessage, http.StatusOK, string(payload))
 
-	response.Message(c, http.StatusOK, fmt.Sprintf("Azure DevOps push event processed: %d workspace(s) queued", len(filteredWorkspaces)))
+	response.Message(c, http.StatusOK, "Azure DevOps push event processed: "+eventMessage)
 }
 
 // handleAzureDevOpsPullRequestEvent handles Azure DevOps git.pullrequest.* events - triggers speculative plan runs.
@@ -1522,52 +1521,30 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 
 	logger.Infof("Received branch push event - ref=%s, branch=%s, repository=%s, commit=%s", pushEvent.Ref, branchName, repositoryFullName, commitHash)
 
-	// Find workspaces that match this repository and branch with AutoQueueRuns enabled
-	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(repositoryFullName, branchName)
-	if err != nil {
-		logger.Errorf("Error finding workspaces for repository %s, branch %s: %v", repositoryFullName, branchName, err)
-		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces found or error: %v", err))
-		return
-	}
-	// AUD-102: only trigger workspaces connected through THIS delivery's installation.
-	workspaces = h.filterWorkspacesByInstallation(workspaces, strconv.FormatInt(pushEvent.Installation.ID, 10))
-
-	if len(workspaces) == 0 {
-		logger.Infof("No workspaces found for repository %s, branch %s with AutoQueueRuns enabled", repositoryFullName, branchName)
-		h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(pushEvent.Installation.ID, 10)), "push", "github", repositoryFullName, branchName, commitHash, "ignored",
-			"No workspaces with AutoQueueRuns enabled", http.StatusOK, string(payload))
-		response.Message(c, http.StatusOK, "No workspaces found for this repository and branch")
-		return
-	}
-
-	logger.Infof("Found %d workspace(s) for repository %s, branch %s", len(workspaces), repositoryFullName, branchName)
-	for _, ws := range workspaces {
-		logger.Infof("Workspace %s - working_directory=%q, vcs_repository=%q, vcs_branch=%q",
-			ws.ID, ws.WorkingDirectory, ws.VCSRepository, ws.VCSBranch)
-	}
+	installationID := strconv.FormatInt(pushEvent.Installation.ID, 10)
 
 	// Collect all changed files from commits for path-based filtering
-	commitsForCheck := make([]struct {
-		Added    []string `json:"added"`
-		Removed  []string `json:"removed"`
-		Modified []string `json:"modified"`
-	}, len(pushEvent.Commits))
+	commitsForCheck := make([]pushCommitFiles, len(pushEvent.Commits))
 	allChangedFilesList := make([]string, 0)
 	for i, commit := range pushEvent.Commits {
-		commitsForCheck[i] = struct {
-			Added    []string `json:"added"`
-			Removed  []string `json:"removed"`
-			Modified []string `json:"modified"`
-		}{
-			Added:    commit.Added,
-			Removed:  commit.Removed,
-			Modified: commit.Modified,
-		}
+		commitsForCheck[i] = pushCommitFiles{Added: commit.Added, Removed: commit.Removed, Modified: commit.Modified}
 		allChangedFilesList = append(allChangedFilesList, commit.Added...)
 		allChangedFilesList = append(allChangedFilesList, commit.Modified...)
 		allChangedFilesList = append(allChangedFilesList, commit.Removed...)
 	}
 	logger.Infof("Changed files in push: %v", allChangedFilesList)
+
+	// Find workspaces that match this repository and branch with AutoQueueRuns enabled. Finding
+	// none does not end the delivery: the repository's playbooks and inventories are synced below
+	// either way, because an Ansible resource is linked to its repository, not to a workspace.
+	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(repositoryFullName, branchName)
+	if err != nil {
+		logger.Errorf("Error finding workspaces for repository %s, branch %s: %v", repositoryFullName, branchName, err)
+		workspaces = nil
+	}
+	// AUD-102: only trigger workspaces connected through THIS delivery's installation.
+	workspaces = h.filterWorkspacesByInstallation(workspaces, installationID)
+	logger.Infof("Found %d workspace(s) for repository %s, branch %s", len(workspaces), repositoryFullName, branchName)
 
 	// Filter workspaces based on changed files and their WorkingDirectory paths (GitOps-style filtering)
 	filteredWorkspaces := make([]models.Workspace, 0)
@@ -1578,19 +1555,6 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 		} else {
 			logger.Infof("Workspace %s (path: %q) skipped - no files in its path were changed", workspace.ID, workspace.WorkingDirectory)
 		}
-	}
-
-	if len(filteredWorkspaces) == 0 {
-		logger.Infof("No workspaces match the changed files for repository %s, branch %s", repositoryFullName, branchName)
-		h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(pushEvent.Installation.ID, 10)), "push", "github", repositoryFullName, branchName, commitHash, "ignored",
-			fmt.Sprintf("No workspaces match changed files (%d workspace(s) exist but none match path)", len(workspaces)), http.StatusOK, string(payload))
-		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces match the changed files (found %d workspace(s) but none match path filters)", len(workspaces)))
-		return
-	}
-
-	logger.Infof("Filtered to %d workspace(s) that match changed files (from %d total)", len(filteredWorkspaces), len(workspaces))
-	if len(filteredWorkspaces) != len(workspaces) {
-		logger.Infof("Summary - %d workspace(s) filtered out due to path mismatch", len(workspaces)-len(filteredWorkspaces))
 	}
 
 	// Process each filtered workspace in background goroutines
@@ -1865,114 +1829,97 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 		}(workspace)
 	}
 
-	// Also sync VCS inventories that match this repository and branch
-	inventories, err := h.inventoryRepo.FindByVCSRepositoryAndBranch(repositoryFullName, branchName)
-	if err == nil {
-		// AUD-102: only sync inventories connected through THIS delivery's installation.
-		inventories = h.filterInventoriesByInstallation(inventories, strconv.FormatInt(pushEvent.Installation.ID, 10))
-	}
-	if err != nil {
-		logger.Errorf("Error finding inventories for repository %s, branch %s: %v", repositoryFullName, branchName, err)
-	} else if len(inventories) > 0 {
-		logger.Infof("Found %d inventory(ies) for repository %s, branch %s", len(inventories), repositoryFullName, branchName)
-		// Map commits to the format expected by isInventoryAffected
-		commitsForCheck := make([]struct {
-			Added    []string `json:"added"`
-			Removed  []string `json:"removed"`
-			Modified []string `json:"modified"`
-		}, len(pushEvent.Commits))
-		for i, commit := range pushEvent.Commits {
-			commitsForCheck[i] = struct {
-				Added    []string `json:"added"`
-				Removed  []string `json:"removed"`
-				Modified []string `json:"modified"`
-			}{
-				Added:    commit.Added,
-				Removed:  commit.Removed,
-				Modified: commit.Modified,
-			}
-		}
-		for _, inventory := range inventories {
-			// Check if inventory path was affected by this push
-			if h.isInventoryAffected(inventory, commitsForCheck) {
-				logger.Infof("Triggering sync for inventory: %s (ID: %s)", inventory.Name, inventory.ID)
-				if h.ansibleQueue != nil {
-					go func(inv models.AnsibleInventory) {
-						// Pre-resolve the clone URL server-side (same format the ansible-runner expects)
-						syncMsg := h.inventorySyncPayload(context.Background(), &inv)
-						if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-							logger.Errorf("Error queuing sync for inventory %s: %v", inv.ID, err)
-						}
-					}(inventory)
-				}
-			}
-		}
-	}
+	syncedInventories, syncedPlaybooks := h.syncAnsibleOnGitHubPush(repositoryFullName, branchName, installationID, commitsForCheck)
 
-	// Also sync VCS playbooks that match this repository and branch
-	if h.playbookRepo != nil {
-		playbooks, err := h.playbookRepo.ListByVCSRepositoryAndBranch(repositoryFullName, branchName)
-		if err == nil {
-			// Only sync playbooks connected through THIS delivery's installation.
-			playbooks = h.filterPlaybooksByInstallation(playbooks, strconv.FormatInt(pushEvent.Installation.ID, 10))
-		}
-		if err != nil {
-			logger.Errorf("Error finding playbooks for repository %s, branch %s: %v", repositoryFullName, branchName, err)
-		} else if len(playbooks) > 0 {
-			logger.Infof("Found %d playbook(s) for repository %s, branch %s", len(playbooks), repositoryFullName, branchName)
-			// Map commits to the format expected by isPlaybookAffected
-			commitsForCheck := make([]struct {
-				Added    []string `json:"added"`
-				Removed  []string `json:"removed"`
-				Modified []string `json:"modified"`
-			}, len(pushEvent.Commits))
-			for i, commit := range pushEvent.Commits {
-				commitsForCheck[i] = struct {
-					Added    []string `json:"added"`
-					Removed  []string `json:"removed"`
-					Modified []string `json:"modified"`
-				}{
-					Added:    commit.Added,
-					Removed:  commit.Removed,
-					Modified: commit.Modified,
-				}
-			}
-			for _, playbook := range playbooks {
-				// Check if playbook path was affected by this push
-				if h.isPlaybookAffected(playbook, commitsForCheck) {
-					logger.Infof("Triggering sync for playbook: %s (ID: %s)", playbook.Name, playbook.ID)
-					if h.ansibleQueue != nil {
-						go func(pb models.AnsiblePlaybook) {
-							// Use JSON marshaling to create the sync message (same format as ansible-runner expects)
-							syncMsg := map[string]interface{}{
-								"playbook_id": pb.ID.String(),
-							}
-							if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-								logger.Errorf("Error queuing sync for playbook %s: %v", pb.ID, err)
-							}
-						}(playbook)
-					}
-					h.launchWebhookTemplates(playbook.ID, playbook.Name, repositoryFullName, branchName)
-				}
-			}
-		}
-	}
-
-	// Build list of triggered workspace names for the webhook event message
-	var triggeredNames []string
-	for _, ws := range filteredWorkspaces {
-		triggeredNames = append(triggeredNames, ws.Name)
-	}
-	eventMessage := fmt.Sprintf("%d workspace(s) triggered", len(filteredWorkspaces))
-	if len(triggeredNames) > 0 {
-		eventMessage = fmt.Sprintf("%d workspace(s) triggered: %s", len(filteredWorkspaces), strings.Join(triggeredNames, ", "))
-	}
-
-	// Record webhook event
-	h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(pushEvent.Installation.ID, 10)), "push", "github", repositoryFullName, branchName, commitHash, "success",
+	status, eventMessage := pushEventSummary(filteredWorkspaces, syncedPlaybooks, syncedInventories)
+	h.recordWebhookEvent(h.orgFromInstallation(installationID), "push", "github", repositoryFullName, branchName, commitHash, status,
 		eventMessage, http.StatusOK, string(payload))
 
-	response.Message(c, http.StatusOK, fmt.Sprintf("Branch push event processed: %d workspace(s) queued (filtered from %d total)", len(filteredWorkspaces), len(workspaces)))
+	response.Message(c, http.StatusOK, "Branch push event processed: "+eventMessage)
+}
+
+// pushCommitFiles is the files one pushed commit added, removed and modified, the shape the
+// path checks (isWorkspaceAffected, isInventoryAffected, isPlaybookAffected) take.
+type pushCommitFiles = struct {
+	Added    []string `json:"added"`
+	Removed  []string `json:"removed"`
+	Modified []string `json:"modified"`
+}
+
+// syncAnsibleOnGitHubPush syncs the VCS inventories and playbooks a GitHub push reaches, and
+// launches their webhook-enabled job templates. It runs whether or not the push also triggered a
+// workspace: a playbook or inventory is linked to its repository and branch, not to a Terraform
+// workspace. Only resources connected through the delivery's installation, and whose path the
+// push changed, are synced. Returns how many inventories and playbooks were synced.
+func (h *VCSAppInstallationHandlerV2) syncAnsibleOnGitHubPush(repositoryFullName, branchName, installationID string, commits []pushCommitFiles) (syncedInventories, syncedPlaybooks int) {
+	inventories, err := h.inventoryRepo.FindByVCSRepositoryAndBranch(repositoryFullName, branchName)
+	if err != nil {
+		logger.Errorf("Error finding inventories for repository %s, branch %s: %v", repositoryFullName, branchName, err)
+	}
+	// AUD-102: only sync inventories connected through THIS delivery's installation.
+	for _, inventory := range h.filterInventoriesByInstallation(inventories, installationID) {
+		if !h.isInventoryAffected(inventory, commits) {
+			continue
+		}
+		logger.Infof("Triggering sync for inventory: %s (ID: %s)", inventory.Name, inventory.ID)
+		syncedInventories++
+		if h.ansibleQueue != nil {
+			go func(inv models.AnsibleInventory) {
+				// Pre-resolve the clone URL server-side (same format the ansible-runner expects)
+				syncMsg := h.inventorySyncPayload(context.Background(), &inv)
+				if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
+					logger.Errorf("Error queuing sync for inventory %s: %v", inv.ID, err)
+				}
+			}(inventory)
+		}
+	}
+
+	if h.playbookRepo == nil {
+		return syncedInventories, syncedPlaybooks
+	}
+	playbooks, err := h.playbookRepo.ListByVCSRepositoryAndBranch(repositoryFullName, branchName)
+	if err != nil {
+		logger.Errorf("Error finding playbooks for repository %s, branch %s: %v", repositoryFullName, branchName, err)
+	}
+	// Only sync playbooks connected through THIS delivery's installation.
+	for _, playbook := range h.filterPlaybooksByInstallation(playbooks, installationID) {
+		if !h.isPlaybookAffected(playbook, commits) {
+			continue
+		}
+		logger.Infof("Triggering sync for playbook: %s (ID: %s)", playbook.Name, playbook.ID)
+		syncedPlaybooks++
+		if h.ansibleQueue != nil {
+			go func(pb models.AnsiblePlaybook) {
+				syncMsg := map[string]interface{}{"playbook_id": pb.ID.String()}
+				if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
+					logger.Errorf("Error queuing sync for playbook %s: %v", pb.ID, err)
+				}
+			}(playbook)
+		}
+		h.launchWebhookTemplates(playbook.ID, playbook.Name, repositoryFullName, branchName)
+	}
+	return syncedInventories, syncedPlaybooks
+}
+
+// pushEventSummary is the webhook-event status and message for a push: "ignored" when it
+// reached nothing, otherwise "success". Ansible counts come first, because the Webhooks page
+// reads the workspace names from the end of the message ("N workspace(s) triggered: a, b").
+func pushEventSummary(workspaces []models.Workspace, syncedPlaybooks, syncedInventories int) (status, message string) {
+	if len(workspaces) == 0 && syncedPlaybooks == 0 && syncedInventories == 0 {
+		return "ignored", "No workspace, playbook or inventory tracks the changed files"
+	}
+	names := make([]string, 0, len(workspaces))
+	for _, ws := range workspaces {
+		names = append(names, ws.Name)
+	}
+	message = fmt.Sprintf("%d workspace(s) triggered", len(workspaces))
+	if len(names) > 0 {
+		message += ": " + strings.Join(names, ", ")
+	}
+	if syncedPlaybooks > 0 || syncedInventories > 0 {
+		message = fmt.Sprintf("%d playbook(s) and %d inventory(ies) synced; %s", syncedPlaybooks, syncedInventories, message)
+	}
+	return "success", message
 }
 
 // handlePullRequestEvent handles GitHub pull request events for speculative plans
