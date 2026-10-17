@@ -183,7 +183,7 @@ func (h *VCSAppInstallationHandlerV2) playbookSyncPayload(ctx context.Context, p
 	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || pb.VCSConnectionID == nil || pb.VCSRepository == "" {
 		return payload
 	}
-	conn, err := coreansible.PlaybookVCSConnection(h.vcsConnectionRepo.OrganizationScope().WithContext(ctx), pb.ProjectID, *pb.VCSConnectionID)
+	conn, err := h.playbookConnection(ctx, pb)
 	if err != nil {
 		logger.Warnf("Playbook %s: failed to load VCS connection for clone-URL pre-resolution: %v", pb.ID, err)
 		return payload
@@ -683,7 +683,7 @@ func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
 	case "pull_request":
 		h.handleAzureDevOpsPullRequestEvent(c, wp, payload)
 	default:
-		h.recordWebhookEvent(nil, wp.EventType, "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
+		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), wp.EventType, "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
 			fmt.Sprintf("Event type %q not handled", wp.EventType), http.StatusOK, string(payload))
 		response.Message(c, http.StatusOK, fmt.Sprintf("Event type %q ignored", wp.EventType))
 	}
@@ -701,7 +701,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	workspaces = h.filterWorkspacesByADOOrg(workspaces, wp.Organization)
 
 	if len(workspaces) == 0 {
-		h.recordWebhookEvent(nil, "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
+		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
 			"No workspaces with AutoQueueRuns enabled", http.StatusOK, string(payload))
 		response.Message(c, http.StatusOK, "No workspaces found for this repository and branch")
 		return
@@ -717,7 +717,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	}
 
 	if len(filteredWorkspaces) == 0 {
-		h.recordWebhookEvent(nil, "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
+		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
 			fmt.Sprintf("No workspaces match changed files (%d exist)", len(workspaces)), http.StatusOK, string(payload))
 		response.Message(c, http.StatusOK, "No workspaces match the changed files")
 		return
@@ -901,6 +901,8 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	}
 	if h.playbookRepo != nil {
 		playbooks, _ := h.playbookRepo.ListByVCSRepositoryAndBranch(wp.Repository, branchName)
+		// Only sync playbooks connected through THIS delivery's Azure DevOps organization.
+		playbooks = h.filterPlaybooksByADOOrg(playbooks, wp.Organization)
 		for _, playbook := range playbooks {
 			pb := playbook
 			if h.ansibleQueue != nil {
@@ -919,7 +921,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	for _, ws := range filteredWorkspaces {
 		triggeredNames = append(triggeredNames, ws.Name)
 	}
-	h.recordWebhookEvent(nil, "push", "azure_devops", wp.Repository, branchName, commitHash, "success",
+	h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, branchName, commitHash, "success",
 		fmt.Sprintf("%d workspace(s) triggered: %s", len(filteredWorkspaces), strings.Join(triggeredNames, ", ")),
 		http.StatusOK, string(payload))
 
@@ -956,7 +958,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 	}
 
 	if len(filteredWorkspaces) == 0 {
-		h.recordWebhookEvent(nil, "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
+		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
 			"No workspaces with speculative plans enabled", http.StatusOK, string(payload))
 		response.Message(c, http.StatusOK, "No workspaces with speculative plans enabled")
 		return
@@ -975,7 +977,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 		h.postUntriggeredPassingStatusesADO(context.Background(),
 			splitUntriggeredWorkspaces(filteredWorkspaces, pathFiltered), wp.PRNumber)
 		if len(pathFiltered) == 0 {
-			h.recordWebhookEvent(nil, "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
+			h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
 				fmt.Sprintf("No workspaces match changed files (%d with speculative enabled)", len(filteredWorkspaces)),
 				http.StatusOK, string(payload))
 			response.Message(c, http.StatusOK, "No workspaces match the changed files")
@@ -1204,7 +1206,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 	for _, ws := range filteredWorkspaces {
 		triggeredNames = append(triggeredNames, ws.Name)
 	}
-	h.recordWebhookEvent(nil, "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, commitHash, "success",
+	h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, commitHash, "success",
 		fmt.Sprintf("PR #%d: %d workspace(s) triggered: %s", wp.PRNumber, len(filteredWorkspaces), strings.Join(triggeredNames, ", ")),
 		http.StatusOK, string(payload))
 
@@ -1215,9 +1217,8 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 // delivery came from. AUD-124: webhook events must be attributed to the *validated*
 // installation's org, not "the first workspace matching this repo name" - otherwise an
 // attacker who installs the app on a same-named repo files their payloads into a victim
-// org's webhook-event log. Returns nil when the installation can't be resolved, so the
-// caller falls back to the (untrusted) repo-name heuristic only when there is no better
-// signal (e.g. Azure DevOps, whose installation binding is the AUD-102 residual).
+// org's webhook-event log. Returns nil when the installation can't be resolved, and the event
+// is then recorded with no org.
 func (h *VCSAppInstallationHandlerV2) orgFromInstallation(installationID string) *uuid.UUID {
 	if h.vcsConnectionRepo == nil || installationID == "" || installationID == "0" {
 		return nil
@@ -1230,41 +1231,38 @@ func (h *VCSAppInstallationHandlerV2) orgFromInstallation(installationID string)
 	return &id
 }
 
-// recordWebhookEvent records a webhook event for debugging and auditing. When trustedOrgID
-// is non-nil (derived from the validated installation, AUD-124) the event is attributed to
-// that org; otherwise it falls back to a best-effort repo-name lookup.
+// orgFromADOOrg is the Azure DevOps counterpart of orgFromInstallation: the organization of the
+// connection made for the delivery's Azure DevOps organization. That name was proven with the
+// connecting user's own token when the connection was made (ValidateTokenAndOrg), so it is the
+// Azure DevOps equivalent of a validated installation. Returns nil when no connection is for it.
+func (h *VCSAppInstallationHandlerV2) orgFromADOOrg(adoOrg string) *uuid.UUID {
+	if h.vcsConnectionRepo == nil || adoOrg == "" {
+		return nil
+	}
+	conn, err := h.vcsConnectionRepo.GetByProviderAndAccountName(models.VCSProviderAzureDevOps, adoOrg)
+	if err != nil || conn.OrganizationID == uuid.Nil {
+		return nil
+	}
+	id := conn.OrganizationID
+	return &id
+}
+
+// recordWebhookEvent records a webhook event for debugging and auditing, in the organization
+// the delivery was proven to come from: the one connected through its GitHub App installation
+// (orgFromInstallation) or its Azure DevOps organization (orgFromADOOrg). Without such an
+// organization the event is recorded with none.
+//
+// It never guesses an organization from the repository name. Repository names are not unique
+// across Azure DevOps organizations, and anyone can name a repository after another's, so a
+// guess files one tenant's deliveries, payload included, into another tenant's event log.
 func (h *VCSAppInstallationHandlerV2) recordWebhookEvent(trustedOrgID *uuid.UUID, eventType, provider, repoFullName, branch, commit, status, message string, responseCode int, payload string) {
 	if h.webhookEventRepo == nil {
 		return
 	}
 
-	// AUD-124: prefer the org bound to the validated installation. Only fall back to the
-	// repo-name heuristic when no trusted org was supplied - a same-named repo in another
-	// org must never redirect attribution.
 	orgID := trustedOrgID
-	if orgID == nil && repoFullName != "" {
-		// Try to find any workspace matching this repository (regardless of branch or auto_queue_runs)
-		workspaces, err := h.workspaceRepo.FindByVCSRepository(repoFullName)
-		if err == nil && len(workspaces) > 0 {
-			// Get organization from the first workspace's project
-			if workspaces[0].Project.Organization.ID != uuid.Nil {
-				id := workspaces[0].Project.Organization.ID
-				orgID = &id
-			}
-		}
-		// If no workspace found, try modules
-		if orgID == nil && h.moduleRepo != nil {
-			modules, err := h.moduleRepo.FindByVCSRepository(repoFullName)
-			if err == nil && len(modules) > 0 && modules[0].OrganizationID != uuid.Nil {
-				id := modules[0].OrganizationID
-				orgID = &id
-			}
-		}
-	}
-
-	// If we couldn't find an org, just log - event will be recorded without org
 	if orgID == nil {
-		logger.Infof("Could not determine organization for repository %s, recording without org", repoFullName)
+		logger.Infof("Webhook delivery for repository %s comes from no connected installation or organization, recording without org", repoFullName)
 	}
 
 	event := &models.WebhookEvent{
@@ -1418,6 +1416,72 @@ func (h *VCSAppInstallationHandlerV2) filterInventoriesByADOOrg(inventories []mo
 			continue
 		}
 		kept = append(kept, inv)
+	}
+	return kept
+}
+
+// playbookConnection loads the VCS connection a playbook names, within the organization of the
+// playbook's project. A playbook row that names another organization's connection gets none.
+// The playbook must name a connection.
+func (h *VCSAppInstallationHandlerV2) playbookConnection(ctx context.Context, pb *models.AnsiblePlaybook) (*models.VCSConnection, error) {
+	return coreansible.PlaybookVCSConnection(h.vcsConnectionRepo.OrganizationScope().WithContext(ctx), pb.ProjectID, *pb.VCSConnectionID)
+}
+
+// filterPlaybooksByInstallation keeps the playbooks connected through the delivery's GitHub App
+// installation, as filterWorkspacesByInstallation does for workspaces. A push syncs a matched
+// playbook and launches its webhook-enabled job templates, so a playbook matched by repository
+// name alone would let a delivery for one installation run another organization's jobs.
+func (h *VCSAppInstallationHandlerV2) filterPlaybooksByInstallation(playbooks []models.AnsiblePlaybook, installationID string) []models.AnsiblePlaybook {
+	kept := make([]models.AnsiblePlaybook, 0, len(playbooks))
+	for _, pb := range playbooks {
+		if pb.VCSConnectionID == nil {
+			continue
+		}
+		conn, err := h.playbookConnection(context.Background(), &pb)
+		if err != nil || conn == nil || conn.InstallationID == "" || conn.InstallationID != installationID {
+			logger.Warnf("webhook: playbook %s connection installation does not match delivery installation %q; skipping", pb.ID, installationID)
+			continue
+		}
+		kept = append(kept, pb)
+	}
+	return kept
+}
+
+// filterPlaybooksByADOOrg is the Azure DevOps counterpart of filterPlaybooksByInstallation. Azure
+// DevOps repository names (project/repository) are only unique within one Azure DevOps
+// organization, so this binding is what tells two tenants' same-named repositories apart. Fails
+// closed: an empty or unresolved delivery organization keeps nothing.
+func (h *VCSAppInstallationHandlerV2) filterPlaybooksByADOOrg(playbooks []models.AnsiblePlaybook, adoOrg string) []models.AnsiblePlaybook {
+	kept := make([]models.AnsiblePlaybook, 0, len(playbooks))
+	for _, pb := range playbooks {
+		if pb.VCSConnectionID == nil {
+			continue
+		}
+		conn, err := h.playbookConnection(context.Background(), &pb)
+		if err != nil || conn == nil || conn.Provider != models.VCSProviderAzureDevOps || adoOrg == "" || !strings.EqualFold(conn.AccountName, adoOrg) {
+			logger.Warnf("webhook: playbook %s connection Azure DevOps organization does not match delivery organization %q; skipping", pb.ID, adoOrg)
+			continue
+		}
+		kept = append(kept, pb)
+	}
+	return kept
+}
+
+// filterModulesByInstallation keeps the registry modules connected through the delivery's GitHub
+// App installation. A tag push publishes a version of every matched module, so a module matched
+// by repository name alone would publish into another organization's registry.
+func (h *VCSAppInstallationHandlerV2) filterModulesByInstallation(modules []models.Module, installationID string) []models.Module {
+	kept := make([]models.Module, 0, len(modules))
+	for _, m := range modules {
+		if m.VCSConnectionID == nil {
+			continue
+		}
+		conn, err := h.vcsConnectionRepo.OrganizationScope().VCSConnection(*m.VCSConnectionID, m.OrganizationID)
+		if err != nil || conn == nil || conn.InstallationID == "" || conn.InstallationID != installationID {
+			logger.Warnf("webhook: module %s connection installation does not match delivery installation %q; skipping", m.ID, installationID)
+			continue
+		}
+		kept = append(kept, m)
 	}
 	return kept
 }
@@ -1746,6 +1810,8 @@ func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []
 		response.Message(c, http.StatusOK, fmt.Sprintf("No modules found for repository: %v", err))
 		return
 	}
+	// Only modules connected through this delivery's installation publish its tag.
+	modules = h.filterModulesByInstallation(modules, strconv.FormatInt(pushEvent.Installation.ID, 10))
 
 	if len(modules) == 0 {
 		logger.Infof("No modules found for repository %s (auto-publish enabled)", repositoryFullName)
@@ -2225,6 +2291,10 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 	// Also sync VCS playbooks that match this repository and branch
 	if h.playbookRepo != nil {
 		playbooks, err := h.playbookRepo.ListByVCSRepositoryAndBranch(repositoryFullName, branchName)
+		if err == nil {
+			// Only sync playbooks connected through THIS delivery's installation.
+			playbooks = h.filterPlaybooksByInstallation(playbooks, strconv.FormatInt(pushEvent.Installation.ID, 10))
+		}
 		if err != nil {
 			logger.Errorf("Error finding playbooks for repository %s, branch %s: %v", repositoryFullName, branchName, err)
 		} else if len(playbooks) > 0 {
