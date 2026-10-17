@@ -127,10 +127,9 @@ func TestGitHubInstallation_RouterTakesAPersonWhoCanAccessTheInstallation(t *tes
 	}
 	complete := func(t *testing.T, installation, code, state string) *httptest.ResponseRecorder {
 		t.Helper()
-		body := "{}"
-		if code != "" {
-			body = fmt.Sprintf(`{"code":%q}`, code)
-		}
+		// #858: the code travels in a vcs-connections document; an empty one is sent as such, so
+		// that GitHub's refusal of it is what answers.
+		body := fmt.Sprintf(`{"data":{"type":"vcs-connections","attributes":{"code":%q}}}`, code)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 			base+"/installations/"+installation+"?state="+url.QueryEscape(state), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -217,7 +216,8 @@ func TestVCSConnectionCreate_TakesNoInstallation(t *testing.T) {
 
 	for _, provider := range []string{"github", "gitlab"} {
 		t.Run("refused for "+provider, func(t *testing.T) {
-			rec := post(t, `{"provider":"`+provider+`","installation_id":"222","access_token":"not-a-real-token","account_name":"acme","account_type":"organization"}`)
+			// #858: the create is a vcs-connections document, and the refusal reads its attributes.
+			rec := post(t, `{"data":{"type":"vcs-connections","attributes":{"provider":"`+provider+`","installation_id":"222","access_token":"not-a-real-token","account_name":"acme","account_type":"organization"}}}`)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("got %d, want 400.\nbody: %s", rec.Code, rec.Body.String())
 			}
@@ -238,7 +238,7 @@ func TestVCSConnectionCreate_TakesNoInstallation(t *testing.T) {
 	}
 
 	t.Run("an empty installation_id names none", func(t *testing.T) {
-		rec := post(t, `{"provider":"gitlab","installation_id":"","access_token":"not-a-real-token","account_name":"acme","account_type":"organization"}`)
+		rec := post(t, `{"data":{"type":"vcs-connections","attributes":{"provider":"gitlab","installation_id":"","access_token":"not-a-real-token","account_name":"acme","account_type":"organization"}}}`)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("got %d, want 201.\nbody: %s", rec.Code, rec.Body.String())
 		}

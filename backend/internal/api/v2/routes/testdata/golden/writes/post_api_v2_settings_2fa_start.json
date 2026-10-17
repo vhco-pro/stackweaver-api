@@ -6,7 +6,9 @@
   },
   "status": 200,
   "response": {
-    "secret": "\u003csecret\u003e",
-    "url": "\u003csecret\u003e"
+    "meta": {
+      "secret": "\u003csecret\u003e",
+      "url": "\u003csecret\u003e"
+    }
   }
 }

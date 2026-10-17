@@ -280,15 +280,16 @@ func TestAzureDevOpsInstallation_IssuesStateOnlyWithThePermission(t *testing.T) 
 // providerURL is the URL a start answers with, the GitHub install URL or the Azure DevOps
 // authorization URL, or "" for a refusal.
 func providerURL(rec *httptest.ResponseRecorder) string {
+	// The URL is meta alone, a value computed for this request (#858, D6).
 	var doc struct {
-		Data struct {
-			InstallURL string `json:"install_url"`
-			AuthURL    string `json:"auth_url"`
-		} `json:"data"`
+		Meta struct {
+			InstallURL string `json:"install-url"`
+			AuthURL    string `json:"auth-url"`
+		} `json:"meta"`
 	}
 	// A refusal has no such member; an unparseable body leaves both empty.
 	_ = json.Unmarshal(rec.Body.Bytes(), &doc)
-	return doc.Data.InstallURL + doc.Data.AuthURL
+	return doc.Meta.InstallURL + doc.Meta.AuthURL
 }
 
 // Completing a GitHub App installation takes the state the caller's own start issued, on top of

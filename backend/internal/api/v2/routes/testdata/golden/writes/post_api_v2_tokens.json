@@ -4,21 +4,43 @@
   "request": {
     "content_type": "application/json",
     "body": {
-      "description": "Laptop CLI",
-      "expires_at": "\u003ctimestamp\u003e"
+      "data": {
+        "attributes": {
+          "description": "Laptop CLI",
+          "expires_at": "\u003ctimestamp\u003e"
+        },
+        "type": "tokens"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "description": {
-          "type": "string"
-        },
-        "expires_at": {
-          "type": "string",
-          "format": "date-time",
-          "nullable": true
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
-      }
+      },
+      "required": [
+        "data"
+      ]
     },
     "schema_source": "type",
     "bound_type": "handlers.CreateTokenRequestV2"

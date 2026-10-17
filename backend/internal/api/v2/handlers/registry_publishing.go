@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -109,6 +108,30 @@ func (h *RegistryPublishingHandler) resolveUserAndOrg(c *gin.Context, orgName st
 	return user, org, true
 }
 
+// CreateRegistryModuleRequest is the registry-modules document a module is created from (#858,
+// D6). Its attributes keep the snake_case spelling the registry-modules resource answers with (D3).
+type CreateRegistryModuleRequest struct {
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Name            string     `json:"name" binding:"required"`
+			Provider        string     `json:"provider" binding:"required"`
+			Description     string     `json:"description"`
+			VCSConnectionID *uuid.UUID `json:"vcs_connection_id,omitempty"`
+			VCSRepository   string     `json:"vcs_repository,omitempty"`
+			AutoPublishTags *bool      `json:"auto_publish_tags"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *CreateRegistryModuleRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
+}
+
 // CreateModule handles POST /api/v2/organizations/:name/registry/modules
 func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 	orgName := c.Param("name")
@@ -119,20 +142,11 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 		return
 	}
 
-	// Parse request body
-	var req struct {
-		Name            string     `json:"name" binding:"required"`
-		Provider        string     `json:"provider" binding:"required"`
-		Description     string     `json:"description"`
-		VCSConnectionID *uuid.UUID `json:"vcs_connection_id,omitempty"`
-		VCSRepository   string     `json:"vcs_repository,omitempty"`
-		AutoPublishTags *bool      `json:"auto_publish_tags"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	var body CreateRegistryModuleRequest
+	if !jsonapi.BindDocument(c, &body, "registry-modules") {
 		return
 	}
+	req := body.Data.Attributes
 
 	// A sent auto_publish_tags is stored as sent. When the key is absent the module publishes from
 	// tags exactly when it has a VCS connection to publish from, which is the rule the create
@@ -257,7 +271,7 @@ func (h *RegistryPublishingHandler) DeleteModule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusNoContent, nil)
+	c.Status(http.StatusNoContent)
 }
 
 // DeleteAllModules handles DELETE /api/v2/organizations/:name/registry/modules
@@ -307,7 +321,8 @@ func (h *RegistryPublishingHandler) DeleteAllModules(c *gin.Context) {
 		}
 	}
 
-	response.Message(c, http.StatusOK, fmt.Sprintf("Deleted %d module(s)", deleted))
+	// Nothing to answer with: the modules are gone, as with the other registry deletes (#858, D6).
+	c.Status(http.StatusNoContent)
 }
 
 // ListModules handles GET /api/v2/organizations/:name/registry/modules
@@ -692,5 +707,5 @@ func (h *RegistryPublishingHandler) DeleteModuleVersion(c *gin.Context) {
 	}
 
 	logger.Infof("Deleted module version %s/%s/%s@%s", orgName, moduleName, provider, versionStr)
-	c.JSON(http.StatusNoContent, nil)
+	c.Status(http.StatusNoContent)
 }

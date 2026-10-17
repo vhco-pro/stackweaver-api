@@ -885,7 +885,7 @@ func (h *TeamHandlerV2) GetByID(c *gin.Context) {
 		response.Included = included
 	}
 
-	c.JSON(http.StatusOK, response)
+	jsonapi.WriteDoc(c, http.StatusOK, response)
 }
 
 // UpdateByID updates a team by ID (TFE-compatible)

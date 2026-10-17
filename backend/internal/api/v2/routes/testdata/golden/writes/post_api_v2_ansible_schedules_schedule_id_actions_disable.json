@@ -6,6 +6,35 @@
   },
   "status": 200,
   "response": {
-    "message": "Schedule disabled"
+    "data": {
+      "attributes": {
+        "config": {},
+        "created-at": "\u003ctimestamp\u003e",
+        "cron-expression": "0 2 * * *",
+        "description": "Applies the patch baseline across the fleet overnight.",
+        "name": "nightly-patch-baseline",
+        "next-run-at": "\u003ctimestamp\u003e",
+        "schedule-type": "job_template",
+        "status": "disabled",
+        "timezone": "UTC",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "job-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "schedules"
+    }
   }
 }

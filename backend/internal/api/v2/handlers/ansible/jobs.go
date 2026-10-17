@@ -951,7 +951,8 @@ func (h *JobHandler) GetOutput(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, output)
+	// The output is a text stream, so it is served as text, the way the run logs are (#858, D1).
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(output))
 }
 
 // LaunchFromTemplate launches a job from a template

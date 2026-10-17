@@ -1,0 +1,88 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/account/update",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "data": {
+        "attributes": {
+          "bio": "Recorded by the golden write harness",
+          "company": "VH \u0026 Co",
+          "email": "golden.recorder@stackweaver.local",
+          "location": "Antwerp, Belgium",
+          "name": "Golden Recorder",
+          "username": "\u003clogin-name\u003e"
+        },
+        "type": "users"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "bio": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "company": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "email": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "location": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "username": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.UpdateAccountRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "avatar-url": "",
+        "bio": "Recorded by the golden write harness",
+        "company": "VH \u0026 Co",
+        "created-at": "\u003ctimestamp\u003e",
+        "email": "golden.recorder@stackweaver.local",
+        "is-service-account": false,
+        "location": "Antwerp, Belgium",
+        "name": "Golden Recorder",
+        "updated-at": "\u003ctimestamp\u003e",
+        "username": "\u003clogin-name\u003e",
+        "v2-only": true
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "users"
+    }
+  }
+}

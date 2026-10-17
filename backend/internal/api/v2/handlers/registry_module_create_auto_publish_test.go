@@ -96,7 +96,7 @@ func TestRegistryModuleCreate_AutoPublishTagsIsStoredAsSent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			name := "autopub-" + uuid.NewString()[:8]
 			repo := ""
-			// The create body is flat JSON, not a JSON:API document.
+			// The create body is a registry-modules document (#858) with snake_case attributes.
 			req := map[string]any{"name": name, "provider": "aws"}
 			if tc.vcsConnected {
 				repo = "explicit-zero-871/" + name
@@ -106,7 +106,7 @@ func TestRegistryModuleCreate_AutoPublishTagsIsStoredAsSent(t *testing.T) {
 			if tc.autoPublish != nil {
 				req[attr] = *tc.autoPublish
 			}
-			raw, err := json.Marshal(req)
+			raw, err := json.Marshal(map[string]any{"data": map[string]any{"type": "registry-modules", "attributes": req}})
 			if err != nil {
 				t.Fatalf("marshal request: %v", err)
 			}

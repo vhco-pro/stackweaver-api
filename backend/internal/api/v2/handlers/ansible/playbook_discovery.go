@@ -175,7 +175,11 @@ func (h *PlaybookHandler) ListPlaybookFiles(c *gin.Context) {
 		return
 	}
 
-	provider, err := h.vcsRegistry.GetProvider(dc.conn)
+	if h.providers == nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "VCS providers are not configured")
+		return
+	}
+	provider, err := h.providers.GetProvider(dc.conn)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to resolve VCS provider: %v", err))
 		return
@@ -200,31 +204,54 @@ func (h *PlaybookHandler) ListPlaybookFiles(c *gin.Context) {
 		return
 	}
 
-	entries := make([]DiscoveredPlaybook, 0, len(candidates))
+	// Each candidate is an ansible-playbook-files resource keyed by its path, and a registered
+	// one relates to its playbook. The listing is the provider's file tree in one response, so
+	// it states no totals and no next page (#858, D5).
+	entries := make([]jsonapi.Resource[PlaybookFileAttributes], 0, len(candidates))
 	for _, filePath := range candidates {
-		entry := DiscoveredPlaybook{Path: filePath, Name: path.Base(filePath)}
+		entry := jsonapi.Resource[PlaybookFileAttributes]{
+			ID:         filePath,
+			Type:       "ansible-playbook-files",
+			Attributes: PlaybookFileAttributes{Name: path.Base(filePath)},
+		}
 		if pb, ok := registered[filePath]; ok {
-			entry.Registered = true
-			entry.PlaybookID = pb.ID.String()
-			entry.PlaybookName = pb.Name
+			entry.Attributes.Registered = true
+			entry.Relationships = PlaybookFileRelationships{Playbook: jsonapi.ToOne(pb.ID.String(), "ansible-playbooks")}
 		}
 		entries = append(entries, entry)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, entries)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, entries, jsonapi.NewProviderListMeta(len(entries)))
 }
 
-// BulkImportRequest is the body of the bulk-import action.
+// playbooksType is the resource type of the two playbook import documents.
+const playbooksType = "ansible-playbooks"
+
+// BulkImportRequest is the bulk-import document (#858, D5): one repository and branch, and the
+// files to register from it.
 type BulkImportRequest struct {
-	ProjectID       string `json:"project_id"`
-	VCSConnectionID string `json:"vcs_connection_id"`
-	Repository      string `json:"repository"`
-	Branch          string `json:"branch"`
-	SourceMode      string `json:"source_mode"`
-	Playbooks       []struct {
-		Path string `json:"path"`
-		Name string `json:"name"`
-	} `json:"playbooks"`
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			ProjectID       string `json:"project-id"`
+			VCSConnectionID string `json:"vcs-connection-id"`
+			Repository      string `json:"repository"`
+			Branch          string `json:"branch"`
+			SourceMode      string `json:"source-mode"`
+			Playbooks       []struct {
+				Path string `json:"path"`
+				Name string `json:"name"`
+			} `json:"playbooks"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *BulkImportRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
 }
 
 // importOnePlaybook finds or creates a single playbook for (project, connection,
@@ -274,11 +301,11 @@ func (h *PlaybookHandler) importOnePlaybook(
 // BulkImportPlaybooks registers many playbooks from one repository in one call.
 // POST /api/v2/organizations/:name/ansible/playbooks/actions/bulk-import
 func (h *PlaybookHandler) BulkImportPlaybooks(c *gin.Context) {
-	var req BulkImportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	var body BulkImportRequest
+	if !jsonapi.BindDocument(c, &body, playbooksType) {
 		return
 	}
+	req := body.Data.Attributes
 	if len(req.Playbooks) == 0 || len(req.Playbooks) > maxBulkImportEntries {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("playbooks must contain between 1 and %d entries", maxBulkImportEntries))
 		return
@@ -304,45 +331,56 @@ func (h *PlaybookHandler) BulkImportPlaybooks(c *gin.Context) {
 		return
 	}
 
-	results := make([]BulkImportResult, 0, len(req.Playbooks))
-	created, skipped, failed := 0, 0, 0
+	// The playbooks that exist afterwards, created and skipped alike, are the resources; the
+	// tallies and the rows that failed are the outcome around them (#858, D1).
+	playbooks := make([]jsonapi.Resource[PlaybookAttributes], 0, len(req.Playbooks))
+	meta := BulkImportMeta{FailedRows: []BulkImportFailure{}}
 	for _, entry := range req.Playbooks {
 		playbook, wasCreated, err := h.importOnePlaybook(registered, projectID, dc.conn.ID, req.Repository, req.Branch, entry.Path, entry.Name, req.SourceMode)
 		switch {
 		case err != nil:
-			failed++
-			results = append(results, BulkImportResult{Path: entry.Path, Status: "failed", Error: err.Error()})
+			meta.Failed++
+			meta.FailedRows = append(meta.FailedRows, BulkImportFailure{Path: entry.Path, Error: err.Error()})
+			continue
 		case wasCreated:
-			created++
-			results = append(results, BulkImportResult{Path: entry.Path, Status: "created", PlaybookID: playbook.ID.String(), Name: playbook.Name})
+			meta.Created++
 		default:
-			skipped++
-			results = append(results, BulkImportResult{Path: entry.Path, Status: "skipped", PlaybookID: playbook.ID.String(), Name: playbook.Name})
+			meta.Skipped++
 		}
+		playbooks = append(playbooks, h.playbookResponse(c.Request.Context(), playbook))
 	}
 
-	if created > 0 {
+	if meta.Created > 0 {
 		// Webhook registration is per-repository, not per-playbook: once per import.
 		h.maybeRegisterADOWebhook(dc.conn, req.Repository)
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, BulkImportResponse{
-		Results: results,
-		Created: created,
-		Skipped: skipped,
-		Failed:  failed,
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, playbooks, meta)
 }
 
-// FindOrCreateRequest is the body of the find-or-create action.
+// FindOrCreateRequest is the find-or-create document (#858, D5): the bulk import's attributes
+// for a single file.
 type FindOrCreateRequest struct {
-	ProjectID       string `json:"project_id"`
-	VCSConnectionID string `json:"vcs_connection_id"`
-	Repository      string `json:"repository"`
-	Branch          string `json:"branch"`
-	Path            string `json:"path"`
-	Name            string `json:"name"`
-	SourceMode      string `json:"source_mode"`
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			ProjectID       string `json:"project-id"`
+			VCSConnectionID string `json:"vcs-connection-id"`
+			Repository      string `json:"repository"`
+			Branch          string `json:"branch"`
+			Path            string `json:"path"`
+			Name            string `json:"name"`
+			SourceMode      string `json:"source-mode"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *FindOrCreateRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
 }
 
 // FindOrCreatePlaybook returns the playbook registered for (project, connection,
@@ -350,11 +388,11 @@ type FindOrCreateRequest struct {
 // playbook, 201 when created.
 // POST /api/v2/organizations/:name/ansible/playbooks/actions/find-or-create
 func (h *PlaybookHandler) FindOrCreatePlaybook(c *gin.Context) {
-	var req FindOrCreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	var body FindOrCreateRequest
+	if !jsonapi.BindDocument(c, &body, playbooksType) {
 		return
 	}
+	req := body.Data.Attributes
 	if req.Repository == "" || !strings.Contains(req.Repository, "/") || req.Path == "" || req.Branch == "" {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "repository (owner/repo), branch, and path are required")
 		return

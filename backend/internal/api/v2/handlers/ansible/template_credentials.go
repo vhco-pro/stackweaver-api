@@ -113,6 +113,24 @@ func (h *PlaybookHandler) ListTemplateCredentials(c *gin.Context) {
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
+// CredentialIdentifierRequest attaches an existing credential by identity alone, so its data is
+// a resource identifier object: {"data": {"type": "ansible-credentials", "id": "<uuid>"}}
+// (#858, D5).
+type CredentialIdentifierRequest struct {
+	Data *struct {
+		Type string `json:"type"`
+		ID   string `json:"id" binding:"required"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *CredentialIdentifierRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
+}
+
 // AttachTemplateCredential attaches a credential to the template's set,
 // enforcing the AWX multi-credential rule (one per type; multiple vaults with
 // distinct vault IDs).
@@ -122,14 +140,11 @@ func (h *PlaybookHandler) AttachTemplateCredential(c *gin.Context) {
 	if template == nil {
 		return
 	}
-	var req struct {
-		CredentialID string `json:"credential_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.CredentialID == "" {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "credential_id is required")
+	var req CredentialIdentifierRequest
+	if !jsonapi.BindIdentifier(c, &req, "ansible-credentials") {
 		return
 	}
-	credID, err := uuid.Parse(req.CredentialID)
+	credID, err := uuid.Parse(req.Data.ID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential ID")
 		return

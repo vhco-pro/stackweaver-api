@@ -1038,7 +1038,7 @@ func TestIdentityGuard(t *testing.T) {
 		{"a session the run created", http.MethodDelete, "/auth/sessions/345678901234567999", "", nil, false},
 		{"another session", http.MethodDelete, "/auth/sessions/999", "", nil, true},
 		{"another session, on the settings route", http.MethodDelete, "/api/v2/settings/sessions/999", "", nil, true},
-		{"a new name for the signed-in user, on the settings route", http.MethodPatch, "/api/v2/settings/profile", jwt(mine.ID), map[string]any{"username": "renamed"}, false},
+		{"a new name for the signed-in user, on the account route", http.MethodPatch, "/api/v2/account/update", jwt(mine.ID), map[string]any{"data": map[string]any{"type": "users", "attributes": map[string]any{"username": "renamed"}}}, false},
 		{"the session search is not a session", http.MethodPost, "/auth/sessions/search", "", nil, false},
 		{"a login name the run created", http.MethodPost, "/auth/sessions", "", sessionBody(mine), false},
 		{"another login name", http.MethodPost, "/auth/sessions", "", sessionBody(identityUser{LoginName: adminLogin}), true},

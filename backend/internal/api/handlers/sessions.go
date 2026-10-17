@@ -4,24 +4,33 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
 )
 
 type SessionsHandler struct {
-	sessionsService *sessions.Service
+	sessionsService sessionsBackend
 	authService     *auth.Service
 }
 
+// sessionsBackend is the identity provider's side of the session list: the methods of
+// sessions.Service these handlers call, declared where they are used so a test can stand in for
+// the identity provider.
+type sessionsBackend interface {
+	ListUserSessions(userID string) ([]*sessions.Session, error)
+	RevokeSession(sessionID string) error
+}
+
 func NewSessionsHandler(sessionsService *sessions.Service, authService *auth.Service) *SessionsHandler {
-	return &SessionsHandler{
-		sessionsService: sessionsService,
-		authService:     authService,
+	h := &SessionsHandler{authService: authService}
+	if sessionsService != nil {
+		h.sessionsService = sessionsService
 	}
+	return h
 }
 
 // ListSessions lists all active sessions for the current user
@@ -80,7 +89,18 @@ func (h *SessionsHandler) ListSessions(c *gin.Context) {
 		sessionsWithCurrent[0].IsCurrent = true
 	}
 
-	c.JSON(http.StatusOK, SessionListResponse{Sessions: sessionsWithCurrent})
+	data := make([]jsonapi.Resource[SessionAttributes], 0, len(sessionsWithCurrent))
+	for _, s := range sessionsWithCurrent {
+		data = append(data, jsonapi.Resource[SessionAttributes]{
+			ID:   s.ID,
+			Type: "sessions",
+			Attributes: SessionAttributes{
+				UserAgent: s.UserAgent, IPAddress: s.IPAddress, CreationDate: s.CreationDate,
+				ExpirationDate: s.ExpirationDate, Factors: s.Factors, IsCurrent: s.IsCurrent,
+			},
+		})
+	}
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
 }
 
 // RevokeSession revokes a session
@@ -132,19 +152,21 @@ func (h *SessionsHandler) RevokeSession(c *gin.Context) {
 		return
 	}
 
-	response.Message(c, http.StatusOK, "Session revoked successfully")
+	c.Status(http.StatusNoContent)
 }
 
 // SessionWithCurrent is a session annotated with whether it is the caller's own.
-//
-// Hoisted to package scope so SessionListResponse can name it. It was declared inside
-// ListSessions, which made the response body impossible to give a type.
 type SessionWithCurrent struct {
 	*sessions.Session
-	IsCurrent bool `json:"is_current"`
+	IsCurrent bool
 }
 
-// SessionListResponse is the body of GET /api/v2/settings/sessions.
-type SessionListResponse struct {
-	Sessions []SessionWithCurrent `json:"sessions"`
+// SessionAttributes describe one of the caller's sessions at the identity provider.
+type SessionAttributes struct {
+	UserAgent      string    `json:"user-agent"`
+	IPAddress      string    `json:"ip-address,omitempty"`
+	CreationDate   time.Time `json:"creation-date"`
+	ExpirationDate time.Time `json:"expiration-date"`
+	Factors        []string  `json:"factors"`
+	IsCurrent      bool      `json:"is-current"`
 }

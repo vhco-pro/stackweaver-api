@@ -3,8 +3,6 @@
 package ansible
 
 import (
-	"errors"
-	"io"
 	"net/http"
 	"time"
 
@@ -97,6 +95,26 @@ func formatWorkflowNodeJob(nodeJob *models.AnsibleWorkflowNodeJob) jsonapi.Resou
 	}
 }
 
+// WorkflowLaunchRequest is the optional workflow launch document (#858, D5), the counterpart of
+// the job template launch: {"data": {"type": "ansible-workflow-jobs", "attributes":
+// {"extra-vars": {...}}}}.
+type WorkflowLaunchRequest struct {
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			ExtraVars map[string]interface{} `json:"extra-vars"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *WorkflowLaunchRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
+}
+
 // LaunchWorkflow starts a run of the workflow's current graph.
 // POST /api/v2/ansible/workflows/:id/launch
 func (h *WorkflowHandler) LaunchWorkflow(c *gin.Context) {
@@ -108,15 +126,17 @@ func (h *WorkflowHandler) LaunchWorkflow(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Workflow engine not configured")
 		return
 	}
-	var req struct {
-		ExtraVars map[string]interface{} `json:"extra_vars"`
-	}
-	// The body is optional. One with no bytes, or only whitespace, makes the decoder return
-	// io.EOF, and that alone means "no body"; any other error is a body that is there and
-	// cannot be read, which must not start a run without the variables its sender asked for.
-	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
+	// The body is optional. One with no bytes, or only whitespace, means "no body"; a body that
+	// is there must be the launch document, and one that cannot be read must not start a run
+	// without the variables its sender asked for.
+	var req WorkflowLaunchRequest
+	present, ok := jsonapi.BindOptionalDocument(c, &req, "ansible-workflow-jobs")
+	if !ok {
 		return
+	}
+	var extraVars map[string]interface{}
+	if present {
+		extraVars = req.Data.Attributes.ExtraVars
 	}
 
 	user, _ := h.authService.GetUserFromContext(c)
@@ -125,7 +145,7 @@ func (h *WorkflowHandler) LaunchWorkflow(c *gin.Context) {
 		launchedBy = &user.ID
 	}
 
-	wfJob, err := h.engine.LaunchWorkflow(c.Request.Context(), workflow.ID, launchedBy, req.ExtraVars)
+	wfJob, err := h.engine.LaunchWorkflow(c.Request.Context(), workflow.ID, launchedBy, extraVars)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", err.Error())
 		return
@@ -178,7 +198,7 @@ func (h *WorkflowHandler) GetWorkflowJob(c *gin.Context) {
 	for i := range wfJob.NodeJobs {
 		nodes = append(nodes, formatWorkflowNodeJob(&wfJob.NodeJobs[i]))
 	}
-	c.JSON(http.StatusOK, jsonapi.Document{Data: formatWorkflowJob(wfJob), Included: nodes})
+	jsonapi.WriteDoc(c, http.StatusOK, jsonapi.Document{Data: formatWorkflowJob(wfJob), Included: nodes})
 }
 
 // ApproveWorkflowNode approves a waiting approval node.

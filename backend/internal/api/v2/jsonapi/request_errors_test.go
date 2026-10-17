@@ -93,3 +93,58 @@ func TestWriteWrongType(t *testing.T) {
 		})
 	}
 }
+
+// WriteWrongTypeAt names the member whose type is wrong, so a client that sent the right
+// document with a wrong relationship identifier is told which identifier (#858, D2).
+func TestWriteWrongTypeAt(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+		got  string
+		body string
+	}{
+		{
+			name: "a relationship identifier",
+			path: "data.relationships.credential.data",
+			want: "ansible-credentials",
+			got:  "ansible-inventories",
+			body: `{"errors":[{"status":"400","title":"Bad Request","detail":"data.relationships.credential.data.type must be \"ansible-credentials\" (got \"ansible-inventories\")"}]}`,
+		},
+		{
+			name: "the primary data, as WriteWrongType writes it",
+			path: "data",
+			want: "runs",
+			got:  "workspaces",
+			body: `{"errors":[{"status":"400","title":"Bad Request","detail":"data.type must be \"runs\" (got \"workspaces\")"}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, body := recordedBody(t, func(c *gin.Context) {
+				WriteWrongTypeAt(c, tt.path, tt.want, tt.got)
+			})
+			if code != http.StatusBadRequest {
+				t.Errorf("status code: got %d, want 400", code)
+			}
+			if body != tt.body {
+				t.Errorf("body:\n got  %s\n want %s", body, tt.body)
+			}
+		})
+	}
+}
+
+// WriteIdentifierRequired answers a request that attaches an existing resource by identity and
+// sent no resource identifier object: the example it shows carries an id, not attributes.
+func TestWriteIdentifierRequired(t *testing.T) {
+	code, body := recordedBody(t, func(c *gin.Context) {
+		WriteIdentifierRequired(c, "ansible-credentials")
+	})
+	if code != http.StatusBadRequest {
+		t.Errorf("status code: got %d, want 400", code)
+	}
+	want := `{"errors":[{"status":"400","title":"Bad Request","detail":"request body must be a JSON:API resource identifier: {\"data\": {\"type\": \"ansible-credentials\", \"id\": \"...\"}}"}]}`
+	if body != want {
+		t.Errorf("body:\n got  %s\n want %s", body, want)
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/logtoken"
+	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -38,12 +39,31 @@ import (
 	"gorm.io/gorm"
 )
 
+// Option configures SetupV2Routes beyond what every caller passes.
+type Option func(*setupConfig)
+
+type setupConfig struct {
+	profileService *profile.Service
+}
+
+// WithProfileService gives the account routes the identity provider's profile API, so that an
+// account update keeps the name and email there in step. Without it the account is the stored
+// row alone.
+func WithProfileService(s *profile.Service) Option {
+	return func(c *setupConfig) { c.profileService = s }
+}
+
 func SetupV2Routes(
 	r *gin.Engine,
 	db *gorm.DB,
 	authService *auth.Service,
 	githubAppManager *vcs.GitHubAppManager,
+	opts ...Option,
 ) {
+	var cfg setupConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	// OIDC Discovery Endpoints (unauthenticated - Azure AD calls these to verify tokens)
 	// These must be on the root router, not under /api/v2/, and without auth middleware
 	oidcSigningKey, err := oidc.NewSigningKey()
@@ -815,8 +835,11 @@ func SetupV2Routes(
 	}
 
 	// Current account (tfe_current_user / go-tfe Users.ReadCurrent): the authenticated caller.
-	accountHandler := handlers.NewAccountHandlerV2(authService)
+	// Reading it answers a token, as tfe_current_user needs. Updating it acts on the signed-in
+	// person, so it carries InteractiveOnly, the rule the settings surface and /tokens follow.
+	accountHandler := handlers.NewAccountHandlerV2(authService, repository.NewUserRepository(db), cfg.profileService)
 	v2.GET("/account/details", accountHandler.Details)
+	v2.PATCH("/account/update", middleware.InteractiveOnly(), accountHandler.Update)
 
 	// Organization authentication token: one per org (tfe_organization_token). Org-owner only.
 	orgTokenHandler := handlers.NewOrganizationTokenHandlerV2(tokenAPIKeyService, authService, rbacService, orgRepo)

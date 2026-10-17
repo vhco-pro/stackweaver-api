@@ -160,7 +160,7 @@ func (h *TeamMemberHandlerV2) ListOrganizationMemberships(c *gin.Context) {
 	if len(included) > 0 {
 		response.Included = included
 	}
-	c.JSON(http.StatusOK, response)
+	jsonapi.WriteDoc(c, http.StatusOK, response)
 }
 
 // AddOrganizationMemberships handles POST /api/v2/teams/:id/relationships/organization-memberships

@@ -28,6 +28,27 @@ func WriteDocumentMeta(c *gin.Context, code int, data, meta any) {
 	c.JSON(code, Document{Data: data, Meta: meta})
 }
 
+// metaDocument is a document with no `data` member. It is separate from Document because
+// Document.Data deliberately has no omitempty.
+type metaDocument struct {
+	Meta any `json:"meta"`
+}
+
+// WriteMeta sends a document holding only `meta`: the form for a value that has no identity of
+// its own, such as a URL computed for this request or a fixed list of reserved names. JSON:API
+// allows a document with `meta` and no `data`; writing `"data": null` instead would say that a
+// resource is absent, which is a different statement.
+func WriteMeta(c *gin.Context, code int, meta any) {
+	c.JSON(code, metaDocument{Meta: meta})
+}
+
+// WriteDoc sends a fully built document, for the few that carry `included` or `links` beside
+// `data`. Every handler body leaves through this package, so the writer guard
+// (scripts/check-handler-response-typing.js) has no hand-rolled site to allow.
+func WriteDoc(c *gin.Context, code int, doc Document) {
+	c.JSON(code, doc)
+}
+
 // Pagination is the TFE-compatible `meta.pagination` block (#756).
 //
 // Every member is emitted unconditionally. go-tfe's Pagination struct reads all of them, and
@@ -39,13 +60,17 @@ func WriteDocumentMeta(c *gin.Context, code int, data, meta any) {
 // rather than disappearing. go-tfe reads them as pointers and distinguishes null from missing;
 // the run-task data sources page until next-page is null, so an absent member ends the loop
 // early rather than at the true end.
+//
+// TotalPages and TotalCount are pointers for the same reason: a page fetched from a VCS provider
+// that reports no total states null rather than a guessed number (NewProviderPageMeta). Every
+// collection the server counts itself sets both, so its block is unchanged.
 type Pagination struct {
-	CurrentPage int   `json:"current-page"`
-	PageSize    int   `json:"page-size"`
-	PrevPage    *int  `json:"prev-page"`
-	NextPage    *int  `json:"next-page"`
-	TotalPages  int   `json:"total-pages"`
-	TotalCount  int64 `json:"total-count"`
+	CurrentPage int    `json:"current-page"`
+	PageSize    int    `json:"page-size"`
+	PrevPage    *int   `json:"prev-page"`
+	NextPage    *int   `json:"next-page"`
+	TotalPages  *int   `json:"total-pages"`
+	TotalCount  *int64 `json:"total-count"`
 }
 
 // PaginationMeta wraps Pagination in the `meta` member TFE clients expect.
@@ -81,8 +106,8 @@ func NewPaginationMeta(page, pageSize int, total int64) PaginationMeta {
 	p := Pagination{
 		CurrentPage: page,
 		PageSize:    pageSize,
-		TotalPages:  totalPages,
-		TotalCount:  total,
+		TotalPages:  &totalPages,
+		TotalCount:  &total,
 	}
 	if page > 1 {
 		prev := page - 1
@@ -110,4 +135,41 @@ func NewPaginationMeta(page, pageSize int, total int64) PaginationMeta {
 // fetchAllPages collect duplicates rather than merely stop early.
 func NewFullPageMeta(n int) PaginationMeta {
 	return NewPaginationMeta(1, n, int64(n))
+}
+
+// NewProviderPageMeta is the block for one page the server fetched from a provider that reports
+// no total, such as a VCS provider's repository or file listing: got is the number of rows the
+// provider returned for the page requested at perPage.
+//
+// The totals are null because the server does not know them, and next-page is the one honest
+// signal it has: a full page may have a successor, a short page is the last. A client pages on
+// next-page until it is null, which is how frontend/src/lib/pagination.ts reads every block.
+func NewProviderPageMeta(page, perPage, got int) PaginationMeta {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 1
+	}
+	p := Pagination{CurrentPage: page, PageSize: perPage}
+	if page > 1 {
+		prev := page - 1
+		p.PrevPage = &prev
+	}
+	if got >= perPage && got > 0 {
+		next := page + 1
+		p.NextPage = &next
+	}
+	return PaginationMeta{Pagination: p}
+}
+
+// NewProviderListMeta is the block for a listing a provider returns in one response with no
+// paging of its own, such as a repository's file tree: one page of the got rows that came back,
+// no next page, and no totals, because a provider may truncate such a listing without saying by
+// how much (GitHub's tree API does). Use NewProviderPageMeta for a provider listing that pages.
+func NewProviderListMeta(got int) PaginationMeta {
+	if got < 1 {
+		got = 1
+	}
+	return PaginationMeta{Pagination: Pagination{CurrentPage: 1, PageSize: got}}
 }

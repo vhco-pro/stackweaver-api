@@ -4,8 +4,5 @@
   "request": {
     "takes_none": true
   },
-  "status": 200,
-  "response": {
-    "message": "TOTP removed successfully"
-  }
+  "status": 204
 }

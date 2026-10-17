@@ -6,6 +6,10 @@
 package routes_test
 
 import (
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -476,7 +480,26 @@ func workspaceStatePush() map[string]any {
 			}},
 		}},
 	}
-	return map[string]any{"state_data": state, "serial": 1, "lineage": lineage}
+	// The document go-tfe's StateVersions.Create sends (#858, D7): the state base64-encoded, its
+	// md5 and serial beside it.
+	raw, err := json.Marshal(state)
+	if err != nil {
+		panic(err)
+	}
+	sum := md5.Sum(raw) //nolint:gosec // TFE's integrity check of a pushed state is an MD5
+	return document("state-versions", map[string]any{
+		"serial":  1,
+		"lineage": lineage,
+		"md5":     hex.EncodeToString(sum[:]),
+		"state":   base64.StdEncoding.EncodeToString(raw),
+	})
+}
+
+// workspaceUnlock releases the lock workspaceLock took. A state push needs the workspace locked
+// by the recorder's identity (TFE's rule, #858 D7); a resource removal needs it unlocked.
+func workspaceUnlock(t *testing.T, w *writeRun) {
+	t.Helper()
+	w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/workspaces/:id/actions/unlock"), nil))
 }
 
 // State versions. All three are storage-backed: the state itself lives in the bucket, and a
@@ -484,9 +507,10 @@ func workspaceStatePush() map[string]any {
 func init() {
 	registerWriteCases(
 		writeCase{
-			// Refused while the workspace is locked, which is the reverse of TFE.
+			// Accepted only while the workspace is locked by the caller, as in TFE.
 			route: "POST /api/v2/workspaces/:id/state-versions",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				workspaceLock(t, w)
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/workspaces/:id/state-versions"), workspaceStatePush())
 			},
 		},
@@ -495,15 +519,21 @@ func init() {
 			// stores the result as a new version, so a state has to be pushed first.
 			route: "POST /api/v2/workspaces/:id/state-versions/remove-resource",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				workspaceLock(t, w)
 				w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/workspaces/:id/state-versions"), workspaceStatePush()))
+				// The removal itself is refused on a manually locked workspace.
+				workspaceUnlock(t, w)
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/workspaces/:id/state-versions/remove-resource"),
-					map[string]any{"address": "null_resource.example"})
+					document("state-versions", map[string]any{"address": "null_resource.example"}))
 			},
 		},
 		writeCase{
 			route: "DELETE /api/v2/state-versions/:id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				workspaceLock(t, w)
 				pushed := w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/workspaces/:id/state-versions"), workspaceStatePush()))
+				// Deleting a version is refused on a locked workspace.
+				workspaceUnlock(t, w)
 				return w.jsonRequest(t, http.MethodDelete, "/api/v2/state-versions/"+dataID(t, pushed), nil)
 			},
 		},

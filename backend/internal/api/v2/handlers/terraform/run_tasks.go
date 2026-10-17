@@ -317,7 +317,7 @@ func (h *RunTaskHandlerV2) Read(c *gin.Context) {
 		}
 		resp.Included = included
 	}
-	c.JSON(http.StatusOK, resp)
+	jsonapi.WriteDoc(c, http.StatusOK, resp)
 }
 
 // Update handles PATCH /tasks/:id. All attributes are optional; hmac-key is written only when the

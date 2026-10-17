@@ -338,15 +338,17 @@ func TestAnsibleErrorEnvelope(t *testing.T) {
 		},
 		{
 			"schedule: create with the wrong data.type", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
-			strings.Replace(scheduleBody(t, nil), `"type":"schedules"`, `"type":"widgets"`, 1), 400, badRequest, "data.type must be 'schedules'",
+			strings.Replace(scheduleBody(t, nil), `"type":"schedules"`, `"type":"widgets"`, 1), 400, badRequest, `data.type must be "schedules" (got "widgets")`,
 		},
 		{
 			"schedule: create without the target id", http.MethodPost, "/organizations/" + f.orgName + "/ansible/schedules",
 			scheduleBody(t, nil), 400, badRequest, "job-template-id is required for job_template schedules",
 		},
 		{
+			// #858 converted the update to a schedules document: a body that is not one is
+			// answered with the sentence that names the document, as every converted endpoint does.
 			"schedule: update bind failure", http.MethodPatch, "/ansible/schedules/" + f.scheduleID, `[]`, 400, badRequest,
-			"json: cannot unmarshal array into Go value of type ansible.UpdateScheduleRequest",
+			`request body must be a JSON:API document: {"data": {"type": "schedules", "attributes": {...}}}`,
 		},
 		// Caller-input validation the service performs: a 500 with the same sentence before #857.
 		{
@@ -398,11 +400,11 @@ func TestAnsibleErrorEnvelope(t *testing.T) {
 		},
 		{
 			"schedule: update with an invalid cron expression", http.MethodPatch, "/ansible/schedules/" + f.scheduleID,
-			`{"cron_expression":"* * * *"}`, 400, badRequest, "invalid cron expression: expected exactly 5 fields, found 4: [* * * *]",
+			`{"data":{"type":"schedules","attributes":{"cron-expression":"* * * *"}}}`, 400, badRequest, "invalid cron expression: expected exactly 5 fields, found 4: [* * * *]",
 		},
 		{
 			"schedule: update with an unknown timezone", http.MethodPatch, "/ansible/schedules/" + f.scheduleID,
-			`{"timezone":"Mars/Olympus_Mons"}`, 400, badRequest, "invalid timezone: unknown time zone Mars/Olympus_Mons",
+			`{"data":{"type":"schedules","attributes":{"timezone":"Mars/Olympus_Mons"}}}`, 400, badRequest, "invalid timezone: unknown time zone Mars/Olympus_Mons",
 		},
 		// The sentinel the sibling launch handlers answer with 409.
 		{
@@ -602,8 +604,15 @@ func TestScheduleEnable_DisabledTemplateIsNotALaunch(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("enable = %d, want 200 (%s)", code, body)
 	}
-	if want := `{"message":"Schedule enabled"}`; string(body) != want {
-		t.Errorf("enable body = %s, want %s", body, want)
+	// Since #858 an action answers with the schedule it acted on, not a message.
+	var enabled struct {
+		Data struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &enabled); err != nil || enabled.Data.Type != "schedules" || enabled.Data.ID == "" {
+		t.Errorf("enable body = %s, want the schedules resource", body)
 	}
 	attrs := read()
 	if attrs["status"] != "enabled" {

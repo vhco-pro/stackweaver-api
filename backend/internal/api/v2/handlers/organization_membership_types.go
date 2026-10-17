@@ -199,23 +199,37 @@ type WorkspaceOnlyRelationshipsNamed struct {
 	Organization jsonapi.Relationship `json:"organization"`
 }
 
-// LegacyPageMeta is the {"pagination": {"page", "per_page"}} block the VCS pass-through
-// listings emit - no total exists, because the rows come from the upstream provider
-// (#756 records these as deliberate exceptions).
-type LegacyPageMeta struct {
-	Pagination LegacyPage `json:"pagination"`
+// VCSRepositoryAttributes describe a vcs-repositories resource, one repository a provider lists
+// for a connection, keyed by the provider's own repository id (#858, D6).
+type VCSRepositoryAttributes struct {
+	Name          string `json:"name"`
+	FullName      string `json:"full-name"`
+	Description   string `json:"description"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default-branch"`
+	URL           string `json:"url"`
+	CloneURL      string `json:"clone-url"`
+	SSHURL        string `json:"ssh-url"`
 }
 
-type LegacyPage struct {
-	Page    int `json:"page"`
-	PerPage int `json:"per_page"`
+// VCSProjectAttributes describe a vcs-projects resource (Azure DevOps projects).
+type VCSProjectAttributes struct {
+	Name string `json:"name"`
 }
 
-// VCSFileContentResponse is the file-fetch payload.
-type VCSFileContentResponse struct {
-	Content string `json:"content"`
-	Path    string `json:"path"`
-	Ref     string `json:"ref"`
+// VCSBranchAttributes describe a vcs-branches resource, keyed by the branch name.
+type VCSBranchAttributes struct {
+	Protected bool   `json:"protected"`
+	CommitSHA string `json:"commit-sha"`
+	CommitURL string `json:"commit-url"`
+}
+
+// VCSFileAttributes describe a vcs-files resource, keyed by the file's path in the repository.
+// A listing carries no attributes; reading one file carries its content and the ref it was read
+// at.
+type VCSFileAttributes struct {
+	Content *string `json:"content,omitempty"`
+	Ref     *string `json:"ref,omitempty"`
 }
 
 // ProjectSettingOverwrites mirrors TFE's setting-overwrites block; the provider sets both
@@ -369,13 +383,14 @@ type RunnerStatsDocument struct {
 	Attributes RunnerStatsAttributes `json:"attributes"`
 }
 
-// VCSInstallURLResponse / VCSAuthURLResponse: the app-installation redirect payloads.
-type VCSInstallURLResponse struct {
-	InstallURL string `json:"install_url"`
+// VCSInstallURLMeta and VCSAuthURLMeta are the meta of the URL-issuing installation steps: a URL
+// computed for this request has no identity of its own, so it is meta alone (#858, D6).
+type VCSInstallURLMeta struct {
+	InstallURL string `json:"install-url"`
 }
 
-type VCSAuthURLResponse struct {
-	AuthURL string `json:"auth_url"`
+type VCSAuthURLMeta struct {
+	AuthURL string `json:"auth-url"`
 }
 
 // VCSConnectionAckAttributes is the slim acknowledgment the OAuth callback paths return;
@@ -600,18 +615,6 @@ type ActivityAttributes struct {
 	WorkspaceID    string              `json:"workspace_id,omitempty"`
 }
 
-// ActivityPageMeta is the activities listing's offset meta block. #756 recorded this route
-// as a deliberate exception to the page/per-page contract: the UI drives it by offset.
-type ActivityPageMeta struct {
-	Pagination ActivityPage `json:"pagination"`
-}
-
-type ActivityPage struct {
-	Total  int64 `json:"total"`
-	Limit  int   `json:"limit"`
-	Offset int   `json:"offset"`
-}
-
 // AnsibleConfigAttributes is the ansible-configs attribute block.
 type AnsibleConfigAttributes struct {
 	Scope         string `json:"scope"`
@@ -718,11 +721,17 @@ type TofuVersionAttributes struct {
 
 // AccountAttributes is the TFE account (current user) attribute block.
 type AccountAttributes struct {
-	Username         string `json:"username"`
-	Email            string `json:"email"`
-	IsServiceAccount bool   `json:"is-service-account"`
-	AvatarURL        string `json:"avatar-url"`
-	V2Only           bool   `json:"v2-only"`
+	Username         string    `json:"username"`
+	Email            string    `json:"email"`
+	IsServiceAccount bool      `json:"is-service-account"`
+	AvatarURL        string    `json:"avatar-url"`
+	V2Only           bool      `json:"v2-only"`
+	Name             string    `json:"name"`
+	Bio              string    `json:"bio"`
+	Company          string    `json:"company"`
+	Location         string    `json:"location"`
+	CreatedAt        time.Time `json:"created-at"`
+	UpdatedAt        time.Time `json:"updated-at"`
 }
 
 // AgentJobVCS tells a self-hosted agent where to clone from when the run has no

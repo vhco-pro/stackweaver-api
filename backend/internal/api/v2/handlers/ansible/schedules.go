@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -58,13 +57,31 @@ type CreateScheduleRequest struct {
 	} `json:"data" binding:"required"`
 }
 
-// UpdateScheduleRequest represents the request to update a schedule
+// schedulesType is the JSON:API resource type the schedule request documents carry.
+const schedulesType = "schedules"
+
+// UpdateScheduleRequest is the schedule update document (#858, D5): the attributes are spelled
+// as the schedule resource spells them, and each is a pointer so that an omitted attribute is
+// left as it is.
 type UpdateScheduleRequest struct {
-	Name           *string                `json:"name"`
-	Description    *string                `json:"description"`
-	CronExpression *string                `json:"cron_expression"`
-	Timezone       *string                `json:"timezone"`
-	Config         *models.ScheduleConfig `json:"config"`
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes struct {
+			Name           *string                `json:"name"`
+			Description    *string                `json:"description"`
+			CronExpression *string                `json:"cron-expression"`
+			Timezone       *string                `json:"timezone"`
+			Config         *models.ScheduleConfig `json:"config"`
+		} `json:"attributes"`
+	} `json:"data" binding:"required"`
+}
+
+// PrimaryType reports data.type and whether data was sent (jsonapi.TypedDocument).
+func (r *UpdateScheduleRequest) PrimaryType() (string, bool) {
+	if r.Data == nil {
+		return "", false
+	}
+	return r.Data.Type, true
 }
 
 // Create creates a new schedule
@@ -79,8 +96,8 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 	// logger.Debugf("CreateSchedule: Type=%s, Name=%s, ScheduleType=%s", req.Data.Type, req.Data.Attributes.Name, req.Data.Attributes.ScheduleType)
 
 	// Validate JSON:API type
-	if req.Data.Type != "schedules" {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'schedules'")
+	if req.Data.Type != schedulesType {
+		jsonapi.WriteWrongType(c, schedulesType, req.Data.Type)
 		return
 	}
 
@@ -354,12 +371,12 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 	}
 
 	var req UpdateScheduleRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+	if !jsonapi.BindDocument(c, &req, schedulesType) {
 		return
 	}
+	attrs := req.Data.Attributes
 
-	schedule, err := h.schedulerService.UpdateSchedule(id, req.Name, req.Description, req.CronExpression, req.Timezone, req.Config)
+	schedule, err := h.schedulerService.UpdateSchedule(id, attrs.Name, attrs.Description, attrs.CronExpression, attrs.Timezone, attrs.Config)
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
@@ -446,7 +463,7 @@ func (h *ScheduleHandler) Enable(c *gin.Context) {
 		return
 	}
 
-	response.Message(c, http.StatusOK, "Schedule enabled")
+	h.writeSchedule(c, id)
 }
 
 // Disable disables a schedule
@@ -483,64 +500,7 @@ func (h *ScheduleHandler) Disable(c *gin.Context) {
 		return
 	}
 
-	response.Message(c, http.StatusOK, "Schedule disabled")
-}
-
-// ValidateCron validates a cron expression and returns the next run time.
-//
-// Its errors are JSON:API error documents, like every other error in this file. This route takes
-// no path parameter and is org-agnostic, so the golden error harness records its bind failure
-// directly; the routes that take one are recorded through goldenErrorOverrides in
-// routes/golden_response_test.go, because the harness's API-key identity is otherwise answered
-// by the org wall before the handler runs.
-func (h *ScheduleHandler) ValidateCron(c *gin.Context) {
-	var req ValidateCronRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-
-	if err := h.schedulerService.ValidateCronExpression(req.CronExpression); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid cron expression: "+err.Error())
-		return
-	}
-
-	timezone := req.Timezone
-	if timezone == "" {
-		timezone = "UTC"
-	}
-
-	nextRun, err := h.schedulerService.GetNextRunTime(req.CronExpression, timezone)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Error calculating next run time: "+err.Error())
-		return
-	}
-
-	c.JSON(http.StatusOK, ValidateCronResponse{
-		Valid:          true,
-		CronExpression: req.CronExpression,
-		Timezone:       timezone,
-		NextRunAt:      nextRun.Format("2006-01-02T15:04:05Z07:00"),
-	})
-}
-
-// ValidateCronRequest represents the request to validate a cron expression
-type ValidateCronRequest struct {
-	CronExpression string `json:"cron_expression" binding:"required"`
-	Timezone       string `json:"timezone"`
-}
-
-// ValidateCronResponse represents the response for cron validation
-type ValidateCronResponse struct {
-	Valid          bool   `json:"valid"`
-	CronExpression string `json:"cron_expression"`
-	Timezone       string `json:"timezone"`
-	NextRunAt      string `json:"next_run_at"`
-}
-
-// GetCronPresets returns the available cron presets
-func (h *ScheduleHandler) GetCronPresets(c *gin.Context) {
-	c.JSON(http.StatusOK, models.CronPresets)
+	h.writeSchedule(c, id)
 }
 
 // ListByOrganization lists schedules for an organization by name
@@ -636,5 +596,17 @@ func (h *ScheduleHandler) RunNow(c *gin.Context) {
 		return
 	}
 
-	response.Message(c, http.StatusOK, "Schedule triggered")
+	h.writeSchedule(c, id)
+}
+
+// writeSchedule answers an action with the schedule it acted on, read again so that the answer
+// carries what the action changed (status, next-run-at, the last run): the state-toggle form
+// TFE's lock and unlock use (#858, D1).
+func (h *ScheduleHandler) writeSchedule(c *gin.Context, id uuid.UUID) {
+	schedule, err := h.schedulerService.GetSchedule(id)
+	if err != nil {
+		apierror.Internal(c, "Failed to read the schedule", err)
+		return
+	}
+	jsonapi.WriteDocument(c, http.StatusOK, formatScheduleResponse(schedule))
 }

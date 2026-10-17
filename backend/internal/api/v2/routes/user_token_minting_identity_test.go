@@ -145,3 +145,27 @@ func TestOAuthAuthorize_TokenIdentitiesAreRefused(t *testing.T) {
 		})
 	}
 }
+
+// The account update acts on the signed-in person, so it is refused to every token identity
+// (#858, D8), while reading the account still answers a token, as tfe_current_user needs.
+func TestAccountUpdate_TokenIdentitiesAreRefused(t *testing.T) {
+	f := setupSettingsGuard(t)
+	body := []byte(`{"data":{"type":"users","attributes":{"bio":"set by a token"}}}`)
+	for identity, token := range f.tokens {
+		t.Run(identity+"/PATCH /api/v2/account/update", func(t *testing.T) {
+			assertRefused(t, f.do(http.MethodPatch, "/api/v2/account/update", token, body))
+		})
+		t.Run(identity+"/GET /api/v2/account/details", func(t *testing.T) {
+			if w := f.do(http.MethodGet, "/api/v2/account/details", token, nil); w.Code != http.StatusOK {
+				t.Errorf("a token reading its owner's account: got %d, want 200.\nbody: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+	var owner models.User
+	if err := f.db.First(&owner, "id = ?", f.owner.ID).Error; err != nil {
+		t.Fatalf("reload the owner: %v", err)
+	}
+	if owner.Bio == "set by a token" {
+		t.Error("a token changed its owner's account through the refused route")
+	}
+}

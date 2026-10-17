@@ -6,6 +6,43 @@
   },
   "status": 200,
   "response": {
-    "message": "Schedule triggered"
+    "data": {
+      "attributes": {
+        "config": {},
+        "created-at": "\u003ctimestamp\u003e",
+        "cron-expression": "0 2 * * *",
+        "description": "Applies the patch baseline across the fleet overnight.",
+        "last-run-at": "\u003ctimestamp\u003e",
+        "last-run-status": "successful",
+        "name": "nightly-patch-baseline",
+        "run-count": 1,
+        "schedule-type": "job_template",
+        "status": "disabled",
+        "timezone": "UTC",
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "job-template": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-job-templates"
+          }
+        },
+        "last-job": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-jobs"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "schedules"
+    }
   }
 }

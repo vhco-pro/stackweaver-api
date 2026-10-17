@@ -77,9 +77,9 @@ func TestRegistryModuleCreate_VCSConnectionOfAnotherOrganizationReadsAsNotFound(
 	// refused requests so that the answers can be compared byte for byte.
 	create := func(t *testing.T, name, connection string) (int, []byte) {
 		t.Helper()
-		raw, err := json.Marshal(map[string]any{
+		raw, err := json.Marshal(map[string]any{"data": map[string]any{"type": "registry-modules", "attributes": map[string]any{
 			"name": name, "provider": "aws", "vcs_connection_id": connection, "vcs_repository": "modconn-" + sfx + "/" + name,
-		})
+		}}})
 		if err != nil {
 			t.Fatalf("marshalling the request: %v", err)
 		}

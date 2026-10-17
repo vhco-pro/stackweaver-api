@@ -178,7 +178,7 @@ func (h *RunHandlerV2) GetTaskStage(c *gin.Context) {
 		}
 		resp.Included = included
 	}
-	c.JSON(http.StatusOK, resp)
+	jsonapi.WriteDoc(c, http.StatusOK, resp)
 }
 
 // OverrideTaskStage handles POST /task-stages/:id/actions/override (plain JSON {"comment"}): a

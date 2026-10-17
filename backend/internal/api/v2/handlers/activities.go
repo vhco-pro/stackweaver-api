@@ -116,18 +116,8 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		return
 	}
 
-	// Parse query parameters
-	limitStr := c.DefaultQuery("limit", "50")
-	offsetStr := c.DefaultQuery("offset", "0")
-	limit, _ := strconv.Atoi(limitStr)
-	offset, _ := strconv.Atoi(offsetStr)
-
-	if limit > 100 {
-		limit = 100
-	}
-	if limit < 1 {
-		limit = 50
-	}
+	// page[number] and page[size], as every other collection reads them (#858, D6).
+	page, pageSize := jsonapi.PageParams(c, 50, 100)
 
 	// Parse optional filters
 	var userID *uuid.UUID
@@ -209,7 +199,7 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		ResourceType:   c.Query("resource_type"),
 	}
 
-	activities, total, err := h.activityService.GetActivities(filters, limit, offset)
+	activities, total, err := h.activityService.GetActivities(filters, pageSize, jsonapi.Offset(page, pageSize))
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -249,9 +239,7 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 		}
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, activitiesData, ActivityPageMeta{
-		Pagination: ActivityPage{Total: total, Limit: limit, Offset: offset},
-	})
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, activitiesData, jsonapi.NewPaginationMeta(page, pageSize, total))
 }
 
 // GetRecentActivities handles GET /api/v2/activities/recent

@@ -416,7 +416,7 @@ func (h *ProjectHandlerV2) GetByID(c *gin.Context) {
 		}
 		resp.Included = IncludedTagBindingResources(bindings, "effective-tag-bindings")
 	}
-	c.JSON(http.StatusOK, resp)
+	jsonapi.WriteDoc(c, http.StatusOK, resp)
 }
 
 // includeHasEffectiveTagBindings reports whether the request asked to include effective tag bindings.

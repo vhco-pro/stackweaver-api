@@ -59,15 +59,21 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AccountHandlerV2).Details-fm"
     },
     {
+      "method": "PATCH",
+      "path": "/api/v2/account/update",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AccountHandlerV2).Update-fm"
+    },
+    {
       "method": "GET",
       "path": "/api/v2/activities",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*ActivityHandlerV2).ListActivities-fm",
       "query": [
         "action",
-        "limit",
-        "offset",
         "organization_id",
+        "page[number]",
+        "page[size]",
         "resource_type",
         "user_id",
         "workspace_id"
@@ -594,18 +600,6 @@
       "path": "/api/v2/ansible/schedules/:schedule_id/actions/run-now",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible.(*ScheduleHandler).RunNow-fm"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v2/ansible/schedules/cron-presets",
-      "mutating": false,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible.(*ScheduleHandler).GetCronPresets-fm"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v2/ansible/schedules/validate-cron",
-      "mutating": true,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible.(*ScheduleHandler).ValidateCron-fm"
     },
     {
       "method": "DELETE",
@@ -2019,18 +2013,6 @@
       "path": "/api/v2/settings/password",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/handlers.(*TOTPHandler).ChangePassword-fm"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v2/settings/profile",
-      "mutating": false,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/handlers.(*ProfileHandler).GetProfile-fm"
-    },
-    {
-      "method": "PATCH",
-      "path": "/api/v2/settings/profile",
-      "mutating": true,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/handlers.(*ProfileHandler).UpdateProfile-fm"
     },
     {
       "method": "GET",

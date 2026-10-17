@@ -6,21 +6,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// The non-JSON:API payloads this API also emits (#755, Phase 3).
+// The non-JSON:API acknowledgements of the protocol surfaces, and nothing else (#858, D12).
 //
-// These are not JSON:API documents and are not pretending to be. They cover the endpoints that
-// answer with a bare acknowledgement: internal callbacks, the TOTP and session flows, the
-// GitHub webhook receiver, and the schedule actions.
+// Every endpoint Stackweaver defines answers a JSON:API document through the jsonapi package's
+// writers (docs/internal/guidelines/api/json-api-everywhere.md). The bodies here belong to
+// surfaces whose shape a protocol defines: the VCS webhook receivers in
+// handlers/vcs_app_installation.go acknowledge a delivery with Message, and the runner control
+// plane in handlers/runner_agent.go answers the runner binaries with Status, as the health check
+// outside /api/v2 (routes/routes.go) does. A handler outside
+// the protocol files may not call this package: scripts/check-handler-response-typing.js fails on
+// any call from a file not in its PROTOCOL_FILES list, and the compiler refuses one from outside
+// the handler trees only if it is removed here, so new callers are a review question, not an
+// accident.
 //
-// They are typed for the same reason everything else here is - a map has no definition, so
+// They are typed for the same reason everything else here is: a map has no definition, so
 // nothing describes the shape to a client or to the OpenAPI generator.
 //
 // This package holds no error shape. Errors are JSON:API error documents written through
-// jsonapi.WriteError (or apierror.Internal for a server-side failure). The flat
-// `{"error": ...}` body and the `{"code", "message"}` pair once lived here; #757 removed the
-// second and some writers of the first, and #857 removed the rest (ErrorResponse and its six
-// helpers, which four Ansible handlers still called at 77 sites). With the helpers gone the
-// compiler is the guard: nothing can call a function that does not exist.
+// jsonapi.WriteError (or apierror.Internal for a server-side failure).
 
 // MessageResponse is a bare acknowledgement: {"message": "..."}.
 type MessageResponse struct {

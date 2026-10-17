@@ -149,7 +149,7 @@ func (h *OrganizationTokenHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, orgTokenResource(key, token))
+	jsonapi.WriteDoc(c, http.StatusCreated, orgTokenResource(key, token))
 }
 
 // Read returns the organization token's metadata (no plaintext).
@@ -176,7 +176,7 @@ func (h *OrganizationTokenHandlerV2) Read(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, orgTokenResource(key, ""))
+	jsonapi.WriteDoc(c, http.StatusOK, orgTokenResource(key, ""))
 }
 
 // Delete revokes the organization token.

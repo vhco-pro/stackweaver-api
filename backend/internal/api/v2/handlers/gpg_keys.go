@@ -262,7 +262,7 @@ func (h *GPGKeyHandler) DeleteGPGKey(c *gin.Context) {
 		gpgError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
 	}
-	c.JSON(http.StatusNoContent, nil)
+	c.Status(http.StatusNoContent)
 }
 
 // resolveKey validates the registry, authenticates, resolves the org from the :namespace

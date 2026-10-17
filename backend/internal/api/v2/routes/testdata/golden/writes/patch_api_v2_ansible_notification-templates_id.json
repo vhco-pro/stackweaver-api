@@ -4,40 +4,62 @@
   "request": {
     "content_type": "application/vnd.api+json",
     "body": {
-      "config": {
-        "method": "PUT",
-        "skip_tls_verify": false,
-        "url": "https://hooks.example.com/stackweaver/releases",
-        "username": "stackweaver"
-      },
-      "description": "Updated by the golden write harness",
-      "name": "golden-write-webhook",
-      "secret": "\u003csecret\u003e"
+      "data": {
+        "attributes": {
+          "config": {
+            "method": "PUT",
+            "skip_tls_verify": false,
+            "url": "https://hooks.example.com/stackweaver/releases",
+            "username": "stackweaver"
+          },
+          "description": "Updated by the golden write harness",
+          "name": "golden-write-webhook",
+          "secret": "\u003csecret\u003e"
+        },
+        "type": "ansible-notification-templates"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "config": {
+        "data": {
           "type": "object",
-          "additionalProperties": true
-        },
-        "description": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "secret": {
-          "type": "string",
-          "nullable": true
-        },
-        "type": {
-          "type": "string"
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "notification-type": {
+                  "type": "string"
+                },
+                "secret": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
-      }
+      },
+      "required": [
+        "data"
+      ]
     },
     "schema_source": "type",
-    "bound_type": "ansible.notificationTemplateRequest"
+    "bound_type": "ansible.NotificationTemplateRequest"
   },
   "status": 200,
   "response": {

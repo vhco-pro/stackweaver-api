@@ -2,43 +2,65 @@
   "method": "POST",
   "path": "/api/v2/organizations/:name/registry/modules",
   "request": {
-    "content_type": "application/json",
+    "content_type": "application/vnd.api+json",
     "body": {
-      "auto_publish_tags": false,
-      "description": "Recorded by the golden write harness",
-      "name": "golden-write",
-      "provider": "aws"
+      "data": {
+        "attributes": {
+          "auto_publish_tags": false,
+          "description": "Recorded by the golden write harness",
+          "name": "golden-write",
+          "provider": "aws"
+        },
+        "type": "registry-modules"
+      }
     },
     "schema": {
       "type": "object",
       "properties": {
-        "auto_publish_tags": {
-          "type": "boolean",
-          "nullable": true
-        },
-        "description": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "provider": {
-          "type": "string"
-        },
-        "vcs_connection_id": {
-          "nullable": true
-        },
-        "vcs_repository": {
-          "type": "string"
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "auto_publish_tags": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "vcs_connection_id": {
+                  "nullable": true
+                },
+                "vcs_repository": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "provider"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
         }
       },
       "required": [
-        "name",
-        "provider"
+        "data"
       ]
     },
     "schema_source": "type",
-    "bound_type": "struct { Name string \"json:\\\"name\\\" binding:\\\"required\\\"\"; Provider string \"json:\\\"provider\\\" binding:\\\"required\\\"\"; Description string \"json:\\\"description\\\"\"; VCSConnectionID *uuid.UUID \"json:\\\"vcs_connection_id,omitempty\\\"\"; VCSRepository string \"json:\\\"vcs_repository,omitempty\\\"\"; AutoPublishTags *bool \"json:\\\"auto_publish_tags\\\"\" }"
+    "bound_type": "handlers.CreateRegistryModuleRequest"
   },
   "status": 201,
   "response": {
