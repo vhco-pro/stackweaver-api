@@ -5,7 +5,7 @@
 // scope). On a repo-name collision an attacker's payloads are filed into a victim org's
 // webhook-event log. The fix derives the org from the validated installation instead.
 // This test drives the real handler + Postgres and proves attribution follows the
-// installation, not the repo name - with a control showing the old heuristic mis-attributes.
+// installation, not the repo name, and that an event with no trusted org goes to no org.
 //
 // Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Cleanup is strictly
 // row-scoped. Run with:
@@ -104,11 +104,16 @@ func TestWebhookEventAttribution(t *testing.T) {
 		t.Fatalf("AUD-124: event attributed to %v, want installation org orgA %v", org, orgA.ID)
 	}
 
-	// CONTROL (pre-fix behavior): with no trusted org, the repo-name heuristic mis-attributes
-	// the very same delivery to orgB - the victim. This is exactly the bug the fix removes.
+	// No trusted org: the delivery came from no connected installation (or, on Azure DevOps, no
+	// connected Azure DevOps organization). This case used to assert that a repo-name guess filed
+	// the event under orgB, as a control showing the guess was wrong. The guess has been removed
+	// rather than kept as a fallback, because every Azure DevOps delivery took that path: a
+	// project/repository name is unique only within one Azure DevOps organization, so it filed one
+	// tenant's deliveries, payload included, into another tenant's log. Such an event is now
+	// recorded with no organization at all, and orgB, the repo-name match, must not get it.
 	h.recordWebhookEvent(nil, "push", "github", repo, "main", oldMarker, "ignored", "test", 200, "{}")
-	if org := orgOf(oldMarker); org == nil || *org != orgB.ID {
-		t.Fatalf("control expectation broken: heuristic attributed to %v, want orgB %v (collision victim)", org, orgB.ID)
+	if org := orgOf(oldMarker); org != nil {
+		t.Fatalf("an event with no trusted org was attributed to %v, want none (orgB %v holds the same-named repo)", org, orgB.ID)
 	}
 }
 
