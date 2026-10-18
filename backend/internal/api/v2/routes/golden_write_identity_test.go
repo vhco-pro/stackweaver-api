@@ -245,18 +245,6 @@ type identityUser struct {
 // case sends, so a case that sends it declares it and the fixture carries the placeholder.
 const identityPassword = "Golden-write-1!" //nolint:gosec // G101: a throwaway user on a dev stack
 
-// createUser makes a user and does not return until it can be found the way a sign-in finds it.
-//
-// Zitadel is event-sourced: the create returns once the event is stored, and the projections a
-// sign-in reads catch up a moment later. A sign-in in that window answers "user not found", and
-// the auth proxy turns that into a decoy session that fails later and far from here.
-//
-// phone, when not empty, is given to the user as an already verified number: what a second
-// factor by text message requires, and something no route of the proxy can set.
-func (o *ownerClient) createUser(ctx context.Context, username string, emailVerified bool, phone string) (identityUser, error) {
-	return o.createUserWith(ctx, username, emailVerified, phone, identityPassword)
-}
-
 // createUserWith is createUser with the password to give the user; "" creates a user with no
 // password, which is the user an invitation is for.
 func (o *ownerClient) createUserWith(ctx context.Context, username string, emailVerified bool, phone, password string) (identityUser, error) {

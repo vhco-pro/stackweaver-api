@@ -274,9 +274,3 @@ func (s *DriftDetectionService) calculateNextRun(cronExpr, timezone string, from
 	// Convert back to UTC for storage
 	return next.UTC(), nil
 }
-
-// ValidateCronExpression validates a cron expression
-func (s *DriftDetectionService) ValidateCronExpression(cronExpression string) error {
-	_, err := s.cronParser.Parse(cronExpression)
-	return err
-}

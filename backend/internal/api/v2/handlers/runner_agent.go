@@ -74,23 +74,6 @@ type RunnerAgentHandler struct {
 	logBuffer *logbuffer.RedisLogBuffer
 }
 
-// NewRunnerAgentHandler creates a new runner agent handler
-func NewRunnerAgentHandler(
-	runnerRepo *repository.RunnerRepository,
-	jobExecRepo *repository.RunnerJobExecutionRepository,
-	poolRepo *repository.AgentPoolRepository,
-	apiKeyService *apikey.Service,
-	db *gorm.DB,
-) *RunnerAgentHandler {
-	return &RunnerAgentHandler{
-		runnerRepo:    runnerRepo,
-		jobExecRepo:   jobExecRepo,
-		poolRepo:      poolRepo,
-		apiKeyService: apiKeyService,
-		db:            db,
-	}
-}
-
 // NewRunnerAgentHandlerWithRepos creates a new runner agent handler with all repositories
 func NewRunnerAgentHandlerWithRepos(
 	runnerRepo *repository.RunnerRepository,

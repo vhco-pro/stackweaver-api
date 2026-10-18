@@ -4,7 +4,6 @@ package activity
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -108,14 +107,6 @@ func (s *Service) LogDelete(ctx context.Context, resourceType string, resourceID
 		"resource_id":   resourceID, // Store the actual prefixed ID
 	}
 	return s.LogActivity(ctx, "delete", resourceType, nil, details, activityCtx)
-}
-
-func (s *Service) LogRun(ctx context.Context, workspaceID uuid.UUID, runID uuid.UUID, operation, status string, activityCtx ActivityContext) error {
-	return s.LogActivity(ctx, fmt.Sprintf("run_%s", operation), "run", &runID, map[string]interface{}{
-		"workspace_id": workspaceID.String(),
-		"status":       status,
-		"operation":    operation,
-	}, activityCtx)
 }
 
 func (s *Service) LogAPIKeyCreate(ctx context.Context, apiKeyID uuid.UUID, keyName string, activityCtx ActivityContext) error {

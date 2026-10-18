@@ -140,12 +140,6 @@ type action struct {
 	done func(t *testing.T, f *scopedTokensFixture) bool
 }
 
-func readWorkspace(ws func(*scopedTokensFixture) string) func(*testing.T, *scopedTokensFixture, string) *httptest.ResponseRecorder {
-	return func(t *testing.T, f *scopedTokensFixture, token string) *httptest.ResponseRecorder {
-		return f.do(t, token, http.MethodGet, "/api/v2/workspaces/"+ws(f), nil)
-	}
-}
-
 func lockWorkspace(ws func(*scopedTokensFixture) string) action {
 	return action{
 		run: func(t *testing.T, f *scopedTokensFixture, token string) *httptest.ResponseRecorder {

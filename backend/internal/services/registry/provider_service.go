@@ -3,7 +3,6 @@
 package registry
 
 import (
-	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -109,31 +108,6 @@ func (s *ProviderService) GetProviderVersion(namespace, name, version string) (*
 	return s.providerVersionRepo.GetByProviderAndVersion(provider.ID, version)
 }
 
-// GetDownloadURL generates a presigned URL for downloading a provider binary
-func (s *ProviderService) GetDownloadURL(ctx context.Context, namespace, name, version, os, arch string) (string, error) {
-	providerVersion, err := s.GetProviderVersion(namespace, name, version)
-	if err != nil {
-		return "", err
-	}
-
-	platform, err := s.providerPlatformRepo.GetByVersionAndPlatform(providerVersion.ID, os, arch)
-	if err != nil {
-		return "", ErrProviderPlatformNotFound
-	}
-
-	if platform.BinaryPath == "" {
-		return "", ErrProviderBinaryNotAvailable
-	}
-
-	// Generate presigned URL (15 minutes expiry as per Terraform Registry spec)
-	url, err := s.storage.PresignGet(ctx, platform.BinaryPath, 15*time.Minute)
-	if err != nil {
-		return "", err
-	}
-
-	return url, nil
-}
-
 // TrackDownload records a download event
 func (s *ProviderService) TrackDownload(providerPlatformID uuid.UUID, ipAddress, userAgent string) error {
 	download := &models.ProviderDownload{
@@ -159,18 +133,4 @@ func (s *ProviderService) TrackDownload(providerPlatformID uuid.UUID, ipAddress,
 // GetDownloadStats gets download statistics for a provider platform
 func (s *ProviderService) GetDownloadStats(providerPlatformID uuid.UUID) (map[string]interface{}, error) {
 	return s.providerDownloadRepo.GetDownloadStats(providerPlatformID)
-}
-
-var (
-	ErrProviderPlatformNotFound   = &ProviderError{Message: "Provider platform not found"}
-	ErrProviderBinaryNotAvailable = &ProviderError{Message: "Provider binary not available for download"}
-	ErrProviderNotFound           = &ProviderError{Message: "Provider not found"}
-)
-
-type ProviderError struct {
-	Message string
-}
-
-func (e *ProviderError) Error() string {
-	return e.Message
 }
