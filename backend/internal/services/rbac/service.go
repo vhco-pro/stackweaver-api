@@ -17,12 +17,6 @@ type Service struct {
 	projectRepo *repository.ProjectRepository
 }
 
-func NewService(orgRepo *repository.OrganizationRepository) *Service {
-	return &Service{
-		orgRepo: orgRepo,
-	}
-}
-
 // NewServiceWithTeams creates a new RBAC service with team support
 func NewServiceWithTeams(orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, projectRepo *repository.ProjectRepository) *Service {
 	return &Service{

@@ -31,7 +31,6 @@ type dbOrgResolver struct {
 	awsOIDCConfig    *repository.AWSOIDCConfigurationRepository
 	gcpOIDCConfig    *repository.GCPOIDCConfigurationRepository
 	vaultOIDCConfig  *repository.VaultOIDCConfigurationRepository
-	gpgKey           *repository.GPGKeyRepository
 	provider         *repository.ProviderRepository
 	ansibleInventory *repository.AnsibleInventoryRepository
 	ansibleInvSource *repository.AnsibleInventorySourceRepository
@@ -74,7 +73,6 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		awsOIDCConfig:    repository.NewAWSOIDCConfigurationRepository(db),
 		gcpOIDCConfig:    repository.NewGCPOIDCConfigurationRepository(db),
 		vaultOIDCConfig:  repository.NewVaultOIDCConfigurationRepository(db),
-		gpgKey:           repository.NewGPGKeyRepository(db),
 		provider:         repository.NewProviderRepository(db),
 		ansibleInventory: repository.NewAnsibleInventoryRepository(db),
 		ansibleInvSource: repository.NewAnsibleInventorySourceRepository(db),
@@ -421,18 +419,6 @@ func (r *dbOrgResolver) ByOIDCConfigID(id string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return cfg.OrganizationID, nil
-}
-
-func (r *dbOrgResolver) ByGPGKeyID(id string) (uuid.UUID, error) {
-	keyID, err := uuid.Parse(id)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	key, err := r.gpgKey.GetByID(keyID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return key.OrganizationID, nil
 }
 
 func (r *dbOrgResolver) ByRegistryProviderID(id string) (uuid.UUID, error) {

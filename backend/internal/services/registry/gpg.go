@@ -64,9 +64,3 @@ func (s *GPGService) VerifyDetachedSignature(publicKeyASCII string, signed, sign
 	}
 	return nil
 }
-
-// ExtractKeyIDFromASCII extracts the key ID from an ASCII-armored GPG public key
-func ExtractKeyIDFromASCII(asciiArmor string) (string, error) {
-	service := NewGPGService()
-	return service.ParseGPGKey(asciiArmor)
-}

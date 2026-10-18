@@ -12,27 +12,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-type RateLimiter struct {
-	limiter *rate.Limiter
-}
-
-func NewRateLimiter(rps int, burst int) *RateLimiter {
-	return &RateLimiter{
-		limiter: rate.NewLimiter(rate.Limit(rps), burst),
-	}
-}
-
-func (rl *RateLimiter) Middleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if !rl.limiter.Allow() {
-			jsonapi.WriteError(c, http.StatusTooManyRequests, http.StatusText(http.StatusTooManyRequests), "rate limit exceeded")
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
-}
-
 // defaultIPLimiterCap bounds the IPRateLimiter map. Round 25c Finding
 // C-3: the previous implementation grew the map unbounded, so an
 // attacker spoofing X-Forwarded-For (or simply traffic from a large
@@ -86,16 +65,6 @@ func (rl *IPRateLimiter) getLimiter(ip string) *rate.Limiter {
 		}
 	}
 	return entry.limiter
-}
-
-// Reset clears all per-IP rate-limit state. Intended for E2E test harnesses
-// to restore a clean slate between specs - never call from production code
-// paths. Guarded at the call site by the `e2e` build tag + runtime env check.
-func (rl *IPRateLimiter) Reset() {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	rl.limiters = make(map[string]*list.Element)
-	rl.entries = list.New()
 }
 
 func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {

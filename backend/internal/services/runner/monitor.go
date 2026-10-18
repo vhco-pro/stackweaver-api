@@ -72,13 +72,3 @@ func (s *MonitorService) markStaleRunners() {
 		logger.Infof("Released %d stranded ansible job reservation(s)", released)
 	}
 }
-
-// SetInterval sets the check interval
-func (s *MonitorService) SetInterval(interval time.Duration) {
-	s.interval = interval
-}
-
-// SetThreshold sets the heartbeat timeout threshold
-func (s *MonitorService) SetThreshold(threshold time.Duration) {
-	s.threshold = threshold
-}
