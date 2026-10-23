@@ -171,6 +171,14 @@ type RegisterResponse struct {
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 }
 
+// grantsRunnerRegister reports whether a key's scopes name runner:register on orgID. An
+// unrestricted key (no scopes, or the wildcard) is a general-purpose user token, not a runner
+// credential, so it never qualifies; HasOrgPermission alone treats an empty scope list as full
+// access.
+func grantsRunnerRegister(checker *apikey.ScopeChecker, orgID uuid.UUID) bool {
+	return !checker.IsUnrestricted() && checker.HasOrgPermission(orgID, "runner:register")
+}
+
 // Register registers a new runner
 // POST /api/v2/runner/register
 // Requires an API key with runner:register scope
@@ -234,7 +242,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	}
 
 	// Check for runner:register permission on the organization
-	if !scopeChecker.HasOrgPermission(pool.OrganizationID, "runner:register") && !scopeChecker.IsUnrestricted() {
+	if !grantsRunnerRegister(scopeChecker, pool.OrganizationID) {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have runner:register scope for this organization")
 		return
 	}

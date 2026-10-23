@@ -581,7 +581,12 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid API key scopes")
 			return false
 		}
-		if !checker.HasOrgPermission(pool.OrganizationID, "runner:register") && !checker.IsUnrestricted() {
+		if checker.IsUnrestricted() {
+			// An unrestricted key is its owner's general-purpose token, not a runner
+			// credential, so it is judged as its owner, the way the org wall treats it.
+			return h.requireManageAgentPools(c, pool.OrganizationID)
+		}
+		if !grantsRunnerRegister(checker, pool.OrganizationID) {
 			// Deny outright - do NOT fall back to the key owner's RBAC. This route is
 			// org-wall-agnostic (the wall's scope-vs-method check would reject a
 			// runner:register key on a GET), so this check IS the tenant boundary for
