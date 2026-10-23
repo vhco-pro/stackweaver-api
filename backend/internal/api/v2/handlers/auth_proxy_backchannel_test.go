@@ -253,13 +253,10 @@ func TestBackchannel_EndSessionDispatch(t *testing.T) {
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("expected Cache-Control: no-store, got %q", w.Header().Get("Cache-Control"))
 	}
-	if !proxy.IsBackchannelRevoked("sess-abc") {
-		t.Error("sid should have been recorded as revoked")
-	}
 }
 
 // TestBackchannel_EndSessionDispatch_Forged verifies a forged/bad JWT is
-// rejected (400) without being forwarded to Zitadel and without revoking
+// rejected (400) without being forwarded to Zitadel and without acting on
 // any sid.
 func TestBackchannel_EndSessionDispatch_Forged(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -298,9 +295,6 @@ func TestBackchannel_EndSessionDispatch_Forged(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-	if proxy.IsBackchannelRevoked("sess-abc") {
-		t.Error("sid must NOT be revoked when token is forged")
 	}
 }
 
@@ -416,22 +410,6 @@ func TestParseAudienceClaim(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestBackchannel_RevokedSIDTTL(t *testing.T) {
-	v := newBackchannelVerifier("", "", "", http.DefaultClient, "https://issuer")
-	if v.IsSIDRevoked("x") {
-		t.Fatal("unrevoked sid reported revoked")
-	}
-	v.RevokeSID("x")
-	if !v.IsSIDRevoked("x") {
-		t.Fatal("freshly-revoked sid not reported")
-	}
-	// Force-expire the entry and confirm the lazy cleanup kicks in.
-	v.revokedSIDs.Store("x", time.Now().Add(-time.Minute))
-	if v.IsSIDRevoked("x") {
-		t.Fatal("expired revocation should no longer be reported")
 	}
 }
 

@@ -210,6 +210,9 @@ type AuthProxy struct {
 	// LoginNameLimiter is the per-loginName lockout the password endpoints claim a slot from.
 	LoginNameLimiter *middleware.LoginNameRateLimiter
 
+	// warnf logs a warning; tests replace it to observe what the proxy reports.
+	warnf func(format string, args ...any)
+
 	// decoySecret is the per-process HMAC key used to derive deterministic
 	// fake user/org ids for F-sec-7 anti-enumeration responses (Round 21
 	// Finding 1). The same loginName probed twice MUST produce the same
@@ -336,6 +339,7 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 		decoyOrgIDsEntries: make(map[string]*list.Element),
 		decoyOrgIDsLRU:     list.New(),
 		decoyOrgIDsCap:     defaultDecoyOrgIDsCap,
+		warnf:              logger.Warnf,
 	}
 	// AUD-113/AUD-071: build the trusted-host allowlist from the configured
 	// public URLs. A forwarding-header host outside this set is ignored so it
@@ -504,13 +508,6 @@ func (p *AuthProxy) getBackchannelVerifier() *backchannelVerifier {
 		p.backchannelVerifier = newBackchannelVerifier(jwksURL, hostOverride, p.config.ClientID, p.client, p.config.ZitadelIssuer)
 	})
 	return p.backchannelVerifier
-}
-
-// IsBackchannelRevoked reports whether a session sid has been invalidated by
-// a prior backchannel logout_token. Other handlers (e.g. session refresh) can
-// call this to reject requests that reference a revoked sid.
-func (p *AuthProxy) IsBackchannelRevoked(sid string) bool {
-	return p.getBackchannelVerifier().IsSIDRevoked(sid)
 }
 
 // HealthAuthProxy exposes a small JSON probe of safety-critical auth-proxy
@@ -1199,17 +1196,39 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 // TokenExchange handles POST /auth/oidc/token.
 // Proxies the token exchange request to Zitadel, passing form data through unchanged.
 // The redirect_uri must match what was used in the authorize request (PKCE requirement).
+//
+// A successful refresh is answered only while the session it belongs to still exists: Zitadel
+// keeps honouring a refresh token after its session is deleted (Settings > Sessions, an
+// administrator, a back-channel logout), so the proxy checks, and for an ended session revokes
+// the refresh token Zitadel just issued and refuses with invalid_grant, which signs the browser out.
 func (p *AuthProxy) TokenExchange(c *gin.Context) {
 	if err := c.Request.ParseForm(); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid form data")
 		return
 	}
 
-	respBody, statusCode, respHeaders, err := p.proxyFormPost(c.Request.Context(), "/oauth/v2/token", c.Request.PostForm)
+	ctx := c.Request.Context()
+	respBody, statusCode, respHeaders, err := p.proxyFormPost(ctx, "/oauth/v2/token", c.Request.PostForm)
 	if err != nil {
 		logger.Errorf("Failed to proxy token exchange: %v", err)
 		respondError(c, http.StatusBadGateway, "failed to exchange token with identity provider")
 		return
+	}
+
+	if statusCode == http.StatusOK && c.Request.PostForm.Get("grant_type") == "refresh_token" {
+		if verdict, issued := p.checkRefreshedSession(ctx, respBody); verdict != sessionAlive {
+			if issued != "" {
+				if err := p.revokeRefreshToken(ctx, issued, c.Request.PostForm.Get("client_id")); err != nil {
+					p.warnf("auth proxy: refused a refresh for an ended session but could not revoke its refresh token: %v", err)
+				}
+			}
+			c.Header("Cache-Control", "no-store")
+			c.JSON(http.StatusBadRequest, OAuthErrorResponse{
+				Error:            "invalid_grant",
+				ErrorDescription: "the session has ended",
+			})
+			return
+		}
 	}
 
 	// Pass through content type from Zitadel

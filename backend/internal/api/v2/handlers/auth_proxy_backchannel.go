@@ -32,11 +32,6 @@ const logoutTokenMaxAge = 5 * time.Minute
 // rotated keys take forever to pick up. 10 min matches common defaults.
 const jwksTTL = 10 * time.Minute
 
-// revokedSIDTTL is how long a sid from a valid logout_token is remembered
-// as revoked. Must be at least as long as the access-token lifetime so any
-// in-flight token that references that sid gets rejected on refresh.
-const revokedSIDTTL = 24 * time.Hour
-
 // seenJTITTL is how long a successfully-verified backchannel logout_token
 // is remembered for replay detection. Round 25 Wave 5 (item 18 / R25a #2):
 // must be at least `logoutTokenMaxAge + clockSkewSeconds` so any token
@@ -82,12 +77,6 @@ type backchannelVerifier struct {
 	keys       []jose.JSONWebKey
 	keysExpiry time.Time
 
-	// revokedSIDs tracks sids seen in valid logout_tokens. Values are the
-	// expiry time after which the entry can be reaped. A real deployment
-	// would back this with Redis so multiple API replicas share state -
-	// noted as a follow-up; single-replica dev is correct with the map.
-	revokedSIDs sync.Map // map[string]time.Time
-
 	// seenJTIs is the LRU-bounded jti dedup cache. Round 25 Wave 5
 	// (item 18 / R25a #2): a captured valid logout_token can be
 	// replayed to amplify CPU work (signature verify) on the verifier.
@@ -104,8 +93,7 @@ type backchannelVerifier struct {
 // seenJTIEntry is the value stored in the seenJTIs LRU. Round 25 Wave 5
 // (item 18 / R25a #2): we cache sid + sub alongside jti so a replay
 // short-circuit can return the original claims rather than synthetic
-// empty ones - RevokeSID gets called again (idempotent), logging stays
-// accurate, and the contract ("logout_token returned valid claims")
+// empty ones - logging stays accurate, and the contract ("logout_token returned valid claims")
 // holds for callers that inspect SID/Subject.
 type seenJTIEntry struct {
 	jti     string
@@ -263,8 +251,8 @@ func canonicalIssuer(s string) string {
 // Round 25 Wave 5 (item 18 / R25a #2): a fast-path replay-detection
 // gate runs after JWS parse but BEFORE signature verify. A repeated
 // jti returns the previously-cached claims as a synthetic success
-// (backchannel logout is idempotent - we already RevokeSID'd the
-// session on the first call, so a replay is a no-op anyway). The
+// (backchannel logout is idempotent - the first call already acted on
+// the session, so a replay is a no-op anyway). The
 // unverified jti is only used as an LRU lookup key; an attacker
 // forging a jti can at most trigger a benign short-circuit, not
 // bypass auth. The LRU bound prevents cache poisoning by attacker-
@@ -285,8 +273,7 @@ func (b *backchannelVerifier) verifyLogoutToken(ctx context.Context, raw string)
 	// Read the unverified jti and short-circuit if we've already seen
 	// it. The cached entry carries sid + sub from the original verify,
 	// so the synthetic claims surfaced to handleBackchannelLogout
-	// preserve the contract (RevokeSID is called again - idempotent -
-	// and logging stays accurate). The peek is "unverified" but the
+	// preserve the contract and logging stays accurate. The peek is "unverified" but the
 	// jti is only used as an LRU lookup key, not for any trust
 	// decision.
 	if jti := peekJTIUnverified(jws); jti != "" {
@@ -554,34 +541,11 @@ func (b *backchannelVerifier) getKeys(ctx context.Context, forceRefresh bool) ([
 	return jwks.Keys, nil
 }
 
-// RevokeSID records sid as revoked until its revocation TTL elapses. Look-ups
-// via IsSIDRevoked will return true in that window.
-func (b *backchannelVerifier) RevokeSID(sid string) {
-	if sid == "" {
-		return
-	}
-	b.revokedSIDs.Store(sid, time.Now().Add(revokedSIDTTL))
-}
-
-// IsSIDRevoked reports whether sid has been backchannel-logged-out and still
-// has revocation remaining.
-func (b *backchannelVerifier) IsSIDRevoked(sid string) bool {
-	v, ok := b.revokedSIDs.Load(sid)
-	if !ok {
-		return false
-	}
-	expiry, _ := v.(time.Time)
-	if time.Now().After(expiry) {
-		b.revokedSIDs.Delete(sid)
-		return false
-	}
-	return true
-}
-
 // handleBackchannelLogout validates an incoming OIDC backchannel logout_token
-// and, if valid, records the referenced sid as revoked so subsequent session
-// refresh attempts referencing it are rejected. Per OIDC Back-Channel Logout
-// 1.0 §2.8 the RP returns:
+// and acknowledges it. It records nothing: the session the token names has
+// already ended at Zitadel, and TokenExchange refuses the next refresh of a
+// session that no longer exists, which signs that browser out. Per OIDC
+// Back-Channel Logout 1.0 §2.8 the RP returns:
 //   - 200 with Cache-Control: no-store on success
 //   - 400 Bad Request with a JSON error object on failure
 //
@@ -600,7 +564,6 @@ func (p *AuthProxy) handleBackchannelLogout(c *gin.Context, token string) {
 	}
 
 	if claims.SID != "" {
-		p.getBackchannelVerifier().RevokeSID(claims.SID)
 		logger.Infof("backchannel logout accepted: sid=%s sub=%s", claims.SID, claims.Subject)
 	} else {
 		// Subject-only logout is a hint to invalidate all sessions for that user
