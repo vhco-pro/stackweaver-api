@@ -32,11 +32,10 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 )
 
-// templateWrites is every write that makes a job template name a row: the two creates and the
-// update, with the referent each must refuse.
-func (f *neighbourScopeFixture) templateWrites() (orgTemplates, projectTemplates, template string, writes []neighbourWrite) {
+// templateWrites is every write that makes a job template name a row: the create and the update,
+// with the referent each must refuse.
+func (f *neighbourScopeFixture) templateWrites() (orgTemplates, template string, writes []neighbourWrite) {
 	orgTemplates = "/api/v2/organizations/" + f.orgName + "/ansible/job-templates"
-	projectTemplates = "/api/v2/projects/" + f.project + "/ansible/job-templates"
 	template = "/api/v2/ansible/job-templates/" + f.template.String()
 
 	create := func(path, relationship string) func(t *testing.T, id string) (int, []byte) {
@@ -58,13 +57,10 @@ func (f *neighbourScopeFixture) templateWrites() (orgTemplates, projectTemplates
 				neighbourDocument(t, "ansible-job-templates", map[string]any{}, map[string]string{relationship: id}, nil))
 		}
 	}
-	return orgTemplates, projectTemplates, template, []neighbourWrite{
+	return orgTemplates, template, []neighbourWrite{
 		{"a job template naming a credential", create(orgTemplates, "credentials"), f.otherSSH, "credential not found"},
 		{"a job template naming an inventory", create(orgTemplates, "inventory"), f.otherInventory, "inventory not found"},
 		{"a job template naming a playbook", create(orgTemplates, "playbook"), f.otherPlaybook, "playbook not found"},
-		{"a project job template naming a credential", create(projectTemplates, "credentials"), f.otherSSH, "credential not found"},
-		{"a project job template naming an inventory", create(projectTemplates, "inventory"), f.otherInventory, "inventory not found"},
-		{"a project job template naming a playbook", create(projectTemplates, "playbook"), f.otherPlaybook, "playbook not found"},
 		{"a job template update naming a credential", update("credentials"), f.otherSSH, "credential not found"},
 		{"a job template update naming an inventory", update("inventory"), f.otherInventory, "inventory not found"},
 		// The next two did refuse another organization's row before, in words an unknown
@@ -86,7 +82,7 @@ func TestJobTemplateReferents_AnotherOrganizationReadsAsNotFound(t *testing.T) {
 		t.Fatalf("loading the template: %v", err)
 	}
 
-	_, _, _, writes := f.templateWrites()
+	_, _, writes := f.templateWrites()
 	f.assertReadAsNotFound(t, writes)
 
 	// The updates were refused whole: the template still names what it named.
@@ -101,9 +97,9 @@ func TestJobTemplateReferents_AnotherOrganizationReadsAsNotFound(t *testing.T) {
 
 func TestJobTemplateReferents_OwnOrganizationIsAccepted(t *testing.T) {
 	f := setupNeighbourScope(t)
-	orgTemplates, projectTemplates, template, _ := f.templateWrites()
+	orgTemplates, template, _ := f.templateWrites()
 
-	for name, path := range map[string]string{"a job template": orgTemplates, "a project job template": projectTemplates} {
+	for name, path := range map[string]string{"a job template": orgTemplates} {
 		t.Run(name+" with its organization's playbook, inventory and credential", func(t *testing.T) {
 			code, body := f.call(t, http.MethodPost, path,
 				neighbourDocument(t, "ansible-job-templates", neighbourName(), f.own("", ""), []string{f.sshCred}))
@@ -189,7 +185,7 @@ func TestJobTemplateReferents_StoredRowsAreNotTrusted(t *testing.T) {
 // identifier with the same bytes and stored nothing.
 func TestJobTemplateReferents_AlreadyOneAnswer(t *testing.T) {
 	f := setupNeighbourScope(t)
-	orgTemplates, _, template, _ := f.templateWrites()
+	orgTemplates, template, _ := f.templateWrites()
 	createNaming := func(relationship string) func(t *testing.T, id string) (int, []byte) {
 		return func(t *testing.T, id string) (int, []byte) {
 			t.Helper()

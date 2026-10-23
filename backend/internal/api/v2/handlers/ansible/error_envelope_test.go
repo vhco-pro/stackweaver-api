@@ -145,11 +145,11 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	if err != nil {
 		t.Fatalf("creating the inventory: %v", err)
 	}
-	source, err := sourceService.CreateInventorySource(inventory.ID, "errenv-src-"+sfx, "", models.InventorySourceTypeCustom, nil, models.InventorySourceConfig{})
+	source, err := sourceService.CreateInventorySourceWithOptions(inventory.ID, "errenv-src-"+sfx, "", models.InventorySourceTypeCustom, nil, models.InventorySourceConfig{}, ansiblesvc.UpdateInventorySourceOptions{})
 	if err != nil {
 		t.Fatalf("creating the enabled source: %v", err)
 	}
-	disabledSource, err := sourceService.CreateInventorySource(inventory.ID, "errenv-src-off-"+sfx, "", models.InventorySourceTypeCustom, nil, models.InventorySourceConfig{})
+	disabledSource, err := sourceService.CreateInventorySourceWithOptions(inventory.ID, "errenv-src-off-"+sfx, "", models.InventorySourceTypeCustom, nil, models.InventorySourceConfig{}, ansiblesvc.UpdateInventorySourceOptions{})
 	if err != nil {
 		t.Fatalf("creating the disabled source: %v", err)
 	}

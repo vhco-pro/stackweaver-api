@@ -192,10 +192,6 @@ func setupNeighbourScope(t *testing.T) *neighbourScopeFixture {
 	router.POST("/api/v2/ansible/job-templates/:id/credentials", templates.AttachTemplateCredential)
 	router.POST("/api/v2/ansible/inventories/:id/sources", sources.Create)
 	router.PATCH("/api/v2/ansible/inventory-sources/:source_id", sources.Update)
-	// The two project-scoped handlers have no route in the product. They are mounted here so that
-	// the day one gets a route it already holds to the rule.
-	router.POST("/api/v2/projects/:id/ansible/jobs", jobs.Launch)
-	router.POST("/api/v2/projects/:id/ansible/job-templates", templates.CreateTemplate)
 
 	return &neighbourScopeFixture{
 		router: router, db: db, member: member.ID,
@@ -378,31 +374,29 @@ func (f *neighbourScopeFixture) assertNotLaunched(t *testing.T, path string) {
 	}
 }
 
-func (f *neighbourScopeFixture) launchWrites() (orgJobs, projectJobs string, credentials []neighbourWrite) {
+func (f *neighbourScopeFixture) launchWrites() (orgJobs string, credentials []neighbourWrite) {
 	orgJobs = "/api/v2/organizations/" + f.orgName + "/ansible/jobs"
-	projectJobs = "/api/v2/projects/" + f.project + "/ansible/jobs"
 	launchWith := func(path string) func(t *testing.T, id string) (int, []byte) {
 		return func(t *testing.T, id string) (int, []byte) {
 			t.Helper()
 			return f.call(t, http.MethodPost, path, neighbourDocument(t, "ansible-jobs", neighbourName(), f.own("", ""), []string{id}))
 		}
 	}
-	return orgJobs, projectJobs, []neighbourWrite{
+	return orgJobs, []neighbourWrite{
 		{"a job launch naming a credential", launchWith(orgJobs), f.otherSSH, "credential not found"},
-		{"a project job launch naming a credential", launchWith(projectJobs), f.otherSSH, "credential not found"},
 	}
 }
 
 func TestJobLaunchReferents_AnotherOrganizationReadsAsNotFound(t *testing.T) {
 	f := setupNeighbourScope(t)
-	_, _, credentials := f.launchWrites()
+	_, credentials := f.launchWrites()
 	f.assertReadAsNotFound(t, credentials)
 }
 
 func TestJobLaunchReferents_OwnOrganizationIsAccepted(t *testing.T) {
 	f := setupNeighbourScope(t)
-	orgJobs, projectJobs, _ := f.launchWrites()
-	for name, path := range map[string]string{"a job launch": orgJobs, "a project job launch": projectJobs} {
+	orgJobs, _ := f.launchWrites()
+	for name, path := range map[string]string{"a job launch": orgJobs} {
 		t.Run(name+" with its organization's credentials", func(t *testing.T) {
 			code, body := f.call(t, http.MethodPost, path,
 				neighbourDocument(t, "ansible-jobs", neighbourName(), f.own("", ""), []string{f.sshCred, f.vaultCred}))
@@ -496,7 +490,7 @@ func TestAdHocReferents_AlreadyOneAnswer(t *testing.T) {
 // stored nothing.
 func TestJobLaunchReferents_AlreadyOneAnswer(t *testing.T) {
 	f := setupNeighbourScope(t)
-	orgJobs, _, _ := f.launchWrites()
+	orgJobs, _ := f.launchWrites()
 	launchNaming := func(relationship string) func(t *testing.T, id string) (int, []byte) {
 		return func(t *testing.T, id string) (int, []byte) {
 			t.Helper()

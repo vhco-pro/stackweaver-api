@@ -88,7 +88,7 @@ func TestVarsetSecretEncryption(t *testing.T) {
 	authService := auth.NewService(repository.NewUserRepository(db))
 	rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db))
 	// Real AES-256 key so Encrypt/Decrypt actually run (32 bytes).
-	varSvc := variable.NewService(varRepo, []byte("0123456789abcdef0123456789abcdef"))
+	varSvc := variable.NewServiceWithVariableSetsAndWorkspace(varRepo, nil, nil, []byte("0123456789abcdef0123456789abcdef"))
 
 	h := NewVariableSetHandlerV2(
 		repository.NewVariableSetRepository(db), vsvRepo, orgRepo,

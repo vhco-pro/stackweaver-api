@@ -360,3 +360,31 @@ func TestSettingsProxy_SingleFlightSurvivesLeaderContextCancel(t *testing.T) {
 		t.Errorf("expected exactly 1 upstream fetch (singleflight), got %d", fetches.Load())
 	}
 }
+
+// SettingsCacheMetrics is a snapshot of the settings-cache counters, which these tests read to
+// observe hits, misses, stale serves, evictions and deduplicated fetches.
+type SettingsCacheMetrics struct {
+	Hits            uint64
+	Misses          uint64
+	StaleServed     uint64
+	Evictions       uint64
+	UpstreamFetches uint64 // Round 25 Wave 8 (item 1): unique upstream fetches (singleflight deduplicated)
+	DedupedFetches  uint64 // concurrent miss-callers that piggy-backed on an in-flight fetch
+}
+
+// Metrics returns a snapshot of the cache counters.
+func (s *settingsCache) Metrics() SettingsCacheMetrics {
+	return SettingsCacheMetrics{
+		Hits:            s.hits.Load(),
+		Misses:          s.misses.Load(),
+		StaleServed:     s.staleServed.Load(),
+		Evictions:       s.evictions.Load(),
+		UpstreamFetches: s.upstreamFetches.Load(),
+		DedupedFetches:  s.dedupedFetches.Load(),
+	}
+}
+
+// SettingsCacheMetrics returns a snapshot of the proxy's settings-cache counters.
+func (p *AuthProxy) SettingsCacheMetrics() SettingsCacheMetrics {
+	return p.settingsCache.Metrics()
+}

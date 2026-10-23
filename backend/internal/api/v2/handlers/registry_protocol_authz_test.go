@@ -21,6 +21,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 )
 
 // TestRegistryProtocolReadAuthz is the AUD-123 assertion: the `/v1` Terraform registry-protocol
@@ -106,7 +107,7 @@ func TestRegistryProtocolReadAuthz(t *testing.T) {
 		t.Fatalf("create module version: %v", err)
 	}
 
-	storageClient := registry.NewMockStorage()
+	storageClient := storagetest.NewMemory()
 	orgRepo := repository.NewOrganizationRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
 	providerService := registry.NewProviderService(

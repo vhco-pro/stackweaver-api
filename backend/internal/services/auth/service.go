@@ -145,16 +145,6 @@ func NewService(userRepo *repository.UserRepository) *Service {
 	}
 }
 
-// NewServiceWithLookups is the test-friendly constructor - accepts
-// the lookup interface directly so unit tests can pass a mock
-// without depending on the concrete repo type or a live database.
-// Production callers should keep using `NewService`.
-func NewServiceWithLookups(userRepo UserLookup) *Service {
-	return &Service{
-		userRepo: userRepo,
-	}
-}
-
 // SetAPIKeyService sets the API key service for authentication
 func (s *Service) SetAPIKeyService(apiKeyService APIKeyVerifier) {
 	s.apiKeyService = apiKeyService

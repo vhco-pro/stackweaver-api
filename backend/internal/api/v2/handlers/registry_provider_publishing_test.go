@@ -36,10 +36,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
-	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 	"gorm.io/gorm"
 )
 
@@ -147,7 +147,7 @@ func TestCreateRegistryProvider(t *testing.T) {
 	providerRepo := repository.NewProviderRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
-	handler := NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, newProviderRBAC(db), registry.NewMockStorage())
+	handler := NewRegistryProviderResourceHandler(providerRepo, orgRepo, authService, newProviderRBAC(db), storagetest.NewMemory())
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -247,7 +247,7 @@ func TestPublishProviderPlatform(t *testing.T) {
 		repository.NewGPGKeyRepository(db),
 		auth.NewService(repository.NewUserRepository(db)),
 		newProviderRBAC(db),
-		registry.NewMockStorage(),
+		storagetest.NewMemory(),
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -327,7 +327,7 @@ func TestPublishProviderPlatform_RejectsPathInjection(t *testing.T) {
 		t.Fatalf("create gpg key: %v", err)
 	}
 
-	mockStore := registry.NewMockStorage()
+	mockStore := storagetest.NewMemory()
 	handler := NewRegistryProviderPublishingHandler(
 		repository.NewProviderRepository(db), repository.NewProviderVersionRepository(db),
 		repository.NewProviderPlatformRepository(db), repository.NewOrganizationRepository(db),
@@ -479,7 +479,7 @@ func TestPublishProviderPlatform_RejectsUnverifiedSignature(t *testing.T) {
 	// A SHA256SUMS that does NOT list the uploaded binary, signed by the registered key.
 	otherShasums := []byte(fmt.Sprintf("%x  some-other-artifact.zip\n", sha256.Sum256([]byte("something else"))))
 
-	mockStore := registry.NewMockStorage()
+	mockStore := storagetest.NewMemory()
 	handler := NewRegistryProviderPublishingHandler(
 		repository.NewProviderRepository(db), repository.NewProviderVersionRepository(db),
 		repository.NewProviderPlatformRepository(db), repository.NewOrganizationRepository(db),

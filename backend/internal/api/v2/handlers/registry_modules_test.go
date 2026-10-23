@@ -39,6 +39,7 @@ import (
 	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 	"gorm.io/gorm"
 )
 
@@ -189,7 +190,7 @@ func TestListModules(t *testing.T) {
 	orgRepo := repository.NewOrganizationRepository(db)
 
 	// Create a mock storage (in-memory for testing)
-	mockStorage := registry.NewMockStorage()
+	mockStorage := storagetest.NewMemory()
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage)
 
 	// AUD-123: modules are org-private; the /v1 list handler filters to modules the caller can
@@ -269,7 +270,7 @@ func TestGetModuleVersions(t *testing.T) {
 	moduleVersionRepo := repository.NewModuleVersionRepository(db)
 	moduleDownloadRepo := repository.NewModuleDownloadRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
-	mockStorage := registry.NewMockStorage()
+	mockStorage := storagetest.NewMemory()
 	moduleService := registry.NewModuleService(moduleRepo, moduleVersionRepo, moduleDownloadRepo, orgRepo, mockStorage)
 
 	// AUD-123: the versions endpoint gates on org membership; construct with the auth deps and
@@ -342,7 +343,7 @@ func TestPublishModuleVersion(t *testing.T) {
 	moduleRepo := repository.NewModuleRepository(db)
 	moduleVersionRepo := repository.NewModuleVersionRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
-	mockStorage := registry.NewMockStorage()
+	mockStorage := storagetest.NewMemory()
 
 	// Create module publisher
 	vcsConnectionRepo := repository.NewVCSConnectionRepository(db)

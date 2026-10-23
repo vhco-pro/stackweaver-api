@@ -15,6 +15,14 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 )
 
+// NewServiceWithLookups builds a Service on the lookup interface, so a test can pass a fake
+// instead of the repository production hands NewService.
+func NewServiceWithLookups(userRepo UserLookup) *Service {
+	return &Service{
+		userRepo: userRepo,
+	}
+}
+
 // Programmatic-token auth regression.
 //
 // Plan contract (docs/internal/plans/security/api-key-org-scoping-enforcement-plan.md):

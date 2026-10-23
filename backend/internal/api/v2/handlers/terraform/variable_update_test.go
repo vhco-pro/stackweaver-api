@@ -87,7 +87,7 @@ func TestWorkspaceVariableUpdate(t *testing.T) {
 	varRepo := repository.NewVariableRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
 	rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db))
-	varSvc := varsvc.NewService(varRepo, []byte("0123456789abcdef0123456789abcdef"))
+	varSvc := varsvc.NewServiceWithVariableSetsAndWorkspace(varRepo, nil, nil, []byte("0123456789abcdef0123456789abcdef"))
 	h := NewVariableHandlerV2(varRepo, repository.NewWorkspaceRepository(db), authService, rbacService, varSvc)
 
 	gin.SetMode(gin.TestMode)

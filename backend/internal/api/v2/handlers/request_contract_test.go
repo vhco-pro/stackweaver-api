@@ -35,6 +35,7 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 )
 
 // contractProvider is a VCS provider that pages a fixed set of repositories, projects and
@@ -145,7 +146,7 @@ func setupPlatformContract(t *testing.T) *platformContractFixture {
 		files:    []string{"inventories/prod.ini", "site.yml"},
 	}}
 	modules := NewRegistryPublishingHandler(moduleRepo, moduleVersionRepo, orgRepo, connRepo, authService, rbacService, nil,
-		registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, connRepo, registry.NewMockStorage()))
+		registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, connRepo, storagetest.NewMemory()))
 	activities := NewActivityHandlerV2(activity.NewService(repository.NewAuditLogRepository(db)), authService, orgRepo,
 		repository.NewWorkspaceRepository(db), projectRepo, nil, rbacService)
 

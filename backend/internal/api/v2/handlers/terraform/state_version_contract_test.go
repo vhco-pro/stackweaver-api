@@ -35,11 +35,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
-	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/state"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 	"gorm.io/gorm"
 )
 
@@ -105,7 +105,7 @@ func setupStateVersionContract(t *testing.T) *stateVersionFixture {
 	projectRepo := repository.NewProjectRepository(db)
 	workspaceRepo := repository.NewWorkspaceRepository(db)
 	versionRepo := repository.NewStateVersionRepository(db)
-	store := registry.NewMockStorage()
+	store := storagetest.NewMemory()
 	stateService := state.NewService(versionRepo, repository.NewStateLockRepository(db), workspaceRepo, store, nil, nil)
 	h := NewStateVersionHandlerV2(versionRepo, workspaceRepo, projectRepo,
 		auth.NewService(repository.NewUserRepository(db)),
