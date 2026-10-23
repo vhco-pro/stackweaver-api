@@ -28,6 +28,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 )
 
 func TestRegistryModuleCreate_VCSConnectionOfAnotherOrganizationReadsAsNotFound(t *testing.T) {
@@ -68,7 +69,7 @@ func TestRegistryModuleCreate_VCSConnectionOfAnotherOrganizationReadsAsNotFound(
 		moduleRepo, moduleVersionRepo, orgRepo, vcsConnectionRepo,
 		auth.NewService(repository.NewUserRepository(db)), newProviderRBAC(db),
 		nil, // githubAppManager - nil skips the publish-latest-tag side effect
-		registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, vcsConnectionRepo, registry.NewMockStorage()),
+		registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, vcsConnectionRepo, storagetest.NewMemory()),
 	)
 	router := storedAsSentRouter()
 	router.POST("/api/v2/organizations/:name/registry/modules", h.CreateModule)

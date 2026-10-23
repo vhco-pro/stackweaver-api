@@ -92,7 +92,7 @@ func TestEmptyVariableValue(t *testing.T) {
 	vsvRepo := repository.NewVariableSetVariableRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
 	rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db))
-	varSvc := variable.NewService(varRepo, []byte("0123456789abcdef0123456789abcdef"))
+	varSvc := variable.NewServiceWithVariableSetsAndWorkspace(varRepo, nil, nil, []byte("0123456789abcdef0123456789abcdef"))
 
 	h := NewVariableSetHandlerV2(
 		repository.NewVariableSetRepository(db), vsvRepo, orgRepo,

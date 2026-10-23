@@ -170,28 +170,6 @@ func (s *settingsCache) set(key string, payload []byte, ttl time.Duration) {
 	}
 }
 
-// SettingsCacheMetrics is the public view of the cache counters.
-type SettingsCacheMetrics struct {
-	Hits            uint64
-	Misses          uint64
-	StaleServed     uint64
-	Evictions       uint64
-	UpstreamFetches uint64 // Round 25 Wave 8 (item 1): unique upstream fetches (singleflight deduplicated)
-	DedupedFetches  uint64 // concurrent miss-callers that piggy-backed on an in-flight fetch
-}
-
-// Metrics returns a snapshot of the cache counters for logging / observability.
-func (s *settingsCache) Metrics() SettingsCacheMetrics {
-	return SettingsCacheMetrics{
-		Hits:            s.hits.Load(),
-		Misses:          s.misses.Load(),
-		StaleServed:     s.staleServed.Load(),
-		Evictions:       s.evictions.Load(),
-		UpstreamFetches: s.upstreamFetches.Load(),
-		DedupedFetches:  s.dedupedFetches.Load(),
-	}
-}
-
 // fetchOrShare runs `fn` exactly once for a given key while concurrent
 // callers for the same key wait and receive the shared result. Round
 // 25 Wave 8 (item 1 / F-chaos-2). The returned error is whatever `fn`

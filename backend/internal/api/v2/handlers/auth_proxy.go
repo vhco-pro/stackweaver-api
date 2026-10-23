@@ -207,9 +207,7 @@ type AuthProxy struct {
 	backchannelVerifier     *backchannelVerifier
 	backchannelVerifierOnce sync.Once
 
-	// LoginNameLimiter exposed (uppercase L) so test reset / observability
-	// hooks (e.g. `/auth/testing/reset` in routes.go) can call ResetAll
-	// without reaching into private state.
+	// LoginNameLimiter is the per-loginName lockout the password endpoints claim a slot from.
 	LoginNameLimiter *middleware.LoginNameRateLimiter
 
 	// decoySecret is the per-process HMAC key used to derive deterministic
@@ -462,12 +460,6 @@ func (p *AuthProxy) StopDecoyOrgIDsSweeper() {
 			close(p.decoyOrgIDsStop)
 		}
 	}
-}
-
-// SettingsCacheMetrics returns a snapshot of the settings-cache counters so
-// callers (e.g. a metrics endpoint or periodic log) can observe cache behaviour.
-func (p *AuthProxy) SettingsCacheMetrics() SettingsCacheMetrics {
-	return p.settingsCache.Metrics()
 }
 
 // getBackchannelVerifier returns the lazily-constructed backchannel-logout

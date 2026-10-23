@@ -143,7 +143,7 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 	if err != nil {
 		t.Fatalf("create host B: %v", err)
 	}
-	source, err := sourceService.CreateInventorySource(inventory.ID, "src-"+sfx, "", models.InventorySourceTypeCustom, nil, models.InventorySourceConfig{})
+	source, err := sourceService.CreateInventorySourceWithOptions(inventory.ID, "src-"+sfx, "", models.InventorySourceTypeCustom, nil, models.InventorySourceConfig{}, ansiblesvc.UpdateInventorySourceOptions{})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}

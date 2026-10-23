@@ -14,11 +14,32 @@ type fakeClock struct {
 	now time.Time
 }
 
+// recordFailure counts one failed sign-in the way the auth proxy does: it claims a slot with
+// BeginAttempt and, the upstream having refused the credentials, leaves the slot counted.
+func recordFailure(rl *LoginNameRateLimiter, loginName string) {
+	rl.BeginAttempt(loginName)
+}
+
+// isLocked reports, without claiming a slot, whether the next BeginAttempt for loginName would be
+// refused.
+func isLocked(rl *LoginNameRateLimiter, loginName string) bool {
+	if rl.threshold <= 0 || loginName == "" {
+		return false
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	entry, ok := rl.loadEntry(loginName)
+	if !ok || rl.now().Sub(entry.firstFailureAt) > rl.window {
+		return false
+	}
+	return entry.count >= rl.threshold
+}
+
 func (c *fakeClock) Now() time.Time { return c.now }
 
 func TestLoginNameRateLimiter_NotLockedInitially(t *testing.T) {
 	rl := NewLoginNameRateLimiter(5, 5*time.Minute)
-	if rl.IsLocked("alice") {
+	if isLocked(rl, "alice") {
 		t.Error("user should not be locked with no recorded failures")
 	}
 }
@@ -26,17 +47,17 @@ func TestLoginNameRateLimiter_NotLockedInitially(t *testing.T) {
 func TestLoginNameRateLimiter_LocksAtThreshold(t *testing.T) {
 	rl := NewLoginNameRateLimiter(3, 5*time.Minute)
 	for i := range 2 {
-		rl.RecordFailure("alice")
-		if rl.IsLocked("alice") {
+		recordFailure(rl, "alice")
+		if isLocked(rl, "alice") {
 			t.Errorf("locked at count=%d but threshold=3", i+1)
 		}
 	}
-	rl.RecordFailure("alice")
-	if !rl.IsLocked("alice") {
+	recordFailure(rl, "alice")
+	if !isLocked(rl, "alice") {
 		t.Error("expected lock at count=3 == threshold")
 	}
-	rl.RecordFailure("alice")
-	if !rl.IsLocked("alice") {
+	recordFailure(rl, "alice")
+	if !isLocked(rl, "alice") {
 		t.Error("expected to remain locked beyond threshold")
 	}
 }
@@ -44,12 +65,12 @@ func TestLoginNameRateLimiter_LocksAtThreshold(t *testing.T) {
 func TestLoginNameRateLimiter_PerUserIsolation(t *testing.T) {
 	rl := NewLoginNameRateLimiter(3, 5*time.Minute)
 	for range 5 {
-		rl.RecordFailure("alice")
+		recordFailure(rl, "alice")
 	}
-	if !rl.IsLocked("alice") {
+	if !isLocked(rl, "alice") {
 		t.Error("alice should be locked")
 	}
-	if rl.IsLocked("bob") {
+	if isLocked(rl, "bob") {
 		t.Error("bob should NOT be locked - failures must be per-user")
 	}
 }
@@ -57,18 +78,18 @@ func TestLoginNameRateLimiter_PerUserIsolation(t *testing.T) {
 func TestLoginNameRateLimiter_ResetClearsLock(t *testing.T) {
 	rl := NewLoginNameRateLimiter(3, 5*time.Minute)
 	for range 5 {
-		rl.RecordFailure("alice")
+		recordFailure(rl, "alice")
 	}
-	if !rl.IsLocked("alice") {
+	if !isLocked(rl, "alice") {
 		t.Fatal("alice should be locked before Reset")
 	}
 	rl.Reset("alice")
-	if rl.IsLocked("alice") {
+	if isLocked(rl, "alice") {
 		t.Error("Reset should clear the lock (F-sec-6 contract)")
 	}
 	// Post-reset, the next failure starts a fresh count.
-	rl.RecordFailure("alice")
-	if rl.IsLocked("alice") {
+	recordFailure(rl, "alice")
+	if isLocked(rl, "alice") {
 		t.Error("single failure after Reset should NOT immediately re-lock")
 	}
 }
@@ -79,53 +100,33 @@ func TestLoginNameRateLimiter_WindowExpiry(t *testing.T) {
 	rl.now = clock.Now
 
 	for range 5 {
-		rl.RecordFailure("alice")
+		recordFailure(rl, "alice")
 	}
-	if !rl.IsLocked("alice") {
+	if !isLocked(rl, "alice") {
 		t.Fatal("alice should be locked initially")
 	}
 
-	// Advance past the window - IsLocked should auto-purge and report
-	// unlocked. This is the sliding-window contract: an attacker who
+	// Advance past the window: the old failures no longer count and the
+	// user reads as unlocked. This is the sliding-window contract: an attacker who
 	// stops trying for the window's duration gets a fresh budget.
 	clock.now = clock.now.Add(6 * time.Minute)
-	if rl.IsLocked("alice") {
+	if isLocked(rl, "alice") {
 		t.Error("expected unlock after window expiry")
 	}
 
 	// And a fresh failure should start a NEW window.
-	rl.RecordFailure("alice")
-	if rl.IsLocked("alice") {
+	recordFailure(rl, "alice")
+	if isLocked(rl, "alice") {
 		t.Error("first failure in new window should NOT lock immediately")
-	}
-}
-
-func TestLoginNameRateLimiter_ResetAllClearsEverything(t *testing.T) {
-	rl := NewLoginNameRateLimiter(3, 5*time.Minute)
-	for _, u := range []string{"alice", "bob", "carol"} {
-		for range 5 {
-			rl.RecordFailure(u)
-		}
-	}
-	for _, u := range []string{"alice", "bob", "carol"} {
-		if !rl.IsLocked(u) {
-			t.Fatalf("%s should be locked before ResetAll", u)
-		}
-	}
-	rl.ResetAll()
-	for _, u := range []string{"alice", "bob", "carol"} {
-		if rl.IsLocked(u) {
-			t.Errorf("%s should be unlocked after ResetAll", u)
-		}
 	}
 }
 
 func TestLoginNameRateLimiter_DisabledByZeroThreshold(t *testing.T) {
 	rl := NewLoginNameRateLimiter(0, 5*time.Minute)
 	for range 100 {
-		rl.RecordFailure("alice")
+		recordFailure(rl, "alice")
 	}
-	if rl.IsLocked("alice") {
+	if isLocked(rl, "alice") {
 		t.Error("threshold=0 must disable locking entirely")
 	}
 }
@@ -135,9 +136,9 @@ func TestLoginNameRateLimiter_EmptyLoginNameNoOp(t *testing.T) {
 	// accidentally lock all empty-loginName attempts together.
 	rl := NewLoginNameRateLimiter(3, 5*time.Minute)
 	for range 10 {
-		rl.RecordFailure("")
+		recordFailure(rl, "")
 	}
-	if rl.IsLocked("") {
+	if isLocked(rl, "") {
 		t.Error("empty loginName must never enter the failure map")
 	}
 }
@@ -162,8 +163,7 @@ func TestBeginAttempt_AllowsUpToThresholdSequentially(t *testing.T) {
 
 // TestBeginAttempt_RaceSafe is the regression test for Audit Round 20
 // Finding 3: under N parallel callers, no more than `threshold` attempts
-// are allowed through. The legacy IsLocked + RecordFailure pair would
-// let all N pass.
+// are allowed through. A check-then-record pair would let all N pass.
 func TestBeginAttempt_RaceSafe(t *testing.T) {
 	const (
 		threshold = 5
@@ -239,10 +239,10 @@ func TestLoginNameRateLimiter_LRUEvictionOnOverflow(t *testing.T) {
 	rl.cap = 3 // shrink for the test
 
 	// Insert 4 distinct loginNames; the first should be evicted.
-	rl.RecordFailure("alice")
-	rl.RecordFailure("bob")
-	rl.RecordFailure("carol")
-	rl.RecordFailure("dave") // pushes alice out
+	recordFailure(rl, "alice")
+	recordFailure(rl, "bob")
+	recordFailure(rl, "carol")
+	recordFailure(rl, "dave") // pushes alice out
 
 	if _, ok := rl.failures["alice"]; ok {
 		t.Errorf("LRU should have evicted alice on overflow")
@@ -258,17 +258,17 @@ func TestLoginNameRateLimiter_LRUEvictionOnOverflow(t *testing.T) {
 }
 
 // Round 25 Wave 3 (item 23 / R25c H-2): touching an entry (via
-// RecordFailure or BeginAttempt) must move it to MRU front so it
+// BeginAttempt) must move it to MRU front so it
 // survives subsequent overflows. Pin the LRU semantics.
 func TestLoginNameRateLimiter_LRUTouchPromotesEntry(t *testing.T) {
 	rl := NewLoginNameRateLimiter(5, 5*time.Minute)
 	rl.cap = 3
 
-	rl.RecordFailure("alice") // [alice]
-	rl.RecordFailure("bob")   // [bob, alice]
-	rl.RecordFailure("carol") // [carol, bob, alice]
-	rl.RecordFailure("alice") // [alice, carol, bob] - alice promoted, count++
-	rl.RecordFailure("dave")  // [dave, alice, carol] - bob evicted (LRU)
+	recordFailure(rl, "alice") // [alice]
+	recordFailure(rl, "bob")   // [bob, alice]
+	recordFailure(rl, "carol") // [carol, bob, alice]
+	recordFailure(rl, "alice") // [alice, carol, bob] - alice promoted, count++
+	recordFailure(rl, "dave")  // [dave, alice, carol] - bob evicted (LRU)
 
 	if _, ok := rl.failures["bob"]; ok {
 		t.Errorf("bob should have been evicted (was LRU after alice's promotion)")
@@ -291,9 +291,9 @@ func TestLoginNameRateLimiter_SweeperPrunesExpired(t *testing.T) {
 	rl.now = func() time.Time { return base }
 
 	// Seed three entries at t=0.
-	rl.RecordFailure("alice")
-	rl.RecordFailure("bob")
-	rl.RecordFailure("carol")
+	recordFailure(rl, "alice")
+	recordFailure(rl, "bob")
+	recordFailure(rl, "carol")
 
 	// Fast-forward past the window.
 	rl.now = func() time.Time { return base.Add(200 * time.Millisecond) }

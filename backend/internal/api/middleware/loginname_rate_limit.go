@@ -39,8 +39,7 @@ const defaultLoginNameLimiterCap = 100_000
 // purged opportunistically on each call (no background goroutine).
 //
 // **Loginname-key canonicalisation invariant (Round 25 item 28 / R25b F7):**
-// All public methods (`IsLocked`, `BeginAttempt`, `RollbackAttempt`,
-// `RecordFailure`, `Reset`) key on the raw `loginName` string the
+// All public methods (`BeginAttempt`, `RollbackAttempt`, `Reset`) key on the raw `loginName` string the
 // caller passes in. Two callers that disagree on case-folding (e.g.
 // `Alice@x.com` vs `alice@x.com`) produce two distinct entries - one
 // would lock the user, the other wouldn't. The limiter does NOT
@@ -75,8 +74,8 @@ type loginNameFailure struct {
 }
 
 // NewLoginNameRateLimiter creates a per-loginName failure tracker. A
-// non-positive `threshold` disables the limiter (every IsLocked call
-// returns false; RecordFailure is a no-op) - useful for STACKWEAVER_ENV=
+// non-positive `threshold` disables the limiter (every BeginAttempt
+// call returns true) - useful for STACKWEAVER_ENV=
 // dev setups where password-spraying lockout would be a footgun.
 //
 // Round 25 hardening (item 23 / R25c H-2): the failures map is now LRU-
@@ -210,40 +209,13 @@ func (rl *LoginNameRateLimiter) removeEntry(loginName string) {
 	}
 }
 
-// IsLocked reports whether `loginName` has accumulated enough recent
-// failures to be locked. Window-expired entries are purged inline and
-// reported as unlocked.
-//
-// NOTE: `IsLocked` alone is NOT race-safe under parallel attempts -
-// concurrent callers can each see `count < threshold`, all forward
-// upstream, then all RecordFailure, blowing past the threshold by N
-// in-flight attempts. Use `BeginAttempt` for the password-attempt
-// gate; `IsLocked` is kept for read-only inspection (tests, metrics).
-func (rl *LoginNameRateLimiter) IsLocked(loginName string) bool {
-	if rl.threshold <= 0 || loginName == "" {
-		return false
-	}
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	entry, ok := rl.loadEntry(loginName)
-	if !ok {
-		return false
-	}
-	if rl.now().Sub(entry.firstFailureAt) > rl.window {
-		// Window expired - clear and treat as unlocked.
-		rl.removeEntry(loginName)
-		return false
-	}
-	return entry.count >= rl.threshold
-}
-
 // BeginAttempt atomically checks the lockout threshold AND tentatively
 // reserves a failure slot. Returns true if the caller may proceed with
 // the upstream password check, false if the user is locked.
 //
-// This closes the parallel-attempt race that `IsLocked` + post-flight
-// `RecordFailure` allows: with N concurrent PATCHes, all N pass the
-// IsLocked gate (count < threshold), all N forward to Zitadel, then
+// This closes the parallel-attempt race a check-then-record pair allows:
+// with N concurrent PATCHes, all N pass the lock check (count <
+// threshold), all N forward to Zitadel, then
 // all N record their failures - blowing past `threshold` by N. Audit
 // Round 20 surfaced this; the fix is to claim the slot pre-flight.
 //
@@ -293,8 +265,7 @@ func (rl *LoginNameRateLimiter) BeginAttempt(loginName string) bool {
 // The honest-user protection is the priority and the IPRateLimiter
 // caps absolute volume per source. A future hardening could track
 // 5xx events separately and treat them as confirmed failures after a
-// small grace count (e.g. 3 5xxs in window → switch to RecordFailure
-// semantics). Not fixed today because the current behavior is
+// small grace count (e.g. 3 5xxs in window → count them as failures). Not fixed today because the current behavior is
 // asymmetrically helpful to honest users (transient blip → no lock)
 // and the abuse case requires a Zitadel-outage-class event that
 // dominates other failure modes anyway.
@@ -315,30 +286,6 @@ func (rl *LoginNameRateLimiter) RollbackAttempt(loginName string) {
 	entry.count--
 }
 
-// RecordFailure increments the failure counter for `loginName`. The
-// first failure within a window stamps `firstFailureAt`; subsequent
-// failures inside the window only bump count. Once the window expires,
-// the next failure resets both fields (sliding window semantics).
-//
-// Prefer `BeginAttempt` for the password-attempt gate (see Audit Round
-// 20). RecordFailure is kept for callers that need the legacy
-// post-flight semantics - currently only the unit-test harness.
-func (rl *LoginNameRateLimiter) RecordFailure(loginName string) {
-	if rl.threshold <= 0 || loginName == "" {
-		return
-	}
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	now := rl.now()
-	entry, ok := rl.touchEntry(loginName)
-	if !ok || now.Sub(entry.firstFailureAt) > rl.window {
-		rl.removeEntry(loginName) // no-op if not present
-		rl.putEntry(&loginNameFailure{loginName: loginName, count: 1, firstFailureAt: now})
-		return
-	}
-	entry.count++
-}
-
 // Reset clears the failure tracking for a single loginName. Called after
 // a successful password verification so honest users who fat-fingered a
 // few attempts aren't penalized after they finally get it right (F-sec-6
@@ -350,14 +297,4 @@ func (rl *LoginNameRateLimiter) Reset(loginName string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	rl.removeEntry(loginName)
-}
-
-// ResetAll clears every loginName failure entry. Intended for E2E test
-// harnesses (`/auth/testing/reset`) to restore a clean slate between
-// specs - never call from production code paths.
-func (rl *LoginNameRateLimiter) ResetAll() {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	rl.failures = make(map[string]*list.Element)
-	rl.lru = list.New()
 }

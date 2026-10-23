@@ -22,7 +22,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -53,10 +52,6 @@ func (q *syncQueue) Enqueue(_ context.Context, queueName string, job any) error 
 	defer q.mu.Unlock()
 	q.jobs = append(q.jobs, m)
 	return nil
-}
-
-func (q *syncQueue) Dequeue(context.Context, string, time.Duration) ([]byte, error) {
-	return nil, errors.New("syncQueue does not dequeue")
 }
 
 func (q *syncQueue) Close() error { return nil }

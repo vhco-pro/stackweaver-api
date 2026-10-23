@@ -276,10 +276,6 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 		// (backchannel binding, production_mode). Lets the E2E suite
 		// assert R24-8 without scraping container logs.
 		auth.GET("/health/auth-proxy", proxy.HealthAuthProxy)
-
-		// Testing hook (A14) - only registered in builds with the `e2e` tag.
-		// Production binaries get a no-op implementation (see testing_noop.go).
-		registerTestingRoutes(auth, authRateLimiter, proxy)
 	}
 }
 

@@ -25,7 +25,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -53,9 +52,6 @@ func (q *contractQueue) Enqueue(context.Context, string, interface{}) error {
 	return nil
 }
 
-func (q *contractQueue) Dequeue(context.Context, string, time.Duration) ([]byte, error) {
-	return nil, nil
-}
 func (q *contractQueue) Close() error { return nil }
 
 // contractProvider is a VCS provider that lists a fixed set of files. Every other method is

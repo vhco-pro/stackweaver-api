@@ -29,24 +29,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/storage"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 )
 
 // snapshotStore is an in-memory storage.Client whose GetStream honours the documented
 // contract (storage.ErrNotFound for a missing object) and counts opened and closed
 // streams, so a test can prove a probe did not leak its reader.
 type snapshotStore struct {
-	*registry.MockStorage
+	*storagetest.Memory
 	opened, closed int
 }
 
 func newSnapshotStore() *snapshotStore {
-	return &snapshotStore{MockStorage: registry.NewMockStorage()}
+	return &snapshotStore{Memory: storagetest.NewMemory()}
 }
 
 type countingCloser struct {
@@ -82,10 +82,6 @@ func (q *recordingQueue) Enqueue(_ context.Context, queueName string, job any) e
 	q.queues = append(q.queues, queueName)
 	q.payloads = append(q.payloads, job)
 	return nil
-}
-
-func (q *recordingQueue) Dequeue(context.Context, string, time.Duration) ([]byte, error) {
-	return nil, errors.New("recordingQueue does not dequeue")
 }
 
 func (q *recordingQueue) Close() error { return nil }

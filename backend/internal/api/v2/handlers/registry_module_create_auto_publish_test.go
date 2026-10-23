@@ -29,6 +29,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 )
 
 func TestRegistryModuleCreate_AutoPublishTagsIsStoredAsSent(t *testing.T) {
@@ -69,7 +70,7 @@ func TestRegistryModuleCreate_AutoPublishTagsIsStoredAsSent(t *testing.T) {
 		auth.NewService(repository.NewUserRepository(db)),
 		newProviderRBAC(db),
 		nil, // githubAppManager - nil skips the publish-latest-tag side effect
-		registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, vcsConnectionRepo, registry.NewMockStorage()),
+		registry.NewModulePublisher(moduleRepo, moduleVersionRepo, orgRepo, vcsConnectionRepo, storagetest.NewMemory()),
 	)
 
 	router := storedAsSentRouter()

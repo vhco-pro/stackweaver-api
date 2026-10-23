@@ -25,11 +25,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -47,10 +45,6 @@ type capturedQueue struct{ payloads []any }
 func (q *capturedQueue) Enqueue(_ context.Context, _ string, job any) error {
 	q.payloads = append(q.payloads, job)
 	return nil
-}
-
-func (q *capturedQueue) Dequeue(context.Context, string, time.Duration) ([]byte, error) {
-	return nil, errors.New("capturedQueue does not dequeue")
 }
 
 func (q *capturedQueue) Close() error { return nil }
@@ -135,9 +129,6 @@ func setupVCSConnectionScope(t *testing.T) *vcsConnectionScopeFixture {
 	router.POST("/api/v2/ansible/inventories/:id/actions/sync", inventories.SyncInventory)
 	router.POST("/api/v2/organizations/:name/ansible/playbooks", playbooks.CreatePlaybookByOrganization)
 	router.PATCH("/api/v2/ansible/playbooks/:id", playbooks.UpdatePlaybook)
-	// The project-scoped create has no route in the product. It is mounted here so that the day
-	// it gets one it already holds to the rule.
-	router.POST("/api/v2/projects/:id/ansible/playbooks", playbooks.CreatePlaybook)
 
 	return &vcsConnectionScopeFixture{
 		neighbourScopeFixture: base, router: router, queue: queue, orgID: orgID,
@@ -201,9 +192,6 @@ func TestPlaybookVCSConnection_AnotherOrganizationReadsAsNotFound(t *testing.T) 
 	writes := map[string]func(connection string) (int, []byte){
 		"a create in the organization": func(connection string) (int, []byte) {
 			return f.send(t, http.MethodPost, "/api/v2/organizations/"+f.orgName+"/ansible/playbooks", f.playbookDocument(t, connection))
-		},
-		"a create in the project": func(connection string) (int, []byte) {
-			return f.send(t, http.MethodPost, "/api/v2/projects/"+f.project+"/ansible/playbooks", f.playbookDocument(t, connection))
 		},
 		"an update": func(connection string) (int, []byte) {
 			return f.send(t, http.MethodPatch, "/api/v2/ansible/playbooks/"+f.playbook,
