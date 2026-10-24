@@ -1468,7 +1468,7 @@ func (p *AuthProxy) GetAuthRequest(c *gin.Context) {
 		return
 	}
 
-	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodGet, "/v2/oidc/auth_requests/"+authRequestID, nil)
+	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodGet, "/v2/oidc/auth_requests/"+url.PathEscape(authRequestID), nil)
 	if err != nil {
 		logger.Errorf("Failed to get auth request: %v", err)
 		respondError(c, http.StatusBadGateway, "failed to get auth request from identity provider")
@@ -1513,6 +1513,16 @@ func (p *AuthProxy) FinalizeAuthRequest(c *gin.Context) {
 		return
 	}
 
+	// Zitadel finalizes any session the login client presents and leaves it to the client to
+	// decide whether the session is authenticated enough. This login client runs in the browser,
+	// so the decision is made here: a session that has not proven who the user is gets the same
+	// answer a decoy session does.
+	if ok, reason := p.sessionMayFinalize(c.Request.Context(), req.SessionID); !ok {
+		p.warnf("auth proxy: refusing to finalize auth request with session %s: %s", req.SessionID, reason)
+		c.Data(http.StatusPreconditionFailed, "application/json", buildDecoyFinalizePreconditionResponse())
+		return
+	}
+
 	zitadelReq := map[string]any{
 		"session": map[string]any{
 			"sessionId":    req.SessionID,
@@ -1520,7 +1530,7 @@ func (p *AuthProxy) FinalizeAuthRequest(c *gin.Context) {
 		},
 	}
 
-	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/oidc/auth_requests/"+req.AuthRequestID, zitadelReq)
+	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/oidc/auth_requests/"+url.PathEscape(req.AuthRequestID), zitadelReq)
 	if err != nil {
 		logger.Errorf("Failed to finalize auth request: %v", err)
 		respondError(c, http.StatusBadGateway, "failed to finalize auth request with identity provider")
@@ -4119,15 +4129,24 @@ type verifiedFactor struct {
 	VerifiedAt string `json:"verifiedAt"`
 }
 
+// webAuthNFactor is a WebAuthn factor. UserVerified distinguishes a passkey (the authenticator
+// verified the user, so it is a primary credential) from a presence-only security key (a second
+// factor).
+type webAuthNFactor struct {
+	verifiedFactor
+	UserVerified bool `json:"userVerified"`
+}
+
 // sessionFactors is the part of Zitadel's `GET /v2/sessions/{id}` the proxy
 // reads: who the session names, and which credentials it has verified.
 type sessionFactors struct {
 	User struct {
 		verifiedFactor
-		ID string `json:"id"`
+		ID             string `json:"id"`
+		OrganizationID string `json:"organizationId"`
 	} `json:"user"`
 	Password verifiedFactor `json:"password"`
-	WebAuthN verifiedFactor `json:"webAuthN"`
+	WebAuthN webAuthNFactor `json:"webAuthN"`
 	Intent   verifiedFactor `json:"intent"`
 	TOTP     verifiedFactor `json:"totp"`
 	OTPSMS   verifiedFactor `json:"otpSms"`
@@ -4138,7 +4157,7 @@ type sessionFactors struct {
 // credential factor. The user factor does not count: it only says a login
 // name resolved.
 func (f sessionFactors) credentialVerified() bool {
-	for _, c := range []verifiedFactor{f.Password, f.WebAuthN, f.Intent, f.TOTP, f.OTPSMS, f.OTPEmail} {
+	for _, c := range []verifiedFactor{f.Password, f.WebAuthN.verifiedFactor, f.Intent, f.TOTP, f.OTPSMS, f.OTPEmail} {
 		if c.VerifiedAt != "" {
 			return true
 		}
