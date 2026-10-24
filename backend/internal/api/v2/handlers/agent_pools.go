@@ -606,8 +606,9 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 		if h.apiKeyService != nil {
 			if raw, exists := c.Get("api_key_id"); exists {
 				if keyID, perr := uuid.Parse(fmt.Sprintf("%v", raw)); perr == nil {
-					if bound, berr := h.apiKeyService.AgentPoolBindingForKey(keyID); berr == nil && bound != nil && *bound != poolID {
-						jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this agent token is bound to a different agent pool")
+					bound, berr := h.apiKeyService.AgentPoolBindingForKey(keyID)
+					if status, detail := poolBindingVerdict(bound, berr, poolID); status != 0 {
+						jsonapi.WriteError(c, status, http.StatusText(status), detail)
 						return false
 					}
 				}
