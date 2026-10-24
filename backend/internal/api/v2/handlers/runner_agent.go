@@ -1972,8 +1972,6 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 				if v := decrypt(cred.Password); v != "" {
 					response.EnvironmentVars["VMWARE_PASSWORD"] = v
 				}
-			case models.CredentialTypeSCM:
-				// SCM credentials are handled via the VCS connection, not job env.
 			}
 		}
 	}
