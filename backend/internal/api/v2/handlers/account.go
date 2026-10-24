@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -95,6 +96,14 @@ func (h *AccountHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
+	// The stored email is written only by the sign-in sync, from an address the identity provider
+	// has verified. A requested change goes to the identity provider and stays unconfirmed until
+	// the person verifies it there, so without one there is nowhere to send it.
+	if attrs.Email != nil && *attrs.Email != "" && !strings.EqualFold(*attrs.Email, user.Email) && h.profiles == nil {
+		jsonAPIError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "the email address is managed by the identity provider")
+		return
+	}
+
 	// The identity provider holds the name and email too; a non-empty new value goes there first,
 	// so the two copies cannot disagree after a failure.
 	if h.profiles != nil {
@@ -104,7 +113,9 @@ func (h *AccountHandlerV2) Update(c *gin.Context) {
 			if attrs.Name != nil && *attrs.Name != "" {
 				update.Name, changed = *attrs.Name, true
 			}
-			if attrs.Email != nil && *attrs.Email != "" {
+			// Only a different address is a change; resending the stored one must not ask the
+			// identity provider to set, and possibly re-verify, the address it already holds.
+			if attrs.Email != nil && *attrs.Email != "" && !strings.EqualFold(*attrs.Email, user.Email) {
 				update.Email, changed = *attrs.Email, true
 			}
 			if changed {
@@ -121,7 +132,6 @@ func (h *AccountHandlerV2) Update(c *gin.Context) {
 		into  *string
 	}{
 		{attrs.Username, &user.Username},
-		{attrs.Email, &user.Email},
 		{attrs.Name, &user.Name},
 		{attrs.Bio, &user.Bio},
 		{attrs.Company, &user.Company},
@@ -155,7 +165,13 @@ func (h *AccountHandlerV2) accountResource(c *gin.Context, user *models.User) js
 	if h.profiles != nil {
 		if subject, err := h.authService.GetUserSubject(c); err == nil {
 			if p, err := h.profiles.GetUserProfile(subject); err == nil && p != nil {
-				if p.Email != "" {
+				switch {
+				case p.Email == "":
+				case user.Email != "" && !strings.EqualFold(p.Email, user.Email):
+					// The identity provider holds an address the sign-in sync has not stored yet,
+					// because it is not verified: TFE reports that as the unconfirmed email.
+					attrs.UnconfirmedEmail = p.Email
+				default:
 					attrs.Email = p.Email
 				}
 				if p.Name != "" {

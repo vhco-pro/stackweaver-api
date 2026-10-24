@@ -22282,6 +22282,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "unconfirmed-email": {
+                    "type": "string"
+                  },
                   "updated-at": {
                     "type": "string",
                     "format": "date-time"
