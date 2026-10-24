@@ -196,7 +196,7 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 	// Validate credential type
 	credType := models.CredentialType(req.Data.Attributes.Type)
 	switch credType {
-	case models.CredentialTypeSSH, models.CredentialTypeSCM, models.CredentialTypeVault,
+	case models.CredentialTypeSSH, models.CredentialTypeVault,
 		models.CredentialTypeMachineSSH, models.CredentialTypeAWSAccessKey,
 		models.CredentialTypeAzure, models.CredentialTypeGCP, models.CredentialTypeVMware:
 		// Valid
