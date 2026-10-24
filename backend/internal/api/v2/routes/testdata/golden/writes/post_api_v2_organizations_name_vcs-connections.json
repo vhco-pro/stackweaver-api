@@ -9,7 +9,7 @@
           "access_token": "\u003csecret\u003e",
           "account_name": "acme-platform",
           "account_type": "organization",
-          "provider": "gitlab",
+          "provider": "azure_devops",
           "refresh_token": "\u003csecret\u003e",
           "token_expires_at": "\u003ctimestamp\u003e"
         },
@@ -72,7 +72,7 @@
         "account_name": "acme-platform",
         "account_type": "organization",
         "created_at": "\u003ctimestamp\u003e",
-        "provider": "gitlab",
+        "provider": "azure_devops",
         "token_expires_at": "\u003ctimestamp\u003e",
         "updated_at": "\u003ctimestamp\u003e"
       },

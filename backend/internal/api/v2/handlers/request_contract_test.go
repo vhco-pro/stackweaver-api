@@ -275,12 +275,17 @@ func TestPlatformRequestContract(t *testing.T) {
 
 	t.Run("a VCS connection is created from a vcs-connections document", func(t *testing.T) {
 		path := "/organizations/" + f.orgName + "/vcs-connections"
-		attrs := `"provider":"gitlab","access_token":"glpat-contract","account_name":"contract","account_type":"organization"`
+		// Azure DevOps, because the fixture already holds the organization's one GitHub connection
+		// and GitLab is refused until it is implemented (#114).
+		attrs := `"provider":"azure_devops","access_token":"ado-contract","account_name":"contract","account_type":"organization"`
 		f.refused(t, http.MethodPost, path, `{`+attrs+`}`, platformDocRequired("vcs-connections"))
 		// A flat body naming an installation is simply not a document.
 		f.refused(t, http.MethodPost, path, `{`+attrs+`,"installation_id":"42"}`, platformDocRequired("vcs-connections"))
 		f.refused(t, http.MethodPost, path, `{"data":{"type":"vcs-connections","attributes":{`+attrs+`,"installation_id":"42"}}}`, installationIDRefusal)
 		f.refused(t, http.MethodPost, path, `{"data":{"type":"oauth-clients","attributes":{`+attrs+`}}}`, `data.type must be "vcs-connections" (got "oauth-clients")`)
+		for _, unimplemented := range []string{"gitlab", "bitbucket"} {
+			f.refused(t, http.MethodPost, path, `{"data":{"type":"vcs-connections","attributes":{"provider":"`+unimplemented+`","access_token":"t","account_name":"contract","account_type":"organization"}}}`, "Invalid provider. Must be 'github' or 'azure_devops'")
+		}
 		doc := f.accepted(t, http.MethodPost, path, `{"data":{"type":"vcs-connections","attributes":{`+attrs+`}}}`, http.StatusCreated)
 		var res platformResource
 		if err := json.Unmarshal(doc.Data, &res); err != nil || res.Type != "vcs-connections" {

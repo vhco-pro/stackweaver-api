@@ -193,7 +193,7 @@ func infraGCPOIDCConfig() map[string]any {
 // kind that needs no exchange with the provider. The seed has no connection of any kind.
 func infraVCSConnectionBody() map[string]any {
 	return document("vcs-connections", map[string]any{
-		"provider":         "gitlab",
+		"provider":         "azure_devops",
 		"account_name":     "acme-platform",
 		"account_type":     "organization",
 		"access_token":     "golden-write-access-token",
