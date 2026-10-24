@@ -104,13 +104,18 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 		return nil, "", fmt.Errorf("invalid scopes: %w", err)
 	}
 
-	// Reject wildcard scopes outright. There is no platform-admin concept yet,
-	// so a `*` scope (or a `*` permission such as `org:<id>:*`) would grant
-	// unbounded access and defeat the single-org token model. Wildcard creation
-	// is re-enabled for platform admins only once #132 lands.
+	// Reject wildcard scopes outright: a `*` scope (or a `*` permission such as `org:<id>:*`)
+	// would grant unbounded access and defeat the single-org token model. Install-wide rights
+	// are the platform administrator's (#132), carried by the explicit platform:admin scope on a
+	// user token, never by a wildcard and never on an organization-bound key.
 	for _, scope := range parsedScopes {
 		if scope.Type == "*" || scope.Permission == "*" {
 			return nil, "", fmt.Errorf("wildcard scopes are not permitted")
+		}
+	}
+	for _, scope := range parsedScopes {
+		if scope.Type == ScopeTypePlatform {
+			return nil, "", fmt.Errorf("platform scopes are only valid on user tokens")
 		}
 	}
 
@@ -234,6 +239,26 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 // This is the unified successor to the legacy `tfe_tokens` table: user tokens
 // are now kind="user" rows in api_keys so there is a single token subsystem.
 func (s *Service) CreateUserToken(userID uuid.UUID, name string, expiresAt *time.Time) (*models.APIKey, string, error) {
+	return s.CreateUserTokenWithScopes(userID, name, expiresAt, nil)
+}
+
+// CreateUserTokenWithScopes mints a user token carrying the given platform scopes (#132): a
+// platform administrator's token for the install-wide admin routes carries platform:admin.
+// Only platform:<permission> scopes are accepted, so a user token never carries an organization
+// scope; with none it is a plain user token. The caller decides who may mint one.
+func (s *Service) CreateUserTokenWithScopes(userID uuid.UUID, name string, expiresAt *time.Time, scopes []string) (*models.APIKey, string, error) {
+	stored := models.StringArray{}
+	for _, raw := range scopes {
+		scope, err := ParseScope(raw)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid scope %q: %w", raw, err)
+		}
+		if scope.Type != ScopeTypePlatform || scope.Permission == "" || scope.Permission == "*" {
+			return nil, "", fmt.Errorf("a user token carries platform scopes only, got %q", raw)
+		}
+		stored = append(stored, scope.Type+":"+scope.Permission)
+	}
+
 	key, err := GenerateAPIKey()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to generate user token: %w", err)
@@ -250,7 +275,7 @@ func (s *Service) CreateUserToken(userID uuid.UUID, name string, expiresAt *time
 		Kind:      models.APIKeyKindUser,
 		KeyHash:   keyHash,
 		KeyPrefix: GetKeyPrefix(key),
-		Scopes:    models.StringArray{},
+		Scopes:    stored,
 		ExpiresAt: expiresAt,
 	}
 

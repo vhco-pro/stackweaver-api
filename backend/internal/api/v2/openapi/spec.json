@@ -11967,6 +11967,30 @@
           }
         }
       },
+      "platform-settings-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "organization-creation": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "post-api-registry-registry-v2-gpg-keys-request": {
         "type": "object",
         "properties": {
@@ -17250,6 +17274,9 @@
                     "type": "string",
                     "format": "date-time",
                     "nullable": true
+                  },
+                  "platform_admin": {
+                    "type": "boolean"
                   }
                 }
               },
@@ -22207,6 +22234,9 @@
                     "type": "string",
                     "format": "date-time"
                   },
+                  "platform_admin": {
+                    "type": "boolean"
+                  },
                   "token": {
                     "type": "string"
                   }
@@ -22248,6 +22278,86 @@
           }
         }
       },
+      "users-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "avatar-url": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "is-admin": {
+                      "type": "boolean"
+                    },
+                    "is-service-account": {
+                      "type": "boolean"
+                    },
+                    "is-site-auditor": {
+                      "type": "boolean"
+                    },
+                    "is-suspended": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "platform-admin-declared": {
+                      "type": "boolean"
+                    },
+                    "username": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "users-response": {
         "type": "object",
         "properties": {
@@ -22273,7 +22383,19 @@
                   "email": {
                     "type": "string"
                   },
+                  "is-admin": {
+                    "type": "boolean"
+                  },
                   "is-service-account": {
+                    "type": "boolean"
+                  },
+                  "is-site-admin": {
+                    "type": "boolean"
+                  },
+                  "is-site-auditor": {
+                    "type": "boolean"
+                  },
+                  "is-suspended": {
                     "type": "boolean"
                   },
                   "location": {
@@ -22281,6 +22403,17 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "properties": {
+                      "can-create-organizations": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "platform-admin-declared": {
+                    "type": "boolean"
                   },
                   "unconfirmed-email": {
                     "type": "string"
@@ -24253,6 +24386,102 @@
         ]
       }
     },
+    "/api/v2/admin/organizations": {
+      "get": {
+        "operationId": "get-api-v2-admin-organizations",
+        "parameters": [
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q[email]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q[name]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/organizations-collection"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/admin/organizations",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{name}": {
+      "get": {
+        "operationId": "get-api-v2-admin-organizations-name",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/organizations-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/admin/organizations/:name",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v2/admin/terraform-versions": {
       "get": {
         "operationId": "get-api-v2-admin-terraform-versions",
@@ -24488,6 +24717,155 @@
           }
         },
         "summary": "PATCH /api/v2/admin/terraform-versions/:id",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v2/admin/users": {
+      "get": {
+        "operationId": "get-api-v2-admin-users",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter[admin]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter[suspended]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/users-collection"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/admin/users",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v2/admin/users/{id}/actions/grant_admin": {
+      "post": {
+        "description": "Takes no request body.",
+        "operationId": "post-api-v2-admin-users-id-actions-grant_admin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/users-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/admin/users/:id/actions/grant_admin",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v2/admin/users/{id}/actions/revoke_admin": {
+      "post": {
+        "description": "Takes no request body.",
+        "operationId": "post-api-v2-admin-users-id-actions-revoke_admin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/users-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/admin/users/:id/actions/revoke_admin",
         "tags": [
           "admin"
         ]
@@ -35125,6 +35503,27 @@
         ]
       }
     },
+    "/api/v2/platform/settings": {
+      "get": {
+        "operationId": "get-api-v2-platform-settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-settings-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/platform/settings",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
     "/api/v2/projects/{id}": {
       "delete": {
         "description": "Takes no request body.",
@@ -39402,7 +39801,8 @@
                 "data": {
                   "attributes": {
                     "description": "Laptop CLI",
-                    "expires_at": "\u003ctimestamp\u003e"
+                    "expires_at": "\u003ctimestamp\u003e",
+                    "platform_admin": true
                   },
                   "type": "tokens"
                 }

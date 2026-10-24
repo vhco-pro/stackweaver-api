@@ -678,6 +678,8 @@ type UserTokenCreateAttributes struct {
 	Description string     `json:"description"`
 	ExpiresAt   *time.Time `json:"expires_at"`
 	CreatedAt   time.Time  `json:"created_at"`
+	// PlatformAdminToken is true for a platform admin token (the platform:admin scope, #132).
+	PlatformAdminToken bool `json:"platform_admin"`
 }
 
 type UserTokenListAttributes struct {
@@ -685,6 +687,8 @@ type UserTokenListAttributes struct {
 	LastUsedAt  *time.Time `json:"last_used_at"`
 	ExpiresAt   *time.Time `json:"expires_at"`
 	CreatedAt   time.Time  `json:"created_at"`
+	// PlatformAdminToken is true for a platform admin token (the platform:admin scope, #132).
+	PlatformAdminToken bool `json:"platform_admin"`
 }
 
 // WebhookEventAttributes is the attribute block of a webhook-events resource: one delivery
@@ -733,6 +737,17 @@ type AccountAttributes struct {
 	Location         string    `json:"location"`
 	CreatedAt        time.Time `json:"created-at"`
 	UpdatedAt        time.Time `json:"updated-at"`
+	// IsSiteAdmin is TFE's site administrator flag: the caller is a platform administrator.
+	IsSiteAdmin bool `json:"is-site-admin"`
+	// DeclaredByDeployment is a Stackweaver extension: the deployment declared the caller a
+	// platform administrator, so the status cannot be revoked through the API.
+	DeclaredByDeployment bool               `json:"platform-admin-declared"`
+	Permissions          AccountPermissions `json:"permissions"`
+}
+
+// AccountPermissions is TFE's permissions object on the account resource.
+type AccountPermissions struct {
+	CanCreateOrganizations bool `json:"can-create-organizations"`
 }
 
 // AgentJobVCS tells a self-hosted agent where to clone from when the run has no

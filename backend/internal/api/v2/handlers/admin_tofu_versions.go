@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
-	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/tofu"
 	"gorm.io/gorm"
@@ -23,47 +23,34 @@ import (
 // AdminTofuVersionsHandler handles the /admin/terraform-versions endpoints.
 //
 // The route and payload keep TFE's "terraform" naming because that is the contract
-// terraform-provider-tfe speaks; the versions served are OpenTofu releases.
-// Access restricted to users in an "owners" team (site admins).
+// terraform-provider-tfe speaks; the versions served are OpenTofu releases. The catalogue is
+// install-wide, so every route is reserved to a platform administrator (platformadmin.Service,
+// #132) and answers 404 to everyone else, as TFE answers a caller who is not a site administrator.
 // TFE API docs: https://developer.hashicorp.com/terraform/enterprise/api-docs/admin/terraform-versions
 type AdminTofuVersionsHandler struct {
-	db          *gorm.DB
-	authService *auth.Service
+	db     *gorm.DB
+	admins *platformadmin.Service
 }
 
-// NewAdminTofuVersionsHandler creates a new handler.
-func NewAdminTofuVersionsHandler(db *gorm.DB, authService *auth.Service) *AdminTofuVersionsHandler {
-	return &AdminTofuVersionsHandler{db: db, authService: authService}
+// NewAdminTofuVersionsHandler creates a new handler. A nil admins refuses every admin route.
+func NewAdminTofuVersionsHandler(db *gorm.DB, admins *platformadmin.Service) *AdminTofuVersionsHandler {
+	return &AdminTofuVersionsHandler{db: db, admins: admins}
 }
 
-// requireAdmin checks that the authenticated user is in an "owners" team.
-// Returns false and sends a 404 (matching TFE behavior) if not authorized.
-func (h *AdminTofuVersionsHandler) requireAdmin(c *gin.Context) bool {
-	user, err := h.authService.GetUserFromContext(c)
-	if err != nil || user == nil {
+// requirePlatformAdmin gates an admin route on the platform administrator check.
+func (h *AdminTofuVersionsHandler) requirePlatformAdmin(c *gin.Context) bool {
+	if h.admins == nil {
 		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
 		return false
 	}
-
-	// Check if user is in "owners" team of any organization using GORM models
-	var count int64
-	h.db.Model(&models.TeamMember{}).
-		Joins("JOIN teams ON teams.id = team_members.team_id").
-		Where("team_members.user_id = ? AND teams.name = ?", user.ID, "owners").
-		Count(&count)
-
-	if count == 0 {
-		logger.Warnf("Admin terraform versions: User %s (%s) denied - not in any owners team", user.Email, user.ID)
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
-		return false
-	}
-	return true
+	_, ok := h.admins.Require(c)
+	return ok
 }
 
 // List all terraform versions.
 // GET /api/v2/admin/terraform-versions
 func (h *AdminTofuVersionsHandler) List(c *gin.Context) {
-	if !h.requireAdmin(c) {
+	if !h.requirePlatformAdmin(c) {
 		return
 	}
 
@@ -147,7 +134,7 @@ func (h *AdminTofuVersionsHandler) List(c *gin.Context) {
 // Read a single terraform version by ID.
 // GET /api/v2/admin/terraform-versions/:id
 func (h *AdminTofuVersionsHandler) Read(c *gin.Context) {
-	if !h.requireAdmin(c) {
+	if !h.requirePlatformAdmin(c) {
 		return
 	}
 
@@ -193,7 +180,7 @@ type terraformVersionArch struct {
 // Create a terraform version.
 // POST /api/v2/admin/terraform-versions
 func (h *AdminTofuVersionsHandler) Create(c *gin.Context) {
-	if !h.requireAdmin(c) {
+	if !h.requirePlatformAdmin(c) {
 		return
 	}
 
@@ -285,7 +272,7 @@ type updateTerraformVersionRequest struct {
 // Update a terraform version.
 // PATCH /api/v2/admin/terraform-versions/:id
 func (h *AdminTofuVersionsHandler) Update(c *gin.Context) {
-	if !h.requireAdmin(c) {
+	if !h.requirePlatformAdmin(c) {
 		return
 	}
 
@@ -363,7 +350,7 @@ func (h *AdminTofuVersionsHandler) Update(c *gin.Context) {
 // Delete a terraform version.
 // DELETE /api/v2/admin/terraform-versions/:id
 func (h *AdminTofuVersionsHandler) Delete(c *gin.Context) {
-	if !h.requireAdmin(c) {
+	if !h.requirePlatformAdmin(c) {
 		return
 	}
 

@@ -11,6 +11,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 )
 
 // TokenHandlerV2 serves the TFE-compatible token endpoints (`/api/v2/tokens`).
@@ -20,6 +21,13 @@ import (
 type TokenHandlerV2 struct {
 	apiKeyService *apikey.Service
 	authService   *auth.Service
+	// admins decides who may mint a platform admin token; nil refuses every such request.
+	admins *platformadmin.Service
+}
+
+// SetPlatformAdmin lets a platform administrator mint a platform admin token (#132, D5).
+func (h *TokenHandlerV2) SetPlatformAdmin(admins *platformadmin.Service) {
+	h.admins = admins
 }
 
 func NewTokenHandlerV2(
@@ -40,6 +48,9 @@ type CreateTokenRequestV2 struct {
 		Attributes struct {
 			Description string     `json:"description"`
 			ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+			// PlatformAdminToken asks for a platform admin token: a user token carrying the
+			// platform:admin scope, which only a platform administrator may mint (#132).
+			PlatformAdminToken bool `json:"platform_admin,omitempty"`
 		} `json:"attributes"`
 	} `json:"data" binding:"required"`
 }
@@ -68,8 +79,24 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 	req := body.Data.Attributes
 
 	// Mint a user-bound token (kind="user") via the unified apikey service.
-	// The description is stored as the key name.
-	apiKey, tokenString, err := h.apiKeyService.CreateUserToken(user.ID, req.Description, req.ExpiresAt)
+	// The description is stored as the key name. A platform admin token additionally carries the
+	// platform:admin scope; the route is interactive-only, so only a signed-in holder mints one.
+	var scopes []string
+	if req.PlatformAdminToken {
+		isAdmin := false
+		if h.admins != nil {
+			if isAdmin, err = h.admins.IsPlatformAdmin(c.Request.Context(), user.ID); err != nil {
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create token")
+				return
+			}
+		}
+		if !isAdmin {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "only a platform administrator can mint a platform admin token")
+			return
+		}
+		scopes = []string{apikey.PlatformAdminScope}
+	}
+	apiKey, tokenString, err := h.apiKeyService.CreateUserTokenWithScopes(user.ID, req.Description, req.ExpiresAt, scopes)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create token")
 		return
@@ -81,10 +108,11 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 		ID:   apiKey.ID.String(),
 		Type: "tokens",
 		Attributes: UserTokenCreateAttributes{
-			Token:       tokenString, // Plaintext token (only shown once)
-			Description: apiKey.Name,
-			ExpiresAt:   apiKey.ExpiresAt,
-			CreatedAt:   apiKey.CreatedAt,
+			Token:              tokenString, // Plaintext token (only shown once)
+			Description:        apiKey.Name,
+			ExpiresAt:          apiKey.ExpiresAt,
+			CreatedAt:          apiKey.CreatedAt,
+			PlatformAdminToken: carriesPlatformAdmin(apiKey.Scopes),
 		},
 	})
 }
@@ -111,10 +139,11 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 			ID:   token.ID.String(),
 			Type: "tokens",
 			Attributes: UserTokenListAttributes{
-				Description: token.Name,
-				LastUsedAt:  token.LastUsedAt,
-				ExpiresAt:   token.ExpiresAt,
-				CreatedAt:   token.CreatedAt,
+				Description:        token.Name,
+				LastUsedAt:         token.LastUsedAt,
+				ExpiresAt:          token.ExpiresAt,
+				CreatedAt:          token.CreatedAt,
+				PlatformAdminToken: carriesPlatformAdmin(token.Scopes),
 			},
 		})
 	}
@@ -145,4 +174,10 @@ func (h *TokenHandlerV2) Delete(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// carriesPlatformAdmin reports whether a token's scopes include platform:admin.
+func carriesPlatformAdmin(scopes []string) bool {
+	checker, err := apikey.NewScopeChecker(scopes)
+	return err == nil && checker.HasPlatformAdmin()
 }

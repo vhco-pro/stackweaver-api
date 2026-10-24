@@ -19,8 +19,11 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/routes"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
+	v2routes "github.com/michielvha/stackweaver/backend/internal/api/v2/routes"
+	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/backend/internal/services/runner"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
@@ -579,6 +582,18 @@ func main() {
 		logger.Info("SSO team sync enabled")
 	}
 
+	// The platform administrator (#132): the deployment's declared list is applied at every
+	// sign-in, and a removal takes effect here, at the restart that loads the new list.
+	platformAdminConfig, err := platformAdminConfigFromEnv()
+	if err != nil {
+		logger.Fatalf("Invalid platform administration settings: %v", err)
+	}
+	platformAdmin := platformadmin.NewService(userRepo, authService, activity.NewService(repository.NewAuditLogRepository(db)), platformAdminConfig)
+	if err := platformAdmin.Reconcile(context.Background()); err != nil {
+		logger.Errorf("Failed to reconcile the declared platform administrators: %v", err)
+	}
+	authService.SetPlatformAdminSeeder(platformAdmin)
+
 	// Initialize GitHub App Manager (loaded once at startup - like Terraform Enterprise)
 	githubAppManager, err := vcs.NewGitHubAppManager()
 	switch {
@@ -910,7 +925,7 @@ func main() {
 	}
 
 	// Setup routes
-	router := routes.SetupRoutes(db, authService, totpService, profileService, sessionsService, apiKeyService, githubAppManager, authProxy)
+	router := routes.SetupRoutes(db, authService, totpService, profileService, sessionsService, apiKeyService, githubAppManager, authProxy, v2routes.WithPlatformAdmin(platformAdmin))
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)
@@ -1056,3 +1071,9 @@ func applyEnvOverrides(config *Config) {
 }
 
 // sync smoke test 1779753492
+
+// platformAdminConfigFromEnv reads the platform administration settings; an invalid value stops
+// the API at startup, with an error naming the variable.
+func platformAdminConfigFromEnv() (platformadmin.Config, error) {
+	return platformadmin.ConfigFromEnv()
+}

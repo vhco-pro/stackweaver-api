@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -26,6 +27,14 @@ type AccountHandlerV2 struct {
 	// profiles is the identity provider's copy of the name and email, kept in step with the
 	// account; nil when the identity provider's profile API is not configured.
 	profiles accountProfileSource
+	// admins reports the caller's platform administrator status and the installation's
+	// organization-creation setting; nil reports neither.
+	admins *platformadmin.Service
+}
+
+// SetPlatformAdmin gives the account resource the caller's platform status (#132, D4).
+func (h *AccountHandlerV2) SetPlatformAdmin(admins *platformadmin.Service) {
+	h.admins = admins
 }
 
 // accountProfileSource is the part of profile.Service the account calls, declared where it is
@@ -185,5 +194,9 @@ func (h *AccountHandlerV2) accountResource(c *gin.Context, user *models.User) js
 		attrs.Username = attrs.Email
 	}
 	attrs.AvatarURL = h.authService.FetchUserInfoPicture(c.Request.Context(), c)
+	// TFE's site-admin attribute and permissions object: the platform administrator, and whether
+	// the installation lets this caller create organizations.
+	attrs.IsSiteAdmin, attrs.DeclaredByDeployment = platformadmin.Status(user)
+	attrs.Permissions.CanCreateOrganizations = h.admins == nil || h.admins.CanCreateOrganizations(c.Request.Context(), user)
 	return jsonapi.Resource[AccountAttributes]{ID: user.ID.String(), Type: "users", Attributes: attrs}
 }

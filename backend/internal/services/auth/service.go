@@ -56,6 +56,15 @@ type TeamSyncer interface {
 	SyncUserTeams(ctx context.Context, userID uuid.UUID, ssoGroups []string) error
 }
 
+// PlatformAdminSeeder applies the deployment's declared platform administrators to a user at
+// sign-in (#132, D2). It is handed the user row and the identity provider's answer for the
+// current request, so it matches on the email the identity provider verified now and never on the
+// stored column. Declared here, where it is used: the implementation lives in the platformadmin
+// package, which imports this one.
+type PlatformAdminSeeder interface {
+	ApplyDeclared(ctx context.Context, user *models.User, info *UserInfo) error
+}
+
 // UserLookup is the subset of `repository.UserRepository` the auth
 // service depends on. Defined as an interface so unit tests can pass
 // a mock without a live database. The concrete repo satisfies it
@@ -69,6 +78,7 @@ type Service struct {
 	userRepo      UserLookup
 	apiKeyService APIKeyVerifier
 	teamSyncer    TeamSyncer
+	adminSeeder   PlatformAdminSeeder
 	verifier      *ZitadelVerifier
 	issuer        string
 	clientID      string
@@ -132,6 +142,14 @@ func (s *Service) userFromJWT(ctx context.Context, claims *oidc.AccessTokenClaim
 	if err != nil {
 		return nil, info, fmt.Errorf("getting or creating the user for %q: %w", info.Subject, err)
 	}
+	// The seeder sees exactly what this request established: the outage fallback above carries no
+	// email, so it can neither flag nor clear. A seeder failure does not block sign-in, as a team
+	// sync failure does not.
+	if s.adminSeeder != nil {
+		if err := s.adminSeeder.ApplyDeclared(ctx, user, info); err != nil {
+			logger.Errorf("auth: applying the declared platform administrators to user %s: %v", user.ID, err)
+		}
+	}
 	return user, info, nil
 }
 
@@ -153,6 +171,12 @@ func (s *Service) SetAPIKeyService(apiKeyService APIKeyVerifier) {
 // SetTeamSyncer sets the team sync service for automatic SSO team assignment
 func (s *Service) SetTeamSyncer(syncer TeamSyncer) {
 	s.teamSyncer = syncer
+}
+
+// SetPlatformAdminSeeder sets the service that applies the declared platform administrators at
+// sign-in.
+func (s *Service) SetPlatformAdminSeeder(seeder PlatformAdminSeeder) {
+	s.adminSeeder = seeder
 }
 
 // InitializeZitadel initializes the Zitadel verifier with configuration.

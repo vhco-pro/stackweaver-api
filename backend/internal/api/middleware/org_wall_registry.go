@@ -67,12 +67,22 @@ func resource(p string, f resolverFunc) routeEntry {
 // are NOT under the v2 group and therefore never reach this wall.
 var wallRegistry = map[string]routeEntry{
 	// --- ping / global ---
-	"/api/v2/ping":                         agnostic(),
+	"/api/v2/ping": agnostic(),
+	// The handler calls platformadmin.Service.Require (#132).
 	"/api/v2/admin/terraform-versions":     agnostic(),
 	"/api/v2/admin/terraform-versions/:id": agnostic(),
 	"/api/v2/terraform-versions":           agnostic(),
-	"/api/v2/activities":                   agnostic(),
-	"/api/v2/activities/recent":            agnostic(),
+	// Platform administration (#132): install-wide, no organization to resolve. The admin
+	// handlers call platformadmin.Service.Require, which is the whole check and never consults
+	// the key owner's memberships; the settings read answers every authenticated identity.
+	"/api/v2/admin/users":                          agnostic(),
+	"/api/v2/admin/users/:id/actions/grant_admin":  agnostic(),
+	"/api/v2/admin/users/:id/actions/revoke_admin": agnostic(),
+	"/api/v2/admin/organizations":                  agnostic(),
+	"/api/v2/admin/organizations/:name":            agnostic(),
+	"/api/v2/platform/settings":                    agnostic(),
+	"/api/v2/activities":                           agnostic(),
+	"/api/v2/activities/recent":                    agnostic(),
 	// The dashboard is cross-organization by construction: it answers for every membership the
 	// caller has, so there is no single target org to resolve.
 	"/api/v2/dashboard/stats":      agnostic(),

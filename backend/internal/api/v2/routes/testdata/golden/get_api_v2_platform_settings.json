@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/platform/settings",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "organization-creation": "everyone"
+      },
+      "id": "platform",
+      "type": "platform-settings"
+    }
+  }
+}

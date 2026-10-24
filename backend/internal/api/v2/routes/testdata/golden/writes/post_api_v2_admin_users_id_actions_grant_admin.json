@@ -1,0 +1,25 @@
+{
+  "method": "POST",
+  "path": "/api/v2/admin/users/:id/actions/grant_admin",
+  "request": {
+    "takes_none": true
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "avatar-url": "",
+        "email": "lena.fischer@example.com",
+        "is-admin": true,
+        "is-service-account": false,
+        "is-site-auditor": false,
+        "is-suspended": false,
+        "name": "Lena Fischer",
+        "platform-admin-declared": false,
+        "username": "lena.fischer@example.com"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "users"
+    }
+  }
+}
