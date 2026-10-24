@@ -14,7 +14,7 @@
   "status": 200,
   "response": {
     "access_token": "\u003csecret\u003e",
-    "expires_in": 43199,
+    "expires_in": 3599,
     "id_token": "\u003csecret\u003e",
     "token_type": "Bearer"
   }
