@@ -75,10 +75,10 @@ func TestVCSConnectionCreate_ConflictsOnlyWithAnExistingConnection(t *testing.T)
 	}
 
 	// The steps build on each other, so a failed one stops the test.
-	rec := create(t, models.VCSProviderGitLab, "first")
+	rec := create(t, models.VCSProviderAzureDevOps, "first")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("the first %s connection of an organization with none = %d, want 201.\nbody: %s",
-			models.VCSProviderGitLab, rec.Code, rec.Body.String())
+			models.VCSProviderAzureDevOps, rec.Code, rec.Body.String())
 	}
 	var doc struct {
 		Data struct {
@@ -89,24 +89,24 @@ func TestVCSConnectionCreate_ConflictsOnlyWithAnExistingConnection(t *testing.T)
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatalf("the 201 body is not JSON: %v\nbody: %s", err, rec.Body.String())
 	}
-	rows := stored(t, models.VCSProviderGitLab)
+	rows := stored(t, models.VCSProviderAzureDevOps)
 	if len(rows) != 1 || rows[0].ID.String() != doc.Data.ID || rows[0].AccountName != "first" {
 		t.Fatalf("after the create the organization holds %d %s connection(s), want the one the response names (%s)",
-			len(rows), models.VCSProviderGitLab, doc.Data.ID)
+			len(rows), models.VCSProviderAzureDevOps, doc.Data.ID)
 	}
 
-	rec = create(t, models.VCSProviderGitLab, "second")
+	rec = create(t, models.VCSProviderAzureDevOps, "second")
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("a second %s connection = %d, want 409.\nbody: %s", models.VCSProviderGitLab, rec.Code, rec.Body.String())
+		t.Fatalf("a second %s connection = %d, want 409.\nbody: %s", models.VCSProviderAzureDevOps, rec.Code, rec.Body.String())
 	}
-	if rows := stored(t, models.VCSProviderGitLab); len(rows) != 1 || rows[0].AccountName != "first" {
-		t.Fatalf("a refused create left %d %s connection(s), want the first one untouched", len(rows), models.VCSProviderGitLab)
+	if rows := stored(t, models.VCSProviderAzureDevOps); len(rows) != 1 || rows[0].AccountName != "first" {
+		t.Fatalf("a refused create left %d %s connection(s), want the first one untouched", len(rows), models.VCSProviderAzureDevOps)
 	}
 
 	// The conflict is per provider, not per organization.
-	rec = create(t, models.VCSProviderBitbucket, "third")
+	rec = create(t, models.VCSProviderGitHub, "third")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("a %s connection beside a %s one = %d, want 201.\nbody: %s",
-			models.VCSProviderBitbucket, models.VCSProviderGitLab, rec.Code, rec.Body.String())
+			models.VCSProviderGitHub, models.VCSProviderAzureDevOps, rec.Code, rec.Body.String())
 	}
 }

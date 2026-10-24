@@ -79,7 +79,7 @@ type CreateVCSConnectionRequestV2 struct {
 
 // CreateVCSConnectionAttributes are the credentials a connection is created from.
 type CreateVCSConnectionAttributes struct {
-	Provider       string `json:"provider" binding:"required"`     // "github", "gitlab", "bitbucket", "azure_devops"
+	Provider       string `json:"provider" binding:"required"`     // "github" or "azure_devops"
 	AccessToken    string `json:"access_token" binding:"required"` //nolint:gosec // G117: token field, encrypted before storage
 	RefreshToken   string `json:"refresh_token,omitempty"`         //nolint:gosec // G117: token field
 	TokenExpiresAt string `json:"token_expires_at,omitempty"`      // ISO 8601 format
@@ -189,12 +189,12 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 	}
 	req := body.Data.Attributes
 
+	// Only implemented providers are accepted. GitLab and Bitbucket are placeholders whose every
+	// listing answers "not implemented", so a connection to them would fail on first use; each is
+	// accepted again in the change that implements it (#114).
 	provider := models.VCSProvider(req.Provider)
-	if provider != models.VCSProviderGitHub &&
-		provider != models.VCSProviderGitLab &&
-		provider != models.VCSProviderBitbucket &&
-		provider != models.VCSProviderAzureDevOps {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid provider. Must be 'github', 'gitlab', 'bitbucket', or 'azure_devops'")
+	if provider != models.VCSProviderGitHub && provider != models.VCSProviderAzureDevOps {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid provider. Must be 'github' or 'azure_devops'")
 		return
 	}
 
