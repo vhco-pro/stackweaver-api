@@ -85,8 +85,9 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 			return
 		}
 
-		// Defence in depth: the runner's org must match the token's bound org.
-		if apiKey.OrganizationID != nil && *apiKey.OrganizationID != runner.OrganizationID {
+		// Defence in depth: the runner's org must match the token's bound org. A runner token
+		// always carries one, so a token without an org is refused rather than waved through.
+		if apiKey.OrganizationID == nil || *apiKey.OrganizationID != runner.OrganizationID {
 			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "runner/token organization mismatch")
 			c.Abort()
 			return

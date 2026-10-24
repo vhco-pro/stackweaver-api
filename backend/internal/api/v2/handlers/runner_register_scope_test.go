@@ -3,6 +3,8 @@
 package handlers
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
@@ -36,6 +38,31 @@ func TestGrantsRunnerRegister(t *testing.T) {
 			}
 			if got := grantsRunnerRegister(checker, tc.org); got != tc.want {
 				t.Errorf("grantsRunnerRegister(%v) = %v, want %v", tc.scopes, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPoolBindingVerdict pins that a pool binding which cannot be read refuses instead of
+// reading as "no binding", which would let an agent token reach every pool of its organization.
+func TestPoolBindingVerdict(t *testing.T) {
+	pool := uuid.New()
+	other := uuid.New()
+	cases := []struct {
+		name  string
+		bound *uuid.UUID
+		err   error
+		want  int
+	}{
+		{"no binding", nil, nil, 0},
+		{"bound to this pool", &pool, nil, 0},
+		{"bound to another pool", &other, nil, http.StatusForbidden},
+		{"binding unreadable", nil, errors.New("database unavailable"), http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, _ := poolBindingVerdict(tc.bound, tc.err, pool); got != tc.want {
+				t.Errorf("poolBindingVerdict = %d, want %d", got, tc.want)
 			}
 		})
 	}

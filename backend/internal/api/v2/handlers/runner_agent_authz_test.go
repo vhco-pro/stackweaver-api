@@ -224,11 +224,31 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 		c.Next()
 	})
 
+	// The same runner token with its org binding removed, and with another org's binding: both
+	// must be refused, never waved through.
+	unboundKey := *runnerKey
+	unboundKey.OrganizationID = nil
+	unboundRouter := build(func(c *gin.Context) {
+		c.Set("auth_method", "api_key")
+		c.Set("api_key", &unboundKey)
+		c.Next()
+	})
+	otherOrg := uuid.New()
+	mismatchKey := *runnerKey
+	mismatchKey.OrganizationID = &otherOrg
+	mismatchRouter := build(func(c *gin.Context) {
+		c.Set("auth_method", "api_key")
+		c.Set("api_key", &mismatchKey)
+		c.Next()
+	})
+
 	cases := []struct {
 		name   string
 		router *gin.Engine
 		want   int
 	}{
+		{"runner token without an org forbidden", unboundRouter, http.StatusForbidden},
+		{"runner token for another org forbidden", mismatchRouter, http.StatusForbidden},
 		{"jwt identity blocked", jwtRouter, http.StatusUnauthorized},
 		{"anonymous blocked", anonRouter, http.StatusUnauthorized},
 		{"non-runner org token forbidden", orgRouter, http.StatusForbidden},

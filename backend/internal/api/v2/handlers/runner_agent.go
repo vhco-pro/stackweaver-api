@@ -171,6 +171,21 @@ type RegisterResponse struct {
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 }
 
+// poolBindingVerdict is the pool-binding check shared by registration and the queue-depth read:
+// it answers 0 when a key may act on poolID, or the status and detail to refuse with. A binding
+// that could not be read refuses, because reading it as "no binding" would let an agent token
+// reach every pool of its organization.
+func poolBindingVerdict(bound *uuid.UUID, err error, poolID uuid.UUID) (int, string) {
+	switch {
+	case err != nil:
+		return http.StatusInternalServerError, "the token's agent pool binding could not be read"
+	case bound != nil && *bound != poolID:
+		return http.StatusForbidden, "this agent token is bound to a different agent pool"
+	default:
+		return 0, ""
+	}
+}
+
 // grantsRunnerRegister reports whether a key's scopes name runner:register on orgID. An
 // unrestricted key (no scopes, or the wildcard) is a general-purpose user token, not a runner
 // credential, so it never qualifies; HasOrgPermission alone treats an empty scope list as full
@@ -252,8 +267,8 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	// (nil) and keeps the historical behavior of joining any pool named in the body.
 	if apiKeyUUID, perr := uuid.Parse(fmt.Sprintf("%v", apiKeyID)); perr == nil {
 		boundPool, berr := h.apiKeyService.AgentPoolBindingForKey(apiKeyUUID)
-		if berr == nil && boundPool != nil && *boundPool != poolID {
-			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this agent token is bound to a different agent pool")
+		if status, detail := poolBindingVerdict(boundPool, berr, poolID); status != 0 {
+			jsonapi.WriteError(c, status, http.StatusText(status), detail)
 			return
 		}
 	}
