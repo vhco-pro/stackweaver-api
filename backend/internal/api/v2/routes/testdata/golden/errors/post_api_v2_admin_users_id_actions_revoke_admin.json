@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/api/v2/admin/users/:id/actions/revoke_admin",
+  "status": 404,
+  "body": {
+    "errors": [
+      {
+        "detail": "User not found, or client is not an administrator.",
+        "status": "404",
+        "title": "Not Found"
+      }
+    ]
+  }
+}

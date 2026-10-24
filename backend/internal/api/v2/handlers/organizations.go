@@ -17,6 +17,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -33,6 +34,13 @@ type OrganizationHandlerV2 struct {
 	activityService *activity.Service
 	rbacService     *rbac.Service
 	db              *gorm.DB
+	// admins carries the installation's organization-creation setting; nil means everyone.
+	admins *platformadmin.Service
+}
+
+// SetPlatformAdmin gives Create the installation's organization-creation setting (#132, D6).
+func (h *OrganizationHandlerV2) SetPlatformAdmin(admins *platformadmin.Service) {
+	h.admins = admins
 }
 
 func NewOrganizationHandlerV2(orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, projectRepo *repository.ProjectRepository, agentPoolRepo *repository.AgentPoolRepository, authService *auth.Service, activityService *activity.Service, rbacService *rbac.Service, db *gorm.DB) *OrganizationHandlerV2 {
@@ -476,6 +484,10 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 	user, err := h.authService.GetUserFromContext(c)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return
+	}
+	if h.admins != nil && !h.admins.CanCreateOrganizations(c.Request.Context(), user) {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "organization creation is limited to platform administrators on this installation")
 		return
 	}
 

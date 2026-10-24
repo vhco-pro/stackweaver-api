@@ -91,6 +91,25 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/admin/organizations",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AdminOrganizationsHandlerV2).List-fm",
+      "query": [
+        "page[number]",
+        "page[size]",
+        "q",
+        "q[email]",
+        "q[name]"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/admin/organizations/:name",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AdminOrganizationsHandlerV2).Show-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/admin/terraform-versions",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AdminTofuVersionsHandler).List-fm",
@@ -124,6 +143,31 @@
       "path": "/api/v2/admin/terraform-versions/:id",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AdminTofuVersionsHandler).Update-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/admin/users",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AdminUsersHandlerV2).List-fm",
+      "query": [
+        "filter[admin]",
+        "filter[suspended]",
+        "page[number]",
+        "page[size]",
+        "q"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/admin/users/:id/actions/grant_admin",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AdminUsersHandlerV2).GrantAdmin-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/admin/users/:id/actions/revoke_admin",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AdminUsersHandlerV2).RevokeAdmin-fm"
     },
     {
       "method": "DELETE",
@@ -1619,6 +1663,12 @@
       "path": "/api/v2/plans/:id/json-output",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetPlanJSONOutput-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/platform/settings",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*PlatformSettingsHandlerV2).Show-fm"
     },
     {
       "method": "DELETE",

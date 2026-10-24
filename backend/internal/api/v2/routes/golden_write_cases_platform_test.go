@@ -619,3 +619,35 @@ func init() {
 		},
 	)
 }
+
+// platformNonAdminUser is a seeded user who is not a platform administrator, the target the
+// grant and revoke cases act on.
+func platformNonAdminUser(t *testing.T, w *writeRun) string {
+	t.Helper()
+	var id string
+	if err := w.db.Raw(`SELECT id::text FROM users WHERE NOT platform_admin AND email <> '' ORDER BY email LIMIT 1`).Scan(&id).Error; err != nil || id == "" {
+		t.Fatalf("no seeded user who is not a platform administrator: %v", err)
+	}
+	return id
+}
+
+// Platform administration (#132): the TFE admin users actions. The recorder's token is a
+// platform administrator's platform:admin token.
+func init() {
+	registerWriteCases(
+		writeCase{
+			route: "POST /api/v2/admin/users/:id/actions/grant_admin",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPost, "/api/v2/admin/users/"+platformNonAdminUser(t, w)+"/actions/grant_admin", nil)
+			},
+		},
+		writeCase{
+			route: "POST /api/v2/admin/users/:id/actions/revoke_admin",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				target := platformNonAdminUser(t, w)
+				w.mustSend(t, w.jsonRequest(t, http.MethodPost, "/api/v2/admin/users/"+target+"/actions/grant_admin", nil))
+				return w.jsonRequest(t, http.MethodPost, "/api/v2/admin/users/"+target+"/actions/revoke_admin", nil)
+			},
+		},
+	)
+}

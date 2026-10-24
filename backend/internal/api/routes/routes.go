@@ -35,6 +35,7 @@ func SetupRoutes(
 	apiKeyService *apikey.Service,
 	githubAppManager *vcs.GitHubAppManager,
 	authProxy *v2handlers.AuthProxy,
+	v2opts ...v2routes.Option,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -99,7 +100,7 @@ func SetupRoutes(
 	}
 
 	// Setup v2 API routes
-	v2routes.SetupV2Routes(r, db, authService, githubAppManager, v2routes.WithProfileService(profileService))
+	v2routes.SetupV2Routes(r, db, authService, githubAppManager, append([]v2routes.Option{v2routes.WithProfileService(profileService)}, v2opts...)...)
 
 	// Settings endpoints (v2). This is the signed-in person's own account: every handler below
 	// acts on whoever AuthMiddleware resolved, and a token resolves to its owner with none of

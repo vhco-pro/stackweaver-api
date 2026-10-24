@@ -11,8 +11,13 @@
         "created-at": "\u003ctimestamp\u003e",
         "email": "avery.diaz@example.com",
         "is-service-account": false,
+        "is-site-admin": true,
         "location": "",
         "name": "Avery Diaz",
+        "permissions": {
+          "can-create-organizations": true
+        },
+        "platform-admin-declared": false,
         "updated-at": "\u003ctimestamp\u003e",
         "username": "avery.diaz@example.com",
         "v2-only": true

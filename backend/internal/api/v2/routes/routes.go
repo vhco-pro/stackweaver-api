@@ -19,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/logtoken"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -44,6 +45,14 @@ type Option func(*setupConfig)
 
 type setupConfig struct {
 	profileService *profile.Service
+	platformAdmin  *platformadmin.Service
+}
+
+// WithPlatformAdmin gives the install-wide routes the platform administrator the API started
+// with, the same one that applies the declared list at sign-in. Without it the routes build their
+// own from the environment, which is what the route-level tests use.
+func WithPlatformAdmin(s *platformadmin.Service) Option {
+	return func(c *setupConfig) { c.platformAdmin = s }
 }
 
 // WithProfileService gives the account routes the identity provider's profile API, so that an
@@ -145,6 +154,16 @@ func SetupV2Routes(
 	auditLogRepo := repository.NewAuditLogRepository(db)
 	activityService := activity.NewService(auditLogRepo)
 
+	// The platform administrator (#132): the one check every install-wide route calls.
+	platformAdmin := cfg.platformAdmin
+	if platformAdmin == nil {
+		paConfig, paErr := platformadmin.ConfigFromEnv()
+		if paErr != nil {
+			logger.Fatalf("Invalid platform administration settings: %v", paErr)
+		}
+		platformAdmin = platformadmin.NewService(repository.NewUserRepository(db), authService, activityService, paConfig)
+	}
+
 	// Team repository (needed for RBAC service)
 	teamRepo := repository.NewTeamRepository(db)
 
@@ -154,6 +173,7 @@ func SetupV2Routes(
 	// Handlers
 	agentPoolRepo := repository.NewAgentPoolRepository(db)
 	orgHandler := handlers.NewOrganizationHandlerV2(orgRepo, teamRepo, projectRepo, agentPoolRepo, authService, activityService, rbacService, db)
+	orgHandler.SetPlatformAdmin(platformAdmin)
 	tagBindingRepo := repository.NewTagBindingRepository(db)
 	projectHandler := handlers.NewProjectHandlerV2(projectRepo, orgRepo, teamRepo, agentPoolRepo, tagBindingRepo, authService, activityService, rbacService)
 	tagBindingHandler := handlers.NewTagBindingHandlerV2(tagBindingRepo, projectRepo, workspaceRepo, orgRepo, authService, rbacService)
@@ -310,7 +330,7 @@ func SetupV2Routes(
 
 	// Admin: Terraform Versions (TFE-compatible)
 	// Reference: https://developer.hashicorp.com/terraform/enterprise/api-docs/admin/terraform-versions
-	adminTFVersionHandler := handlers.NewAdminTofuVersionsHandler(db, authService)
+	adminTFVersionHandler := handlers.NewAdminTofuVersionsHandler(db, platformAdmin)
 	adminTFVersions := v2.Group("/admin/terraform-versions")
 	{
 		adminTFVersions.GET("", adminTFVersionHandler.List)
@@ -323,6 +343,20 @@ func SetupV2Routes(
 	// Public: List enabled Terraform versions (any authenticated user)
 	// Used by workspace create/edit to populate the version dropdown
 	v2.GET("/terraform-versions", adminTFVersionHandler.ListEnabled)
+
+	// Platform administration (#132): the TFE admin users lookup and actions, the admin
+	// organizations listing, and the deployment's platform settings. Every admin route is
+	// reserved to a platform administrator (platformadmin.Service.Require) and answers 404 to
+	// everyone else; the settings read answers every authenticated identity.
+	adminUsersHandler := handlers.NewAdminUsersHandlerV2(repository.NewUserRepository(db), platformAdmin)
+	v2.GET("/admin/users", adminUsersHandler.List)
+	v2.POST("/admin/users/:id/actions/grant_admin", adminUsersHandler.GrantAdmin)
+	v2.POST("/admin/users/:id/actions/revoke_admin", adminUsersHandler.RevokeAdmin)
+	adminOrgsHandler := handlers.NewAdminOrganizationsHandlerV2(orgRepo, platformAdmin)
+	v2.GET("/admin/organizations", adminOrgsHandler.List)
+	v2.GET("/admin/organizations/:name", adminOrgsHandler.Show)
+	platformSettingsHandler := handlers.NewPlatformSettingsHandlerV2(platformAdmin, authService)
+	v2.GET("/platform/settings", platformSettingsHandler.Show)
 
 	// Runners (Self-Hosted Runners Management)
 	// Reference: SELF_HOSTED_RUNNERS_DESIGN.md
@@ -822,6 +856,7 @@ func SetupV2Routes(
 	// handler; the route resolves it per request.
 	agentPoolHandler.SetAPIKeyService(tokenAPIKeyService)
 	tokenHandler := handlers.NewTokenHandlerV2(tokenAPIKeyService, authService)
+	tokenHandler.SetPlatformAdmin(platformAdmin)
 	// A user-bound token acts as its owner in every organization they belong to, and these
 	// handlers mint, list and revoke on behalf of whoever AuthMiddleware resolved. The wall
 	// passes the group as agnostic (no target org), so InteractiveOnly is the authorization
@@ -838,6 +873,7 @@ func SetupV2Routes(
 	// Reading it answers a token, as tfe_current_user needs. Updating it acts on the signed-in
 	// person, so it carries InteractiveOnly, the rule the settings surface and /tokens follow.
 	accountHandler := handlers.NewAccountHandlerV2(authService, repository.NewUserRepository(db), cfg.profileService)
+	accountHandler.SetPlatformAdmin(platformAdmin)
 	v2.GET("/account/details", accountHandler.Details)
 	v2.PATCH("/account/update", middleware.InteractiveOnly(), accountHandler.Update)
 

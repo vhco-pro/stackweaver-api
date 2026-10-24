@@ -513,11 +513,20 @@ func init() {
 			responseSecrets: []string{"code"},
 		},
 		writeCase{
+			// A platform admin token (#132): the signed-in user is made a platform administrator
+			// after their first request creates their row, and asks for the platform:admin scope.
 			route: "POST /api/v2/tokens",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				return identityJSON(t, w.signIn(w.newUser(true)), http.MethodPost, "/api/v2/tokens", document("tokens", map[string]any{
-					"description": "Laptop CLI",
-					"expires_at":  "2030-01-01T00:00:00Z",
+				u := w.newUser(true)
+				sess := w.signIn(u)
+				w.send(identityJSON(t, sess, http.MethodGet, "/api/v2/account/details", nil))
+				if res := w.db.Exec(`UPDATE users SET platform_admin = true WHERE zitadel_subject = ?`, u.ID); res.Error != nil || res.RowsAffected != 1 {
+					t.Fatalf("make the signed-in user a platform administrator: %v (%d rows)", res.Error, res.RowsAffected)
+				}
+				return identityJSON(t, sess, http.MethodPost, "/api/v2/tokens", document("tokens", map[string]any{
+					"description":    "Laptop CLI",
+					"expires_at":     "2030-01-01T00:00:00Z",
+					"platform_admin": true,
 				}))
 			},
 			responseSecrets: []string{"data.attributes.token"},

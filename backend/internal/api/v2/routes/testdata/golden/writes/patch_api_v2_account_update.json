@@ -75,8 +75,13 @@
         "created-at": "\u003ctimestamp\u003e",
         "email": "\u003cemail\u003e",
         "is-service-account": false,
+        "is-site-admin": false,
         "location": "Antwerp, Belgium",
         "name": "Golden Recorder",
+        "permissions": {
+          "can-create-organizations": true
+        },
+        "platform-admin-declared": false,
         "unconfirmed-email": "golden.recorder@stackweaver.local",
         "updated-at": "\u003ctimestamp\u003e",
         "username": "\u003clogin-name\u003e",

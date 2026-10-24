@@ -29,7 +29,7 @@ func CoarseLevelForMethod(method string) string {
 
 // Scope represents a parsed API key scope
 type Scope struct {
-	Type       string     // "org", "project", "team", "user", or "*" for all
+	Type       string     // "org", "project", "team", "runner", "user", "platform", or "*" for all
 	ResourceID *uuid.UUID // Organization, Project, or Team ID (nil for user scopes or wildcard)
 	Permission string     // "read", "write", "admin", etc.
 }
@@ -42,6 +42,10 @@ type Scope struct {
 //   - "team:<team_id>:<permission>" - team-scoped (e.g., "team:789:read")
 //   - "runner:<runner_id>:<permission>" - runner-scoped (e.g., "runner:abc:heartbeat")
 //   - "user:<permission>" - user-scoped (e.g., "user:read")
+//   - "platform:<permission>" - install-wide, on user tokens only (#132); the one permission is
+//     "admin", which lets a platform administrator's token call the install-wide admin routes.
+//     It is evaluated by ScopeChecker.HasPlatformAdmin alone and is invisible to every
+//     organization-level check.
 //   - "<permission>" - legacy format, treated as user scope (e.g., "read")
 //
 // Runner-specific permissions:
@@ -80,6 +84,13 @@ func ParseScope(scopeStr string) (*Scope, error) {
 		if parts[0] == "user" {
 			return &Scope{
 				Type:       "user",
+				ResourceID: nil,
+				Permission: parts[1],
+			}, nil
+		}
+		if parts[0] == ScopeTypePlatform {
+			return &Scope{
+				Type:       ScopeTypePlatform,
 				ResourceID: nil,
 				Permission: parts[1],
 			}, nil
@@ -162,9 +173,20 @@ func (s *Scope) MatchesResource(resourceType string, resourceID *uuid.UUID) bool
 	return s.ResourceID.String() == resourceID.String()
 }
 
+// ScopeTypePlatform is the scope type of the install-wide platform scopes (#132).
+const ScopeTypePlatform = "platform"
+
+// PlatformAdminScope is the scope a platform administrator's user token carries to call the
+// install-wide admin routes.
+const PlatformAdminScope = "platform:admin"
+
 // ScopeChecker provides methods to check permissions for API keys
 type ScopeChecker struct {
+	// scopes holds every scope but the platform ones, so each organization-level method sees
+	// exactly what it sees for the same token without them.
 	scopes []*Scope
+	// platform holds the platform scopes, read by HasPlatformAdmin only.
+	platform []*Scope
 }
 
 // NewScopeChecker creates a new scope checker from scope strings
@@ -173,7 +195,26 @@ func NewScopeChecker(scopeStrs []string) (*ScopeChecker, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ScopeChecker{scopes: scopes}, nil
+	sc := &ScopeChecker{}
+	for _, s := range scopes {
+		if s.Type == ScopeTypePlatform {
+			sc.platform = append(sc.platform, s)
+			continue
+		}
+		sc.scopes = append(sc.scopes, s)
+	}
+	return sc, nil
+}
+
+// HasPlatformAdmin reports whether the token carries the platform:admin scope. It says nothing
+// about the token's owner: the platform administrator check also requires the owner's flag.
+func (sc *ScopeChecker) HasPlatformAdmin() bool {
+	for _, s := range sc.platform {
+		if s.Permission == "admin" {
+			return true
+		}
+	}
+	return false
 }
 
 // HasPermission checks if any scope grants the requested permission

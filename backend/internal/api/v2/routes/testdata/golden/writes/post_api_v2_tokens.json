@@ -7,7 +7,8 @@
       "data": {
         "attributes": {
           "description": "Laptop CLI",
-          "expires_at": "\u003ctimestamp\u003e"
+          "expires_at": "\u003ctimestamp\u003e",
+          "platform_admin": true
         },
         "type": "tokens"
       }
@@ -29,6 +30,9 @@
                   "type": "string",
                   "format": "date-time",
                   "nullable": true
+                },
+                "platform_admin": {
+                  "type": "boolean"
                 }
               }
             },
@@ -52,6 +56,7 @@
         "created_at": "\u003ctimestamp\u003e",
         "description": "Laptop CLI",
         "expires_at": "\u003ctimestamp\u003e",
+        "platform_admin": true,
         "token": "\u003csecret\u003e"
       },
       "id": "\u003cuuid\u003e",

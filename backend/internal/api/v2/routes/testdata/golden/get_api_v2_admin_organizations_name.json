@@ -1,0 +1,20 @@
+{
+  "method": "GET",
+  "path": "/api/v2/admin/organizations/:name",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "external-id": "\u003cuuid\u003e",
+        "is-disabled": false,
+        "member-count": 4,
+        "name": "demo",
+        "notification-email": "demo@example.invalid",
+        "workspace-count": 6
+      },
+      "id": "demo",
+      "type": "organizations"
+    }
+  }
+}

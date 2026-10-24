@@ -35,6 +35,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -53,13 +54,15 @@ func storedAsSentCall(t *testing.T, router http.Handler, method, path string, as
 	return rec.Code, rec.Body.Bytes()
 }
 
-// storedAsSentRouter is a gin engine that authenticates the caller from the X-Test-User header.
+// storedAsSentRouter is a gin engine that authenticates the caller from the X-Test-User header,
+// as a signed-in person (a JWT identity).
 func storedAsSentRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if id, err := uuid.Parse(c.GetHeader("X-Test-User")); err == nil {
 			c.Set("user_id", id)
+			c.Set("auth_method", "jwt")
 		}
 		c.Next()
 	})
@@ -114,26 +117,21 @@ func TestAdminTofuVersionCreate_EnabledIsStoredAsSent(t *testing.T) {
 		t.Fatalf("connect test db: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
-		&models.Team{}, &models.TeamMember{}, &models.TofuVersion{},
+		&models.User{}, &models.TofuVersion{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	sfx := uuid.NewString()[:8]
 
-	// The admin routes are open to a member of any organization's owners team.
-	org := &models.Organization{ID: uuid.New(), Name: "tvenabled-" + sfx}
+	// The admin routes are reserved to a platform administrator (#132). This test used to seed an
+	// owners-team member, which was the admin check before the platform administrator existed.
 	admin := &models.User{ID: uuid.New(), ZitadelSubject: "tvenabled-" + sfx, Email: "tvenabled-" + sfx + "@test.local"}
-	ownersTeam := &models.Team{ID: uuid.New(), OrganizationID: org.ID, Name: "owners"}
-	seed := []any{
-		org, admin, ownersTeam,
-		&models.OrganizationMember{ID: uuid.New(), OrganizationID: org.ID, UserID: admin.ID},
-		&models.TeamMember{ID: uuid.New(), TeamID: ownersTeam.ID, UserID: admin.ID},
+	if err := db.Create(admin).Error; err != nil {
+		t.Fatalf("seed admin: %v", err)
 	}
-	for _, obj := range seed {
-		if err := db.Create(obj).Error; err != nil {
-			t.Fatalf("seed %T: %v", obj, err)
-		}
+	userRepo := repository.NewUserRepository(db)
+	if _, err := userRepo.SetPlatformAdmin(admin.ID, true, false); err != nil {
+		t.Fatalf("flag admin: %v", err)
 	}
 	var versionIDs []string
 	t.Cleanup(func() {
@@ -141,14 +139,11 @@ func TestAdminTofuVersionCreate_EnabledIsStoredAsSent(t *testing.T) {
 		if len(versionIDs) > 0 {
 			db.Where("id IN ?", versionIDs).Delete(&models.TofuVersion{})
 		}
-		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamMember{})
-		db.Where("id = ?", ownersTeam.ID).Delete(&models.Team{})
-		db.Where("organization_id = ?", org.ID).Delete(&models.OrganizationMember{})
-		db.Where("id = ?", org.ID).Delete(&models.Organization{})
 		db.Where("id = ?", admin.ID).Delete(&models.User{})
 	})
 
-	h := NewAdminTofuVersionsHandler(db, auth.NewService(repository.NewUserRepository(db)))
+	admins := platformadmin.NewService(userRepo, auth.NewService(userRepo), nil, platformadmin.Config{})
+	h := NewAdminTofuVersionsHandler(db, admins)
 	router := storedAsSentRouter()
 	router.POST("/api/v2/admin/terraform-versions", h.Create)
 	router.GET("/api/v2/admin/terraform-versions/:id", h.Read)

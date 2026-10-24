@@ -154,6 +154,9 @@ var timeSensitiveRoutes = map[string]string{
 // since (30 days back) and the previous comparison period from until, so pinning until alone
 // fixes membership, ordering, daily buckets and the previous-period block.
 var goldenQueries = map[string]string{
+	// The admin users listing is a lookup (#132, decision 8): without a lookup parameter it
+	// answers 400, so the fixture records the administrators' lookup.
+	"GET /api/v2/admin/users":                              "filter%5Badmin%5D=true",
 	"GET /api/v2/organizations/:name/analytics":            "until=" + goldenSeedInstant,
 	"GET /api/v2/organizations/:name/analytics/executions": "until=" + goldenSeedInstant,
 }
@@ -601,7 +604,10 @@ func setupGoldenHarnessWithGitHub(t *testing.T, githubApp *vcs.GitHubAppManager)
 		}
 		t.Logf("no owners-team member found; falling back to the first user, expect forbidden responses")
 	}
-	_, token, tokErr := apiKeyService.CreateUserToken(seedUser.ID, "golden-harness", nil)
+	// The token carries platform:admin so the install-wide admin routes are recorded with a
+	// payload (#132); the scope is invisible inside organizations, so every other fixture is what
+	// a plain user token records. grantHarnessAccess makes the user a platform administrator.
+	_, token, tokErr := apiKeyService.CreateUserTokenWithScopes(seedUser.ID, "golden-harness", nil, []string{apikey.PlatformAdminScope})
 	if tokErr != nil {
 		t.Fatalf("mint user token: %v", tokErr)
 	}
@@ -737,6 +743,11 @@ func firstCol(db *gorm.DB, table, col string) (string, bool) {
 // column cannot silently reintroduce a 403 and quietly shrink coverage.
 func grantHarnessAccess(t *testing.T, db *gorm.DB, userID uuid.UUID) {
 	t.Helper()
+
+	// The harness user is a platform administrator, so the admin routes record their payloads.
+	if err := db.Exec(`UPDATE users SET platform_admin = true WHERE id = ?`, userID).Error; err != nil {
+		t.Fatalf("make the harness user a platform administrator: %v", err)
+	}
 
 	var teamIDs []string
 	if err := db.Raw(`SELECT team_id::text FROM team_members WHERE user_id = ?`, userID).Scan(&teamIDs).Error; err != nil {
