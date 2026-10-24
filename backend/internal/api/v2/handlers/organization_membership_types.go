@@ -723,6 +723,7 @@ type TofuVersionAttributes struct {
 type AccountAttributes struct {
 	Username         string    `json:"username"`
 	Email            string    `json:"email"`
+	UnconfirmedEmail string    `json:"unconfirmed-email,omitempty"`
 	IsServiceAccount bool      `json:"is-service-account"`
 	AvatarURL        string    `json:"avatar-url"`
 	V2Only           bool      `json:"v2-only"`
