@@ -100,7 +100,6 @@
     "subject_types_supported": [
       "public"
     ],
-    "token_endpoint": "http://localhost/auth/oidc/token",
     "token_endpoint_auth_methods_supported": [
       "client_secret_basic",
       "client_secret_post",
@@ -133,7 +132,6 @@
       "tr",
       "uk",
       "zh"
-    ],
-    "userinfo_endpoint": "http://localhost/auth/oidc/userinfo"
+    ]
   }
 }

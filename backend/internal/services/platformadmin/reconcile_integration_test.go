@@ -132,8 +132,8 @@ func assertSystemAction(t *testing.T, rows []models.AuditLog, action string, tar
 	}
 }
 
-func verified(email string) *auth.UserInfo {
-	return &auth.UserInfo{Email: email, EmailVerified: true}
+func verified(email string) auth.BrowserIdentity {
+	return auth.BrowserIdentity{Email: email, EmailVerified: true}
 }
 
 // AC7 + AC11: a verified, listed address is flagged declared at sign-in, matched
@@ -178,11 +178,10 @@ func TestDeclared_SignInIgnoresTheStoredColumn(t *testing.T) {
 	u := r.user(t, declared, false, false)
 	svc := r.service(t, []uuid.UUID{u.ID}, declared)
 
-	for name, info := range map[string]*auth.UserInfo{
+	for name, info := range map[string]auth.BrowserIdentity{
 		"different verified address":  verified("someone-else-" + uuid.NewString()[:8] + "@test.local"),
 		"unverified declared address": {Email: declared, EmailVerified: false},
-		"outage fallback":             {Subject: u.ZitadelSubject},
-		"no identity":                 nil,
+		"no email":                    {Subject: u.ZitadelSubject},
 	} {
 		if err := svc.ApplyDeclared(t.Context(), r.reload(t, u.ID), info); err != nil {
 			t.Fatalf("%s: ApplyDeclared: %v", name, err)
@@ -195,15 +194,15 @@ func TestDeclared_SignInIgnoresTheStoredColumn(t *testing.T) {
 }
 
 // AC4, sign-in half: a declared administrator whose verified email is no longer on the list loses
-// both columns on their next JWT request; a request with no verified email clears nothing.
+// both columns at their next sign-in; a sign-in with no verified email clears nothing.
 func TestDeclared_SignInClearsAnAddressOffTheList(t *testing.T) {
 	r := newDeclaredRig(t)
 	email := "platadm-" + uuid.NewString()[:8] + "@test.local"
 	u := r.user(t, email, true, true)
 	svc := r.service(t, []uuid.UUID{u.ID}) // the list no longer names the user
 
-	if err := svc.ApplyDeclared(t.Context(), r.reload(t, u.ID), &auth.UserInfo{Subject: u.ZitadelSubject}); err != nil {
-		t.Fatalf("ApplyDeclared (outage fallback): %v", err)
+	if err := svc.ApplyDeclared(t.Context(), r.reload(t, u.ID), auth.BrowserIdentity{Subject: u.ZitadelSubject}); err != nil {
+		t.Fatalf("ApplyDeclared (no email): %v", err)
 	}
 	assertFlags(t, r.reload(t, u.ID), true, true)
 

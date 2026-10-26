@@ -185,11 +185,24 @@ type writeCase struct {
 	// a declared path that is not there fails the case.
 	responseVaries []string
 
+	// redirects marks a write that is a top-level form POST whose success is a 303 See Other into
+	// the next page, as sign-out is: its 303 is the accepted answer, recorded in place of a 2xx.
+	redirects bool
+
 	// env is set in the process environment while this case's router is built and its request
 	// served, and put back afterwards. The server reads some settings once, when it starts (a
 	// webhook's signing secret, whether a run task may live on a private address), so a case
 	// that needs one has to have it in place before the router exists.
 	env map[string]string
+}
+
+// accepts reports whether status is the answer of a write the server accepted: a 2xx, or for a
+// redirecting case the 303 See Other into the next page.
+func (wc writeCase) accepts(status int) bool {
+	if wc.redirects {
+		return status == http.StatusSeeOther
+	}
+	return status >= 200 && status <= 299
 }
 
 // The four reasons a mutating route may be named instead of recorded. The list is closed: "it
@@ -631,7 +644,7 @@ func (r *writeRecorder) open(t *testing.T, n int, label string) (w *writeRun, do
 			t.Fatalf("initialise the auth service for %s: %v", label, err)
 		}
 		authService.RegisterAudience(id.APIClientID)
-		authService.RegisterAudience(id.FrontendClientID)
+		authService.RegisterAudience(id.BFFClientID)
 		settings = id.harness()
 	}
 	w.router = buildHarnessRouter(t, db, authService, settings)
@@ -691,7 +704,7 @@ func (r *writeRecorder) run(t *testing.T, n int, wc writeCase) (fx writeFixture,
 
 	method, path, _ := strings.Cut(wc.route, " ")
 	fx = writeFixture{Method: method, Path: path, Status: rec.Code}
-	if rec.Code < 200 || rec.Code > 299 {
+	if !wc.accepts(rec.Code) {
 		return fx, rec.Body.Bytes(), false
 	}
 	idn := w.identityNormaliser()
@@ -768,8 +781,8 @@ func TestGoldenWrites(t *testing.T) {
 		ran++
 		caseStart := time.Now()
 		fx, body, ok := r.run(t, n, wc)
-		if fx.Status < 200 || fx.Status > 299 {
-			t.Errorf("%s answered %d, not a 2xx; a case has to be a write the server accepts:\n%s", wc.route, fx.Status, body)
+		if !wc.accepts(fx.Status) {
+			t.Errorf("%s answered %d, not a 2xx (or the 303 of a redirecting case); a case has to be a write the server accepts:\n%s", wc.route, fx.Status, body)
 			continue
 		}
 		if !ok {

@@ -4,8 +4,7 @@
   "request": {
     "content_type": "application/x-www-form-urlencoded",
     "form": {
-      "client_id": "\u003cid\u003e",
-      "id_token_hint": "\u003csecret\u003e",
+      "client_id": "\u003cbff-client-id\u003e",
       "post_logout_redirect_uri": "http://localhost:5173",
       "state": "golden-write"
     }

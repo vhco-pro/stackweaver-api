@@ -24,7 +24,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -65,14 +64,16 @@ const (
 
 // writeIdentity is where the identity provider is and what the recorder may present to it.
 type writeIdentity struct {
-	Issuer           string // what the provider calls itself in the tokens it issues
-	Addr             string // host:port a host process reaches it at
-	InstanceHost     string // the host name the provider routes an instance on
-	LoginToken       string // the login-client token the API's own proxy uses
-	OwnerToken       string // the IAM_OWNER token, for ownerClient only
-	APIClientID      string
-	APIClientSecret  string
-	FrontendClientID string
+	Issuer          string // what the provider calls itself in the tokens it issues
+	Addr            string // host:port a host process reaches it at
+	InstanceHost    string // the host name the provider routes an instance on
+	LoginToken      string // the login-client token the API's own proxy uses
+	OwnerToken      string // the IAM_OWNER token, for ownerClient only
+	APIClientID     string
+	APIClientSecret string
+	// BFFClientID and BFFClientSecret are the confidential client browser sign-in redeems as.
+	BFFClientID     string
+	BFFClientSecret string
 }
 
 // writeIdentityFromEnv reads the identity settings from the dev stack's own files, by the paths
@@ -92,18 +93,20 @@ func writeIdentityFromEnv() (writeIdentity, error) {
 		return id, fmt.Errorf("reading the owner token: %w", err)
 	}
 	id = writeIdentity{
-		Issuer:           vars["ZITADEL_ISSUER"],
-		Addr:             os.Getenv(envWriteIdentityAddr),
-		InstanceHost:     vars["ZITADEL_EXTERNAL_HOST"],
-		LoginToken:       vars["ZITADEL_LOGIN_SERVICE_USER_TOKEN"],
-		OwnerToken:       strings.TrimSpace(string(token)),
-		APIClientID:      vars["ZITADEL_API_CLIENT_ID"],
-		APIClientSecret:  vars["ZITADEL_API_CLIENT_SECRET"],
-		FrontendClientID: vars["ZITADEL_FRONTEND_CLIENT_ID"],
+		Issuer:          vars["ZITADEL_ISSUER"],
+		Addr:            os.Getenv(envWriteIdentityAddr),
+		InstanceHost:    vars["ZITADEL_EXTERNAL_HOST"],
+		LoginToken:      vars["ZITADEL_LOGIN_SERVICE_USER_TOKEN"],
+		OwnerToken:      strings.TrimSpace(string(token)),
+		APIClientID:     vars["ZITADEL_API_CLIENT_ID"],
+		APIClientSecret: vars["ZITADEL_API_CLIENT_SECRET"],
+		BFFClientID:     vars["ZITADEL_BFF_CLIENT_ID"],
+		BFFClientSecret: vars["ZITADEL_BFF_CLIENT_SECRET"],
 	}
 	for name, value := range map[string]string{
 		"ZITADEL_ISSUER": id.Issuer, envWriteIdentityAddr: id.Addr, "ZITADEL_LOGIN_SERVICE_USER_TOKEN": id.LoginToken,
-		"the owner token": id.OwnerToken, "ZITADEL_API_CLIENT_ID": id.APIClientID, "ZITADEL_FRONTEND_CLIENT_ID": id.FrontendClientID,
+		"the owner token": id.OwnerToken, "ZITADEL_API_CLIENT_ID": id.APIClientID,
+		"ZITADEL_BFF_CLIENT_ID": id.BFFClientID, "ZITADEL_BFF_CLIENT_SECRET": id.BFFClientSecret,
 	} {
 		if value == "" {
 			return id, fmt.Errorf("%s is empty; %s", name, identityAdvice)
@@ -140,6 +143,8 @@ func (id writeIdentity) harness() harnessIdentity {
 		InternalAddr:     id.Addr,
 		PAT:              id.LoginToken,
 		NotificationMode: v2handlers.NotificationModeEmail,
+		BFFClientID:      id.BFFClientID,
+		BFFClientSecret:  id.BFFClientSecret,
 	}
 	if id.InstanceHost != "" {
 		h.CustomRequestHeaders = "x-zitadel-instance-host:" + id.InstanceHost
@@ -651,36 +656,28 @@ func (n *identityNormaliser) apply(v any) any {
 
 // --- signing in --------------------------------------------------------------------------------
 
-// identitySession is a signed-in throwaway user: what a browser holds after the login page.
+// identitySession is a signed-in throwaway user: what a browser holds after the login page. Its
+// credential is the API's httpOnly session cookie; the browser holds no token.
 type identitySession struct {
-	User         identityUser
-	SessionID    string
-	SessionToken string
-	AccessToken  string // a JWT the interactive-only routes accept
-	Cookies      []*http.Cookie
+	User          identityUser
+	SessionID     string // the Zitadel session the sign-in created
+	SessionToken  string
+	SessionCookie *http.Cookie // __Host-sw_session, which the interactive-only routes accept
+	Cookies       []*http.Cookie
 }
 
-// pkcePair is a PKCE verifier and its S256 challenge.
-func pkcePair() (verifier, challenge string) {
-	raw := make([]byte, 32)
-	_, _ = rand.Read(raw)
-	verifier = base64.RawURLEncoding.EncodeToString(raw)
-	sum := sha256.Sum256([]byte(verifier))
-	return verifier, base64.RawURLEncoding.EncodeToString(sum[:])
-}
+// identityOrigin is the SPA origin the recorder's browser requests come from, one the API's
+// origin policy allows outside release mode.
+const identityOrigin = "http://localhost:5173"
 
-// authorizeTarget is the authorize request the login page starts from.
-func authorizeTarget(clientID, challenge string) string {
-	q := url.Values{
-		"client_id":             {clientID},
-		"redirect_uri":          {identityRedirectURI},
-		"response_type":         {"code"},
-		"scope":                 {"openid profile email"},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {"golden-write"},
+// browserHeaders adds what the SPA sends with a request that rides on the session cookie: the
+// CSRF header and, for a write, its origin.
+func browserHeaders(req *http.Request) *http.Request {
+	req.Header.Set("X-Stackweaver-CSRF", "1")
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		req.Header.Set("Origin", identityOrigin)
 	}
-	return "/auth/oidc/authorize?" + q.Encode()
+	return req
 }
 
 // sessionBody is what the login page posts to check a login name and a password.
@@ -689,17 +686,6 @@ func sessionBody(u identityUser) map[string]any {
 		"user":     map[string]any{"loginName": u.LoginName},
 		"password": map[string]any{"password": u.Password},
 	}}
-}
-
-// tokenForm is the code exchange the callback page posts.
-func tokenForm(clientID, code, verifier string) url.Values {
-	return url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {clientID},
-		"redirect_uri":  {identityRedirectURI},
-		"code":          {code},
-		"code_verifier": {verifier},
-	}
 }
 
 // randomHex is n random bytes as hex, for the part of a user name that is unique to a run.
@@ -803,29 +789,37 @@ func publicJSON(t *testing.T, method, target string, body any) *http.Request {
 // signInSteps is the login page's work, one request at a time, so that a case can stop before
 // the step it records and send that one itself.
 type signInSteps struct {
-	w         *writeRun
-	user      identityUser
-	verifier  string
-	challenge string
+	w    *writeRun
+	user identityUser
 
 	authRequest  string
+	binding      []*http.Cookie // the sign-in's __Host-sw_login_* cookie, set at authorize
 	sessionID    string
 	sessionToken string
 	cookies      []*http.Cookie
 	code         string
+	state        string
 }
 
 func (w *writeRun) beginSignIn(u identityUser) *signInSteps {
-	verifier, challenge := pkcePair()
-	return &signInSteps{w: w, user: u, verifier: verifier, challenge: challenge}
+	return &signInSteps{w: w, user: u}
 }
 
-// authorize starts the authorization request and keeps its identifier.
+// authorize starts the sign-in: the API stores the login transaction, sets the binding cookie and
+// names the login UI's auth request.
 func (s *signInSteps) authorize() {
 	s.w.t.Helper()
-	out, _ := s.w.sendJSON(publicRequest(http.MethodGet, authorizeTarget(s.w.rec.identity.FrontendClientID, s.challenge), "", nil))
+	out, cookies := s.w.sendJSON(publicRequest(http.MethodGet, "/auth/oidc/authorize", "", nil))
 	if s.authRequest, _ = out["authRequest"].(string); s.authRequest == "" {
 		s.w.t.Fatalf("the authorize request returned no authRequest: %v", out)
+	}
+	for _, c := range cookies {
+		if strings.HasPrefix(c.Name, "__Host-sw_login_") {
+			s.binding = append(s.binding, c)
+		}
+	}
+	if len(s.binding) == 0 {
+		s.w.t.Fatalf("the authorize request set no binding cookie")
 	}
 }
 
@@ -867,21 +861,31 @@ func (s *signInSteps) finalizeRequest() *http.Request {
 	})
 }
 
-// finalize joins the session to the authorization request and keeps the code from the callback.
+// finalize joins the session to the authorization request and keeps the code and state from the
+// callback URL.
 func (s *signInSteps) finalize() {
 	s.w.t.Helper()
 	out, _ := s.w.sendJSON(s.finalizeRequest())
 	callback, _ := out["callbackUrl"].(string)
 	u, err := url.Parse(callback)
-	if err != nil || u.Query().Get("code") == "" {
-		s.w.t.Fatalf("finalizing returned no callback URL with a code: %v", out)
+	if err != nil || u.Query().Get("code") == "" || u.Query().Get("state") == "" {
+		s.w.t.Fatalf("finalizing returned no callback URL with a code and state: %v", out)
 	}
-	s.code = u.Query().Get("code")
+	s.code, s.state = u.Query().Get("code"), u.Query().Get("state")
 }
 
-func (s *signInSteps) tokenRequest() *http.Request {
-	form := tokenForm(s.w.rec.identity.FrontendClientID, s.code, s.verifier)
-	return publicRequest(http.MethodPost, "/auth/oidc/token", "application/x-www-form-urlencoded", []byte(form.Encode()))
+// redeemRequest is what the callback page posts: the code and state, with the binding cookie the
+// authorize answer set in this browser.
+func (s *signInSteps) redeemRequest() *http.Request {
+	s.w.t.Helper()
+	req := publicJSON(s.w.t, http.MethodPost, "/auth/session", map[string]any{
+		"data": map[string]any{"type": "sessions", "attributes": map[string]any{"code": s.code, "state": s.state}},
+	})
+	req.Header.Set("Content-Type", "application/vnd.api+json")
+	for _, c := range s.binding {
+		req.AddCookie(c)
+	}
+	return browserHeaders(req)
 }
 
 // signIn does all of it and returns what a browser holds afterwards.
@@ -891,24 +895,27 @@ func (w *writeRun) signIn(u identityUser) identitySession {
 	s.authorize()
 	s.session()
 	s.finalize()
-	out, _ := w.sendJSON(s.tokenRequest())
-	access, _ := out["access_token"].(string)
-	if access == "" {
-		w.t.Fatalf("the token exchange returned no access token: %v", keysOf(out))
+	_, cookies := w.sendJSON(s.redeemRequest())
+	sess := identitySession{User: u, SessionID: s.sessionID, SessionToken: s.sessionToken, Cookies: s.cookies}
+	for _, c := range cookies {
+		if c.Name == "__Host-sw_session" && c.Value != "" {
+			sess.SessionCookie = c
+		}
 	}
-	if sub, isJWT := jwtSubject(access); !isJWT || sub != u.ID {
-		w.t.Fatalf("the access token is not a JWT for the user that signed in (JWT: %v, subject %q, user %s)", isJWT, sub, u.ID)
+	if sess.SessionCookie == nil {
+		w.t.Fatalf("the redemption set no session cookie")
 	}
-	return identitySession{User: u, SessionID: s.sessionID, SessionToken: s.sessionToken, AccessToken: access, Cookies: s.cookies}
+	return sess
 }
 
-// as builds a request the signed-in user sends: its token, and the session cookie the proxy set.
+// as builds a request the signed-in user sends: the session cookie with the CSRF header, and the
+// login UI's cookie the proxy set.
 func (sess identitySession) as(req *http.Request) *http.Request {
-	req.Header.Set("Authorization", "Bearer "+sess.AccessToken)
+	req.AddCookie(sess.SessionCookie)
 	for _, c := range sess.Cookies {
 		req.AddCookie(c)
 	}
-	return req
+	return browserHeaders(req)
 }
 
 // attachIdentity gives the recorder its identity settings and sweeps what a killed run left.
@@ -944,8 +951,8 @@ func (r *writeRecorder) identityLeftovers(t *testing.T) []string {
 }
 
 // TestGoldenWriteSignIn is the identity feasibility check (#869): a user the recorder creates
-// signs in through the proxy's own routes, without a browser, and the token that comes out is
-// one an interactive-only route accepts. Eleven routes depend on that and fit no reason for
+// signs in through the proxy's own routes, without a browser, and the session cookie that comes
+// out is one an interactive-only route accepts. Eleven routes depend on that and fit no reason for
 // being named, so if this cannot be made to pass the plan goes back to its owner.
 func TestGoldenWriteSignIn(t *testing.T) {
 	if os.Getenv(envWritePhase) == "" {

@@ -138,12 +138,14 @@ func (f *platformAdminFixture) team(t *testing.T, org *models.Organization, name
 // identity is how a request is authenticated, as auth.Service would set it on the context.
 type identity struct {
 	user      uuid.UUID
-	method    string // auth_method; "" means jwt
+	method    string // auth_method; "" means a browser session
 	tokenKind string
 	scopes    []string
 }
 
-func jwtAs(u *models.User) identity { return identity{user: u.ID, method: "jwt"} }
+// browserAs is a person signed in through the browser session cookie
+// (backend-for-frontend-session-plan.md).
+func browserAs(u *models.User) identity { return identity{user: u.ID, method: "session"} }
 
 // platformAdminRouter is a gin engine that establishes the identity of each request from the
 // headers platformAdminCall sets.
@@ -180,7 +182,7 @@ func platformAdminCall(t *testing.T, router http.Handler, method, path string, a
 		req.Header.Set("X-Test-User", as.user.String())
 		m := as.method
 		if m == "" {
-			m = "jwt"
+			m = "session"
 		}
 		req.Header.Set("X-Test-Auth-Method", m)
 		req.Header.Set("X-Test-Token-Kind", as.tokenKind)
@@ -248,14 +250,15 @@ func TestPlatformAdminAuthz_VersionsRefuseEveryoneElse(t *testing.T) {
 	router := platformAdminRouter()
 	routes := f.versionRoutes(t, router, f.admins)
 
-	assertAllNotFound(t, router, routes, "owner of every organization", jwtAs(f.owner))
-	assertAllNotFound(t, router, routes, "member", jwtAs(f.member))
-	assertAllNotFound(t, router, routes, "user without memberships", jwtAs(f.plain))
+	assertAllNotFound(t, router, routes, "owner of every organization", browserAs(f.owner))
+	assertAllNotFound(t, router, routes, "member", browserAs(f.member))
+	assertAllNotFound(t, router, routes, "user without memberships", browserAs(f.plain))
 	assertAllNotFound(t, router, routes, "unauthenticated", identity{})
 	// A log token re-establishes a session user on run log paths only; even a platform
 	// administrator's is refused here before the row is read.
 	assertAllNotFound(t, router, routes, "platform administrator through a log token", identity{user: f.admin.ID, method: "log_token"})
-	assertAllNotFound(t, router, routes, "platform administrator through an unknown identity", identity{user: f.admin.ID, method: "session"})
+	// "jwt" is the retired browser bearer path: no request is established with it any more.
+	assertAllNotFound(t, router, routes, "platform administrator through an unknown identity", identity{user: f.admin.ID, method: "jwt"})
 }
 
 // AC3: a platform administrator, granted or declared, reaches every versions route.
@@ -269,7 +272,7 @@ func TestPlatformAdminAuthz_VersionsAdmitAPlatformAdministrator(t *testing.T) {
 			}
 			router := platformAdminRouter()
 			for _, r := range f.versionRoutes(t, router, f.admins) {
-				rec := platformAdminCall(t, router, r.method, r.path, jwtAs(caller), r.body)
+				rec := platformAdminCall(t, router, r.method, r.path, browserAs(caller), r.body)
 				if rec.Code != r.wantOK {
 					t.Errorf("%s %s = %d, want %d (%s)", r.method, r.path, rec.Code, r.wantOK, rec.Body.String())
 				}
@@ -284,12 +287,12 @@ func TestPlatformAdminAuthz_EmptyDeclaredListAdmitsNobody(t *testing.T) {
 	f := setupPlatformAdminFixture(t)
 	empty := f.service(platformadmin.Config{})
 	bootstrap := f.user(t, "bootstrap")
-	if err := empty.ApplyDeclared(t.Context(), bootstrap, &auth.UserInfo{Email: bootstrap.Email, EmailVerified: true}); err != nil {
+	if err := empty.ApplyDeclared(t.Context(), bootstrap, auth.BrowserIdentity{Email: bootstrap.Email, EmailVerified: true}); err != nil {
 		t.Fatalf("ApplyDeclared: %v", err)
 	}
 	router := platformAdminRouter()
 	routes := f.versionRoutes(t, router, empty)
-	assertAllNotFound(t, router, routes, "bootstrap admin on an empty list", jwtAs(bootstrap))
+	assertAllNotFound(t, router, routes, "bootstrap admin on an empty list", browserAs(bootstrap))
 }
 
 // everyRoute mounts every install-wide route of AC3 and returns them in an order a platform
@@ -319,9 +322,9 @@ func TestPlatformAdminAuthz_EveryInstallWideRoute(t *testing.T) {
 	router := platformAdminRouter()
 	routes := f.everyRoute(t, router, f.admins)
 
-	assertAllNotFound(t, router, routes, "owner of every organization", jwtAs(f.owner))
-	assertAllNotFound(t, router, routes, "member", jwtAs(f.member))
-	assertAllNotFound(t, router, routes, "user without memberships", jwtAs(f.plain))
+	assertAllNotFound(t, router, routes, "owner of every organization", browserAs(f.owner))
+	assertAllNotFound(t, router, routes, "member", browserAs(f.member))
+	assertAllNotFound(t, router, routes, "user without memberships", browserAs(f.plain))
 	assertAllNotFound(t, router, routes, "log token of a platform administrator", identity{user: f.admin.ID, method: "log_token"})
 	assertAllNotFound(t, router, routes, "plain user token of a platform administrator",
 		identity{user: f.admin.ID, method: "api_key", tokenKind: models.APIKeyKindUser})
@@ -339,7 +342,7 @@ func TestPlatformAdminAuthz_EveryInstallWideRoute(t *testing.T) {
 	}
 
 	for _, r := range routes {
-		rec := platformAdminCall(t, router, r.method, r.path, jwtAs(f.admin), r.body)
+		rec := platformAdminCall(t, router, r.method, r.path, browserAs(f.admin), r.body)
 		if rec.Code != r.wantOK {
 			t.Errorf("platform administrator: %s %s = %d, want %d (%s)", r.method, r.path, rec.Code, r.wantOK, rec.Body.String())
 		}

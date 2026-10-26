@@ -61,7 +61,7 @@ func TestTokensPlatformAdmin(t *testing.T) {
 	}
 	yes, no := true, false
 
-	code, attrs, id := mint(jwtAs(f.admin), &yes)
+	code, attrs, id := mint(browserAs(f.admin), &yes)
 	if code != http.StatusCreated || attrs["platform_admin"] != true {
 		t.Fatalf("holder mint = %d %v, want 201 with platform_admin true", code, attrs)
 	}
@@ -70,16 +70,16 @@ func TestTokensPlatformAdmin(t *testing.T) {
 	}
 	platformID := id
 
-	code, attrs, id = mint(jwtAs(f.admin), &no)
+	code, attrs, id = mint(browserAs(f.admin), &no)
 	if code != http.StatusCreated || attrs["platform_admin"] != false || len(stored(id)) != 0 {
 		t.Errorf("holder plain mint = %d %v scopes %v, want 201, false, none", code, attrs, stored(id))
 	}
 	plainID := id
-	if code, _, _ := mint(jwtAs(f.admin), nil); code != http.StatusCreated {
+	if code, _, _ := mint(browserAs(f.admin), nil); code != http.StatusCreated {
 		t.Errorf("mint without the attribute = %d, want 201", code)
 	}
 
-	if code, _, _ := mint(jwtAs(f.owner), &yes); code != http.StatusForbidden {
+	if code, _, _ := mint(browserAs(f.owner), &yes); code != http.StatusForbidden {
 		t.Errorf("non-holder platform mint = %d, want 403", code)
 	}
 	for _, kind := range []string{models.APIKeyKindUser, models.APIKeyKindOrg} {
@@ -88,7 +88,7 @@ func TestTokensPlatformAdmin(t *testing.T) {
 		}
 	}
 
-	rec := platformAdminCall(t, router, http.MethodGet, "/api/v2/tokens", jwtAs(f.admin), "")
+	rec := platformAdminCall(t, router, http.MethodGet, "/api/v2/tokens", browserAs(f.admin), "")
 	var list struct {
 		Data []struct {
 			ID         string         `json:"id"`

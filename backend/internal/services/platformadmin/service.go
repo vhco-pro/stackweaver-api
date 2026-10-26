@@ -81,8 +81,8 @@ func Status(u *models.User) (admin, declared bool) {
 	return u.PlatformAdmin, u.PlatformAdmin && u.PlatformAdminDeclared
 }
 
-// Require authorizes a request to an install-wide route. It accepts a signed-in person (a JWT)
-// and a user token that carries the platform:admin scope, in both cases only while the row of
+// Require authorizes a request to an install-wide route. It accepts a signed-in person (a browser
+// session) and a user token that carries the platform:admin scope, in both cases only while the row of
 // the person behind it carries the flag, and refuses every other identity before the row is
 // read, so an identity kind added later fails closed here until someone decides otherwise. It never consults
 // team memberships, RBAC or the org wall, and the row is read on every call, so a revocation is
@@ -96,7 +96,7 @@ func (s *Service) Require(c *gin.Context) (*models.User, bool) {
 	}
 	userID, _ := c.Get("user_id")
 	switch method := c.GetString("auth_method"); method {
-	case "jwt":
+	case "session":
 	case "api_key":
 		// Only a user token that carries platform:admin; an organization-bound key is refused
 		// by its kind before its scopes or its owner are looked at.
@@ -142,13 +142,13 @@ func (s *Service) IsPlatformAdmin(_ context.Context, userID uuid.UUID) (bool, er
 // ApplyDeclared applies the declared list to a user at sign-in (auth.PlatformAdminSeeder). It
 // acts only on an address the identity provider verified for this request: a listed address is
 // flagged declared (promoting a granted administrator), and a declared administrator whose
-// address is off the list loses both columns. A request without a verified email, such as the
-// identity-provider outage fallback or a machine user, changes nothing. user is updated in place.
-func (s *Service) ApplyDeclared(ctx context.Context, user *models.User, info *auth.UserInfo) error {
-	if user == nil || info == nil || !info.EmailVerified || info.Email == "" {
+// address is off the list loses both columns. A sign-in without a verified email changes
+// nothing. user is updated in place.
+func (s *Service) ApplyDeclared(ctx context.Context, user *models.User, id auth.BrowserIdentity) error {
+	if user == nil || !id.EmailVerified || id.Email == "" {
 		return nil
 	}
-	onList := s.cfg.Declared.Contains(info.Email)
+	onList := s.cfg.Declared.Contains(id.Email)
 	switch {
 	case onList && (!user.PlatformAdmin || !user.PlatformAdminDeclared):
 		if err := s.transition(ctx, user, true, true, ActionDeclared, "sign-in"); err != nil {

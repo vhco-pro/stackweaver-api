@@ -2891,18 +2891,6 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).JWKSProxy-fm"
     },
     {
-      "method": "POST",
-      "path": "/auth/oidc/token",
-      "mutating": true,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).TokenExchange-fm"
-    },
-    {
-      "method": "GET",
-      "path": "/auth/oidc/userinfo",
-      "mutating": false,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).UserinfoProxy-fm"
-    },
-    {
       "method": "GET",
       "path": "/auth/orgs/by-domain",
       "mutating": false,
@@ -2910,6 +2898,30 @@
       "query": [
         "domain"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/auth/session",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).GetBrowserSession-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/session",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).CreateBrowserSession-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/session/end",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).EndBrowserSession-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/auth/session/touch",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AuthProxy).TouchBrowserSession-fm"
     },
     {
       "method": "POST",

@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -559,6 +560,9 @@ func TestInjectReturnCodeFlags_NoChallenges(t *testing.T) {
 }
 
 // --- Prefix dispatch tests (A2.1) ---
+//
+// Authorize runs the backend-for-frontend sign-in and refuses to start without the BFF client, so
+// these proxies are built with bffProxyConfig; the prefix dispatch they pin is unchanged.
 
 func TestAuthorize_RejectsSAMLPrefix(t *testing.T) {
 	// Create a mock Zitadel server that returns a redirect with a saml_ auth request
@@ -568,10 +572,7 @@ func TestAuthorize_RejectsSAMLPrefix(t *testing.T) {
 	}))
 	defer mockZitadel.Close()
 
-	proxy := NewAuthProxy(AuthProxyConfig{
-		ZitadelInternalURL: mockZitadel.URL,
-		PAT:                "test-pat",
-	})
+	proxy := NewAuthProxy(bffProxyConfig(mockZitadel.URL, newMemLoginTransactions()))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -594,10 +595,7 @@ func TestAuthorize_RejectsDevicePrefix(t *testing.T) {
 	}))
 	defer mockZitadel.Close()
 
-	proxy := NewAuthProxy(AuthProxyConfig{
-		ZitadelInternalURL: mockZitadel.URL,
-		PAT:                "test-pat",
-	})
+	proxy := NewAuthProxy(bffProxyConfig(mockZitadel.URL, newMemLoginTransactions()))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -617,10 +615,7 @@ func TestAuthorize_AcceptsOIDCPrefix(t *testing.T) {
 	}))
 	defer mockZitadel.Close()
 
-	proxy := NewAuthProxy(AuthProxyConfig{
-		ZitadelInternalURL: mockZitadel.URL,
-		PAT:                "test-pat",
-	})
+	proxy := NewAuthProxy(bffProxyConfig(mockZitadel.URL, newMemLoginTransactions()))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -2812,6 +2807,79 @@ func TestDecoySecret_DivergesWithoutShared(t *testing.T) {
 	idB := deriveDecoySnowflake(b.decoySecret, "user:"+loginName)
 	if idA == idB {
 		t.Errorf("per-process secrets must produce divergent ids (probabilistically impossible to collide); got %q", idA)
+	}
+}
+
+// Without STACKWEAVER_DECOY_SECRET, the login UI's cookie key and the decoy-id key are derived
+// from ENCRYPTION_KEY, which every replica of an install shares, so a cookie signed by one replica
+// verifies on another and after a restart, and decoy ids stay stable across replicas.
+func TestDerivedKeys_SharedEncryptionKeyAcrossReplicas(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer upstream.Close()
+
+	key := bytes.Repeat([]byte{7}, 32)
+	a := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: upstream.URL, PAT: "pat", EncryptionKey: key})
+	b := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: upstream.URL, PAT: "pat", EncryptionKey: key})
+	other := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: upstream.URL, PAT: "pat", EncryptionKey: bytes.Repeat([]byte{8}, 32)})
+	defer a.StopDecoyOrgIDsSweeper()
+	defer b.StopDecoyOrgIDsSweeper()
+	defer other.StopDecoyOrgIDsSweeper()
+
+	payload := []byte(`[{"id":"s1"}]`)
+	cookie := a.signSessionCookie(payload) + "." + string(payload)
+	if got, ok := b.verifySessionCookie(cookie); !ok || string(got) != string(payload) {
+		t.Fatalf("a cookie signed by one replica must verify on another with the same ENCRYPTION_KEY")
+	}
+	if _, ok := other.verifySessionCookie(cookie); ok {
+		t.Fatalf("a different ENCRYPTION_KEY must not verify the cookie")
+	}
+
+	loginName := "ghost@example.com"
+	if deriveDecoySnowflake(a.decoySecret, "user:"+loginName) != deriveDecoySnowflake(b.decoySecret, "user:"+loginName) {
+		t.Errorf("decoy ids must be stable across replicas sharing ENCRYPTION_KEY")
+	}
+	if bytes.Equal(a.sessionCookieKey, a.decoySecret) || bytes.Equal(a.sessionCookieKey, key) || bytes.Equal(a.decoySecret, key) {
+		t.Errorf("the cookie key, the decoy key and ENCRYPTION_KEY must all differ (distinct HKDF labels)")
+	}
+}
+
+// The all-zero key DEV_INSECURE_KEY=1 hands out is public, so nothing is derived from it: each
+// process keys its login UI cookie at random, and a cookie signed with the key anyone could compute
+// from the zero key does not verify.
+func TestDerivedKeys_InsecureZeroKeyIsNotUsed(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer upstream.Close()
+
+	zero := make([]byte, 32)
+	a := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: upstream.URL, PAT: "pat", EncryptionKey: zero})
+	b := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: upstream.URL, PAT: "pat", EncryptionKey: zero})
+	defer a.StopDecoyOrgIDsSweeper()
+	defer b.StopDecoyOrgIDsSweeper()
+
+	if bytes.Equal(a.sessionCookieKey, deriveProxyKey(zero, sessionCookieKeyLabel)) {
+		t.Fatalf("the cookie key must not be derived from the all-zero dev key")
+	}
+	payload := []byte(`[{"id":"s1"}]`)
+	cookie := a.signSessionCookie(payload) + "." + string(payload)
+	if _, ok := b.verifySessionCookie(cookie); ok {
+		t.Fatalf("two processes on the all-zero key must not share a cookie key")
+	}
+}
+
+// An explicit STACKWEAVER_DECOY_SECRET still wins over the derivation.
+func TestDerivedKeys_ExplicitDecoySecretWins(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer upstream.Close()
+
+	shared := []byte("0123456789abcdef0123456789abcdef")
+	a := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: upstream.URL, PAT: "pat", DecoySecret: shared, EncryptionKey: bytes.Repeat([]byte{1}, 32)})
+	b := NewAuthProxy(AuthProxyConfig{ZitadelInternalURL: upstream.URL, PAT: "pat", DecoySecret: shared, EncryptionKey: bytes.Repeat([]byte{2}, 32)})
+	defer a.StopDecoyOrgIDsSweeper()
+	defer b.StopDecoyOrgIDsSweeper()
+
+	payload := []byte(`[]`)
+	if _, ok := b.verifySessionCookie(a.signSessionCookie(payload) + "." + string(payload)); !ok {
+		t.Errorf("replicas sharing STACKWEAVER_DECOY_SECRET must verify each other's cookie whatever their ENCRYPTION_KEY")
 	}
 }
 

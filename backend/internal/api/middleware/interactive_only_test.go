@@ -14,8 +14,8 @@ import (
 )
 
 // The settings routes are exercised end to end, with real keys, by
-// TestSettings_TokenIdentitiesAreRefused in v2/routes. That test cannot mint a Zitadel-signed
-// JWT, so the half it leaves open is pinned here: an interactive caller passes untouched, and
+// TestSettings_TokenIdentitiesAreRefused in v2/routes. That test signs no one in through a
+// browser, so the half it leaves open is pinned here: an interactive caller passes untouched, and
 // the decision rests on how the caller authenticated rather than on who they are.
 func TestInteractiveOnly(t *testing.T) {
 	const denied = `{"errors":[{"status":"403","title":"Forbidden","detail":"this endpoint requires an interactive sign-in and cannot be used with an API token"}]}`
@@ -28,9 +28,21 @@ func TestInteractiveOnly(t *testing.T) {
 		wantCode int
 	}{
 		{
-			name: "interactive JWT passes",
+			// The browser used to authenticate with a Zitadel JWT, which is no longer a credential
+			// (backend-for-frontend-session-plan.md, AC32): even if something recorded the method,
+			// it must not pass.
+			name: "a jwt method is refused",
 			identity: func(c *gin.Context) {
 				c.Set("auth_method", "jwt")
+				c.Set("user_subject", "zitadel-subject")
+			},
+			wantCode: http.StatusForbidden,
+		},
+		{
+			// A browser signed in through the backend-for-frontend session cookie.
+			name: "interactive browser session passes",
+			identity: func(c *gin.Context) {
+				c.Set("auth_method", "session")
 				c.Set("user_subject", "zitadel-subject")
 			},
 			wantCode: http.StatusOK,

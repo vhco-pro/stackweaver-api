@@ -26,11 +26,12 @@ import (
 // token instead of trying to scope it.
 //
 // The check is an allow-list on purpose. A caller is admitted only when AuthMiddleware recorded
-// a verified JWT, so an authentication method added later is refused here until someone decides
-// it belongs, which is the same fail-closed default the org wall takes for unclassified routes.
+// a person's browser session, so an authentication method added
+// later is refused here until someone decides it belongs, which is the same fail-closed default
+// the org wall takes for unclassified routes.
 func InteractiveOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if method, _ := c.Get("auth_method"); method != "jwt" {
+		if method, _ := c.Get("auth_method"); method != "session" {
 			logger.Warnf("interactive-only: denying %v identity on %s %s", method, c.Request.Method, c.FullPath())
 			jsonapi.AbortError(c, http.StatusForbidden, jsonapi.TitleForbidden,
 				"this endpoint requires an interactive sign-in and cannot be used with an API token")

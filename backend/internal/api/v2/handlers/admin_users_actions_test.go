@@ -59,17 +59,17 @@ func TestAdminUsersActions(t *testing.T) {
 	}
 
 	// AC8: a grant sets the flag, a second grant is 400, and the target's next request is let in.
-	if code := reach(jwtAs(f.plain)); code != http.StatusNotFound {
+	if code := reach(browserAs(f.plain)); code != http.StatusNotFound {
 		t.Fatalf("before the grant the target reached the catalogue (%d)", code)
 	}
-	code, body := action(jwtAs(f.admin), f.plain.ID, "grant_admin")
+	code, body := action(browserAs(f.admin), f.plain.ID, "grant_admin")
 	if code != http.StatusOK || userAttrs(t, body)["is-admin"] != true {
 		t.Fatalf("grant_admin = %d %s, want 200 with is-admin true", code, body)
 	}
-	if code, body := action(jwtAs(f.admin), f.plain.ID, "grant_admin"); code != http.StatusBadRequest {
+	if code, body := action(browserAs(f.admin), f.plain.ID, "grant_admin"); code != http.StatusBadRequest {
 		t.Errorf("second grant_admin = %d %s, want 400", code, body)
 	}
-	if code := reach(jwtAs(f.plain)); code != http.StatusOK {
+	if code := reach(browserAs(f.plain)); code != http.StatusOK {
 		t.Errorf("after the grant the target's next request = %d, want 200", code)
 	}
 	// A platform:admin token the target mints while holding the flag (AC9).
@@ -79,13 +79,13 @@ func TestAdminUsersActions(t *testing.T) {
 	}
 
 	// AC9: a revoke clears it and the target's next request is refused.
-	if code, body := action(jwtAs(f.admin), f.plain.ID, "revoke_admin"); code != http.StatusOK || userAttrs(t, body)["is-admin"] != false {
+	if code, body := action(browserAs(f.admin), f.plain.ID, "revoke_admin"); code != http.StatusOK || userAttrs(t, body)["is-admin"] != false {
 		t.Fatalf("revoke_admin = %d %s, want 200 with is-admin false", code, body)
 	}
-	if code, _ := action(jwtAs(f.admin), f.plain.ID, "revoke_admin"); code != http.StatusBadRequest {
+	if code, _ := action(browserAs(f.admin), f.plain.ID, "revoke_admin"); code != http.StatusBadRequest {
 		t.Errorf("second revoke_admin = %d, want 400", code)
 	}
-	if code := reach(jwtAs(f.plain)); code != http.StatusNotFound {
+	if code := reach(browserAs(f.plain)); code != http.StatusNotFound {
 		t.Errorf("after the revoke the target's next request = %d, want 404", code)
 	}
 	if code := reach(targetToken); code != http.StatusNotFound {
@@ -93,11 +93,11 @@ func TestAdminUsersActions(t *testing.T) {
 	}
 
 	// AC10: a declared administrator cannot be revoked, and granting one changes nothing.
-	code, body = action(jwtAs(f.admin), f.declared.ID, "revoke_admin")
+	code, body = action(browserAs(f.admin), f.declared.ID, "revoke_admin")
 	if code != http.StatusUnprocessableEntity || !strings.Contains(string(body), "STACKWEAVER_PLATFORM_ADMINS") {
 		t.Errorf("revoke_admin on a declared administrator = %d %s, want 422 naming the deployment configuration", code, body)
 	}
-	code, body = action(jwtAs(f.admin), f.declared.ID, "grant_admin")
+	code, body = action(browserAs(f.admin), f.declared.ID, "grant_admin")
 	if code != http.StatusOK || userAttrs(t, body)["platform-admin-declared"] != true {
 		t.Errorf("grant_admin on a declared administrator = %d %s, want 200 still declared", code, body)
 	}
@@ -112,21 +112,21 @@ func TestAdminUsersActions(t *testing.T) {
 
 	// An administrator may revoke themselves; the declared administrators always remain.
 	second := f.user(t, "second")
-	if code, _ := action(jwtAs(f.admin), second.ID, "grant_admin"); code != http.StatusOK {
+	if code, _ := action(browserAs(f.admin), second.ID, "grant_admin"); code != http.StatusOK {
 		t.Fatalf("grant second = %d", code)
 	}
-	if code, _ := action(jwtAs(second), second.ID, "revoke_admin"); code != http.StatusOK {
+	if code, _ := action(browserAs(second), second.ID, "revoke_admin"); code != http.StatusOK {
 		t.Errorf("self-revoke = %d, want 200", code)
 	}
 
 	// Unknown ids and refused callers both get 404.
-	if code, _ := action(jwtAs(f.admin), uuid.New(), "grant_admin"); code != http.StatusNotFound {
+	if code, _ := action(browserAs(f.admin), uuid.New(), "grant_admin"); code != http.StatusNotFound {
 		t.Errorf("grant_admin on an unknown id = %d, want 404", code)
 	}
-	if code, _ := action(jwtAs(f.admin), uuid.Nil, "grant_admin"); code != http.StatusNotFound {
+	if code, _ := action(browserAs(f.admin), uuid.Nil, "grant_admin"); code != http.StatusNotFound {
 		t.Errorf("grant_admin on the nil id = %d, want 404", code)
 	}
-	for _, who := range []identity{jwtAs(f.owner), jwtAs(f.member), jwtAs(f.plain)} {
+	for _, who := range []identity{browserAs(f.owner), browserAs(f.member), browserAs(f.plain)} {
 		for _, name := range []string{"grant_admin", "revoke_admin"} {
 			if code, _ := action(who, f.admin.ID, name); code != http.StatusNotFound {
 				t.Errorf("non-administrator %s %s = %d, want 404", who.user, name, code)

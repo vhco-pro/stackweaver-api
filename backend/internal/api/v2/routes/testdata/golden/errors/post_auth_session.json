@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/auth/session",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "detail": "request body must be a JSON:API document: {\"data\": {\"type\": \"sessions\", \"attributes\": {...}}}",
+        "status": "400",
+        "title": "Bad Request"
+      }
+    ]
+  }
+}

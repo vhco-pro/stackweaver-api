@@ -52,6 +52,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/routes"
 	v2handlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
@@ -432,6 +433,11 @@ type harnessIdentity struct {
 	// identityFromEnv, which is what every fixture recorded before #869 saw.
 	CustomRequestHeaders string
 	NotificationMode     v2handlers.NotificationMode
+	// BFFClientID and BFFClientSecret are the confidential browser sign-in client. The write
+	// recorder sets them from the dev stack, so its sign-ins redeem at the real Zitadel; the
+	// read and error recorders leave them empty and get placeholders.
+	BFFClientID     string
+	BFFClientSecret string
 }
 
 // identityFromEnv is the identity configuration the read and error recorders have always used:
@@ -526,13 +532,35 @@ func buildHarnessRouterWithGitHub(t *testing.T, db *gorm.DB, authService *auth.S
 		repository.NewTeamRepository(db),
 	)
 
-	authProxy := v2handlers.NewAuthProxy(v2handlers.AuthProxyConfig{
+	browserSessions := repository.NewBrowserSessionRepository(db)
+	bffID, bffSecret := id.BFFClientID, id.BFFClientSecret
+	if bffID == "" {
+		bffID, bffSecret = "bff-client", "bff-secret"
+	}
+	sessions := auth.NewSessions(browserSessions, auth.DefaultSessionLimits, time.Now)
+	proxyConfig := v2handlers.AuthProxyConfig{
 		ZitadelIssuer:        issuer,
 		ZitadelInternalURL:   issuer,
 		PAT:                  pat,
 		CustomRequestHeaders: id.CustomRequestHeaders,
 		NotificationMode:     id.NotificationMode,
-	})
+		// Browser sign-in is configured so GET/POST /auth/session record their real shapes
+		// instead of a 503. With the write recorder's real client a sign-in completes; the read
+		// and error recorders have no Zitadel and record the refusals.
+		BFFClientID:        bffID,
+		BFFClientSecret:    bffSecret,
+		DefaultRedirectURI: "http://localhost:5173/auth/callback",
+		LoginTransactions:  browserSessions,
+		BrowserSessions:    sessions,
+	}
+	// The route-coverage test builds the router with no auth service, only to list its routes.
+	if authService != nil {
+		authService.SetBrowserSessions(sessions)
+		proxyConfig.SignIn = authService
+	}
+	authProxy := v2handlers.NewAuthProxy(proxyConfig)
+	// Sign-out and expiry end Zitadel sessions through the proxy, as in main.go.
+	sessions.SetZitadel(authProxy)
 
 	// SetupRoutes builds its own engine with gin.Default(), which installs Recovery - the same
 	// thing the previous hand-rolled router had to add explicitly. Without it a panicking handler
@@ -1020,6 +1048,16 @@ func errorPath(routePath string) string {
 	return strings.Join(segs, "/")
 }
 
+// asTheSPA adds what the SPA sends with every call to the /auth routes: its origin and the CSRF
+// header the session endpoints require. Those routes are called by the browser, so this is the
+// request their fixtures describe; the API-key routes ignore both.
+func asTheSPA(req *http.Request) {
+	if strings.HasPrefix(req.URL.Path, "/auth/") {
+		req.Header.Set("Origin", "http://localhost:5173")
+		req.Header.Set(middleware.CSRFHeader, "1")
+	}
+}
+
 func (h *goldenHarness) captureError(t *testing.T, method, routePath string) goldenFixture {
 	t.Helper()
 	target, reqBody := errorPath(routePath), "{}"
@@ -1032,6 +1070,7 @@ func (h *goldenHarness) captureError(t *testing.T, method, routePath string) gol
 	req := httptest.NewRequest(method, target, strings.NewReader(reqBody))
 	req.Header.Set("Authorization", "Bearer "+h.token)
 	req.Header.Set("Content-Type", "application/vnd.api+json")
+	asTheSPA(req)
 	rec := httptest.NewRecorder()
 	h.router.ServeHTTP(rec, req)
 
@@ -1053,6 +1092,7 @@ func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFi
 	req := httptest.NewRequest(method, target, nil)
 	req.Header.Set("Authorization", "Bearer "+h.token)
 	req.Header.Set("Content-Type", "application/vnd.api+json")
+	asTheSPA(req)
 	rec := httptest.NewRecorder()
 	h.router.ServeHTTP(rec, req)
 
@@ -1318,7 +1358,7 @@ func TestGoldenErrorEnvelopeGuard(t *testing.T) {
 		{"no body at all", goldenFixture{Method: "POST", Path: "/api/v2/x", Status: 500, Body: nil}, "no body"},
 		{"a body that is not an object", goldenFixture{Method: "POST", Path: "/api/v2/x", Status: 400, Body: "nope"}, "not an object"},
 		{"the RFC 6749 surface keeps its flat body", goldenFixture{Method: "POST", Path: "/api/v2/oauth/token", Status: 400, Body: map[string]any{"error": "invalid_grant"}}, ""},
-		{"the auth proxy keeps Zitadel's bodies", goldenFixture{Method: "POST", Path: "/auth/oidc/token", Status: 400, Body: map[string]any{"error": "invalid_grant"}}, ""},
+		{"the auth proxy keeps Zitadel's bodies", goldenFixture{Method: "POST", Path: "/auth/oidc/end-session", Status: 400, Body: map[string]any{"error": "invalid_request"}}, ""},
 		{"the registry protocol may answer without a body", goldenFixture{Method: "GET", Path: "/v1/modules/:namespace", Status: 404, Body: nil}, ""},
 	}
 	for _, tc := range cases {

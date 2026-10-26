@@ -491,6 +491,16 @@ func main() {
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
+	browserSessionRepo := repository.NewBrowserSessionRepository(db)
+	// One Sessions for the whole process: sign-in starts sessions through it and every
+	// cookie-authenticated request resolves through it.
+	sessionLimits, err := sessionLimitsFromEnv(os.Getenv)
+	if err != nil {
+		logger.Fatalf("Invalid browser session settings: %v", err)
+	}
+	logger.Infof("Browser sessions: signed out after %s idle and %s in total, checked against Zitadel every %s",
+		sessionLimits.Idle, sessionLimits.Absolute, sessionLimits.Liveness)
+	browserSessions := auth.NewSessions(browserSessionRepo, sessionLimits, time.Now)
 
 	// Initialize auth service
 	authService := auth.NewService(userRepo)
@@ -522,16 +532,12 @@ func main() {
 	if err := authService.InitializeZitadel(zitadelIssuer, zitadelClientID, zitadelClientSecret, zitadelInternalAddr); err != nil {
 		logger.Fatalf("Failed to initialize Zitadel verifier: %v", err)
 	}
-	// AUD-012: register the Stackweaver client_ids an access token may carry in `aud`. Real
-	// user tokens are issued to the frontend PKCE client, so its id must be accepted; the API
-	// client id covers any future service-to-service token. Tokens for other clients on the
-	// same Zitadel instance are rejected.
+	// AUD-012: register the Stackweaver client_ids an access token may carry in `aud`. The only
+	// access token the API verifies is the one received at browser sign-in, issued to the BFF
+	// client, verified once to read its sso_groups claim; the API client id covers any future
+	// service-to-service token. Tokens for other clients on the same Zitadel instance are rejected.
 	authService.RegisterAudience(zitadelClientID)
-	zitadelFrontendClientID := os.Getenv("ZITADEL_FRONTEND_CLIENT_ID")
-	if zitadelFrontendClientID == "" {
-		logger.Warn("ZITADEL_FRONTEND_CLIENT_ID not set - access-token audience enforcement (AUD-012) may reject real user tokens. Set it to the frontend OIDC client_id.")
-	}
-	authService.RegisterAudience(zitadelFrontendClientID)
+	authService.RegisterAudience(os.Getenv("ZITADEL_BFF_CLIENT_ID"))
 
 	loginServicePAT := os.Getenv("ZITADEL_LOGIN_SERVICE_USER_TOKEN")
 	if loginServicePAT == "" {
@@ -573,6 +579,7 @@ func main() {
 
 	// Set API key service in auth service for authentication
 	authService.SetAPIKeyService(apiKeyService)
+	authService.SetBrowserSessions(browserSessions)
 
 	// Initialize TeamSync service for automatic SSO team assignment
 	teamSyncConfig := teamsync.ConfigFromEnv()
@@ -816,6 +823,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Browser sign-in needs the BFF client and the login service token; release mode refuses to
+	// start without them, and any mode warns about a plain-http app URL the Secure session cookie
+	// cannot work on.
+	browserAuthWarnings, err := checkBrowserAuthConfig(os.Getenv, isProduction)
+	if err != nil {
+		logger.Errorf("startup: refusing to start: %v", err)
+		os.Exit(1)
+	}
+	for _, w := range browserAuthWarnings {
+		logger.Warn("startup: " + w)
+	}
+
 	// #829: parse the notification mode whether or not the auth proxy is enabled, so a typo or a
 	// production return_code fails at startup instead of silently changing how codes are sent.
 	notificationMode, err := handlers.ParseNotificationMode(
@@ -874,11 +893,11 @@ func main() {
 		}
 
 		// Round 25 Wave 6 (item 6 / Round 22 OOS): parse the optional
-		// shared decoy secret for HA deployments. Base64-encoded ≥32
-		// bytes. Empty / unset → NewAuthProxy generates a per-process
-		// random secret (single-replica friendly). Misconfiguration
-		// (set but invalid encoding / too short) is fatal in
-		// production so the operator notices.
+		// shared decoy secret. Base64-encoded ≥32 bytes. Empty / unset →
+		// NewAuthProxy derives its cookie and decoy-id keys from
+		// ENCRYPTION_KEY, which every replica shares. Misconfiguration
+		// (set but invalid encoding / too short) is fatal in production
+		// so the operator notices.
 		var decoySecret []byte
 		if raw := os.Getenv("STACKWEAVER_DECOY_SECRET"); raw != "" {
 			decoded, err := base64.StdEncoding.DecodeString(raw)
@@ -888,13 +907,13 @@ func main() {
 					logger.Errorf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 (production refuses to start with a bad shared secret): %v", err)
 					os.Exit(1)
 				}
-				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 - falling back to per-process random secret: %v", err)
+				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET is not valid base64 - falling back to keys derived from ENCRYPTION_KEY: %v", err)
 			case len(decoded) < 32:
 				if isProduction {
 					logger.Errorf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) - production refuses to start", len(decoded))
 					os.Exit(1)
 				}
-				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) - falling back to per-process random secret", len(decoded))
+				logger.Warnf("startup: STACKWEAVER_DECOY_SECRET decodes to only %d bytes (need ≥32) - falling back to keys derived from ENCRYPTION_KEY", len(decoded))
 			default:
 				decoySecret = decoded
 				logger.Info("auth proxy: STACKWEAVER_DECOY_SECRET configured - decoy ids will be stable across replicas")
@@ -905,6 +924,12 @@ func main() {
 			ZitadelInternalURL:        zitadelInternalURL,
 			ZitadelIssuer:             zitadelIssuer,
 			PAT:                       loginServicePAT,
+			EncryptionKey:             encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")),
+			BFFClientID:               os.Getenv("ZITADEL_BFF_CLIENT_ID"),
+			BFFClientSecret:           os.Getenv("ZITADEL_BFF_CLIENT_SECRET"),
+			LoginTransactions:         browserSessionRepo,
+			SignIn:                    authService,
+			BrowserSessions:           browserSessions,
 			ClientID:                  zitadelClientID,
 			NotificationMode:          notificationMode,
 			DefaultRedirectURI:        os.Getenv("STACKWEAVER_DEFAULT_REDIRECT_URI"),
@@ -920,6 +945,11 @@ func main() {
 			LoginNameLockoutWindow:    lockoutWindow,
 		})
 		logger.Info("Auth Proxy initialized for custom login UI")
+		// Browser sessions are checked against Zitadel through the proxy's connection, with the
+		// login service account, once per liveness interval.
+		browserSessions.SetLiveness(auth.NewZitadelLiveness(browserSessionRepo, authProxy, browserSessions.Limits().Liveness))
+		// Sign-out and expiry end the Zitadel session too, through the same connection.
+		browserSessions.SetZitadel(authProxy)
 	} else {
 		logger.Warn("Auth Proxy not initialized - ZITADEL_LOGIN_SERVICE_USER_TOKEN not set")
 	}
@@ -936,6 +966,15 @@ func main() {
 		WriteTimeout: config.Server.WriteTimeout,
 	}
 
+	// The sweeper ends expired browser sessions (and their Zitadel sessions) every minute. It runs
+	// on every replica; sweeping is idempotent. It stops when the server shuts down.
+	sweepCtx, stopSweeper := context.WithCancel(context.Background())
+	sweeperDone := make(chan struct{})
+	go func() {
+		defer close(sweeperDone)
+		browserSessions.RunSweeper(sweepCtx, auth.SweepInterval)
+	}()
+
 	// Start server in goroutine
 	go func() {
 		logger.Infof("Server starting on %s", addr)
@@ -950,6 +989,9 @@ func main() {
 	<-quit
 
 	logger.Info("Shutting down server...")
+
+	stopSweeper()
+	<-sweeperDone
 
 	// Stop scheduler service if running
 	if schedulerService != nil {

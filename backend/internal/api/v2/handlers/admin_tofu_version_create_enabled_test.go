@@ -55,14 +55,14 @@ func storedAsSentCall(t *testing.T, router http.Handler, method, path string, as
 }
 
 // storedAsSentRouter is a gin engine that authenticates the caller from the X-Test-User header,
-// as a signed-in person (a JWT identity).
+// as a signed-in person (a browser session).
 func storedAsSentRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if id, err := uuid.Parse(c.GetHeader("X-Test-User")); err == nil {
 			c.Set("user_id", id)
-			c.Set("auth_method", "jwt")
+			c.Set("auth_method", "session")
 		}
 		c.Next()
 	})

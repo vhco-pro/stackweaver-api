@@ -66,7 +66,7 @@ func TestAdminOrganizations(t *testing.T) {
 	}
 
 	t.Run("lists every organization to an administrator who is a member of none", func(t *testing.T) {
-		code, doc := list(jwtAs(f.admin), "?q="+url.QueryEscape("platadm-")+"&page%5Bsize%5D=100")
+		code, doc := list(browserAs(f.admin), "?q="+url.QueryEscape("platadm-")+"&page%5Bsize%5D=100")
 		if code != http.StatusOK {
 			t.Fatalf("status %d", code)
 		}
@@ -101,36 +101,36 @@ func TestAdminOrganizations(t *testing.T) {
 	})
 
 	t.Run("q[name] and q[email] narrow", func(t *testing.T) {
-		_, doc := list(jwtAs(f.admin), "?q%5Bname%5D="+url.QueryEscape(f.orgB.Name))
+		_, doc := list(browserAs(f.admin), "?q%5Bname%5D="+url.QueryEscape(f.orgB.Name))
 		if len(doc.Data) != 1 || doc.Data[0].ID != f.orgB.Name {
 			t.Errorf("q[name] = %+v, want orgB only", doc.Data)
 		}
-		_, doc = list(jwtAs(f.admin), "?q%5Bemail%5D="+url.QueryEscape(f.orgA.Email))
+		_, doc = list(browserAs(f.admin), "?q%5Bemail%5D="+url.QueryEscape(f.orgA.Email))
 		if len(doc.Data) != 1 || doc.Data[0].ID != f.orgA.Name {
 			t.Errorf("q[email] = %+v, want orgA only", doc.Data)
 		}
 	})
 
 	t.Run("pagination walks the listing", func(t *testing.T) {
-		_, doc := list(jwtAs(f.admin), "?q="+url.QueryEscape("platadm-a-"+f.sfx)+"&page%5Bsize%5D=1&page%5Bnumber%5D=1")
+		_, doc := list(browserAs(f.admin), "?q="+url.QueryEscape("platadm-a-"+f.sfx)+"&page%5Bsize%5D=1&page%5Bnumber%5D=1")
 		if len(doc.Data) != 1 || doc.Meta.Pagination["total-count"] != float64(1) {
 			t.Errorf("one-row page = %+v %v", doc.Data, doc.Meta.Pagination)
 		}
 	})
 
 	t.Run("show", func(t *testing.T) {
-		rec := platformAdminCall(t, router, http.MethodGet, "/api/v2/admin/organizations/"+f.orgA.Name, jwtAs(f.admin), "")
+		rec := platformAdminCall(t, router, http.MethodGet, "/api/v2/admin/organizations/"+f.orgA.Name, browserAs(f.admin), "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("show = %d", rec.Code)
 		}
-		rec = platformAdminCall(t, router, http.MethodGet, "/api/v2/admin/organizations/no-such-"+uuid.NewString()[:8], jwtAs(f.admin), "")
+		rec = platformAdminCall(t, router, http.MethodGet, "/api/v2/admin/organizations/no-such-"+uuid.NewString()[:8], browserAs(f.admin), "")
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("unknown name = %d, want 404", rec.Code)
 		}
 	})
 
 	t.Run("a non-administrator gets 404", func(t *testing.T) {
-		for _, who := range []identity{jwtAs(f.owner), jwtAs(f.member), jwtAs(f.plain)} {
+		for _, who := range []identity{browserAs(f.owner), browserAs(f.member), browserAs(f.plain)} {
 			for _, path := range []string{"/api/v2/admin/organizations", "/api/v2/admin/organizations/" + f.orgA.Name} {
 				if rec := platformAdminCall(t, router, http.MethodGet, path, who, ""); rec.Code != http.StatusNotFound {
 					t.Errorf("%s GET %s = %d, want 404", who.user, path, rec.Code)

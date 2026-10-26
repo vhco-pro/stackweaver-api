@@ -62,7 +62,7 @@ func TestOrganizationCreatePolicy(t *testing.T) {
 
 	// AC17
 	for _, setting := range []platformadmin.OrganizationCreation{"", platformadmin.OrganizationCreationEveryone} {
-		if code := create(t, setting, jwtAs(f.plain)); code != http.StatusCreated {
+		if code := create(t, setting, browserAs(f.plain)); code != http.StatusCreated {
 			t.Errorf("%q: session create = %d, want 201", setting, code)
 		}
 		if code := create(t, setting, userToken(f.plain)); code != http.StatusCreated {
@@ -72,13 +72,13 @@ func TestOrganizationCreatePolicy(t *testing.T) {
 
 	// AC18
 	limited := platformadmin.OrganizationCreationPlatformAdmins
-	if code := create(t, limited, jwtAs(f.plain)); code != http.StatusForbidden {
+	if code := create(t, limited, browserAs(f.plain)); code != http.StatusForbidden {
 		t.Errorf("platform-admins: non-administrator session = %d, want 403", code)
 	}
 	if code := create(t, limited, userToken(f.owner)); code != http.StatusForbidden {
 		t.Errorf("platform-admins: non-administrator user token = %d, want 403", code)
 	}
-	if code := create(t, limited, jwtAs(f.admin)); code != http.StatusCreated {
+	if code := create(t, limited, browserAs(f.admin)); code != http.StatusCreated {
 		t.Errorf("platform-admins: platform administrator = %d, want 201", code)
 	}
 	// The administrator joined only what they created.

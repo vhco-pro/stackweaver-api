@@ -1,0 +1,65 @@
+{
+  "method": "POST",
+  "path": "/auth/session",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "code": "\u003csecret\u003e",
+          "state": "\u003csecret\u003e"
+        },
+        "type": "sessions"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "state"
+              ]
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.createSessionRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "email": "\u003cemail\u003e",
+        "expires-at": "\u003ctimestamp\u003e",
+        "family-name": "Write",
+        "given-name": "Golden",
+        "name": "Golden Write",
+        "picture": ""
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "sessions"
+    }
+  }
+}

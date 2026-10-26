@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,7 +19,6 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
-	"github.com/zitadel/oidc/v3/pkg/oidc"
 )
 
 // shortTokenID returns a 16-hex-char SHA-256 prefix of the token, suitable
@@ -57,12 +54,12 @@ type TeamSyncer interface {
 }
 
 // PlatformAdminSeeder applies the deployment's declared platform administrators to a user at
-// sign-in (#132, D2). It is handed the user row and the identity provider's answer for the
-// current request, so it matches on the email the identity provider verified now and never on the
-// stored column. Declared here, where it is used: the implementation lives in the platformadmin
-// package, which imports this one.
+// sign-in (#132, D2). It is handed the user row and the identity the sign-in verified, so it
+// matches on the email the identity provider verified now and never on the stored column.
+// Declared here, where it is used: the implementation lives in the platformadmin package, which
+// imports this one.
 type PlatformAdminSeeder interface {
-	ApplyDeclared(ctx context.Context, user *models.User, info *UserInfo) error
+	ApplyDeclared(ctx context.Context, user *models.User, id BrowserIdentity) error
 }
 
 // UserLookup is the subset of `repository.UserRepository` the auth
@@ -82,76 +79,36 @@ type Service struct {
 	verifier      *ZitadelVerifier
 	issuer        string
 	clientID      string
-	verified      verifiedCache
+	sessions      *Sessions
+	sessionCheck  func(*http.Request) error
+}
+
+// CodeAuthenticationRequired is the JSON:API error `code` of a 401 that means the browser has no
+// usable session. The SPA signs out on it, and only on it, so a 401 passed through from another
+// service does not end the user's session.
+const CodeAuthenticationRequired = "authentication-required"
+
+// CodeEmailNotVerified is the JSON:API error `code` of the 403 a sign-in gets for an account whose
+// email address is not verified, so the SPA can tell it from any other refusal.
+const CodeEmailNotVerified = "email-not-verified"
+
+// SetSessionRequestCheck sets the CSRF defence every cookie-authenticated request must pass (the
+// custom header and the origin allowlist; see middleware.OriginPolicy.CheckBrowserRequest). The
+// cookie is sent by the browser on its own, so without a check it would be accepted from any
+// page; with none set, the cookie credential is refused.
+func (s *Service) SetSessionRequestCheck(check func(*http.Request) error) {
+	s.sessionCheck = check
+}
+
+// SetBrowserSessions enables the session-cookie credential: a request with no Authorization
+// header is authenticated by its __Host-sw_session cookie.
+func (s *Service) SetBrowserSessions(ss *Sessions) {
+	s.sessions = ss
 }
 
 // ErrEmailNotVerified means the account has an email address Zitadel has not verified. Such an
 // account does not reach the platform (#829 D5): it gets no users row and claims no invitation.
 var ErrEmailNotVerified = errors.New("the account's email address is not verified")
-
-// ErrIdentityUnavailable means Zitadel could not be asked about the account, and there is no
-// recent verified result to fall back on. The request fails closed.
-var ErrIdentityUnavailable = errors.New("the identity provider could not be reached")
-
-// verifiedCache remembers subjects Zitadel recently reported as verified, until their token
-// expires (#829 Q14), so a brief Zitadel outage does not cut off users who were already in.
-type verifiedCache struct {
-	mu    sync.Mutex
-	until map[string]time.Time
-}
-
-const verifiedCacheMax = 10000
-
-func (v *verifiedCache) mark(subject string, until time.Time) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.until == nil || len(v.until) >= verifiedCacheMax {
-		v.until = make(map[string]time.Time) // bounded: start over rather than grow without limit
-	}
-	v.until[subject] = until
-}
-
-func (v *verifiedCache) has(subject string, now time.Time) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return now.Before(v.until[subject])
-}
-
-// userFromJWT is the one place a verified JWT becomes a platform user, used by
-// Authenticate (#829 D5). It refuses an account whose email is
-// unverified before any users row is written, so an invitation placeholder for that address stays
-// unclaimed until the person verifies. Accounts without an email (machine users) are not subject
-// to the check: they cannot self-register or claim an invitation. When Zitadel cannot be reached,
-// a subject verified within its token's lifetime proceeds and any other fails closed.
-func (s *Service) userFromJWT(ctx context.Context, claims *oidc.AccessTokenClaims, claimsMap map[string]interface{}, tokenString string) (*models.User, *UserInfo, error) {
-	info, err := ExtractUserInfo(ctx, claims, claimsMap, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
-	switch {
-	case err != nil:
-		if !s.verified.has(claims.Subject, time.Now()) {
-			return nil, nil, fmt.Errorf("%w: %w", ErrIdentityUnavailable, err)
-		}
-		logger.Warnf("auth: %v; using the cached verified state for %s", err, claims.Subject)
-		info = &UserInfo{Subject: claims.Subject, ID: claims.Subject}
-	case info.Email != "" && !info.EmailVerified:
-		return nil, info, ErrEmailNotVerified
-	case info.Email != "":
-		s.verified.mark(claims.Subject, claims.GetExpiration())
-	}
-
-	user, err := s.userRepo.GetOrCreateByZitadelSubject(info.Subject, info.Email, info.Name)
-	if err != nil {
-		return nil, info, fmt.Errorf("getting or creating the user for %q: %w", info.Subject, err)
-	}
-	// The seeder sees exactly what this request established: the outage fallback above carries no
-	// email, so it can neither flag nor clear. A seeder failure does not block sign-in, as a team
-	// sync failure does not.
-	if s.adminSeeder != nil {
-		if err := s.adminSeeder.ApplyDeclared(ctx, user, info); err != nil {
-			logger.Errorf("auth: applying the declared platform administrators to user %s: %v", user.ID, err)
-		}
-	}
-	return user, info, nil
-}
 
 // NewService constructs the auth service with the production repos.
 // The signature accepts the concrete `*repository.UserRepository` so
@@ -194,8 +151,8 @@ func (s *Service) InitializeZitadel(issuer, clientID, clientSecret, internalAddr
 }
 
 // RegisterAudience adds a client_id the Zitadel verifier will accept in an access token's
-// `aud` (AUD-012). Register both the API and the frontend PKCE client so real user tokens
-// (issued to the frontend client) are accepted while tokens for other clients are rejected.
+// `aud` (AUD-012). The access token verified at sign-in is issued to the BFF client, so that
+// client is registered; tokens for other clients are rejected.
 func (s *Service) RegisterAudience(clientID string) {
 	if s.verifier != nil {
 		s.verifier.AcceptAudience(clientID)
@@ -226,12 +183,13 @@ type AuthError struct {
 	Status int
 	Title  string
 	Detail string
+	// Code is the JSON:API error code, set where a client must act on the refusal.
+	Code string
 }
 
 func (e *AuthError) Error() string { return e.Detail }
 
-// Authenticate verifies a credential, a `tfe-` API token or a Zitadel JWT, and establishes the
-// caller on the request: the user, and for an API token its kind, its organization and the
+// Authenticate verifies a `tfe-` API token and establishes the caller on the request: the user, and for an API token its kind, its organization and the
 // subject it is judged as (rbac.Subject). Every place that accepts a credential, whether from the
 // Authorization header or elsewhere, goes through it, so a token is the same token wherever it
 // arrives. It sets nothing on failure and returns an *AuthError.
@@ -244,51 +202,9 @@ func (s *Service) Authenticate(c *gin.Context, tokenString string) error {
 		return s.authenticateAPIKey(c, tokenString)
 	}
 
-	// Try JWT token (Zitadel)
-	if s.verifier == nil {
-		return &AuthError{http.StatusInternalServerError, "Internal Server Error", "authentication service not initialized"}
-	}
-	claims, claimsMap, err := s.verifier.VerifyToken(c.Request.Context(), tokenString)
-	if err != nil {
-		// Log the actual error for debugging (but don't expose it to client for security)
-		logger.Warnf("auth: token verification failed: %v", err)
-		return &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid token"}
-	}
-
-	user, userInfo, err := s.userFromJWT(c.Request.Context(), claims, claimsMap, tokenString)
-	switch {
-	case errors.Is(err, ErrEmailNotVerified):
-		return &AuthError{http.StatusForbidden, "Forbidden", "verify your email address to continue"}
-	case errors.Is(err, ErrIdentityUnavailable):
-		logger.Warnf("auth: %v", err)
-		return &AuthError{http.StatusServiceUnavailable, "Service Unavailable", "the identity provider could not be reached; try again shortly"}
-	case err != nil:
-		logger.Errorf("auth: %v", err)
-		return &AuthError{http.StatusInternalServerError, "Internal Server Error", "failed to get or create user"}
-	}
-	logger.Infof("Auth: Subject=%s Email=%s Groups=%v", userInfo.Subject, userInfo.Email, userInfo.Groups)
-
-	// Store local user UUID in context (not Zitadel subject)
-	c.Set("user_id", user.ID)
-	c.Set("user_email", user.Email)
-	c.Set("user_name", user.Name)
-	c.Set("user_subject", userInfo.Subject)
-	c.Set("token_claims", claims)
-	c.Set("auth_method", "jwt")
-
-	// Store SSO groups in context for downstream team sync
-	if len(userInfo.Groups) > 0 {
-		c.Set("sso_groups", userInfo.Groups)
-
-		// Trigger automatic team sync based on SSO group claims
-		if s.teamSyncer != nil && s.teamSyncer.IsEnabled() {
-			if err := s.teamSyncer.SyncUserTeams(c.Request.Context(), user.ID, userInfo.Groups); err != nil {
-				logger.Errorf("TeamSync failed for user %s: %v", user.ID, err)
-				// Don't block authentication on team sync failure
-			}
-		}
-	}
-	return nil
+	// Any other value is refused. A Zitadel access token is not a credential for the API: the
+	// browser authenticates with its session cookie (backend-for-frontend-session-plan.md, AC32).
+	return &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid token"}
 }
 
 func (s *Service) authenticateAPIKey(c *gin.Context, tokenString string) error {
@@ -296,7 +212,7 @@ func (s *Service) authenticateAPIKey(c *gin.Context, tokenString string) error {
 	// terminal. Falling through to JWT verification surfaced revoked/unknown keys as "token is not
 	// a JWT (got opaque token)" - misdirecting operators toward Zitadel configuration instead of
 	// the token's lifecycle.
-	rejected := &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid or revoked API token"}
+	rejected := &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid or revoked API token"}
 	if s.apiKeyService == nil {
 		return rejected
 	}
@@ -311,7 +227,7 @@ func (s *Service) authenticateAPIKey(c *gin.Context, tokenString string) error {
 // establishAPIKey establishes a verified API key as the request's caller: its user, its kind, its
 // organization and the subject it is judged as.
 func (s *Service) establishAPIKey(c *gin.Context, apiKey *models.APIKey) error {
-	rejected := &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid or revoked API token"}
+	rejected := &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid or revoked API token"}
 	user, err := s.userRepo.GetByID(apiKey.UserID)
 	if err != nil {
 		return rejected
@@ -320,7 +236,7 @@ func (s *Service) establishAPIKey(c *gin.Context, apiKey *models.APIKey) error {
 	subj, scoped, err := rbac.SubjectForAPIKey(apiKey, s.apiKeyService.IsTeamMember)
 	if err != nil {
 		logger.Errorf("auth: resolving the scope of api token %s: %v", apiKey.ID, err)
-		return &AuthError{http.StatusInternalServerError, "Internal Server Error", "failed to resolve the token's scope"}
+		return &AuthError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: "failed to resolve the token's scope"}
 	}
 	_ = s.apiKeyService.UpdateLastUsed(apiKey.ID)
 
@@ -349,11 +265,11 @@ func (s *Service) establishAPIKey(c *gin.Context, apiKey *models.APIKey) error {
 
 // authenticateLogToken establishes the credential a run-bound log token was minted for, as it
 // stands now: the API key while it exists and has not expired, judged with its current scope and
-// subject, or the session's user while the user exists. The token itself grants nothing, so a
+// subject, or the user of the browser session that minted it while that session is live. The token itself grants nothing, so a
 // revoked key reads no more logs, and the org wall and the run's authorization judge the
 // credential exactly as they would judge it in the Authorization header.
 func (s *Service) authenticateLogToken(c *gin.Context, cred logtoken.Credential) error {
-	rejected := &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid or revoked log token"}
+	rejected := &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid or revoked log token"}
 	if cred.APIKeyID != uuid.Nil {
 		if s.apiKeyService == nil {
 			return rejected
@@ -367,7 +283,14 @@ func (s *Service) authenticateLogToken(c *gin.Context, cred logtoken.Credential)
 		}
 		return nil
 	}
-	user, err := s.userRepo.GetByID(cred.UserID)
+	if cred.BrowserSessionID == uuid.Nil || s.sessions == nil {
+		return rejected
+	}
+	session, err := s.sessions.ResolveID(c.Request.Context(), cred.BrowserSessionID)
+	if err != nil {
+		return rejected
+	}
+	user, err := s.userRepo.GetByID(session.UserID)
 	if err != nil {
 		return rejected
 	}
@@ -377,6 +300,68 @@ func (s *Service) authenticateLogToken(c *gin.Context, cred logtoken.Credential)
 	c.Set("auth_method", "log_token")
 	return nil
 }
+
+// authenticateSession establishes the user of the request's browser session: the
+// __Host-sw_session cookie, looked up by its hash and checked against Zitadel when a check is due.
+// The request is an interactive user's, so it carries no token kind and the org wall judges it by
+// the user's memberships. It sets nothing on failure.
+func (s *Service) authenticateSession(c *gin.Context) error {
+	required := func(detail string) error {
+		return &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: detail, Code: CodeAuthenticationRequired}
+	}
+	raw, err := c.Cookie(SessionCookieName)
+	if err != nil || raw == "" {
+		logger.Debugf("auth: no credential for path: %s", c.Request.URL.Path)
+		return required("not signed in")
+	}
+	if s.sessions == nil {
+		return required("not signed in")
+	}
+	// The CSRF defence comes before the lookup, so a forged request costs no database read and
+	// triggers no liveness check.
+	if s.sessionCheck == nil {
+		return &AuthError{Status: http.StatusForbidden, Title: "Forbidden", Detail: "browser sessions are not accepted here"}
+	}
+	if err := s.sessionCheck(c.Request); err != nil {
+		logger.Warnf("auth: refusing a session request to %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+		return &AuthError{Status: http.StatusForbidden, Title: "Forbidden", Detail: err.Error()}
+	}
+	session, err := s.sessions.Resolve(c.Request.Context(), raw)
+	switch {
+	case errors.Is(err, ErrSessionNotFound):
+		return required("not signed in")
+	case errors.Is(err, ErrSessionExpired):
+		return required("the session has expired; sign in again")
+	case errors.Is(err, ErrSessionEnded):
+		return required("the session has ended; sign in again")
+	case err != nil:
+		logger.Errorf("auth: %v", err)
+		return &AuthError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: "failed to look up the session"}
+	}
+	user, err := s.userRepo.GetByID(session.UserID)
+	if err != nil {
+		return required("not signed in")
+	}
+
+	c.Set("user_id", user.ID)
+	c.Set("user_email", user.Email)
+	c.Set("user_name", user.Name)
+	c.Set("user_subject", session.ZitadelSubject)
+	c.Set("auth_method", "session")
+	c.Set(BrowserSessionContextKey, session)
+
+	// A state-changing request is the person acting, so it counts as activity; a GET does not,
+	// so background polling cannot keep a forgotten tab signed in.
+	if m := c.Request.Method; m != http.MethodGet && m != http.MethodHead && m != http.MethodOptions {
+		if err := s.sessions.Touch(session); err != nil {
+			logger.Warnf("auth: %v", err)
+		}
+	}
+	return nil
+}
+
+// BrowserSessionContextKey holds the *models.BrowserSession of a cookie-authenticated request.
+const BrowserSessionContextKey = "browser_session"
 
 // runIDFromLogPath returns the run id of a run log route.
 func runIDFromLogPath(path string) string {
@@ -421,7 +406,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 			if c.GetHeader("Authorization") == "" {
 				var authErr *AuthError
 				if !errors.As(err, &authErr) {
-					authErr = &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid token"}
+					authErr = &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid token"}
 				}
 				jsonapi.WriteError(c, authErr.Status, authErr.Title, authErr.Detail)
 				c.Abort()
@@ -432,9 +417,20 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		// Extract token from Authorization header (standard TFE authentication)
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			logger.Debugf("auth: missing authorization header for path: %s", c.Request.URL.Path)
-			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "missing authorization header")
-			c.Abort()
+			// A request with no Authorization header is the browser's: its credential is the session
+			// cookie, and with none it has no credential at all. Both refusals carry the code the
+			// SPA signs out on. A request that does carry a header is judged by that header alone,
+			// so a valid cookie never rescues an invalid bearer token.
+			if err := s.authenticateSession(c); err != nil {
+				var authErr *AuthError
+				if !errors.As(err, &authErr) {
+					authErr = &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "not signed in"}
+				}
+				jsonapi.WriteCodedError(c, authErr.Status, authErr.Code, authErr.Title, authErr.Detail)
+				c.Abort()
+				return
+			}
+			c.Next()
 			return
 		}
 
@@ -449,7 +445,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		if err := s.Authenticate(c, parts[1]); err != nil {
 			var authErr *AuthError
 			if !errors.As(err, &authErr) {
-				authErr = &AuthError{http.StatusUnauthorized, "Unauthorized", "invalid token"}
+				authErr = &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid token"}
 			}
 			jsonapi.WriteError(c, authErr.Status, authErr.Title, authErr.Detail)
 			c.Abort()
@@ -490,49 +486,13 @@ func (s *Service) GetUserSubject(c *gin.Context) (string, error) {
 	return subjectStr, nil
 }
 
-// GetTokenClaims returns the token claims from context
-func (s *Service) GetTokenClaims(c *gin.Context) (*oidc.AccessTokenClaims, error) {
-	claims, exists := c.Get("token_claims")
-	if !exists {
-		return nil, errors.New("token claims not found")
-	}
-	tokenClaims, ok := claims.(*oidc.AccessTokenClaims)
-	if !ok {
-		return nil, errors.New("invalid token claims type")
-	}
-	return tokenClaims, nil
-}
-
-// FetchUserInfoPicture calls the OIDC UserInfo endpoint and returns the picture URL.
-// Returns empty string if the user has no avatar or the call fails.
-// Only works for JWT auth (requires a valid access token).
-func (s *Service) FetchUserInfoPicture(ctx context.Context, c *gin.Context) string {
-	// Only fetch for JWT auth - API key / TFE token don't work with Zitadel UserInfo
-	authMethod, _ := c.Get("auth_method")
-	if authMethod != "jwt" {
-		return ""
-	}
-
-	// Extract Bearer token from Authorization header
-	authHeader := c.GetHeader("Authorization")
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		return ""
-	}
-	tokenString := parts[1]
-
-	if s.verifier == nil || s.issuer == "" {
-		return ""
-	}
-
-	userInfoData, err := fetchUserInfoFromEndpoint(ctx, s.issuer, tokenString, s.verifier.httpClient, s.verifier.internalAddr, s.verifier.hostOverride)
-	if err != nil {
-		logger.Warnf("auth: %v", err)
-		return ""
-	}
-
-	if picture, ok := userInfoData["picture"].(string); ok {
-		return picture
+// SessionPicture is the signed-in browser user's avatar, read from the session record (set at
+// sign-in and refreshed by the liveness check). Other callers have none.
+func (s *Service) SessionPicture(c *gin.Context) string {
+	if session, ok := c.Get(BrowserSessionContextKey); ok {
+		if bs, ok := session.(*models.BrowserSession); ok {
+			return bs.Picture
+		}
 	}
 	return ""
 }

@@ -67,42 +67,53 @@ func init() {
 			responseSecrets: []string{"callbackUrl"},
 		},
 		writeCase{
-			route: "POST /auth/oidc/token",
-			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				s := w.beginSignIn(w.newUser(true))
-				s.authorize()
-				s.session()
-				s.finalize()
-				return s.tokenRequest()
-			},
-			requestSecrets:  []string{"code", "code_verifier"},
-			responseSecrets: []string{"access_token", "id_token"},
-		},
-		writeCase{
-			// RP-initiated logout: the ID token says whose session ends. The provider answers
-			// with a redirect to the application, which the proxy follows only to a host it was
-			// configured to trust; the recorder's proxy has none, so it answers that the logout
-			// happened and leaves the navigation to the page.
+			// RP-initiated logout as the confidential client: the browser holds no ID token, so
+			// the request names the client, which Zitadel validates the redirect against. The
+			// provider answers with a redirect to the application, which the proxy follows only
+			// to a host it was configured to trust; the recorder's proxy has none, so it answers
+			// that the logout happened and leaves the navigation to the page.
 			route: "POST /auth/oidc/end-session",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				s := w.beginSignIn(w.newUser(true))
-				s.authorize()
-				s.session()
-				s.finalize()
-				tokens, _ := w.sendJSON(s.tokenRequest())
-				idToken, _ := tokens["id_token"].(string)
-				if idToken == "" {
-					t.Fatalf("the token exchange returned no ID token: %v", keysOf(tokens))
-				}
 				form := url.Values{
-					"id_token_hint":            {idToken},
-					"client_id":                {w.rec.identity.FrontendClientID},
+					"client_id":                {w.rec.identity.BFFClientID},
 					"post_logout_redirect_uri": {"http://localhost:5173"},
 					"state":                    {"golden-write"},
 				}
+				w.publishAs(w.rec.identity.BFFClientID, "<bff-client-id>")
 				return publicRequest(http.MethodPost, "/auth/oidc/end-session", "application/x-www-form-urlencoded", []byte(form.Encode()))
 			},
-			requestSecrets: []string{"id_token_hint"},
+		},
+		writeCase{
+			// The callback page redeems the code and state Zitadel's redirect carried, in the
+			// browser that started the sign-in (its binding cookie). The answer is the session
+			// resource; the session cookie it sets is not part of the body.
+			route: "POST /auth/session",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				s := w.beginSignIn(w.newUser(true))
+				s.authorize()
+				s.session()
+				s.finalize()
+				return s.redeemRequest()
+			},
+			requestSecrets: []string{"data.attributes.code", "data.attributes.state"},
+		},
+		writeCase{
+			// The SPA's activity touch, which extends the session's idle limit.
+			route: "POST /auth/session/touch",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				sess := w.signIn(w.newUser(true))
+				return sess.as(publicRequest(http.MethodPost, "/auth/session/touch", "", nil))
+			},
+		},
+		writeCase{
+			// Sign-out: a form POST from the app's origin, answered with a 303 into Zitadel's
+			// end_session.
+			route:     "POST /auth/session/end",
+			redirects: true,
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				sess := w.signIn(w.newUser(true))
+				return sess.as(publicRequest(http.MethodPost, "/auth/session/end", "", nil))
+			},
 		},
 	)
 }

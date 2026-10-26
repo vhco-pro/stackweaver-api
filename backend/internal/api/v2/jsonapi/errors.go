@@ -33,6 +33,7 @@ import (
 // A pointer reproduces both exactly: nil omits the key, and a pointer to "" emits it.
 type Error struct {
 	Status string  `json:"status,omitempty"`
+	Code   string  `json:"code,omitempty"`
 	Title  string  `json:"title,omitempty"`
 	Detail *string `json:"detail,omitempty"`
 }
@@ -50,6 +51,18 @@ type ErrorDocument struct {
 func WriteError(c *gin.Context, code int, title, detail string) {
 	c.JSON(code, ErrorDocument{Errors: []Error{{
 		Status: strconv.Itoa(code),
+		Title:  title,
+		Detail: &detail,
+	}}})
+}
+
+// WriteCodedError sends a single-error document whose `code` member names the error for a
+// client that must act on it, rather than only show it. See CodeAuthenticationRequired in the auth
+// service, which the SPA signs out on.
+func WriteCodedError(c *gin.Context, status int, code, title, detail string) {
+	c.JSON(status, ErrorDocument{Errors: []Error{{
+		Status: strconv.Itoa(status),
+		Code:   code,
 		Title:  title,
 		Detail: &detail,
 	}}})

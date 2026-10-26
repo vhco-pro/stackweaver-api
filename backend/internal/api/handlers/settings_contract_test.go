@@ -75,9 +75,15 @@ func (f *fakeTwoFactor) ListMFADevices(string) ([]*totp.MFADevice, error) {
 }
 
 // fakeSessions is the identity provider's side of the session list.
-type fakeSessions struct{ revoked []string }
+type fakeSessions struct {
+	revoked []string
+	listErr error
+}
 
 func (f *fakeSessions) ListUserSessions(userID string) ([]*sessions.Session, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
 	return []*sessions.Session{
 		{ID: "sess-1", UserID: userID, UserAgent: "Firefox", IPAddress: "192.0.2.1", CreationDate: now, ExpirationDate: now.Add(time.Hour), Factors: []string{"password"}},
@@ -90,12 +96,21 @@ func (f *fakeSessions) RevokeSession(id string) error {
 	return nil
 }
 
+// fakeBrowserSessions records which Zitadel sessions' browser sessions were ended.
+type fakeBrowserSessions struct{ endedSIDs []string }
+
+func (f *fakeBrowserSessions) DeleteByZitadelSID(sid string) (int64, error) {
+	f.endedSIDs = append(f.endedSIDs, sid)
+	return 1, nil
+}
+
 type settingsFixture struct {
 	router   *gin.Engine
 	user     *models.User
 	orgID    string
 	twoFA    *fakeTwoFactor
 	sessions *fakeSessions
+	browser  *fakeBrowserSessions
 }
 
 func setupSettingsContract(t *testing.T) *settingsFixture {
@@ -125,9 +140,9 @@ func setupSettingsContract(t *testing.T) *settingsFixture {
 
 	orgRepo := repository.NewOrganizationRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
-	f := &settingsFixture{user: user, orgID: org.ID.String(), twoFA: &fakeTwoFactor{password: "old-password"}, sessions: &fakeSessions{}}
+	f := &settingsFixture{user: user, orgID: org.ID.String(), twoFA: &fakeTwoFactor{password: "old-password"}, sessions: &fakeSessions{}, browser: &fakeBrowserSessions{}}
 	totpHandler := &TOTPHandler{totpService: f.twoFA, authService: authService}
-	sessionsHandler := &SessionsHandler{sessionsService: f.sessions, authService: authService}
+	sessionsHandler := &SessionsHandler{sessionsService: f.sessions, authService: authService, browserSessions: f.browser}
 	keys := NewAPIKeyHandler(apikey.NewService(repository.NewAPIKeyRepository(db), orgRepo, repository.NewProjectRepository(db), repository.NewTeamRepository(db)), authService, nil)
 
 	gin.SetMode(gin.TestMode)
@@ -135,6 +150,8 @@ func setupSettingsContract(t *testing.T) *settingsFixture {
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", user.ID)
 		c.Set("user_subject", user.ZitadelSubject)
+		// The caller's browser session, signed in through Zitadel session sess-1.
+		c.Set(auth.BrowserSessionContextKey, &models.BrowserSession{ZitadelSID: "sess-1"})
 		c.Next()
 	})
 	// The paths of routes.SetupRoutes' settings group.
@@ -285,12 +302,29 @@ func TestSettingsContract(t *testing.T) {
 		if len(list) != 2 || list[0].Attributes["user-agent"] != "Firefox" || list[0].Attributes["ip-address"] != "192.0.2.1" {
 			t.Errorf("sessions: %+v", list)
 		}
+		// The current session is the one the caller's browser session was signed in through (its
+		// sid). It was guessed from the caller's IP address before the browser held a session
+		// (backend-for-frontend-session-plan.md, AC6), which two browsers behind one address defeat.
 		if list[0].Attributes["is-current"] != true || list[1].Attributes["is-current"] != false {
-			t.Errorf("is-current: %v, %v; the session from the caller's address is the current one", list[0].Attributes["is-current"], list[1].Attributes["is-current"])
+			t.Errorf("is-current: %v, %v; the session the caller signed in through is the current one", list[0].Attributes["is-current"], list[1].Attributes["is-current"])
 		}
 		f.doc(t, http.MethodDelete, "/api/v2/settings/sessions/sess-2", "", http.StatusNoContent)
 		if len(f.sessions.revoked) != 1 || f.sessions.revoked[0] != "sess-2" {
 			t.Errorf("revoked %v", f.sessions.revoked)
+		}
+		// AC6: the browsers signed in through the revoked session are signed out with it.
+		if len(f.browser.endedSIDs) != 1 || f.browser.endedSIDs[0] != "sess-2" {
+			t.Errorf("browser sessions ended for %v, want [sess-2]", f.browser.endedSIDs)
+		}
+	})
+
+	t.Run("a revoke whose ownership cannot be confirmed is refused", func(t *testing.T) {
+		f.sessions.listErr = errors.New("zitadel unavailable")
+		defer func() { f.sessions.listErr = nil }()
+		revokedBefore := len(f.sessions.revoked)
+		f.doc(t, http.MethodDelete, "/api/v2/settings/sessions/someone-elses", "", http.StatusServiceUnavailable)
+		if len(f.sessions.revoked) != revokedBefore {
+			t.Errorf("a session was revoked without confirming it belongs to the caller: %v", f.sessions.revoked)
 		}
 	})
 
