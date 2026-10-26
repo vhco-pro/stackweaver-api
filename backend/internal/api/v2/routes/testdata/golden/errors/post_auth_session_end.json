@@ -1,0 +1,6 @@
+{
+  "method": "POST",
+  "path": "/auth/session/end",
+  "status": 303,
+  "body": null
+}

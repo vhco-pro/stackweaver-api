@@ -17,6 +17,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth/authtest"
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 // backchannelTestRig wires a test JWKS server, a signing key, and a
@@ -684,5 +688,91 @@ func TestBackchannel_SeenJTIs_EmptyJTINotCached(t *testing.T) {
 	}
 	if e := r.verifier.lookupJTI(""); e != nil {
 		t.Errorf("empty jti must not be reported as seen")
+	}
+}
+
+// postLogoutToken sends a back-channel logout POST, the way Zitadel does: form-encoded, server to
+// server, with no Origin, Referer or CSRF header.
+func postLogoutToken(proxy *AuthProxy, token string) *httptest.ResponseRecorder {
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/auth/oidc/end-session", strings.NewReader("logout_token="+token))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+	proxy.EndSession(c)
+	return w
+}
+
+// backchannelSessionsProxy is a proxy whose verifier accepts the BFF client as the audience of a
+// logout token, over an in-memory session store holding two browsers signed in through sid
+// "sess-abc" and one through another Zitadel session.
+func backchannelSessionsProxy(t *testing.T, r *backchannelTestRig) (*AuthProxy, *authtest.MemSessions) {
+	t.Helper()
+	store := authtest.NewMemSessions()
+	sessions := auth.NewSessions(store, auth.DefaultSessionLimits, time.Now)
+	for _, sid := range []string{"sess-abc", "sess-abc", "sess-other"} {
+		if _, _, err := sessions.Start(&models.BrowserSession{UserID: uuid.New(), ZitadelSID: sid}); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+	}
+	proxy := NewAuthProxy(AuthProxyConfig{
+		ZitadelInternalURL: r.jwksServer.URL,
+		ZitadelIssuer:      r.issuer,
+		PAT:                "pat",
+		ClientID:           "api-client",
+		BFFClientID:        r.clientID,
+		BrowserSessions:    sessions,
+	})
+	t.Cleanup(proxy.StopDecoyOrgIDsSweeper)
+	return proxy, store
+}
+
+// AC18: a verified logout token whose audience is the BFF client ends the browser sessions signed
+// in through its sid, and only those.
+func TestBackchannel_LogoutTokenEndsTheBrowserSessionsOfItsSID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := newBackchannelTestRig(t)
+	proxy, store := backchannelSessionsProxy(t, r)
+
+	w := postLogoutToken(proxy, r.sign(t, r.validClaims()))
+	if w.Code != http.StatusOK {
+		t.Fatalf("answered %d: %s", w.Code, w.Body.String())
+	}
+	if n := store.Len(); n != 1 {
+		t.Fatalf("%d browser sessions left, want only the one on another Zitadel session", n)
+	}
+	if left := store.Only(t); left.ZitadelSID != "sess-other" {
+		t.Errorf("the wrong session survived: %s", left.ZitadelSID)
+	}
+}
+
+// AC18: a logout token for a sid with no session answers 200 and changes nothing, which is what
+// the tokens Zitadel sends for the API's own deletes at sign-out and expiry look like.
+func TestBackchannel_LogoutTokenForAnUnknownSIDChangesNothing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := newBackchannelTestRig(t)
+	proxy, store := backchannelSessionsProxy(t, r)
+	claims := r.validClaims()
+	claims["sid"] = "sess-nobody"
+	if w := postLogoutToken(proxy, r.sign(t, claims)); w.Code != http.StatusOK {
+		t.Fatalf("answered %d: %s", w.Code, w.Body.String())
+	}
+	if n := store.Len(); n != 3 {
+		t.Errorf("%d sessions left, want all 3", n)
+	}
+}
+
+// A logout token addressed to another client of the same Zitadel ends nothing here.
+func TestBackchannel_LogoutTokenForAnotherClientEndsNothing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := newBackchannelTestRig(t)
+	proxy, store := backchannelSessionsProxy(t, r)
+	claims := r.validClaims()
+	claims["aud"] = "someone-elses-app"
+	if w := postLogoutToken(proxy, r.sign(t, claims)); w.Code != http.StatusBadRequest {
+		t.Fatalf("answered %d, want 400", w.Code)
+	}
+	if n := store.Len(); n != 3 {
+		t.Errorf("%d sessions left, want all 3", n)
 	}
 }

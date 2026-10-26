@@ -37,7 +37,7 @@ const verificationCheckHMACDomain = "stackweaver-verification-check-v1:"
 const verificationCheckPath = "/auth/users"
 
 func (p *AuthProxy) verificationCheckTag(userID string, expires int64) string {
-	mac := hmac.New(sha256.New, p.decoySecret)
+	mac := hmac.New(sha256.New, p.sessionCookieKey)
 	mac.Write([]byte(verificationCheckHMACDomain))
 	mac.Write([]byte(userID + "." + strconv.FormatInt(expires, 10)))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))

@@ -4555,6 +4555,9 @@
             "items": {
               "type": "object",
               "properties": {
+                "code": {
+                  "type": "string"
+                },
                 "detail": {
                   "type": "string"
                 },
@@ -6325,9 +6328,6 @@
               "type": "string"
             }
           },
-          "token_endpoint": {
-            "type": "string"
-          },
           "token_endpoint_auth_methods_supported": {
             "type": "array",
             "items": {
@@ -6345,9 +6345,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "userinfo_endpoint": {
-            "type": "string"
           }
         }
       },
@@ -6387,17 +6384,6 @@
                 }
               }
             }
-          }
-        }
-      },
-      "get-auth-oidc-userinfo-7516d3": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "error_description": {
-            "type": "string"
           }
         }
       },
@@ -18151,9 +18137,6 @@
           "client_id": {
             "type": "string"
           },
-          "id_token_hint": {
-            "type": "string"
-          },
           "post_logout_redirect_uri": {
             "type": "string"
           },
@@ -18199,48 +18182,40 @@
           }
         }
       },
-      "post-auth-oidc-token-8565c0": {
-        "type": "object",
-        "properties": {
-          "access_token": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          },
-          "error_description": {
-            "type": "string"
-          },
-          "expires_in": {
-            "type": "integer"
-          },
-          "id_token": {
-            "type": "string"
-          },
-          "token_type": {
-            "type": "string"
-          }
-        }
+      "post-auth-session-end-ab5972": {
+        "nullable": true
       },
-      "post-auth-oidc-token-request": {
+      "post-auth-session-request": {
         "type": "object",
         "properties": {
-          "client_id": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "code_verifier": {
-            "type": "string"
-          },
-          "grant_type": {
-            "type": "string"
-          },
-          "redirect_uri": {
-            "type": "string"
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "state"
+                ]
+              },
+              "type": {
+                "type": "string"
+              }
+            }
           }
-        }
+        },
+        "required": [
+          "data"
+        ]
       },
       "post-auth-sessions-0a2e24": {
         "type": "object",
@@ -20622,6 +20597,47 @@
                     }
                   }
                 }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "sessions-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "expires-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "family-name": {
+                    "type": "string"
+                  },
+                  "given-name": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "picture": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
               },
               "type": {
                 "type": "string"
@@ -43464,8 +43480,7 @@
           "content": {
             "application/x-www-form-urlencoded": {
               "example": {
-                "client_id": "\u003cid\u003e",
-                "id_token_hint": "\u003csecret\u003e",
+                "client_id": "\u003cbff-client-id\u003e",
                 "post_logout_redirect_uri": "http://localhost:5173",
                 "state": "golden-write"
               },
@@ -43561,75 +43576,6 @@
         ]
       }
     },
-    "/auth/oidc/token": {
-      "post": {
-        "operationId": "post-auth-oidc-token",
-        "requestBody": {
-          "content": {
-            "application/x-www-form-urlencoded": {
-              "example": {
-                "client_id": "\u003cid\u003e",
-                "code": "\u003csecret\u003e",
-                "code_verifier": "\u003csecret\u003e",
-                "grant_type": "authorization_code",
-                "redirect_uri": "http://localhost:5173/auth/callback"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/post-auth-oidc-token-request"
-              }
-            }
-          },
-          "description": "Described from one accepted request rather than from a type: a member this example does not send may still be accepted. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/post-auth-oidc-token-8565c0"
-                }
-              }
-            },
-            "description": "Success"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/post-auth-oidc-token-8565c0"
-                }
-              }
-            },
-            "description": "Bad Request"
-          }
-        },
-        "summary": "POST /auth/oidc/token",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/auth/oidc/userinfo": {
-      "get": {
-        "operationId": "get-auth-oidc-userinfo",
-        "responses": {
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/get-auth-oidc-userinfo-7516d3"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          }
-        },
-        "summary": "GET /auth/oidc/userinfo",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
     "/auth/orgs/by-domain": {
       "get": {
         "operationId": "get-auth-orgs-by-domain",
@@ -43656,6 +43602,116 @@
           }
         },
         "summary": "GET /auth/orgs/by-domain",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "operationId": "get-auth-session",
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /auth/session",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "post-auth-session",
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "code": "\u003csecret\u003e",
+                    "state": "\u003csecret\u003e"
+                  },
+                  "type": "sessions"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-auth-session-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/sessions-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-400"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "POST /auth/session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/session/end": {
+      "post": {
+        "description": "Takes no request body.",
+        "operationId": "post-auth-session-end",
+        "responses": {
+          "303": {
+            "description": "See Other. No content."
+          }
+        },
+        "summary": "POST /auth/session/end",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/session/touch": {
+      "post": {
+        "description": "Takes no request body.",
+        "operationId": "post-auth-session-touch",
+        "responses": {
+          "204": {
+            "description": "Success. No content."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "POST /auth/session/touch",
         "tags": [
           "auth"
         ]

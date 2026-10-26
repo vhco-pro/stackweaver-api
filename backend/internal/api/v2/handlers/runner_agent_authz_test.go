@@ -205,8 +205,10 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 		return r
 	}
 
-	// JWT identity → blocked outright.
-	jwtRouter := build(func(c *gin.Context) { c.Set("auth_method", "jwt"); c.Set("user_id", user.ID); c.Next() })
+	// A signed-in person (browser session) → blocked outright. This was a JWT identity until the
+	// browser moved to the session cookie (backend-for-frontend-session-plan.md); either way it is a
+	// person, not a runner.
+	jwtRouter := build(func(c *gin.Context) { c.Set("auth_method", "session"); c.Set("user_id", user.ID); c.Next() })
 	// Anonymous (no auth_method) → blocked.
 	anonRouter := build(func(c *gin.Context) { c.Next() })
 	// Valid runner token → resolves.

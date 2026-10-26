@@ -95,8 +95,8 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 		case "tfe_token":
 			// TFE token = Terraform CLI remote backend
 			configSource = "tfe-cli"
-		case "jwt":
-			// JWT token = UI/web interface
+		case "session":
+			// A browser session = UI/web interface
 			configSource = "tfe-ui"
 		case "api_key":
 			// API key = programmatic access (similar to CLI)

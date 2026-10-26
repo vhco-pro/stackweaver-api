@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/auth/session",
+  "status": 401,
+  "body": {
+    "errors": [
+      {
+        "code": "authentication-required",
+        "detail": "not signed in",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
+  }
+}

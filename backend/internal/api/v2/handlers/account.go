@@ -193,7 +193,7 @@ func (h *AccountHandlerV2) accountResource(c *gin.Context, user *models.User) js
 	if attrs.Username == "" {
 		attrs.Username = attrs.Email
 	}
-	attrs.AvatarURL = h.authService.FetchUserInfoPicture(c.Request.Context(), c)
+	attrs.AvatarURL = h.authService.SessionPicture(c)
 	// TFE's site-admin attribute and permissions object: the platform administrator, and whether
 	// the installation lets this caller create organizations.
 	attrs.IsSiteAdmin, attrs.DeclaredByDeployment = platformadmin.Status(user)

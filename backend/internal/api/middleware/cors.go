@@ -3,99 +3,49 @@
 package middleware
 
 import (
-	"os"
-	"strings"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-func CORSMiddleware() gin.HandlerFunc {
-	// AUD-070: only credential-trust localhost origins outside production. In production
-	// (GIN_MODE=release, the same gate the rest of the app uses) the real frontend origin is
-	// configured via CORS_EXTRA_ORIGINS, so trusting any localhost variant there is pure attack
-	// surface - a page a victim was tricked into loading from their own localhost could otherwise
-	// pivot into the API with credentials.
-	allowLocalhost := os.Getenv("GIN_MODE") != "release"
+// corsAllowHeaders are the request headers a cross-origin caller may send. CSRFHeader is among
+// them, or a split-host browser could never send it.
+const corsAllowHeaders = "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, " + CSRFHeader
 
+// CORSMiddleware answers cross-origin requests for the origins p trusts: the app's own origin,
+// CORS_EXTRA_ORIGINS, and localhost outside release mode (AUD-070, see OriginPolicyFromEnv).
+//
+// Round 24 Finding 2 (HIGH): a localhost origin is matched on the host boundary, so
+// `http://localhost.evil.com` is not localhost (isLocalhostOrigin).
+func CORSMiddleware(p OriginPolicy) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
+		allowed := p.Allows(origin)
 
-		var allowedOrigins []string
-		// Allowed localhost dev origins (non-production only).
-		if allowLocalhost {
-			allowedOrigins = append(allowedOrigins,
-				"http://localhost:5173", // Vite dev server
-				"http://localhost:3000", // Alternative frontend port
-				"http://localhost:5174", // Alternative Vite port
-				"http://127.0.0.1:5173", // IPv4 localhost
-				"http://127.0.0.1:3000", // IPv4 localhost
-				"http://127.0.0.1:5174", // IPv4 localhost
-				"http://[::1]:5173",     // IPv6 localhost
-				"http://[::1]:3000",     // IPv6 localhost
-				"http://[::1]:5174",     // IPv6 localhost
-			)
-		}
-		// Extra origins for Cloudflare Tunnel or other public frontend URLs (comma-separated).
-		if extra := os.Getenv("CORS_EXTRA_ORIGINS"); extra != "" {
-			for _, o := range strings.Split(extra, ",") {
-				if o = strings.TrimSpace(o); o != "" {
-					allowedOrigins = append(allowedOrigins, o)
-				}
-			}
-		}
-
-		// Check if origin is allowed
-		allowed := false
-		for _, allowedOrigin := range allowedOrigins {
-			if origin == allowedOrigin {
-				allowed = true
-				break
-			}
-		}
-
-		// Also allow if origin is empty (same-origin request) or if it's a localhost variant.
-		// This handles cases where the browser sends different localhost formats.
-		//
-		// Round 24 Finding 2 (HIGH): the previous prefix check
-		// (`origin[:16] == "http://localhost"`) matched
-		// `http://localhost.evil.com:1234` because there was no
-		// host-boundary delimiter - combined with
-		// `Allow-Credentials: true` an attacker who tricks a victim
-		// into navigating to a `localhost.<attacker>` host could
-		// pivot into the auth proxy with cookies attached. The fix:
-		// after the literal host prefix, require the next byte to
-		// be `:` (port), `/` (path), or end-of-string, anchoring the
-		// match to the actual hostname.
-		if !allowed && origin != "" && allowLocalhost {
-			allowed = isLocalhostOrigin(origin)
-		}
+		// The answer depends on the Origin, so a shared cache must not serve one origin's answer
+		// to another.
+		c.Writer.Header().Add("Vary", "Origin")
 
 		// For OPTIONS requests (preflight), reflect the origin only when it is allowed.
 		// AUD-157: the preflight previously set Access-Control-Allow-Origin + Allow-Credentials
 		// for ANY origin before consulting `allowed`, so an arbitrary origin got a credentialed
-		// 204. It was not independently exploitable (the real-request path below IS gated, so the
-		// browser blocked reads), but the preflight must match that gate - only allowed origins
-		// (and the localhost variants folded into `allowed` above) get the credentialed headers.
-		if c.Request.Method == "OPTIONS" {
-			if allowed && origin != "" {
+		// 204. The preflight must match the gate on real requests.
+		if c.Request.Method == http.MethodOptions {
+			if allowed {
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
-			c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", corsAllowHeaders)
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
-			c.AbortWithStatus(204)
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 
-		// For actual requests, set CORS headers if origin is allowed or if it's a localhost variant
-		if allowed || origin == "" {
-			if origin != "" {
-				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-			}
+		if allowed {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", corsAllowHeaders)
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
 
 		c.Next()

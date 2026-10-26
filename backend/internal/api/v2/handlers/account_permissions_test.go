@@ -29,7 +29,7 @@ func TestAccountPermissions(t *testing.T) {
 		h.SetPlatformAdmin(admins)
 		router := platformAdminRouter()
 		router.GET("/api/v2/account/details", h.Details)
-		rec := platformAdminCall(t, router, http.MethodGet, "/api/v2/account/details", jwtAs(u), "")
+		rec := platformAdminCall(t, router, http.MethodGet, "/api/v2/account/details", browserAs(u), "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("details = %d", rec.Code)
 		}

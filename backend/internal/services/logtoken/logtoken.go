@@ -3,9 +3,10 @@
 // Package logtoken mints and verifies the run-bound token in a run's log-read-url.
 //
 // The token is short-lived, HMAC-signed and bound to one run, so a leaked URL reads only that run's
-// logs. It names the credential that minted it, an API key or a signed-in user, and grants nothing
+// logs. It names the credential that minted it, an API key or a browser session, and grants nothing
 // itself: each read re-establishes that credential and authorizes it as of that moment, so a
-// revoked key or a team that has lost access to the run stops reading at once.
+// revoked key, an ended browser session, or a team that has lost access to the run stops reading
+// at once.
 //
 // The lifetime is an hour. Terraform Enterprise's archivist log URLs live longer, and go-tfe's log
 // reader does not rely on either: it authenticates its polls with its Authorization header and
@@ -27,11 +28,11 @@ import (
 // TTL is how long a minted token stays valid.
 const TTL = time.Hour
 
-// Credential is what minted a log token: an API key, or a signed-in user for a session. Exactly
-// one of the two is set.
+// Credential is what minted a log token: an API key, or a browser session. Exactly one of the two
+// is set.
 type Credential struct {
-	APIKeyID uuid.UUID
-	UserID   uuid.UUID
+	APIKeyID         uuid.UUID
+	BrowserSessionID uuid.UUID
 }
 
 // secret is the HMAC key, set once at startup.
@@ -51,8 +52,8 @@ func Mint(runID string, cred Credential) string {
 	switch {
 	case cred.APIKeyID != uuid.Nil:
 		kind, id = "k", cred.APIKeyID.String()
-	case cred.UserID != uuid.Nil:
-		kind, id = "u", cred.UserID.String()
+	case cred.BrowserSessionID != uuid.Nil:
+		kind, id = "s", cred.BrowserSessionID.String()
 	default:
 		return ""
 	}
@@ -93,8 +94,8 @@ func Verify(token, runID string) (Credential, bool) {
 	switch parts[1] {
 	case "k":
 		return Credential{APIKeyID: id}, true
-	case "u":
-		return Credential{UserID: id}, true
+	case "s":
+		return Credential{BrowserSessionID: id}, true
 	default:
 		return Credential{}, false
 	}

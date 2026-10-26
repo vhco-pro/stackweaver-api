@@ -29,7 +29,7 @@ func TestPlatformSettings(t *testing.T) {
 				name string
 				as   identity
 			}{
-				{"session", jwtAs(f.plain)},
+				{"session", browserAs(f.plain)},
 				{"plain user token", identity{user: f.plain.ID, method: "api_key", tokenKind: models.APIKeyKindUser}},
 				{"organization-bound key", identity{user: f.owner.ID, method: "api_key", tokenKind: models.APIKeyKindOrg, scopes: []string{"org:" + f.orgA.ID.String() + ":read"}}},
 			} {

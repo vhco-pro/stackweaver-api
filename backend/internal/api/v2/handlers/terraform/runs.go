@@ -409,8 +409,8 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 	if runSource == "tfe-api" && c != nil {
 		if authMethod, exists := c.Get("auth_method"); exists {
 			switch authMethod {
-			case "jwt":
-				// JWT token = UI/web interface
+			case "session":
+				// A browser session = UI/web interface
 				runSource = "tfe-ui"
 			case "tfe_token", "api_key":
 				// TFE token or API key = API access (not UI)

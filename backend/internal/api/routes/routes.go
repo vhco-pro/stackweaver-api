@@ -60,8 +60,15 @@ func SetupRoutes(
 		_ = r.SetTrustedProxies(nil)
 	}
 
+	// One origin allowlist for CORS, the /auth group and the session cookie: the app's own origin,
+	// CORS_EXTRA_ORIGINS, and localhost outside release mode.
+	origins := middleware.OriginPolicyFromEnv()
+	if authService != nil {
+		authService.SetSessionRequestCheck(origins.CheckBrowserRequest)
+	}
+
 	// Middleware
-	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.CORSMiddleware(origins))
 	r.Use(middleware.NewIPRateLimiter(rateLimitFromEnv("RATE_LIMIT", 100, 200)).Middleware())
 	// Security headers on every response (JSON API + auth proxy). CSP is inert on
 	// JSON but nosniff/HSTS/etc. are real defense-in-depth. Applied globally after
@@ -96,7 +103,7 @@ func SetupRoutes(
 	// NOT under /api/v2/* - responses use Zitadel's v2 API shape, not JSON:API.
 	// ==========================================
 	if authProxy != nil {
-		setupAuthProxyRoutes(r, authProxy)
+		setupAuthProxyRoutes(r, authProxy, origins)
 	}
 
 	// Setup v2 API routes
@@ -128,7 +135,7 @@ func SetupRoutes(
 
 		// Sessions Settings (only if sessions service is available)
 		if sessionsService != nil {
-			sessionsHandler := handlers.NewSessionsHandler(sessionsService, authService)
+			sessionsHandler := handlers.NewSessionsHandler(sessionsService, authService, repository.NewBrowserSessionRepository(db))
 			settings.GET("/sessions", sessionsHandler.ListSessions)
 			settings.DELETE("/sessions/:sessionId", sessionsHandler.RevokeSession)
 		}
@@ -172,27 +179,9 @@ func setupOAuthLoginRoutes(r *gin.Engine, authService *auth.Service, apiKeyServi
 // These routes are unauthenticated (the user hasn't logged in yet) and proxy
 // requests to Zitadel using the service account PAT (server-side only).
 // CSRF protection is applied to mutating methods via Origin/Referer validation.
-func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
+func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy, origins middleware.OriginPolicy) {
 	// Auth-specific rate limiter: stricter than the global one (10 req/s, burst 20)
 	authRateLimiter := middleware.NewIPRateLimiter(rateLimitFromEnv("AUTH_RATE_LIMIT", 10, 20))
-
-	// CSRF protection on mutating methods
-	// Allowed origins match the CORS middleware (localhost variants + CORS_EXTRA_ORIGINS)
-	allowedOrigins := []string{
-		"http://localhost:5173",
-		"http://localhost:3000",
-		"http://localhost:5174",
-		"http://127.0.0.1:5173",
-		"http://127.0.0.1:3000",
-		"http://127.0.0.1:5174",
-	}
-	if extra := os.Getenv("CORS_EXTRA_ORIGINS"); extra != "" {
-		for o := range strings.SplitSeq(extra, ",") {
-			if o = strings.TrimSpace(o); o != "" {
-				allowedOrigins = append(allowedOrigins, o)
-			}
-		}
-	}
 
 	auth := r.Group("/auth")
 	// SecurityHeaders() is applied globally (see r.Use above), so the /auth
@@ -204,15 +193,13 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 	// to bound memory under flood.
 	auth.Use(middleware.MaxBodyBytes(64 * 1024))
 	auth.Use(authRateLimiter.Middleware())
-	auth.Use(middleware.CSRFProtection(allowedOrigins))
+	auth.Use(middleware.CSRFProtection(origins))
 	{
 		// OIDC proxy endpoints (A2)
 		oidc := auth.Group("/oidc")
 		{
 			oidc.GET("/authorize", proxy.Authorize)
-			oidc.POST("/token", proxy.TokenExchange)
 			oidc.GET("/keys", proxy.JWKSProxy)
-			oidc.GET("/userinfo", proxy.UserinfoProxy)
 			oidc.POST("/end-session", proxy.EndSession)
 			oidc.GET("/end-session", proxy.EndSession) // OIDC RP-Initiated Logout uses GET
 			oidc.GET("/discovery", proxy.OIDCDiscovery)
@@ -221,6 +208,18 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy) {
 		// Auth request endpoints (A3)
 		oidc.GET("/auth-requests/:id", proxy.GetAuthRequest)
 		auth.POST("/oidc/finalize", proxy.FinalizeAuthRequest)
+
+		// Browser session (backend-for-frontend): redeem the sign-in code into a server-side
+		// session behind an httpOnly cookie, and read the signed-in profile.
+		// They act on the session cookie, so they carry its CSRF defence too.
+		browser := middleware.RequireBrowserRequest(origins)
+		auth.POST("/session", browser, proxy.CreateBrowserSession)
+		auth.GET("/session", browser, proxy.GetBrowserSession)
+		auth.POST("/session/touch", browser, proxy.TouchBrowserSession)
+		// Sign-out is a top-level form POST, which cannot carry a custom header, so it must come from
+		// a trusted origin instead: no other site, and no sibling host of the same site, can sign a
+		// browser out.
+		auth.POST("/session/end", middleware.RequireBrowserNavigation(origins), proxy.EndBrowserSession)
 
 		// Session API proxy (A4)
 		auth.POST("/sessions", proxy.CreateSession)

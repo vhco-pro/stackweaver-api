@@ -74,7 +74,7 @@ func TestCORSMiddleware_LocalhostGatedByProdMode(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v2/ping", nil)
 		req.Header.Set("Origin", localhostOrigin)
 		c.Request = req
-		CORSMiddleware()(c)
+		CORSMiddleware(OriginPolicyFromEnv())(c)
 		return w.Header().Get("Access-Control-Allow-Origin"), w.Header().Get("Access-Control-Allow-Credentials")
 	}
 
@@ -101,7 +101,7 @@ func TestCORSPreflight_GatedOnAllowedOrigin(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodOptions, "/api/v2/organizations", nil)
 		req.Header.Set("Origin", origin)
 		c.Request = req
-		CORSMiddleware()(c)
+		CORSMiddleware(OriginPolicyFromEnv())(c)
 		return w.Header().Get("Access-Control-Allow-Origin"), w.Header().Get("Access-Control-Allow-Credentials"), w.Code
 	}
 

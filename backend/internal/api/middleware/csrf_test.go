@@ -24,7 +24,7 @@ func init() {
 
 func setupCSRFRouter(origins []string) *gin.Engine {
 	r := gin.New()
-	r.Use(CSRFProtection(origins))
+	r.Use(CSRFProtection(NewOriginPolicy(false, origins...)))
 	r.POST("/auth/sessions", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

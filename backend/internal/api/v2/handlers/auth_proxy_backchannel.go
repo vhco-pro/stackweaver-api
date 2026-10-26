@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +73,9 @@ type backchannelVerifier struct {
 	httpClient       *http.Client    // shared proxy client
 	acceptedIss      map[string]bool // set of issuer values we accept
 	expectedClientID string          // Round 23 Finding 1: must appear in `aud`
+	// alsoAccepted are further client ids of this deployment a logout token may be addressed to:
+	// the BFF client, whose sessions Zitadel ends and reports here.
+	alsoAccepted []string
 
 	mu         sync.RWMutex
 	keys       []jose.JSONWebKey
@@ -317,7 +321,7 @@ func (b *backchannelVerifier) verifyLogoutToken(ctx context.Context, raw string)
 		}
 		matched := false
 		for _, a := range auds {
-			if a == b.expectedClientID {
+			if a == b.expectedClientID || (a != "" && slices.Contains(b.alsoAccepted, a)) {
 				matched = true
 				break
 			}
@@ -541,10 +545,9 @@ func (b *backchannelVerifier) getKeys(ctx context.Context, forceRefresh bool) ([
 	return jwks.Keys, nil
 }
 
-// handleBackchannelLogout validates an incoming OIDC backchannel logout_token
-// and acknowledges it. It records nothing: the session the token names has
-// already ended at Zitadel, and TokenExchange refuses the next refresh of a
-// session that no longer exists, which signs that browser out. Per OIDC
+// handleBackchannelLogout validates an incoming OIDC backchannel logout_token,
+// ends the browser sessions signed in through the Zitadel session it names,
+// and acknowledges it. Per OIDC
 // Back-Channel Logout 1.0 §2.8 the RP returns:
 //   - 200 with Cache-Control: no-store on success
 //   - 400 Bad Request with a JSON error object on failure
@@ -565,6 +568,16 @@ func (p *AuthProxy) handleBackchannelLogout(c *gin.Context, token string) {
 
 	if claims.SID != "" {
 		logger.Infof("backchannel logout accepted: sid=%s sub=%s", claims.SID, claims.Subject)
+		// The browsers signed in through that Zitadel session are refused from their next request.
+		// An unknown sid ends nothing, which is what the tokens for the API's own deletes (sign-out,
+		// expiry, Settings > Sessions) find.
+		if p.config.BrowserSessions != nil {
+			if n, err := p.config.BrowserSessions.EndBySID(claims.SID); err != nil {
+				logger.Errorf("backchannel logout: ending the browser sessions of sid %s: %v", claims.SID, err)
+			} else if n > 0 {
+				logger.Infof("backchannel logout: ended %d browser session(s) of sid %s", n, claims.SID)
+			}
+		}
 	} else {
 		// Subject-only logout is a hint to invalidate all sessions for that user
 		// across this RP. We don't maintain a sub→sid map yet; log and move on.

@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/session/touch",
+  "request": {
+    "takes_none": true
+  },
+  "status": 204
+}

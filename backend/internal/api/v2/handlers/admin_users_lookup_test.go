@@ -59,7 +59,7 @@ func TestAdminUsersLookup(t *testing.T) {
 	}
 
 	t.Run("filter[admin]=true lists every administrator", func(t *testing.T) {
-		code, body := get(jwtAs(f.admin), "?filter%5Badmin%5D=true&page%5Bsize%5D=100")
+		code, body := get(browserAs(f.admin), "?filter%5Badmin%5D=true&page%5Bsize%5D=100")
 		if code != http.StatusOK {
 			t.Fatalf("status %d, want 200 (%s)", code, body)
 		}
@@ -106,7 +106,7 @@ func TestAdminUsersLookup(t *testing.T) {
 	})
 
 	t.Run("q matches one full email whatever its case", func(t *testing.T) {
-		code, body := get(jwtAs(f.admin), "?q="+url.QueryEscape(strings.ToUpper(f.plain.Email)))
+		code, body := get(browserAs(f.admin), "?q="+url.QueryEscape(strings.ToUpper(f.plain.Email)))
 		if code != http.StatusOK {
 			t.Fatalf("status %d (%s)", code, body)
 		}
@@ -117,18 +117,18 @@ func TestAdminUsersLookup(t *testing.T) {
 	})
 
 	t.Run("q for an unknown address is an empty list", func(t *testing.T) {
-		code, body := get(jwtAs(f.admin), "?q="+url.QueryEscape("nobody-"+f.sfx+"@test.local"))
+		code, body := get(browserAs(f.admin), "?q="+url.QueryEscape("nobody-"+f.sfx+"@test.local"))
 		if code != http.StatusOK || len(decodeAdminUsers(t, body).Data) != 0 {
 			t.Fatalf("status %d body %s, want 200 and no data", code, body)
 		}
 	})
 
 	t.Run("q and filter[admin]=true narrow together", func(t *testing.T) {
-		_, body := get(jwtAs(f.admin), "?filter%5Badmin%5D=true&q="+url.QueryEscape(f.plain.Email))
+		_, body := get(browserAs(f.admin), "?filter%5Badmin%5D=true&q="+url.QueryEscape(f.plain.Email))
 		if n := len(decodeAdminUsers(t, body).Data); n != 0 {
 			t.Errorf("a non-administrator matched filter[admin]=true (%d rows)", n)
 		}
-		_, body = get(jwtAs(f.admin), "?filter%5Badmin%5D=true&q="+url.QueryEscape(f.declared.Email))
+		_, body = get(browserAs(f.admin), "?filter%5Badmin%5D=true&q="+url.QueryEscape(f.declared.Email))
 		if n := len(decodeAdminUsers(t, body).Data); n != 1 {
 			t.Errorf("the declared administrator did not match (%d rows)", n)
 		}
@@ -145,7 +145,7 @@ func TestAdminUsersLookup(t *testing.T) {
 	}
 	t.Run("any other call is 400", func(t *testing.T) {
 		for _, q := range refused {
-			code, body := get(jwtAs(f.admin), q)
+			code, body := get(browserAs(f.admin), q)
 			if code != http.StatusBadRequest {
 				t.Errorf("GET /admin/users%s = %d, want 400 (%s)", q, code, body)
 				continue
@@ -161,7 +161,7 @@ func TestAdminUsersLookup(t *testing.T) {
 		for _, who := range []struct {
 			name string
 			as   identity
-		}{{"owner of every organization", jwtAs(f.owner)}, {"member", jwtAs(f.member)}, {"plain", jwtAs(f.plain)}} {
+		}{{"owner of every organization", browserAs(f.owner)}, {"member", browserAs(f.member)}, {"plain", browserAs(f.plain)}} {
 			for _, q := range calls {
 				if code, body := get(who.as, q); code != http.StatusNotFound {
 					t.Errorf("%s: GET /admin/users%s = %d, want 404 (%s)", who.name, q, code, body)

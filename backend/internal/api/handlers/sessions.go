@@ -7,14 +7,22 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 type SessionsHandler struct {
 	sessionsService sessionsBackend
 	authService     *auth.Service
+	browserSessions browserSessionEnder
+}
+
+// browserSessionEnder ends the Stackweaver browser sessions signed in through a Zitadel session.
+type browserSessionEnder interface {
+	DeleteByZitadelSID(sid string) (int64, error)
 }
 
 // sessionsBackend is the identity provider's side of the session list: the methods of
@@ -25,8 +33,8 @@ type sessionsBackend interface {
 	RevokeSession(sessionID string) error
 }
 
-func NewSessionsHandler(sessionsService *sessions.Service, authService *auth.Service) *SessionsHandler {
-	h := &SessionsHandler{authService: authService}
+func NewSessionsHandler(sessionsService *sessions.Service, authService *auth.Service, browserSessions browserSessionEnder) *SessionsHandler {
+	h := &SessionsHandler{authService: authService, browserSessions: browserSessions}
 	if sessionsService != nil {
 		h.sessionsService = sessionsService
 	}
@@ -60,33 +68,17 @@ func (h *SessionsHandler) ListSessions(c *gin.Context) {
 		return
 	}
 
-	// Identify current session by comparing request metadata
-	// Get current request's IP address
-	currentIP := c.ClientIP()
-
-	// Find the session that best matches the current request
-	sessionsWithCurrent := make([]SessionWithCurrent, len(sessionList))
-
-	// First, try to match by IP address (most reliable)
-	matchedByIP := false
-	for i, session := range sessionList {
-		isCurrent := false
-
-		// Match by IP address if available
-		if currentIP != "" && session.IPAddress != "" && session.IPAddress == currentIP {
-			isCurrent = true
-			matchedByIP = true
-		}
-
-		sessionsWithCurrent[i] = SessionWithCurrent{
-			Session:   session,
-			IsCurrent: isCurrent,
+	// The current session is the Zitadel session the caller's browser session was signed in
+	// through (the sid of its ID token).
+	currentSID := ""
+	if v, ok := c.Get(auth.BrowserSessionContextKey); ok {
+		if bs, ok := v.(*models.BrowserSession); ok {
+			currentSID = bs.ZitadelSID
 		}
 	}
-
-	// If no match by IP, mark the most recent session as current (fallback)
-	if !matchedByIP && len(sessionsWithCurrent) > 0 {
-		sessionsWithCurrent[0].IsCurrent = true
+	sessionsWithCurrent := make([]SessionWithCurrent, len(sessionList))
+	for i, session := range sessionList {
+		sessionsWithCurrent[i] = SessionWithCurrent{Session: session, IsCurrent: currentSID != "" && session.ID == currentSID}
 	}
 
 	data := make([]jsonapi.Resource[SessionAttributes], 0, len(sessionsWithCurrent))
@@ -129,27 +121,38 @@ func (h *SessionsHandler) RevokeSession(c *gin.Context) {
 		return
 	}
 
-	// Optional: Verify the session belongs to the user before revoking
-	// This adds an extra security layer - we can list the user's sessions and check if the session ID exists
+	// The session must be one of the caller's: the service account could revoke anyone's. When the
+	// list cannot be read, ownership is unknown, so nothing is revoked.
 	sessions, err := h.sessionsService.ListUserSessions(userSubject)
-	if err == nil {
-		sessionExists := false
-		for _, session := range sessions {
-			if session.ID == sessionID {
-				sessionExists = true
-				break
-			}
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable), "could not confirm the session belongs to you; try again")
+		return
+	}
+	sessionExists := false
+	for _, session := range sessions {
+		if session.ID == sessionID {
+			sessionExists = true
+			break
 		}
-		if !sessionExists {
-			jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "session does not belong to user")
-			return
-		}
+	}
+	if !sessionExists {
+		jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "session does not belong to user")
+		return
 	}
 
 	// Revoke session
 	if err := h.sessionsService.RevokeSession(sessionID); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "failed to revoke session"+": "+err.Error())
 		return
+	}
+
+	// The browsers signed in through that Zitadel session are refused from their next request.
+	if h.browserSessions != nil {
+		if _, err := h.browserSessions.DeleteByZitadelSID(sessionID); err != nil {
+			logger.Errorf("sessions: revoked Zitadel session %s but could not delete its browser sessions: %v", sessionID, err)
+			jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "revoked the session but failed to sign its browsers out")
+			return
+		}
 	}
 
 	c.Status(http.StatusNoContent)

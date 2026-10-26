@@ -62,10 +62,10 @@ func TestAccountUpdateDeclaredAddress(t *testing.T) {
 			doc.Data.Attributes["email"], doc.Data.Attributes["unconfirmed-email"], original, declaredAddr)
 	}
 
-	// signIn is what auth.Service.userFromJWT does for one JWT request: sync the row from the
-	// identity provider's answer (a verified address only reaches the repository), then apply the
-	// declared list to that answer.
-	signIn := func(t *testing.T, info *auth.UserInfo) *models.User {
+	// signIn is what auth.Service.ProvisionBrowserUser does for one browser sign-in: sync the row
+	// from the identity the sign-in verified (a verified address only reaches the repository), then
+	// apply the declared list to it.
+	signIn := func(t *testing.T, info auth.BrowserIdentity) *models.User {
 		t.Helper()
 		email := ""
 		if info.EmailVerified {
@@ -94,9 +94,9 @@ func TestAccountUpdateDeclaredAddress(t *testing.T) {
 		}
 	}
 
-	notFlagged(t, "after the update", signIn(t, &auth.UserInfo{Subject: user.ZitadelSubject, Email: original, EmailVerified: true}))
-	// While the identity provider holds the address unverified, auth refuses the request before
-	// the row is read; the seeder is never even reached with it, and nothing changes.
-	notFlagged(t, "with the address pending", signIn(t, &auth.UserInfo{Subject: user.ZitadelSubject, Email: declaredAddr}))
-	notFlagged(t, "during an outage", signIn(t, &auth.UserInfo{Subject: user.ZitadelSubject}))
+	notFlagged(t, "after the update", signIn(t, auth.BrowserIdentity{Subject: user.ZitadelSubject, Email: original, EmailVerified: true}))
+	// While the identity provider holds the address unverified, sign-in is refused before the row
+	// is read; the seeder is never even reached with it, and nothing changes.
+	notFlagged(t, "with the address pending", signIn(t, auth.BrowserIdentity{Subject: user.ZitadelSubject, Email: declaredAddr}))
+	notFlagged(t, "with no email at all", signIn(t, auth.BrowserIdentity{Subject: user.ZitadelSubject}))
 }

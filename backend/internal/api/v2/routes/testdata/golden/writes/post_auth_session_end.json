@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/auth/session/end",
+  "request": {
+    "takes_none": true
+  },
+  "status": 303
+}

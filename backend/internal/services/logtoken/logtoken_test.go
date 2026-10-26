@@ -3,8 +3,11 @@
 package logtoken
 
 import (
+	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,8 +18,8 @@ func TestMintVerify_CarriesTheCredential(t *testing.T) {
 
 	runID := "run-abc123"
 	for name, cred := range map[string]Credential{
-		"api key": {APIKeyID: uuid.New()},
-		"session": {UserID: uuid.New()},
+		"api key":         {APIKeyID: uuid.New()},
+		"browser session": {BrowserSessionID: uuid.New()},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tok := Mint(runID, cred)
@@ -52,10 +55,23 @@ func TestMintVerify_CarriesTheCredential(t *testing.T) {
 
 func TestMintVerify_DisabledWithoutSecret(t *testing.T) {
 	SetSecret(nil)
-	if tok := Mint("run-x", Credential{UserID: uuid.New()}); tok != "" {
+	if tok := Mint("run-x", Credential{BrowserSessionID: uuid.New()}); tok != "" {
 		t.Error("minted a token without a secret")
 	}
 	if _, ok := Verify("anything", "run-x"); ok {
 		t.Error("verified a token without a secret")
+	}
+}
+
+// A token naming only a user, with no API key or browser session behind it, is refused even when
+// correctly signed: nothing could end it before it expires.
+func TestVerify_RefusesAUserOnlyToken(t *testing.T) {
+	SetSecret([]byte("test-secret-key-32-bytes-long!!!"))
+	t.Cleanup(func() { SetSecret(nil) })
+
+	payload := fmt.Sprintf("run-abc:u:%s:%d", uuid.New(), time.Now().Add(TTL).Unix())
+	tok := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + sign(payload)
+	if _, ok := Verify(tok, "run-abc"); ok {
+		t.Fatal("a signed user-only token verified")
 	}
 }

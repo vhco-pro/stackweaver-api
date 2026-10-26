@@ -27,6 +27,8 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 // NotificationMode controls how verification/OTP codes are delivered.
@@ -174,11 +176,29 @@ type AuthProxyConfig struct {
 	// same secret so decoy ids are stable across replicas - otherwise
 	// an attacker round-robin'd across replicas sees divergent fake
 	// ids while a real user's ids stay stable, distinguishing real
-	// vs decoy. Single-replica deployments can leave this nil and
-	// `NewAuthProxy` will generate a per-process random secret. Read
-	// from `STACKWEAVER_DECOY_SECRET` (base64-encoded ≥32 bytes) in
-	// main.go.
+	// vs decoy. When nil, `NewAuthProxy` derives the keys from
+	// EncryptionKey instead. Read from `STACKWEAVER_DECOY_SECRET`
+	// (base64-encoded ≥32 bytes) in main.go.
 	DecoySecret []byte
+
+	// BFFClientID and BFFClientSecret are the confidential client the API completes browser
+	// sign-in with. Without them browser sign-in is unavailable.
+	BFFClientID     string
+	BFFClientSecret string
+
+	// LoginTransactions keeps each sign-in's state, nonce and PKCE verifier between the authorize
+	// request and the redemption of its code.
+	LoginTransactions loginTransactionStore
+
+	// SignIn provisions the user a verified browser sign-in names, and BrowserSessions starts and
+	// looks up the server-side session the browser's cookie points at.
+	SignIn          browserSignIn
+	BrowserSessions *auth.Sessions
+
+	// EncryptionKey is the install's resolved ENCRYPTION_KEY. When DecoySecret is unset, the
+	// session-cookie key and the decoy-id key are derived from it, so every replica of an
+	// install (which all share ENCRYPTION_KEY) signs and verifies the same cookies.
+	EncryptionKey []byte
 	// LoginNameLockoutThreshold is the number of failed password
 	// attempts per loginName within `LoginNameLockoutWindow` that
 	// triggers a per-user lockout (defense against password-spraying
@@ -213,23 +233,22 @@ type AuthProxy struct {
 	// warnf logs a warning; tests replace it to observe what the proxy reports.
 	warnf func(format string, args ...any)
 
-	// decoySecret is the per-process HMAC key used to derive deterministic
+	// decoySecret is the HMAC key used to derive deterministic
 	// fake user/org ids for F-sec-7 anti-enumeration responses (Round 21
 	// Finding 1). The same loginName probed twice MUST produce the same
 	// fake `factors.user.id` and `organizationId` - random ids per call
 	// would diverge across two probes for the same unknown user, while
-	// a real user always returns the same ids. Keyed on a randomly-
-	// generated 32-byte secret at AuthProxy construction so the fake-
-	// id space can't be precomputed by an attacker without server
-	// access. Process restart rotates the keyspace - acceptable since
-	// the decoy contract is per-session, not durable.
-	//
-	// HA caveat: each replica generates its own decoySecret, so the
-	// same loginName probed via two replicas yields different fake
-	// ids - distinguishable from a real user (whose ids are stable
-	// across replicas). Round 22 OOS note. Deferred: needs a shared
-	// cluster secret (env var or KMS-derived) for HA correctness.
+	// a real user always returns the same ids. Keyed on a
+	// secret the attacker does not hold (STACKWEAVER_DECOY_SECRET, or a key derived from
+	// ENCRYPTION_KEY; see proxySecrets), so the fake-id space can't be precomputed. Every
+	// replica shares it, so the same loginName yields the same fake ids on any replica, as a
+	// real user's ids do.
 	decoySecret []byte
+
+	// sessionCookieKey signs the login UI's `sessions` and verification-check cookies. It is
+	// STACKWEAVER_DECOY_SECRET when set, otherwise derived from ENCRYPTION_KEY with its own HKDF
+	// label, so it never equals the decoy-id key.
+	sessionCookieKey []byte
 
 	// decoyOrgIDs tracks every fake organization id the proxy has
 	// issued via `deriveDecoySnowflake(secret, "org:"+loginName)` in
@@ -303,25 +322,9 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 		lockoutWindow = 15 * time.Minute
 	}
 
-	// Decoy-id HMAC key (Round 21 Finding 1).
-	//
-	// Round 25 Wave 6 (item 6 / Round 22 OOS): if the operator
-	// provided one via STACKWEAVER_DECOY_SECRET, use it so HA
-	// replicas produce identical decoy ids. Otherwise generate a
-	// per-process random secret (correct for single-replica). 32
-	// bytes is overkill for HMAC-SHA256 but matches the OWASP
-	// recommendation; crypto/rand failure here is catastrophic
-	// - we'd rather panic at startup than ship without a decoy
-	// secret (decoy ids would otherwise collide trivially).
-	var secret []byte
-	if len(config.DecoySecret) > 0 {
-		secret = config.DecoySecret
-	} else {
-		secret = make([]byte, 32)
-		if _, err := cryptorand.Read(secret); err != nil {
-			panic(fmt.Sprintf("auth proxy: cannot generate decoy secret: %v", err))
-		}
-	}
+	// Decoy-id and session-cookie HMAC keys (Round 21 Finding 1): STACKWEAVER_DECOY_SECRET when
+	// set, otherwise derived from ENCRYPTION_KEY so every replica shares them (proxySecrets).
+	secret, cookieKey := proxySecrets(config)
 
 	p := &AuthProxy{
 		config: config,
@@ -336,6 +339,7 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 		userReadyTimeout:   defaultUserReadyTimeout,
 		LoginNameLimiter:   middleware.NewLoginNameRateLimiter(lockoutThreshold, lockoutWindow),
 		decoySecret:        secret,
+		sessionCookieKey:   cookieKey,
 		decoyOrgIDsEntries: make(map[string]*list.Element),
 		decoyOrgIDsLRU:     list.New(),
 		decoyOrgIDsCap:     defaultDecoyOrgIDsCap,
@@ -506,6 +510,10 @@ func (p *AuthProxy) getBackchannelVerifier() *backchannelVerifier {
 			logger.Warn("auth proxy: ZITADEL_API_CLIENT_ID is empty - backchannel-logout audience binding is DISABLED. Any Zitadel-signed logout_token (including from other RPs on the same instance) will terminate sessions. Set ZITADEL_API_CLIENT_ID to enable cross-RP forced-logout DoS protection (Round 23 Finding 1).")
 		}
 		p.backchannelVerifier = newBackchannelVerifier(jwksURL, hostOverride, p.config.ClientID, p.client, p.config.ZitadelIssuer)
+		// Zitadel addresses the logout tokens for browser sessions to the BFF client.
+		if bff := strings.TrimSpace(p.config.BFFClientID); bff != "" {
+			p.backchannelVerifier.alsoAccepted = append(p.backchannelVerifier.alsoAccepted, bff)
+		}
 	})
 	return p.backchannelVerifier
 }
@@ -680,10 +688,15 @@ func (p *AuthProxy) proxyJSON(ctx context.Context, method, path string, requestB
 	return json.RawMessage(respBody), statusCode, nil
 }
 
-// proxyFormPost forwards a form-encoded POST to Zitadel (used for token exchange).
-func (p *AuthProxy) proxyFormPost(ctx context.Context, path string, formData url.Values) ([]byte, int, http.Header, error) {
-	return p.proxyRequest(ctx, http.MethodPost, path, strings.NewReader(formData.Encode()), "application/x-www-form-urlencoded")
+// CallZitadel makes a request to Zitadel's API as the login service account (auth.ZitadelCaller),
+// for the checks and deletes the API makes on browser sessions.
+func (p *AuthProxy) CallZitadel(ctx context.Context, method, path string, body any) (int, []byte, error) {
+	resp, status, err := p.proxyJSON(ctx, method, path, body)
+	return status, resp, err
 }
+
+// The proxy is the API's connection to Zitadel for the browser-session checks.
+var _ auth.ZitadelCaller = (*AuthProxy)(nil)
 
 // hostFromURLOrHost returns the host of a URL string (scheme://host/…) or, if the
 // value is already a bare host, the value itself. Empty in → empty out.
@@ -906,18 +919,18 @@ func respondError(c *gin.Context, status int, message string) {
 
 // sessionCookieHMACDomain is the domain-separation tag prepended to the
 // HMAC input so the session-cookie HMAC tag can never be confused with
-// any other HMAC use of the same `decoySecret`. Round 25 Wave 6 (item 19
+// any other HMAC use of the same `sessionCookieKey`. Round 25 Wave 6 (item 19
 // / R25a #3).
 const sessionCookieHMACDomain = "stackweaver-session-cookie-v1:"
 
 // signSessionCookie computes the HMAC-SHA256 tag for `payload` using
-// `decoySecret` (which is the shared HA-aware secret per item 6 when
-// configured, or a per-process random one otherwise). The tag is
+// `sessionCookieKey` (STACKWEAVER_DECOY_SECRET when configured, otherwise derived from
+// ENCRYPTION_KEY, so every replica shares it). The tag is
 // returned as base64url-no-padding so it's a fixed 43 chars, separated
 // from the payload by a `.` (which never appears in base64url). Round
 // 25 Wave 6 (item 19 / R25a #3).
 func (p *AuthProxy) signSessionCookie(payload []byte) string {
-	mac := hmac.New(sha256.New, p.decoySecret)
+	mac := hmac.New(sha256.New, p.sessionCookieKey)
 	mac.Write([]byte(sessionCookieHMACDomain))
 	mac.Write(payload)
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
@@ -940,7 +953,7 @@ func (p *AuthProxy) verifySessionCookie(cookieVal string) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	mac := hmac.New(sha256.New, p.decoySecret)
+	mac := hmac.New(sha256.New, p.sessionCookieKey)
 	mac.Write([]byte(sessionCookieHMACDomain))
 	mac.Write([]byte(payload))
 	if !hmac.Equal(expected, mac.Sum(nil)) {
@@ -1107,14 +1120,52 @@ func (p *AuthProxy) requireOwningSession(c *gin.Context, sessionID string) bool 
 // Authorize handles GET /auth/oidc/authorize.
 // Intercepts Zitadel's 302 redirect, extracts the authRequest ID, and returns JSON (DR-2 Option A).
 func (p *AuthProxy) Authorize(c *gin.Context) {
-	// Build the query string to forward to Zitadel
-	params := c.Request.URL.Query()
+	if !p.browserSignInConfigured() {
+		respondError(c, http.StatusServiceUnavailable, "browser sign-in is not configured")
+		return
+	}
 
-	// Dispatch on auth-request ID prefix (A2.1)
-	// At this point we don't have the auth-request ID yet - prefix dispatch happens
-	// after Zitadel returns the redirect. We validate in the response parsing below.
+	// The API runs the code flow as the BFF client: the request Zitadel receives carries the
+	// BFF's client id, redirect URI, state, nonce and PKCE challenge, whatever the caller sent.
+	// Only the caller's prompt, login hint, locale and organization scope pass through.
+	callerParams := c.Request.URL.Query()
+	binding, errBinding := randomURLToken()
+	state, errState := randomURLToken()
+	nonce, errNonce := randomURLToken()
+	verifier, errVerifier := randomURLToken()
+	if errBinding != nil || errState != nil || errNonce != nil || errVerifier != nil {
+		respondError(c, http.StatusInternalServerError, "could not start sign-in")
+		return
+	}
+	params := url.Values{
+		"client_id":             {p.config.BFFClientID},
+		"redirect_uri":          {p.signInRedirectURI()},
+		"response_type":         {"code"},
+		"scope":                 {bffScope(callerParams.Get("scope"))},
+		"state":                 {state},
+		"nonce":                 {nonce},
+		"code_challenge":        {pkceChallenge(verifier)},
+		"code_challenge_method": {"S256"},
+	}
+	for _, key := range []string{"prompt", "login_hint", "ui_locales"} {
+		if v := callerParams.Get(key); v != "" {
+			params.Set(key, v)
+		}
+	}
+	// max_age asks for a recent authentication. It is kept with the transaction, so the ID token's
+	// auth_time can be held to it at redemption.
+	var maxAge *int
+	if v := callerParams.Get("max_age"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			respondError(c, http.StatusBadRequest, "max_age must be a non-negative number of seconds")
+			return
+		}
+		maxAge = &n
+		params.Set("max_age", v)
+	}
 
-	// Forward the authorize request to Zitadel
+	// Dispatch on auth-request ID prefix (A2.1) happens after Zitadel returns the redirect.
 	zitadelPath := "/oauth/v2/authorize?" + params.Encode()
 	_, statusCode, respHeaders, err := p.proxyRequest(c.Request.Context(), http.MethodGet, zitadelPath, nil, "")
 	if err != nil {
@@ -1154,6 +1205,23 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 			return
 		}
 
+		// Keep the sign-in's secrets server-side until its code comes back, bound to this browser.
+		now := time.Now()
+		if err := p.config.LoginTransactions.CreateLoginTransaction(&models.LoginTransaction{
+			MaxAgeSeconds:  maxAge,
+			State:          state,
+			Nonce:          nonce,
+			CodeVerifier:   verifier,
+			BrowserBinding: binding,
+			CreatedAt:      now,
+			ExpiresAt:      now.Add(loginTransactionTTL),
+		}); err != nil {
+			logger.Errorf("auth proxy: storing login transaction: %v", err)
+			respondError(c, http.StatusInternalServerError, "could not start sign-in")
+			return
+		}
+		setLoginBindingCookie(c, state, binding, int(loginTransactionTTL.Seconds()))
+
 		// Extract OIDC parameters from the original request to return to the SPA
 		response := AuthorizeParamsResponse{
 			AuthRequest: authRequestID,
@@ -1171,7 +1239,7 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 		}
 
 		// Parse org scope from scope parameter or organization query param
-		if org := params.Get("organization"); org != "" {
+		if org := callerParams.Get("organization"); org != "" {
 			response.Organization = org
 		} else if scope := params.Get("scope"); scope != "" {
 			// Check for urn:zitadel:iam:org:id: or urn:zitadel:iam:org:domain:primary: scopes
@@ -1193,52 +1261,6 @@ func (p *AuthProxy) Authorize(c *gin.Context) {
 	respondError(c, statusCode, "authorization request failed")
 }
 
-// TokenExchange handles POST /auth/oidc/token.
-// Proxies the token exchange request to Zitadel, passing form data through unchanged.
-// The redirect_uri must match what was used in the authorize request (PKCE requirement).
-//
-// A successful refresh is answered only while the session it belongs to still exists: Zitadel
-// keeps honouring a refresh token after its session is deleted (Settings > Sessions, an
-// administrator, a back-channel logout), so the proxy checks, and for an ended session revokes
-// the refresh token Zitadel just issued and refuses with invalid_grant, which signs the browser out.
-func (p *AuthProxy) TokenExchange(c *gin.Context) {
-	if err := c.Request.ParseForm(); err != nil {
-		respondError(c, http.StatusBadRequest, "invalid form data")
-		return
-	}
-
-	ctx := c.Request.Context()
-	respBody, statusCode, respHeaders, err := p.proxyFormPost(ctx, "/oauth/v2/token", c.Request.PostForm)
-	if err != nil {
-		logger.Errorf("Failed to proxy token exchange: %v", err)
-		respondError(c, http.StatusBadGateway, "failed to exchange token with identity provider")
-		return
-	}
-
-	if statusCode == http.StatusOK && c.Request.PostForm.Get("grant_type") == "refresh_token" {
-		if verdict, issued := p.checkRefreshedSession(ctx, respBody); verdict != sessionAlive {
-			if issued != "" {
-				if err := p.revokeRefreshToken(ctx, issued, c.Request.PostForm.Get("client_id")); err != nil {
-					p.warnf("auth proxy: refused a refresh for an ended session but could not revoke its refresh token: %v", err)
-				}
-			}
-			c.Header("Cache-Control", "no-store")
-			c.JSON(http.StatusBadRequest, OAuthErrorResponse{
-				Error:            "invalid_grant",
-				ErrorDescription: "the session has ended",
-			})
-			return
-		}
-	}
-
-	// Pass through content type from Zitadel
-	contentType := respHeaders.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/json"
-	}
-	c.Data(statusCode, contentType, respBody)
-}
-
 // JWKSProxy handles GET /auth/oidc/keys.
 // Proxies the JWKS endpoint from Zitadel.
 func (p *AuthProxy) JWKSProxy(c *gin.Context) {
@@ -1249,40 +1271,6 @@ func (p *AuthProxy) JWKSProxy(c *gin.Context) {
 		return
 	}
 	c.Data(statusCode, "application/json", respBody)
-}
-
-// UserinfoProxy handles GET /auth/oidc/userinfo.
-// Proxies the userinfo endpoint - note this one passes the Bearer token from the client,
-// not the PAT, since it returns info about the authenticated user.
-func (p *AuthProxy) UserinfoProxy(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
-	reqURL := p.zitadelURL("/oidc/v1/userinfo")
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, reqURL, nil)
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create userinfo request")
-		return
-	}
-	if authHeader != "" {
-		req.Header.Set("Authorization", authHeader)
-	}
-	for k, v := range p.parsedHeaders() {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		logger.Errorf("Failed to proxy userinfo: %v", err)
-		respondError(c, http.StatusBadGateway, "failed to fetch userinfo from identity provider")
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Errorf("Failed to read userinfo response: %v", err)
-		respondError(c, http.StatusBadGateway, "failed to read userinfo from identity provider")
-		return
-	}
-	c.Data(resp.StatusCode, "application/json", body)
 }
 
 // EndSession handles both GET and POST /auth/oidc/end-session.
@@ -1313,30 +1301,12 @@ func (p *AuthProxy) EndSession(c *gin.Context) {
 		}
 	}
 
-	// End session uses id_token_hint for session identification - do NOT add the PAT
-	// (PAT identifies the service account, not the end user's session).
-	reqURL := p.zitadelURL("/oidc/v1/end_session")
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, reqURL, strings.NewReader(formData.Encode()))
-	if err != nil {
-		respondError(c, http.StatusInternalServerError, "failed to create end session request")
-		return
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	for k, v := range p.parsedHeaders() {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := p.client.Do(req)
+	respBody, statusCode, location, err := p.endSessionAtZitadel(c.Request.Context(), formData)
 	if err != nil {
 		logger.Errorf("Failed to proxy end session: %v", err)
 		respondError(c, http.StatusBadGateway, "failed to end session with identity provider")
 		return
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	statusCode := resp.StatusCode
-	respHeaders := resp.Header
 
 	// If Zitadel returns a redirect (302), follow it (redirect the browser).
 	// Round 25 Wave 5 (item 5 / Round 23 Finding 5): defense-in-depth
@@ -1346,22 +1316,47 @@ func (p *AuthProxy) EndSession(c *gin.Context) {
 	// attacker craft a logout URL that bounces the browser to an
 	// arbitrary host with our origin as the redirect issuer. We
 	// validate the host before forwarding.
-	if statusCode == http.StatusFound || statusCode == http.StatusSeeOther {
-		location := respHeaders.Get("Location")
-		if location != "" {
-			if p.allowPostLogoutRedirect(location) {
-				c.Redirect(statusCode, location)
-				return
-			}
-			// Refuse the redirect - return a benign success body so
-			// the SPA can render its own logout-done page.
-			logger.Warnf("EndSession: refusing post-logout redirect to disallowed host (%q)", location)
-			c.JSON(http.StatusOK, LoggedOutResponse{LoggedOut: true})
+	if location != "" {
+		if p.allowPostLogoutRedirect(location) {
+			c.Redirect(statusCode, location)
 			return
 		}
+		// Refuse the redirect - return a benign success body so
+		// the SPA can render its own logout-done page.
+		logger.Warnf("EndSession: refusing post-logout redirect to disallowed host (%q)", location)
+		c.JSON(http.StatusOK, LoggedOutResponse{LoggedOut: true})
+		return
 	}
 
 	c.Data(statusCode, "application/json", respBody)
+}
+
+// endSessionAtZitadel sends an RP-initiated logout to Zitadel's end_session endpoint and returns
+// its answer, with the redirect Zitadel sent the browser to (empty when it did not redirect). It
+// sends no PAT: the request names the session by id_token_hint or the client by client_id, not the
+// service account.
+func (p *AuthProxy) endSessionAtZitadel(ctx context.Context, form url.Values) (body []byte, status int, location string, err error) {
+	reqURL := p.zitadelURL("/oidc/v1/end_session")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("building the end session request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for k, v := range p.parsedHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusSeeOther {
+		location = resp.Header.Get("Location")
+	}
+	return body, resp.StatusCode, location, nil
 }
 
 // allowPostLogoutRedirect reports whether the given absolute or
@@ -1449,9 +1444,11 @@ func (p *AuthProxy) OIDCDiscovery(c *gin.Context) {
 	}
 	discovery["issuer"] = publicBase
 	discovery["authorization_endpoint"] = publicBase + "/auth/oidc/authorize"
-	discovery["token_endpoint"] = publicBase + "/auth/oidc/token"
 	discovery["jwks_uri"] = publicBase + "/auth/oidc/keys"
-	discovery["userinfo_endpoint"] = publicBase + "/auth/oidc/userinfo"
+	// The proxy redeems no code and answers no userinfo for a browser: the API is the only
+	// client, redeeming at Zitadel itself, so those endpoints are not advertised.
+	delete(discovery, "token_endpoint")
+	delete(discovery, "userinfo_endpoint")
 	discovery["end_session_endpoint"] = publicBase + "/auth/oidc/end-session"
 
 	c.JSON(http.StatusOK, discovery)
