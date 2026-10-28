@@ -84,12 +84,9 @@ func (h *SessionsHandler) ListSessions(c *gin.Context) {
 	data := make([]jsonapi.Resource[SessionAttributes], 0, len(sessionsWithCurrent))
 	for _, s := range sessionsWithCurrent {
 		data = append(data, jsonapi.Resource[SessionAttributes]{
-			ID:   s.ID,
-			Type: "sessions",
-			Attributes: SessionAttributes{
-				UserAgent: s.UserAgent, IPAddress: s.IPAddress, CreationDate: s.CreationDate,
-				ExpirationDate: s.ExpirationDate, Factors: s.Factors, IsCurrent: s.IsCurrent,
-			},
+			ID:         s.ID,
+			Type:       "sessions",
+			Attributes: sessionAttributes(s),
 		})
 	}
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
@@ -166,10 +163,24 @@ type SessionWithCurrent struct {
 
 // SessionAttributes describe one of the caller's sessions at the identity provider.
 type SessionAttributes struct {
-	UserAgent      string    `json:"user-agent"`
-	IPAddress      string    `json:"ip-address,omitempty"`
-	CreationDate   time.Time `json:"creation-date"`
-	ExpirationDate time.Time `json:"expiration-date"`
-	Factors        []string  `json:"factors"`
-	IsCurrent      bool      `json:"is-current"`
+	UserAgent      string     `json:"user-agent"`
+	IPAddress      string     `json:"ip-address,omitempty"`
+	CreationDate   time.Time  `json:"creation-date"`
+	ExpirationDate *time.Time `json:"expiration-date,omitempty"`
+	Factors        []string   `json:"factors"`
+	IsCurrent      bool       `json:"is-current"`
+}
+
+// sessionAttributes describes s. A Zitadel session created without a lifetime has no expiration,
+// which the attribute leaves out rather than reporting Go's zero time.
+func sessionAttributes(s SessionWithCurrent) SessionAttributes {
+	attrs := SessionAttributes{
+		UserAgent: s.UserAgent, IPAddress: s.IPAddress, CreationDate: s.CreationDate,
+		Factors: s.Factors, IsCurrent: s.IsCurrent,
+	}
+	if !s.ExpirationDate.IsZero() {
+		exp := s.ExpirationDate
+		attrs.ExpirationDate = &exp
+	}
+	return attrs
 }
