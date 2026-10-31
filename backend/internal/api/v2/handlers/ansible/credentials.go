@@ -4,7 +4,6 @@ package ansible
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -464,10 +463,8 @@ func (h *CredentialHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.credentialService.DeleteCredential(id); err != nil {
-		// Check for foreign key constraint violation
-		errStr := err.Error()
-		if strings.Contains(errStr, "violates foreign key constraint") {
-			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Cannot delete credential: it is referenced by one or more job templates, jobs, or inventory sources. Remove the credential from those resources first.")
+		if detail, ok := deleteConflictDetail(err, jobLinkConflicts); ok {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", detail)
 			return
 		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())

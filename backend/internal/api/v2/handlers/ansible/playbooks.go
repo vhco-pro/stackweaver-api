@@ -815,10 +815,9 @@ func (h *PlaybookHandler) DeletePlaybook(c *gin.Context) {
 	}
 
 	if err := h.playbookRepo.Delete(id); err != nil {
-		// Check for foreign key constraint violation (fallback)
-		errStr := err.Error()
-		if strings.Contains(errStr, "violates foreign key constraint") {
-			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Cannot delete playbook: it is referenced by one or more job templates or jobs. Remove the playbook from those resources first.")
+		// A template that appeared after the dependency count is refused by its foreign key.
+		if detail, ok := deleteConflictDetail(err, playbookConflicts); ok {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", detail)
 			return
 		}
 

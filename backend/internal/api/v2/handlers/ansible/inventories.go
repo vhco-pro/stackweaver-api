@@ -755,9 +755,9 @@ func (h *InventoryHandler) Delete(c *gin.Context) {
 			return
 		}
 
-		// Check for foreign key constraint violation (fallback)
-		if strings.Contains(errStr, "violates foreign key constraint") {
-			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Cannot delete inventory: it is referenced by one or more job templates, jobs, or inventory sources. Remove the inventory from those resources first.")
+		// A template or job that appeared after the dependency count is refused by its foreign key.
+		if detail, ok := deleteConflictDetail(err, inventoryConflicts); ok {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", detail)
 			return
 		}
 
