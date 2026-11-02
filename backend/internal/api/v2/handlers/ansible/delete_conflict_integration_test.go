@@ -9,14 +9,15 @@
 //
 // An inventory or playbook delete first counts its dependents and refuses with a 409 naming them
 // (InventoryService.DeleteInventory, PlaybookHandler.DeletePlaybook); a reference the count does
-// not cover, one nulled by the delete rules, lets the delete through. The 409 for a foreign key
-// violation behind the count is held to the constraints that really refuse the delete by
-// TestDeleteConflictDetail.
+// not cover, one nulled by the delete rules, lets the delete through. A playbook's count covers
+// job templates only: the jobs that ran it keep their history with the link cleared. The 409 for
+// a foreign key violation behind the count is held to the constraints that really refuse the
+// delete by TestDeleteConflictDetail.
 //
 // Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Cleanup is strictly
 // row-scoped (the database may be live). Run with:
 //
-//	go test -tags integration ./internal/api/v2/handlers/ansible/ -run 'TestCredentialDelete|TestInventoryDelete|TestPlaybookDelete'
+//	go test -tags integration ./internal/api/v2/handlers/ansible/ -run 'TestCredentialDelete|TestInventoryDelete|TestPlaybookDelete|TestPlaybookForceDelete'
 
 //go:build integration
 
@@ -38,6 +39,7 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
+	"github.com/michielvha/stackweaver/core/storage/storagetest"
 	"gorm.io/gorm"
 )
 
@@ -50,6 +52,8 @@ type credentialDeleteFixture struct {
 	playbook uuid.UUID
 	inv      uuid.UUID
 	sfx      string
+	// store is the object storage the playbook repository prunes a deleted playbook from.
+	store *storagetest.Memory
 }
 
 func setupCredentialDelete(t *testing.T) *credentialDeleteFixture {
@@ -109,8 +113,11 @@ func setupCredentialDelete(t *testing.T) *credentialDeleteFixture {
 		ansiblesvc.NewInventoryService(inventoryRepo, orgRepo), inventoryRepo, orgRepo, projectRepo,
 		authService, rbacService, nil, nil, repository.NewVCSConnectionRepository(db),
 	)
+	playbookRepo := repository.NewAnsiblePlaybookRepository(db)
+	f.store = storagetest.NewMemory()
+	playbookRepo.SetStorage(f.store)
 	playbooks := NewPlaybookHandler(
-		repository.NewAnsiblePlaybookRepository(db), repository.NewAnsibleJobTemplateRepository(db), repository.NewAnsibleJobRepository(db),
+		playbookRepo, repository.NewAnsibleJobTemplateRepository(db), repository.NewAnsibleJobRepository(db),
 		repository.NewAnsibleScheduleRepository(db), projectRepo, orgRepo, authService, rbacService,
 		nil, nil, repository.NewVCSConnectionRepository(db), nil,
 	)
@@ -125,6 +132,16 @@ func setupCredentialDelete(t *testing.T) *credentialDeleteFixture {
 	f.router.DELETE("/ansible/credentials/:id", credentials.Delete)
 	f.router.DELETE("/ansible/inventories/:id", inventories.Delete)
 	f.router.DELETE("/ansible/playbooks/:id", playbooks.DeletePlaybook)
+	templateRepo := repository.NewAnsibleJobTemplateRepository(db)
+	jobs := NewJobHandler(
+		ansiblesvc.NewJobService(
+			repository.NewAnsibleJobRepository(db), repository.NewAnsiblePlaybookRepository(db), inventoryRepo,
+			templateRepo, projectRepo, nil,
+		),
+		projectRepo, orgRepo, templateRepo, authService, rbacService,
+	)
+	f.router.GET("/ansible/jobs/:id", jobs.Get)
+	f.router.POST("/ansible/jobs/:id/actions/relaunch", jobs.Relaunch)
 	return f
 }
 
@@ -178,11 +195,13 @@ func (f *credentialDeleteFixture) delete(t *testing.T, path string) (int, []byte
 	return rec.Code, rec.Body.Bytes()
 }
 
-// deleteWhileInserting reaches the foreign key behind a dependency count. It inserts a row that
-// references the resource in a transaction it holds open, so the count cannot see the row while
-// the insert's key lock makes the handler's DELETE of the resource wait. Once the DELETE waits,
-// the transaction commits, and the DELETE then meets the committed reference.
-func (f *credentialDeleteFixture) deleteWhileInserting(t *testing.T, path, table string, insert func(tx *gorm.DB) error) (int, []byte) {
+// deleteWhileInserting races a delete against a reference inserted while it runs. It inserts a
+// row that references the resource in a transaction it holds open, so a dependency count cannot
+// see the row while the insert's key lock makes the delete wait: the DELETE of an inventory, or
+// the row lock a playbook delete takes before it counts. waitingQuery is a LIKE pattern for
+// the statement that waits. Once it waits, the transaction commits, and the delete then meets the
+// committed reference.
+func (f *credentialDeleteFixture) deleteWhileInserting(t *testing.T, path, waitingQuery string, insert func(tx *gorm.DB) error) (int, []byte) {
 	t.Helper()
 	tx := f.db.Begin()
 	if err := insert(tx); err != nil {
@@ -204,7 +223,7 @@ func (f *credentialDeleteFixture) deleteWhileInserting(t *testing.T, path, table
 		var waiting int64
 		if err := f.db.Raw(
 			`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE ?`,
-			`%DELETE FROM "`+table+`"%`,
+			waitingQuery,
 		).Scan(&waiting).Error; err != nil {
 			tx.Rollback()
 			t.Fatalf("watching for the waiting delete: %v", err)
@@ -310,7 +329,7 @@ func TestInventoryDelete_LateTemplateConflicts(t *testing.T) {
 	tmpl := &models.AnsibleJobTemplate{ID: uuid.New(), ProjectID: f.project, PlaybookID: f.playbook, InventoryID: f.inv, Name: "creddel-late-" + f.sfx}
 	t.Cleanup(func() { f.db.Delete(&models.AnsibleJobTemplate{}, "id = ?", tmpl.ID) })
 
-	code, body := f.deleteWhileInserting(t, "/ansible/inventories/"+f.inv.String(), "ansible_inventories",
+	code, body := f.deleteWhileInserting(t, "/ansible/inventories/"+f.inv.String(), `%DELETE FROM "ansible_inventories"%`,
 		func(tx *gorm.DB) error { return tx.Create(tmpl).Error })
 	assertConflict(t, code, body, inventoryUsedByTemplatesDetail)
 	if n := f.count(t, "SELECT count(*) FROM ansible_inventories WHERE id = ?", f.inv); n != 1 {
@@ -325,21 +344,29 @@ func TestInventoryDelete_LateJobConflicts(t *testing.T) {
 	job := &models.AnsibleJob{ID: uuid.New(), ProjectID: f.project, InventoryID: f.inv, Status: models.AnsibleJobStatusSuccessful}
 	t.Cleanup(func() { f.db.Delete(&models.AnsibleJob{}, "id = ?", job.ID) })
 
-	code, body := f.deleteWhileInserting(t, "/ansible/inventories/"+f.inv.String(), "ansible_inventories",
+	code, body := f.deleteWhileInserting(t, "/ansible/inventories/"+f.inv.String(), `%DELETE FROM "ansible_inventories"%`,
 		func(tx *gorm.DB) error { return tx.Create(job).Error })
 	assertConflict(t, code, body, inventoryUsedByJobsDetail)
 }
 
-// A job template built on the playbook after the dependency count is refused by its foreign key,
-// and the 409 names job templates only.
+// playbookRowLock is the statement a playbook delete waits on while a reference to the playbook is
+// being inserted: the row lock it takes before it counts what blocks it.
+const playbookRowLock = `%FROM "ansible_playbooks"%FOR UPDATE%`
+
+// A job template built on the playbook while the delete runs is counted: the delete locks the
+// playbook row first, which waits for the template's insert, and then counts it, so the 409 is the
+// count's. Before the row lock the count missed such a template and its foreign key refused the
+// DELETE (playbookUsedByTemplatesDetail); that mapping stays for a reference the lock does not
+// cover.
 func TestPlaybookDelete_LateTemplateConflicts(t *testing.T) {
 	f := setupCredentialDelete(t)
 	tmpl := &models.AnsibleJobTemplate{ID: uuid.New(), ProjectID: f.project, PlaybookID: f.playbook, InventoryID: f.inv, Name: "creddel-late-" + f.sfx}
 	t.Cleanup(func() { f.db.Delete(&models.AnsibleJobTemplate{}, "id = ?", tmpl.ID) })
 
-	code, body := f.deleteWhileInserting(t, "/ansible/playbooks/"+f.playbook.String(), "ansible_playbooks",
+	code, body := f.deleteWhileInserting(t, "/ansible/playbooks/"+f.playbook.String(), playbookRowLock,
 		func(tx *gorm.DB) error { return tx.Create(tmpl).Error })
-	assertConflict(t, code, body, playbookUsedByTemplatesDetail)
+	assertConflict(t, code, body,
+		"Cannot delete playbook: it is referenced by 1 job template(s). Remove the playbook from those resources first")
 	if n := f.count(t, "SELECT count(*) FROM ansible_playbooks WHERE id = ?", f.playbook); n != 1 {
 		t.Errorf("the playbook was deleted despite the conflict")
 	}
@@ -374,16 +401,119 @@ func TestInventoryDelete_ReferencedOnlyByCascadingAndNulledRowsDeletes(t *testin
 	}
 }
 
-// A job template built on a playbook blocks the delete, and the 409 names it.
+// A job template built on a playbook blocks the delete, and the 409 names it. The template's past
+// job does not count toward the refusal: the detail names job templates only.
 func TestPlaybookDelete_UsedByATemplateConflicts(t *testing.T) {
 	f := setupCredentialDelete(t)
-	f.template(t)
+	tmplID := f.template(t)
+	f.job(t, &tmplID)
 
 	code, body := f.delete(t, "/ansible/playbooks/"+f.playbook.String())
 	assertConflict(t, code, body,
 		"Cannot delete playbook: it is referenced by 1 job template(s). Remove the playbook from those resources first")
 	if n := f.count(t, "SELECT count(*) FROM ansible_playbooks WHERE id = ?", f.playbook); n != 1 {
 		t.Errorf("the playbook was deleted despite the conflict")
+	}
+}
+
+// job creates a finished job that ran the fixture's playbook, launched from tmplID when it is
+// not nil, with one output event, the way a launch records the playbook's name. Both rows are
+// removed at the end of the test.
+func (f *credentialDeleteFixture) job(t *testing.T, tmplID *uuid.UUID) *models.AnsibleJob {
+	t.Helper()
+	return f.jobIn(t, tmplID, models.AnsibleJobStatusSuccessful)
+}
+
+// jobIn is job with the given status.
+func (f *credentialDeleteFixture) jobIn(t *testing.T, tmplID *uuid.UUID, status models.AnsibleJobStatus) *models.AnsibleJob {
+	t.Helper()
+	job := &models.AnsibleJob{
+		ID: uuid.New(), ProjectID: f.project, PlaybookID: &f.playbook, PlaybookName: "creddel-pb-" + f.sfx,
+		InventoryID: f.inv, TemplateID: tmplID, Name: "creddel-job-" + f.sfx,
+		Status: status, HostsTotal: 2, HostsOk: 2,
+	}
+	if err := f.db.Create(job).Error; err != nil {
+		t.Fatalf("seeding the job: %v", err)
+	}
+	t.Cleanup(func() { f.db.Delete(&models.AnsibleJob{}, "id = ?", job.ID) })
+	event := &models.AnsibleJobEvent{ID: uuid.New(), JobID: job.ID, Counter: 1, Event: "runner_on_ok", Host: "web-01", Stdout: "ok: [web-01]"}
+	if err := f.db.Create(event).Error; err != nil {
+		t.Fatalf("seeding the job event: %v", err)
+	}
+	t.Cleanup(func() { f.db.Delete(&models.AnsibleJobEvent{}, "id = ?", event.ID) })
+	return job
+}
+
+// A playbook that only past jobs ran deletes. The jobs keep their row, results, events and the
+// playbook name they recorded, with the playbook link cleared, and stay readable through the API.
+// A relaunch of such a job is refused with a 409, since there is no playbook left to run.
+func TestPlaybookDelete_RanOnlyByPastJobsDeletes(t *testing.T) {
+	f := setupCredentialDelete(t)
+	job := f.job(t, nil)
+
+	if code, body := f.delete(t, "/ansible/playbooks/"+f.playbook.String()); code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (%s)", code, body)
+	}
+	if n := f.count(t, "SELECT count(*) FROM ansible_playbooks WHERE id = ?", f.playbook); n != 0 {
+		t.Errorf("the playbook survived its delete")
+	}
+	if n := f.count(t,
+		"SELECT count(*) FROM ansible_jobs WHERE id = ? AND playbook_id IS NULL AND playbook_name = ? AND status = ? AND hosts_ok = 2",
+		job.ID, job.PlaybookName, models.AnsibleJobStatusSuccessful); n != 1 {
+		t.Errorf("the job was removed, still names the deleted playbook, or lost its recorded name or results")
+	}
+	if n := f.count(t, "SELECT count(*) FROM ansible_job_events WHERE job_id = ?", job.ID); n != 1 {
+		t.Errorf("the job has %d event(s) after the playbook delete, want 1", n)
+	}
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ansible/jobs/"+job.ID.String(), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reading the job: status = %d, want 200 (%s)", rec.Code, rec.Body.Bytes())
+	}
+	var doc struct {
+		Data struct {
+			Attributes    map[string]any            `json:"attributes"`
+			Relationships map[string]map[string]any `json:"relationships"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decoding the job %s: %v", rec.Body.Bytes(), err)
+	}
+	if got := doc.Data.Attributes["playbook-name"]; got != job.PlaybookName {
+		t.Errorf("playbook-name = %v, want %q", got, job.PlaybookName)
+	}
+	if got := doc.Data.Attributes["status"]; got != string(models.AnsibleJobStatusSuccessful) {
+		t.Errorf("status = %v, want successful", got)
+	}
+	if _, ok := doc.Data.Relationships["playbook"]; ok {
+		t.Errorf("the job still has a playbook relationship: %v", doc.Data.Relationships["playbook"])
+	}
+
+	rec = httptest.NewRecorder()
+	f.router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ansible/jobs/"+job.ID.String()+"/actions/relaunch", nil))
+	assertConflict(t, rec.Code, rec.Body.Bytes(), jobPlaybookDeletedDetail)
+}
+
+// A force delete removes the playbook's templates with the jobs they launched, as a template
+// delete does, and keeps the jobs that ran the playbook directly with the link cleared.
+func TestPlaybookForceDelete_KeepsJobsThatRanThePlaybookDirectly(t *testing.T) {
+	f := setupCredentialDelete(t)
+	tmplID := f.template(t)
+	fromTemplate := f.job(t, &tmplID)
+	direct := f.job(t, nil)
+
+	if code, body := f.delete(t, "/ansible/playbooks/"+f.playbook.String()+"?force=true"); code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (%s)", code, body)
+	}
+	if n := f.count(t, "SELECT count(*) FROM ansible_jobs WHERE id = ?", fromTemplate.ID); n != 0 {
+		t.Errorf("the template's job survived the force delete")
+	}
+	if n := f.count(t, "SELECT count(*) FROM ansible_jobs WHERE id = ? AND playbook_id IS NULL AND playbook_name = ?", direct.ID, direct.PlaybookName); n != 1 {
+		t.Errorf("the job that ran the playbook directly was removed, or still names the playbook")
+	}
+	if n := f.count(t, "SELECT count(*) FROM ansible_job_events WHERE job_id = ?", direct.ID); n != 1 {
+		t.Errorf("the kept job has %d event(s), want 1", n)
 	}
 }
 

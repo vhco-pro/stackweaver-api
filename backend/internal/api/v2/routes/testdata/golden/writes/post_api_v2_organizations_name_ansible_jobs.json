@@ -208,6 +208,7 @@
         "job-type": "check",
         "limit": "webservers",
         "name": "golden-write-job",
+        "playbook-name": "deploy-app",
         "runner-id": null,
         "skip-tags": "",
         "slice-count": 0,

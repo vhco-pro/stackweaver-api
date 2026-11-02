@@ -15,8 +15,11 @@ import (
 // SliceGroupID, RunnerID, StartedAt and FinishedAt are pointers because the old map emitted
 // them as null until set - present either way.
 type JobAttributes struct {
-	Name             string                  `json:"name"`
-	JobType          models.AnsibleJobType   `json:"job-type"`
+	Name    string                `json:"name"`
+	JobType models.AnsibleJobType `json:"job-type"`
+	// PlaybookName is the name of the playbook the job ran, recorded at launch. It stays when the
+	// playbook is deleted and the playbook relationship is gone; empty for ad hoc jobs.
+	PlaybookName     string                  `json:"playbook-name"`
 	Status           models.AnsibleJobStatus `json:"status"`
 	ExtraVars        models.JobExtraVars     `json:"extra-vars"`
 	Limit            string                  `json:"limit"`

@@ -2,7 +2,12 @@
 
 package ansible
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/michielvha/stackweaver/core/repository"
+)
 
 // deleteConflict pairs a foreign key that refuses a delete with the 409 detail that names what
 // holds the row and how to remove it.
@@ -45,8 +50,23 @@ var inventoryConflicts = []deleteConflict{
 const playbookUsedByTemplatesDetail = "Cannot delete playbook: one or more job templates use it. " +
 	"Change those templates to another playbook or delete them, or force delete the playbook."
 
-// playbookConflicts are the playbook's blockers: the job templates built on it. Jobs run against
-// it and schedules that target it keep their row with the playbook link cleared.
+// playbookInUseDetail is the 409 detail for a playbook delete refused by what uses the playbook:
+// the job templates built on it first, since those need changing whatever else is true, else the
+// jobs that use it and have not finished.
+func playbookInUseDetail(inUse *repository.PlaybookInUseError) string {
+	if inUse.JobTemplates > 0 {
+		return fmt.Sprintf("Cannot delete playbook: it is referenced by %d job template(s). "+
+			"Remove the playbook from those resources first", inUse.JobTemplates)
+	}
+	return fmt.Sprintf("Cannot delete playbook: %d job(s) using it have not finished. "+
+		"Wait for them to finish or cancel them, then delete the playbook again, or force delete the playbook, which cancels them.",
+		inUse.UnfinishedJobs)
+}
+
+// playbookConflicts are the playbook's blockers at the foreign key: the job templates built on
+// it. PlaybookRepository.Delete counts those and the unfinished jobs under the playbook's row
+// lock, so this mapping is a fallback. Jobs run against it and schedules that target it keep
+// their row with the playbook link cleared.
 var playbookConflicts = []deleteConflict{
 	{"fk_ansible_playbooks_job_templates", playbookUsedByTemplatesDetail},
 }

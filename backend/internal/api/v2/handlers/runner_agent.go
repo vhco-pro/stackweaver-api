@@ -924,7 +924,8 @@ func (h *RunnerAgentHandler) parseAndStoreAgentEvent(jobID uuid.UUID, eventData 
 				job.HostsUnreachable = totalUnreachable
 				job.HostsRescued = totalRescued
 				job.HostsIgnored = totalIgnored
-				_ = h.ansibleJobRepo.Update(job)
+				_ = h.ansibleJobRepo.UpdateColumns(job, "hosts_total", "hosts_ok", "hosts_changed", "hosts_failed",
+					"hosts_skipped", "hosts_unreachable", "hosts_rescued", "hosts_ignored")
 			}
 		}
 
@@ -1178,7 +1179,8 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 				job.WarningsCount = warningsCount
 			}
 
-			_ = h.ansibleJobRepo.Update(job)
+			_ = h.ansibleJobRepo.UpdateColumns(job, "finished_at", "status", "error_message", "hosts_failed",
+				"has_warnings", "warnings_count")
 		}
 	}
 
@@ -1810,7 +1812,7 @@ func (h *RunnerAgentHandler) ansibleJobCredentialIDs(c *gin.Context, job *models
 	logger.Warnf("Job %s is not handed to runner: %s", job.ID, message)
 	job.Status = models.AnsibleJobStatusFailed
 	job.ErrorMessage = message
-	if updateErr := h.ansibleJobRepo.Update(job); updateErr != nil {
+	if updateErr := h.ansibleJobRepo.UpdateColumns(job, "status", "error_message"); updateErr != nil {
 		logger.Warnf("Failed to mark job %s failed: %v", job.ID, updateErr)
 	}
 	jsonapi.WriteError(c, http.StatusConflict, "Conflict", message)
@@ -2004,7 +2006,7 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 				logger.Warnf("Failed to slice inventory for job %s: %v", job.ID, err)
 				job.Status = models.AnsibleJobStatusFailed
 				job.ErrorMessage = fmt.Sprintf("failed to slice inventory: %v", err)
-				if updateErr := h.ansibleJobRepo.Update(job); updateErr != nil {
+				if updateErr := h.ansibleJobRepo.UpdateColumns(job, "status", "error_message"); updateErr != nil {
 					logger.Warnf("Failed to mark sliced job %s failed: %v", job.ID, updateErr)
 				}
 				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to slice inventory: "+err.Error())

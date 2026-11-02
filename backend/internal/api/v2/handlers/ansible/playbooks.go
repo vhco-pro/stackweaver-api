@@ -6,7 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -22,6 +22,7 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	vcs "github.com/michielvha/stackweaver/core/services/vcs"
+	"gorm.io/gorm"
 )
 
 // PlaybookHandler handles Ansible playbook API endpoints
@@ -762,10 +763,11 @@ func (h *PlaybookHandler) DeletePlaybook(c *gin.Context) {
 		return
 	}
 
-	// ?force=true cascades over every dependent resource (job templates, jobs,
-	// schedules, workflow nodes). It deletes resources well beyond the playbook
-	// itself, so it additionally requires org-level Ansible manage. The playbook
-	// has no direct org, so resolve it via its project.
+	// ?force=true cancels the unfinished jobs that use the playbook and cascades over the job
+	// templates built on it, with their jobs, schedules and workflow nodes, and the schedules that
+	// target the playbook. It deletes resources well beyond the playbook itself, so it additionally
+	// requires org-level Ansible manage. The playbook has no direct org, so resolve it via its
+	// project.
 	if c.Query("force") == "true" {
 		project, err := h.projectRepo.GetByID(playbook.ProjectID)
 		if err != nil {
@@ -782,6 +784,10 @@ func (h *PlaybookHandler) DeletePlaybook(c *gin.Context) {
 			return
 		}
 		if err := h.playbookRepo.ForceDelete(id); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Playbook not found")
+				return
+			}
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", err.Error())
 			return
 		}
@@ -789,33 +795,23 @@ func (h *PlaybookHandler) DeletePlaybook(c *gin.Context) {
 		return
 	}
 
-	// Check for dependencies before deleting
-	templateCount, err := h.playbookRepo.CountJobTemplatesByPlaybook(id)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to check dependencies: %v", err))
-		return
-	}
-
-	jobCount, err := h.playbookRepo.CountJobsByPlaybook(id)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", fmt.Sprintf("Failed to check dependencies: %v", err))
-		return
-	}
-
-	if templateCount > 0 || jobCount > 0 {
-		var deps []string
-		if templateCount > 0 {
-			deps = append(deps, fmt.Sprintf("%d job template(s)", templateCount))
-		}
-		if jobCount > 0 {
-			deps = append(deps, fmt.Sprintf("%d job(s)", jobCount))
-		}
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", fmt.Sprintf("Cannot delete playbook: it is referenced by %s. Remove the playbook from those resources first", strings.Join(deps, ", ")))
-		return
-	}
-
+	// Job templates built on the playbook and jobs that use it and have not finished block the
+	// delete; the repository counts them under the playbook's row lock. Jobs that ran the playbook
+	// keep their history, logs, results and events with the playbook link cleared
+	// (fk_ansible_playbooks_jobs is SET NULL) and the playbook name they recorded at launch, as AWX
+	// keeps the jobs of a deleted template. Schedules that target the playbook are nulled the same
+	// way.
 	if err := h.playbookRepo.Delete(id); err != nil {
-		// A template that appeared after the dependency count is refused by its foreign key.
+		var inUse *repository.PlaybookInUseError
+		if errors.As(err, &inUse) {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", playbookInUseDetail(inUse))
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Playbook not found")
+			return
+		}
+		// A reference the row lock does not cover is refused by its foreign key.
 		if detail, ok := deleteConflictDetail(err, playbookConflicts); ok {
 			jsonapi.WriteError(c, http.StatusConflict, "Conflict", detail)
 			return

@@ -27,6 +27,7 @@
         "job-type": "run",
         "limit": "",
         "name": "baseline-compliance - 2026-08-23 08:10",
+        "playbook-name": "site",
         "runner-id": null,
         "skip-tags": "",
         "slice-count": "\u003cnumber\u003e",
@@ -45,6 +46,12 @@
           "data": {
             "id": "\u003cuuid\u003e",
             "type": "ansible-inventories"
+          }
+        },
+        "playbook": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-playbooks"
           }
         },
         "project": {
