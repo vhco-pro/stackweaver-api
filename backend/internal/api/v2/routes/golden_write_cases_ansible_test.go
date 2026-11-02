@@ -367,7 +367,7 @@ func init() {
 		},
 		writeCase{
 			// A playbook of the case's own: every seeded one is named by a job template, and the
-			// server refuses to delete a playbook anything still refers to.
+			// server refuses to delete a playbook a job template uses.
 			route: "DELETE /api/v2/ansible/playbooks/:id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				id := ansibleCreated(t, w, w.path("/api/v2/organizations/:name/ansible/playbooks"),

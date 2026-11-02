@@ -2171,6 +2171,9 @@
                     "name": {
                       "type": "string"
                     },
+                    "playbook-name": {
+                      "type": "string"
+                    },
                     "runner-id": {
                       "nullable": true
                     },
@@ -2216,6 +2219,23 @@
                   "type": "object",
                   "properties": {
                     "inventory": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "playbook": {
                       "type": "object",
                       "properties": {
                         "data": {
@@ -2386,6 +2406,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "playbook-name": {
+                    "type": "string"
+                  },
                   "runner-id": {
                     "nullable": true
                   },
@@ -2431,6 +2454,23 @@
                 "type": "object",
                 "properties": {
                   "inventory": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "playbook": {
                     "type": "object",
                     "properties": {
                       "data": {
@@ -12225,6 +12265,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "playbook-name": {
+                    "type": "string"
+                  },
                   "runner-id": {
                     "nullable": true
                   },
@@ -12676,6 +12719,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "playbook-name": {
+                    "type": "string"
+                  },
                   "runner-id": {
                     "nullable": true
                   },
@@ -12952,6 +12998,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "playbook-name": {
+                    "type": "string"
+                  },
                   "runner-id": {
                     "nullable": true
                   },
@@ -13185,6 +13234,9 @@
                     "type": "string"
                   },
                   "name": {
+                    "type": "string"
+                  },
+                  "playbook-name": {
                     "type": "string"
                   },
                   "runner-id": {
@@ -14339,6 +14391,9 @@
                     "type": "string"
                   },
                   "name": {
+                    "type": "string"
+                  },
+                  "playbook-name": {
                     "type": "string"
                   },
                   "runner-id": {

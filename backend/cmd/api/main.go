@@ -198,6 +198,15 @@ func main() {
 		hasVarsetGlobal = true // fail safe: never backfill on uncertainty
 	}
 
+	// ansible_jobs.playbook_name records the playbook a job ran, so the job still names it once
+	// the playbook is deleted. Detect whether the column predates this startup so jobs created
+	// before it existed take their playbook's current name exactly once below.
+	var hasJobPlaybookName bool
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ansible_jobs' AND column_name = 'playbook_name')").Scan(&hasJobPlaybookName).Error; err != nil {
+		logger.Warnf("Failed to inspect ansible_jobs.playbook_name column: %v", err)
+		hasJobPlaybookName = true // fail safe: never backfill on uncertainty
+	}
+
 	// Run GORM AutoMigrate to create/update tables. The model list is the shared
 	// models.AllModels() source of truth (also used by integration tests) so schema drift
 	// between the app and the tests is impossible.
@@ -250,6 +259,17 @@ func main() {
 			logger.Warnf("Failed to backfill runs.run_triggers_fired_at: %v", err)
 		} else {
 			logger.Info("Backfilled runs.run_triggers_fired_at for pre-existing applied runs (tfe_run_trigger cutover)")
+		}
+	}
+
+	// One-time backfill: a job created before playbook_name existed takes the name of the playbook
+	// it still links to. A job whose playbook was already deleted has no name to recover.
+	if !hasJobPlaybookName {
+		if err := db.Exec(`UPDATE ansible_jobs SET playbook_name = p.name FROM ansible_playbooks p
+			WHERE ansible_jobs.playbook_id = p.id AND COALESCE(ansible_jobs.playbook_name, '') = ''`).Error; err != nil {
+			logger.Warnf("Failed to backfill ansible_jobs.playbook_name: %v", err)
+		} else {
+			logger.Info("Backfilled ansible_jobs.playbook_name for pre-existing jobs")
 		}
 	}
 

@@ -28,6 +28,7 @@
           "job-type": "run",
           "limit": "",
           "name": "patch-linux-fleet - 2026-08-31 17:41",
+          "playbook-name": "patch-baseline",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -46,6 +47,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -87,6 +94,7 @@
           "job-type": "run",
           "limit": "",
           "name": "rotate-certificates - 2026-08-31 11:01",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -105,6 +113,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {

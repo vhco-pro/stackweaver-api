@@ -97,6 +97,7 @@
         "module": "shell",
         "module-args": "uptime",
         "name": "Ad hoc: shell",
+        "playbook-name": "",
         "runner-id": null,
         "skip-tags": "",
         "slice-count": 0,

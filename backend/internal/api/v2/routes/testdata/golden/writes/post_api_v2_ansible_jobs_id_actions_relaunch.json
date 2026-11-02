@@ -35,6 +35,7 @@
         "job-type": "run",
         "limit": "",
         "name": "Relaunch: baseline-compliance - \u003ctimestamp\u003e",
+        "playbook-name": "site",
         "runner-id": null,
         "skip-tags": "",
         "slice-count": 0,

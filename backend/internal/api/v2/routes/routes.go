@@ -1267,6 +1267,10 @@ func SetupV2Routes(
 	// Initialize Ansible repositories for dashboard (needed for stats)
 	ansibleInventoryRepo := repository.NewAnsibleInventoryRepository(db)
 	ansiblePlaybookRepo := repository.NewAnsiblePlaybookRepository(db)
+	// A deleted playbook's objects (its cached snapshot and uploaded content) go with it.
+	if storageClient != nil {
+		ansiblePlaybookRepo.SetStorage(storageClient)
+	}
 	ansibleJobTemplateRepo := repository.NewAnsibleJobTemplateRepository(db)
 	ansibleJobRepo := repository.NewAnsibleJobRepository(db)
 	ansibleCredentialRepo := repository.NewAnsibleCredentialRepository(db)

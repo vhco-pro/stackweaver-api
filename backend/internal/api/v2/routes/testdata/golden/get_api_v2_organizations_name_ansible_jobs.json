@@ -28,6 +28,7 @@
           "job-type": "run",
           "limit": "",
           "name": "deploy-web-tier - 2026-08-25 09:48",
+          "playbook-name": "deploy-app",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -46,6 +47,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -87,6 +94,7 @@
           "job-type": "run",
           "limit": "",
           "name": "patch-linux-fleet - 2026-08-28 10:40",
+          "playbook-name": "patch-baseline",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -105,6 +113,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -146,6 +160,7 @@
           "job-type": "run",
           "limit": "",
           "name": "patch-linux-fleet - 2026-08-26 09:37",
+          "playbook-name": "patch-baseline",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -164,6 +179,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -205,6 +226,7 @@
           "job-type": "run",
           "limit": "",
           "name": "deploy-web-tier - 2026-08-27 09:13",
+          "playbook-name": "deploy-app",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -223,6 +245,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -264,6 +292,7 @@
           "job-type": "run",
           "limit": "",
           "name": "deploy-web-tier - 2026-08-24 16:50",
+          "playbook-name": "deploy-app",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -282,6 +311,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -323,6 +358,7 @@
           "job-type": "run",
           "limit": "",
           "name": "patch-linux-fleet - 2026-08-26 09:05",
+          "playbook-name": "patch-baseline",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -341,6 +377,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -382,6 +424,7 @@
           "job-type": "run",
           "limit": "",
           "name": "patch-linux-fleet - 2026-08-27 07:14",
+          "playbook-name": "patch-baseline",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -400,6 +443,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -441,6 +490,7 @@
           "job-type": "run",
           "limit": "",
           "name": "deploy-web-tier - 2026-08-25 16:42",
+          "playbook-name": "deploy-app",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -459,6 +509,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -500,6 +556,7 @@
           "job-type": "run",
           "limit": "",
           "name": "rotate-certificates - 2026-08-29 07:49",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -518,6 +575,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -559,6 +622,7 @@
           "job-type": "run",
           "limit": "",
           "name": "baseline-compliance - 2026-08-23 08:10",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -577,6 +641,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -618,6 +688,7 @@
           "job-type": "run",
           "limit": "",
           "name": "baseline-compliance - 2026-08-23 17:43",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -636,6 +707,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -677,6 +754,7 @@
           "job-type": "run",
           "limit": "",
           "name": "rotate-certificates - 2026-08-29 14:44",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -695,6 +773,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -736,6 +820,7 @@
           "job-type": "run",
           "limit": "",
           "name": "deploy-web-tier - 2026-08-26 10:24",
+          "playbook-name": "deploy-app",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -754,6 +839,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -795,6 +886,7 @@
           "job-type": "run",
           "limit": "",
           "name": "deploy-web-tier - 2026-08-25 12:12",
+          "playbook-name": "deploy-app",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -813,6 +905,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -854,6 +952,7 @@
           "job-type": "run",
           "limit": "",
           "name": "deploy-web-tier - 2026-08-30 07:46",
+          "playbook-name": "deploy-app",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -872,6 +971,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -913,6 +1018,7 @@
           "job-type": "run",
           "limit": "",
           "name": "patch-linux-fleet - 2026-08-31 17:41",
+          "playbook-name": "patch-baseline",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -931,6 +1037,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -972,6 +1084,7 @@
           "job-type": "run",
           "limit": "",
           "name": "rotate-certificates - 2026-08-31 11:01",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -990,6 +1103,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -1031,6 +1150,7 @@
           "job-type": "run",
           "limit": "",
           "name": "rotate-certificates - 2026-08-24 12:05",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -1049,6 +1169,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -1090,6 +1216,7 @@
           "job-type": "run",
           "limit": "",
           "name": "baseline-compliance - 2026-08-30 17:24",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -1108,6 +1235,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
@@ -1149,6 +1282,7 @@
           "job-type": "run",
           "limit": "",
           "name": "baseline-compliance - 2026-08-23 11:01",
+          "playbook-name": "site",
           "runner-id": null,
           "skip-tags": "",
           "slice-count": "\u003cnumber\u003e",
@@ -1167,6 +1301,12 @@
             "data": {
               "id": "\u003cuuid\u003e",
               "type": "ansible-inventories"
+            }
+          },
+          "playbook": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-playbooks"
             }
           },
           "project": {
