@@ -275,7 +275,7 @@ func goldenDB(t *testing.T) (*gorm.DB, string) {
 		}
 		// Scoped to the single generated name, never an unqualified DROP.
 		if err := admin.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %q (FORCE)", name)).Error; err != nil {
-			t.Logf("drop database %s: %v", name, err)
+			t.Errorf("drop database %s: %v", name, err)
 		}
 		if sqlDB, err := admin.DB(); err == nil {
 			_ = sqlDB.Close()

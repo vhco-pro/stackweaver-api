@@ -1241,7 +1241,7 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		resourceDestructions = phaseState.Summary.Destructions
 	} else if h.storageClient != nil {
 		// Fallback: parse apply logs from storage (e.g. self-hosted destroy runs) so apply-resources and status update
-		logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
+		logsKey := models.RunLogKey(run.ID, "apply")
 		if logsBytes, getErr := h.storageClient.Get(c.Request.Context(), logsKey); getErr == nil && len(logsBytes) > 0 {
 			logsStr := string(logsBytes)
 			var plannedResources []logparser.PlannedResource
@@ -1468,7 +1468,7 @@ func (h *RunHandlerV2) fetchPhaseLogs(c *gin.Context, runID, phase string, offse
 		return nil, false
 	}
 
-	logsKey := fmt.Sprintf("runs/%s/logs/%s.log", runID, phase)
+	logsKey := models.RunLogKey(runID, phase)
 	stored, err := h.storageClient.Get(c.Request.Context(), logsKey)
 	if err != nil {
 		// TFE returns 200 OK with an empty body when logs do not exist yet.
@@ -1578,7 +1578,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
-			logsKey := fmt.Sprintf("runs/%s/logs/%s.log", run.ID, run.Operation)
+			logsKey := models.RunLogKey(run.ID, string(run.Operation))
 			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				// Return 200 OK with empty body when logs don't exist
@@ -1655,7 +1655,7 @@ func (h *RunHandlerV2) GetPlanLogs(c *gin.Context) {
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
-			logsKey := fmt.Sprintf("runs/%s/logs/plan.log", run.ID)
+			logsKey := models.RunLogKey(run.ID, "plan")
 			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
@@ -1737,7 +1737,7 @@ func (h *RunHandlerV2) GetApplyLogs(c *gin.Context) {
 	default:
 		// Unknown execution mode, try to get logs from storage anyway
 		if h.storageClient != nil {
-			logsKey := fmt.Sprintf("runs/%s/logs/apply.log", run.ID)
+			logsKey := models.RunLogKey(run.ID, "apply")
 			logs, err = h.storageClient.Get(c.Request.Context(), logsKey)
 			if err != nil {
 				c.Data(http.StatusOK, "text/plain", []byte(""))
@@ -2346,7 +2346,7 @@ func (h *RunHandlerV2) createConfigurationVersionFromVCS(ctx context.Context, wo
 		}
 	}()
 
-	storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+	storageKey := models.ConfigurationTarballKey(configVersion.ID)
 	if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 		return "", fmt.Errorf("failed to upload configuration: %w", err)
 	}

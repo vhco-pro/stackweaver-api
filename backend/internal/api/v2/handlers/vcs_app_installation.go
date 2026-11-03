@@ -593,7 +593,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 				return
 			}
 
-			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+			storageKey := models.ConfigurationTarballKey(configVersion.ID)
 			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 				logger.Errorf("Failed to upload config for workspace %s: %v", ws.ID, err)
 				configVersion.Status = models.ConfigurationVersionStatusErrored
@@ -860,7 +860,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 				return
 			}
 
-			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+			storageKey := models.ConfigurationTarballKey(configVersion.ID)
 			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
 				logger.Errorf("Failed to upload config for workspace %s: %v", ws.ID, err)
 				configVersion.Status = models.ConfigurationVersionStatusErrored
@@ -1757,7 +1757,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 				}
 			}()
 
-			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+			storageKey := models.ConfigurationTarballKey(configVersion.ID)
 			if h.storageClient == nil {
 				logger.Errorf("storageClient is nil, cannot upload configuration for workspace %s", ws.ID)
 				// Mark configuration version as errored since we can't upload
@@ -2215,7 +2215,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 				}
 			}()
 
-			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+			storageKey := models.ConfigurationTarballKey(configVersion.ID)
 			if h.storageClient == nil {
 				logger.Errorf("storageClient is nil, cannot upload configuration for workspace %s", ws.ID)
 				configVersion.Status = models.ConfigurationVersionStatusErrored

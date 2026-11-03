@@ -2169,7 +2169,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	// uploaded to another workspace finds none, and the runner is handed none of its code.
 	if run.ConfigurationVersionID != nil && h.storageClient != nil {
 		if configVersion, cvErr := h.runConfigurationVersion(&run); cvErr == nil {
-			storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+			storageKey := models.ConfigurationTarballKey(configVersion.ID)
 			ctx := context.Background()
 			if data, err := h.storageClient.Get(ctx, storageKey); err == nil {
 				response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
