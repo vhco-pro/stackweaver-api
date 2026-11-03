@@ -102,9 +102,13 @@ func (f *platformAdminFixture) user(t *testing.T, role string) *models.User {
 	if err := f.db.Create(u).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	// Users are created after the organizations, so this runs first: the user's team and
+	// organization memberships have to go here, or fk_organization_members_user refuses the user.
 	t.Cleanup(func() {
 		f.db.Where("resource_type = ? AND resource_id = ?", "user", u.ID).Delete(&models.AuditLog{})
 		f.db.Where("user_id = ?", u.ID).Delete(&models.APIKey{})
+		f.db.Where("user_id = ?", u.ID).Delete(&models.TeamMember{})
+		f.db.Where("user_id = ?", u.ID).Delete(&models.OrganizationMember{})
 		f.db.Where("id = ?", u.ID).Delete(&models.User{})
 	})
 	return u

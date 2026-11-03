@@ -266,7 +266,7 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 
 	// Store configuration files in MinIO
 	// Path: configuration-versions/{config_version_id}/config.tar.gz
-	storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", configVersion.ID)
+	storageKey := models.ConfigurationTarballKey(configVersion.ID)
 	if h.storageClient == nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Storage client not initialized")
 		return

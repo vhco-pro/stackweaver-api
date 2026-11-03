@@ -150,7 +150,7 @@ func (h *ConfigurationVersionHandlerV2) DownloadConfigurationVersion(c *gin.Cont
 		taskError(c, http.StatusServiceUnavailable, "Service Unavailable", "Object storage is not configured")
 		return
 	}
-	storageKey := fmt.Sprintf("configuration-versions/%s/config.tar.gz", cv.ID)
+	storageKey := models.ConfigurationTarballKey(cv.ID)
 	stream, err := h.storageClient.GetStream(c.Request.Context(), storageKey)
 	if err != nil {
 		taskError(c, http.StatusNotFound, "Not Found", "Configuration archive not found (was it uploaded?)")

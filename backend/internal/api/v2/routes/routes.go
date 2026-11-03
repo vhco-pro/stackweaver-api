@@ -557,9 +557,12 @@ func SetupV2Routes(
 	if err != nil {
 		logger.Warnf("Failed to initialize storage: %v (storage features will be limited)", err)
 	}
-	// AUD-053: let workspace deletion prune the workspace's stored state files + run logs.
+	// AUD-053: a delete prunes the objects of what it removes: state files, run logs, plans,
+	// configuration tarballs, playbook content and registry artifacts.
 	if storageClient != nil {
 		workspaceRepo.SetStorage(storageClient)
+		projectRepo.SetStorage(storageClient)
+		orgRepo.SetStorage(storageClient)
 	}
 
 	configVersionHandler := terraformHandlers.NewConfigurationVersionHandlerV2(configVersionRepo, workspaceRepo, authService, storageClient, rbacService)
