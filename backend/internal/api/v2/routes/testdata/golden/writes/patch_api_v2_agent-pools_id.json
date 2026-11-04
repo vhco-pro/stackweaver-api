@@ -32,12 +32,40 @@
               "type": "object",
               "nullable": true,
               "properties": {
+                "cpu-limit": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "keep-failed-jobs-for": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "limits-required": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "local-readthrough": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "max-concurrent-jobs": {
+                  "type": "integer",
+                  "nullable": true
+                },
+                "memory-limit": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "name": {
                   "type": "string",
                   "nullable": true
                 },
                 "organization-scoped": {
                   "type": "boolean",
+                  "nullable": true
+                },
+                "placement-group": {
+                  "type": "string",
                   "nullable": true
                 }
               }
@@ -129,7 +157,13 @@
     "data": {
       "attributes": {
         "agent-count": 1,
+        "cpu-limit": "",
         "created-at": "\u003ctimestamp\u003e",
+        "keep-failed-jobs-for": 0,
+        "kind": "customer",
+        "limits-required": false,
+        "local-readthrough": true,
+        "memory-limit": "",
         "name": "golden-write-renamed-pool",
         "organization-scoped": false
       },

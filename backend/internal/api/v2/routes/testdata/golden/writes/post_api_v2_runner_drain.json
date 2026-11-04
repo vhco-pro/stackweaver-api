@@ -1,0 +1,24 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/drain",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "runner_id": "\u003cuuid\u003e"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "runner_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner_id"
+      ]
+    },
+    "schema_source": "type",
+    "bound_type": "runnercontract.DrainRequest"
+  },
+  "status": 202
+}

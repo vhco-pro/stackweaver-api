@@ -160,6 +160,21 @@ func (h *StateVersionHandlerV2) stateVersionResource(c *gin.Context, v *models.S
 	}
 }
 
+// requestScheme is the scheme the client used to reach the API: the one a TLS-terminating proxy
+// reports in X-Forwarded-Proto (only http or https is taken, the leftmost value), else the
+// connection's own. Behind an https ingress the API sees plain HTTP, and an http:// URL handed
+// back sends the client through a redirect that drops its credential.
+func requestScheme(c *gin.Context) string {
+	first, _, _ := strings.Cut(c.GetHeader("X-Forwarded-Proto"), ",")
+	if scheme := strings.ToLower(strings.TrimSpace(first)); scheme == "http" || scheme == "https" {
+		return scheme
+	}
+	if c.Request.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
 // hostedStateDownloadURL returns the API URL for downloading state (TFE hosted-state-download-url).
 // Terraform fetches state from this URL; it must be reachable (use API URL, not internal MinIO).
 func (h *StateVersionHandlerV2) hostedStateDownloadURL(c *gin.Context, v *models.StateVersion) string {
@@ -167,11 +182,7 @@ func (h *StateVersionHandlerV2) hostedStateDownloadURL(c *gin.Context, v *models
 	if host == "" {
 		host = c.Request.Host
 	}
-	scheme := "https"
-	if c.GetHeader("X-Forwarded-Proto") == "http" || c.Request.TLS == nil {
-		scheme = "http"
-	}
-	return fmt.Sprintf("%s://%s/api/v2/state-versions/%s/download", scheme, host, v.ID)
+	return fmt.Sprintf("%s://%s/api/v2/state-versions/%s/download", requestScheme(c), host, v.ID)
 }
 
 // ListByWorkspace lists state versions for a workspace (TFE-compatible)

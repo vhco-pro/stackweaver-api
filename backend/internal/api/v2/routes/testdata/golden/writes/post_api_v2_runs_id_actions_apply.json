@@ -14,6 +14,8 @@
           "is-discardable": false,
           "is-force-cancelable": false
         },
+        "agent-pool-id": "\u003cuuid\u003e",
+        "agent-pool-name": "hosted",
         "created-at": "\u003ctimestamp\u003e",
         "has-changes": false,
         "is-destroy": false,

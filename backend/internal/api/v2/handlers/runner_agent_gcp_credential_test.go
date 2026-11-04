@@ -6,7 +6,7 @@
 // content and to set none of those variables itself: a GCP_AUTH_KIND of the API's own would
 // arrive beside the runner's and one of the two would be wrong. The runner's half, from this
 // document to ansible-playbook's environment, is TestRunAnsiblePlaybook_GCPCredential in
-// cmd/ansible-runner.
+// internal/executor/ansibleexec.
 //
 // Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Every row is created under
 // a unique name and removed by primary key. Run with:

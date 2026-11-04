@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 )
 
 // Typed organization-membership wire shapes (#760).
@@ -138,6 +139,19 @@ type AgentPoolAttributes struct {
 	AgentCount         int    `json:"agent-count"`
 	OrganizationScoped bool   `json:"organization-scoped"`
 	CreatedAt          string `json:"created-at"`
+	// The native pool settings (#933, D4, D7, D15), beside the TFE attributes: how long a failed
+	// job's container or pod is kept, each job's limits and whether they are required, and the
+	// launcher's local read-through cache.
+	Kind              string `json:"kind"`
+	KeepFailedJobsFor int    `json:"keep-failed-jobs-for"`
+	CPULimit          string `json:"cpu-limit"`
+	MemoryLimit       string `json:"memory-limit"`
+	LimitsRequired    bool   `json:"limits-required"`
+	LocalReadthrough  bool   `json:"local-readthrough"`
+	// MaxConcurrentJobs and PlacementGroup are a hosted pool's cap and group (D9), written by a
+	// platform administrator only; absent on a customer pool.
+	MaxConcurrentJobs *int    `json:"max-concurrent-jobs,omitempty"`
+	PlacementGroup    *string `json:"placement-group,omitempty"`
 }
 
 // AgentPoolRelationships: the scoping relations appear only when populated.
@@ -154,16 +168,55 @@ type AgentAttributes struct {
 	IPAddress  string     `json:"ip-address"`
 	Status     string     `json:"status"`
 	LastPingAt *time.Time `json:"last-ping-at"`
+	// Driver and NetworkMode are what the agent's launcher reported at registration (#933, D4,
+	// D5, AC22): read-only, since a launcher's network mode is its installer's setting and no
+	// route changes it.
+	Driver      string `json:"driver"`
+	NetworkMode string `json:"network-mode"`
+	LauncherSettingsAttributes
+}
+
+// LauncherSettingsAttributes are a launcher's hosted.strict, cache verification mode and node cache
+// as it reported them at registration (#933, D0, D15), read-only.
+type LauncherSettingsAttributes struct {
+	HostedStrict        bool   `json:"hosted-strict"`
+	CacheVerification   string `json:"cache-verification"`
+	LocalCache          bool   `json:"local-cache"`
+	LocalCacheSizeLimit int64  `json:"local-cache-size-limit"`
+}
+
+// launcherSettings reads a runner's LauncherSettingsAttributes.
+func launcherSettings(r *models.Runner) LauncherSettingsAttributes {
+	return LauncherSettingsAttributes{
+		HostedStrict: r.HostedStrict, CacheVerification: r.CacheVerification,
+		LocalCache: r.LocalCache, LocalCacheSizeLimit: r.LocalCacheSizeLimit,
+	}
 }
 
 // QueueDepthAttributes is the StackWeaver queue-depths extension.
 type QueueDepthAttributes struct {
 	PendingTerraformJobs int64 `json:"pending-terraform-jobs"`
 	PendingAnsibleJobs   int64 `json:"pending-ansible-jobs"`
+	PendingWorkItems     int64 `json:"pending-work-items"`
 	TotalPending         int64 `json:"total-pending"`
 	BusyRunners          int64 `json:"busy-runners"`
 	TotalRunners         int64 `json:"total-runners"`
 	IdleRunners          int64 `json:"idle-runners"`
+	// PendingByEngine, Capacity, InFlight and Headroom size the pool's launchers by engine (#933,
+	// D11): what is waiting per engine, the jobs the online launchers take at once, what they hold
+	// now and what they have left.
+	PendingByEngine QueueDepthEngines `json:"pending-by-engine"`
+	Capacity        int64             `json:"capacity"`
+	InFlight        int64             `json:"in-flight"`
+	Headroom        int64             `json:"headroom"`
+}
+
+// QueueDepthEngines is a pool's pending work by the engine it needs; any is work every launcher
+// takes (the snapshot syncs).
+type QueueDepthEngines struct {
+	Tofu    int64 `json:"tofu"`
+	Ansible int64 `json:"ansible"`
+	Any     int64 `json:"any"`
 }
 
 // VCSConnectionAttributes: snake_case members, a StackWeaver-native surface predating the
@@ -247,14 +300,21 @@ type ProjectAttributes struct {
 	IsUnified            bool                     `json:"is-unified"`
 	DefaultExecutionMode string                   `json:"default-execution-mode"`
 	SettingOverwrites    ProjectSettingOverwrites `json:"setting-overwrites"`
-	CreatedAt            string                   `json:"created-at"`
-	UpdatedAt            string                   `json:"updated-at"`
-	WorkspacesCount      *int                     `json:"workspaces-count,omitempty"`
-	InventoriesCount     *int                     `json:"inventories-count,omitempty"`
-	PlaybooksCount       *int                     `json:"playbooks-count,omitempty"`
-	JobTemplatesCount    *int                     `json:"job-templates-count,omitempty"`
-	WorkflowsCount       *int                     `json:"workflows-count,omitempty"`
-	CredentialsCount     *int                     `json:"credentials-count,omitempty"`
+	// Stackweaver extensions: the project's level of the level rule (empty or zero inherits).
+	TofuVersion string `json:"tofu-version"`
+	RunTimeout  int    `json:"run-timeout"`
+	// The project's run images, one per engine, and identity binding (#933, D6, D8); null inherits.
+	TofuRunImageID    *string `json:"tofu-run-image-id"`
+	AnsibleRunImageID *string `json:"ansible-run-image-id"`
+	IdentityBindingID *string `json:"identity-binding-id"`
+	CreatedAt         string  `json:"created-at"`
+	UpdatedAt         string  `json:"updated-at"`
+	WorkspacesCount   *int    `json:"workspaces-count,omitempty"`
+	InventoriesCount  *int    `json:"inventories-count,omitempty"`
+	PlaybooksCount    *int    `json:"playbooks-count,omitempty"`
+	JobTemplatesCount *int    `json:"job-templates-count,omitempty"`
+	WorkflowsCount    *int    `json:"workflows-count,omitempty"`
+	CredentialsCount  *int    `json:"credentials-count,omitempty"`
 }
 
 // ProjectRelationships: default-agent-pool is always present, {data: null} when unset (TFE
@@ -360,7 +420,14 @@ type RunnerAttributes struct {
 	LastHeartbeatAt      *string                  `json:"last-heartbeat-at"`
 	RegisteredAt         string                   `json:"registered-at"`
 	AgentPoolName        string                   `json:"agent-pool-name,omitempty"`
-	RecentJobs           *[]RunnerRecentJob       `json:"recent_jobs,omitempty"`
+	// Driver and NetworkMode are what the runner's launcher reported at registration, read-only
+	// (#933, D4, D5, AC22).
+	Driver      string `json:"driver"`
+	NetworkMode string `json:"network-mode"`
+	LauncherSettingsAttributes
+	// DrainRequestedAt is when the runner was asked to drain; null while it is not (D11).
+	DrainRequestedAt *string            `json:"drain-requested-at"`
+	RecentJobs       *[]RunnerRecentJob `json:"recent_jobs,omitempty"`
 }
 
 // OrgAndAgentPoolRelationships is the fixed relation pair of a runners resource.
@@ -750,31 +817,11 @@ type AccountPermissions struct {
 	CanCreateOrganizations bool `json:"can-create-organizations"`
 }
 
-// AgentJobVCS tells a self-hosted agent where to clone from when the run has no
-// configuration version.
-type AgentJobVCS struct {
-	RepoURL    string `json:"repo_url"`
-	Branch     string `json:"branch"`
-	Repository string `json:"repository"`
-}
+// AgentJobVCS is runnercontract.VCS, the shared runner wire contract.
+type AgentJobVCS = runnercontract.VCS
 
-// AgentJobArtifacts is the self-hosted agent's job payload. This is the agent protocol,
-// not a public API: every member past the first four is populated only when it applies,
-// and older agents ignore members they do not know.
-type AgentJobArtifacts struct {
-	JobID            string            `json:"job_id"`
-	JobType          string            `json:"job_type"`
-	TofuVersion      string            `json:"tofu_version"`
-	WorkingDirectory string            `json:"working_directory"`
-	ConfigTarball    string            `json:"config_tarball,omitempty"`
-	VCS              *AgentJobVCS      `json:"vcs,omitempty"`
-	Variables        map[string]string `json:"variables,omitempty"`
-	// VariablesHCL tells the agent which variables are HCL-typed so it writes them
-	// unquoted in tfvars (AUD-022). Separate from Variables so older agents keep working.
-	VariablesHCL    []string          `json:"variables_hcl,omitempty"`
-	EnvironmentVars map[string]string `json:"environment_vars,omitempty"`
-	StateJSON       string            `json:"state_json,omitempty"`
-}
+// AgentJobArtifacts is runnercontract.TofuArtifacts, the shared runner wire contract.
+type AgentJobArtifacts = runnercontract.TofuArtifacts
 
 // AuthorizeParamsResponse returns the OIDC parameters the login SPA needs. Every member
 // past authRequest is passed through only when the original request carried it.

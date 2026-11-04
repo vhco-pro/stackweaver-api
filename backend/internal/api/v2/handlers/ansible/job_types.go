@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/placement"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -61,6 +62,9 @@ type JobAttributes struct {
 
 	AgentPoolName string `json:"agent-pool-name,omitempty"`
 	RunnerName    string `json:"runner-name,omitempty"`
+
+	// Placement is where the job's latest attempt ran (#933, D4, AC77), read-only.
+	Placement placement.Attributes `json:"placement"`
 }
 
 // JobInventorySyncWarning is one entry of a job's inventory-sync-warnings: the source, when its
@@ -244,6 +248,8 @@ type JobTemplateAttributes struct {
 	ScheduleCron      string                    `json:"schedule-cron"`
 	Enabled           bool                      `json:"enabled"`
 	TimeoutSeconds    int                       `json:"timeout-seconds"`
+	RunImageID        *string                   `json:"run-image-id"`
+	IdentityBindingID *string                   `json:"identity-binding-id"`
 	AllowSimultaneous bool                      `json:"allow-simultaneous"`
 	RetentionDays     *int                      `json:"retention-days"`
 	JobSliceCount     int                       `json:"job-slice-count"`
@@ -437,30 +443,35 @@ type HostRelationships struct {
 
 // InventorySourceAttributes is the inventory-sources attribute block.
 type InventorySourceAttributes struct {
-	Name                    string                       `json:"name"`
-	Description             string                       `json:"description"`
-	SourceType              string                       `json:"source-type"`
-	Config                  models.InventorySourceConfig `json:"config"`
-	UpdateOnLaunch          bool                         `json:"update-on-launch"`
-	UpdateCacheTimeout      int                          `json:"update-cache-timeout"`
-	Overwrite               bool                         `json:"overwrite"`
-	OverwriteVars           bool                         `json:"overwrite-vars"`
-	Verbosity               int                          `json:"verbosity"`
-	GroupByInstanceID       bool                         `json:"group-by-instance-id"`
-	GroupByRegion           bool                         `json:"group-by-region"`
-	GroupByAvailabilityZone bool                         `json:"group-by-availability-zone"`
-	GroupByTag              string                       `json:"group-by-tag"`
-	HostnameVar             string                       `json:"hostname-var"`
-	InstanceFilters         string                       `json:"instance-filters"`
-	SyncSchedule            string                       `json:"sync-schedule"`
-	Status                  string                       `json:"status"`
-	LastSyncAt              *time.Time                   `json:"last-sync-at"`
-	LastSyncError           string                       `json:"last-sync-error"`
-	LastSyncLog             string                       `json:"last-sync-log"`
-	HostsCount              int                          `json:"hosts-count"`
-	Enabled                 bool                         `json:"enabled"`
-	CreatedAt               string                       `json:"created-at"`
-	UpdatedAt               string                       `json:"updated-at"`
+	Name               string                       `json:"name"`
+	Description        string                       `json:"description"`
+	SourceType         string                       `json:"source-type"`
+	Config             models.InventorySourceConfig `json:"config"`
+	UpdateOnLaunch     bool                         `json:"update-on-launch"`
+	UpdateCacheTimeout int                          `json:"update-cache-timeout"`
+	Overwrite          bool                         `json:"overwrite"`
+	OverwriteVars      bool                         `json:"overwrite-vars"`
+	Verbosity          int                          `json:"verbosity"`
+	// SyncTimeout is the source's sync time limit in seconds; 0 defers to the project, the
+	// organization and the deployment (#933, D0).
+	SyncTimeout             int        `json:"sync-timeout"`
+	RunImageID              *string    `json:"run-image-id"`
+	IdentityBindingID       *string    `json:"identity-binding-id"`
+	GroupByInstanceID       bool       `json:"group-by-instance-id"`
+	GroupByRegion           bool       `json:"group-by-region"`
+	GroupByAvailabilityZone bool       `json:"group-by-availability-zone"`
+	GroupByTag              string     `json:"group-by-tag"`
+	HostnameVar             string     `json:"hostname-var"`
+	InstanceFilters         string     `json:"instance-filters"`
+	SyncSchedule            string     `json:"sync-schedule"`
+	Status                  string     `json:"status"`
+	LastSyncAt              *time.Time `json:"last-sync-at"`
+	LastSyncError           string     `json:"last-sync-error"`
+	LastSyncLog             string     `json:"last-sync-log"`
+	HostsCount              int        `json:"hosts-count"`
+	Enabled                 bool       `json:"enabled"`
+	CreatedAt               string     `json:"created-at"`
+	UpdatedAt               string     `json:"updated-at"`
 }
 
 // InventorySourceRelationships: the inventory always, the cloud credential when bound.

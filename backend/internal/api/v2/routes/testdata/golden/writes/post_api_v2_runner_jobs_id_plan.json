@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/jobs/:id/plan",
+  "request": {
+    "content_type": "application/octet-stream",
+    "binary": true
+  },
+  "status": 200,
+  "response": {
+    "status": "stored"
+  }
+}

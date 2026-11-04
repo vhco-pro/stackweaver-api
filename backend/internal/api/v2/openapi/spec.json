@@ -29,6 +29,35 @@
           }
         }
       },
+      "agent-jit-tokens-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "expires-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "token": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "agent-pools-collection": {
         "type": "object",
         "properties": {
@@ -43,9 +72,27 @@
                     "agent-count": {
                       "type": "integer"
                     },
+                    "cpu-limit": {
+                      "type": "string"
+                    },
                     "created-at": {
                       "type": "string",
                       "format": "date-time"
+                    },
+                    "keep-failed-jobs-for": {
+                      "type": "integer"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "limits-required": {
+                      "type": "boolean"
+                    },
+                    "local-readthrough": {
+                      "type": "boolean"
+                    },
+                    "memory-limit": {
+                      "type": "string"
                     },
                     "name": {
                       "type": "string"
@@ -136,9 +183,27 @@
                   "agent-count": {
                     "type": "integer"
                   },
+                  "cpu-limit": {
+                    "type": "string"
+                  },
                   "created-at": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "keep-failed-jobs-for": {
+                    "type": "integer"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "limits-required": {
+                    "type": "boolean"
+                  },
+                  "local-readthrough": {
+                    "type": "boolean"
+                  },
+                  "memory-limit": {
+                    "type": "string"
                   },
                   "name": {
                     "type": "string"
@@ -238,6 +303,15 @@
                 "attributes": {
                   "type": "object",
                   "properties": {
+                    "cache-verification": {
+                      "type": "string"
+                    },
+                    "driver": {
+                      "type": "string"
+                    },
+                    "hosted-strict": {
+                      "type": "boolean"
+                    },
                     "ip-address": {
                       "type": "string"
                     },
@@ -245,7 +319,16 @@
                       "type": "string",
                       "format": "date-time"
                     },
+                    "local-cache": {
+                      "type": "boolean"
+                    },
+                    "local-cache-size-limit": {
+                      "type": "integer"
+                    },
                     "name": {
+                      "type": "string"
+                    },
+                    "network-mode": {
                       "type": "string"
                     },
                     "status": {
@@ -1775,6 +1858,9 @@
                     "host-config-key": {
                       "type": "string"
                     },
+                    "identity-binding-id": {
+                      "nullable": true
+                    },
                     "job-slice-count": {
                       "type": "integer"
                     },
@@ -1788,6 +1874,9 @@
                       "type": "string"
                     },
                     "retention-days": {
+                      "nullable": true
+                    },
+                    "run-image-id": {
                       "nullable": true
                     },
                     "schedule-cron": {
@@ -1961,6 +2050,11 @@
                   "host-config-key": {
                     "type": "string"
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
                   "job-slice-count": {
                     "type": "integer"
                   },
@@ -1975,6 +2069,11 @@
                   },
                   "retention-days": {
                     "type": "integer",
+                    "nullable": true
+                  },
+                  "run-image-id": {
+                    "type": "string",
+                    "format": "uuid",
                     "nullable": true
                   },
                   "schedule-cron": {
@@ -2170,6 +2269,47 @@
                     },
                     "name": {
                       "type": "string"
+                    },
+                    "placement": {
+                      "type": "object",
+                      "properties": {
+                        "attempt": {
+                          "type": "string"
+                        },
+                        "driver": {
+                          "type": "string"
+                        },
+                        "identity-binding-id": {
+                          "nullable": true
+                        },
+                        "image": {
+                          "type": "string"
+                        },
+                        "image-digest": {
+                          "type": "string"
+                        },
+                        "image-level": {
+                          "type": "string"
+                        },
+                        "node": {
+                          "type": "string"
+                        },
+                        "placement-id": {
+                          "type": "string"
+                        },
+                        "queue-cap": {
+                          "nullable": true
+                        },
+                        "queue-in-flight": {
+                          "nullable": true
+                        },
+                        "queue-position": {
+                          "nullable": true
+                        },
+                        "queue-reason": {
+                          "type": "string"
+                        }
+                      }
                     },
                     "playbook-name": {
                       "type": "string"
@@ -2405,6 +2545,47 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "placement": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "string"
+                      },
+                      "driver": {
+                        "type": "string"
+                      },
+                      "identity-binding-id": {
+                        "nullable": true
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "image-digest": {
+                        "type": "string"
+                      },
+                      "image-level": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      },
+                      "placement-id": {
+                        "type": "string"
+                      },
+                      "queue-cap": {
+                        "nullable": true
+                      },
+                      "queue-in-flight": {
+                        "nullable": true
+                      },
+                      "queue-position": {
+                        "nullable": true
+                      },
+                      "queue-reason": {
+                        "type": "string"
+                      }
+                    }
                   },
                   "playbook-name": {
                     "type": "string"
@@ -4509,6 +4690,93 @@
           }
         }
       },
+      "effective-settings-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "agent-pool-id": {
+                    "type": "object",
+                    "properties": {
+                      "level": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "execution-mode": {
+                    "type": "object",
+                    "properties": {
+                      "level": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "identity-binding-id": {
+                    "type": "object",
+                    "properties": {
+                      "level": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "run-image-id": {
+                    "type": "object",
+                    "properties": {
+                      "level": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "run-timeout": {
+                    "type": "object",
+                    "properties": {
+                      "level": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "tofu-version": {
+                    "type": "object",
+                    "properties": {
+                      "level": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "entitlement-sets-response": {
         "type": "object",
         "properties": {
@@ -4907,6 +5175,86 @@
         }
       },
       "get-api-v2-agent-pools-id-authentication-tokens-9c3bbd": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get-api-v2-agent-pools-id-identity-bindings-6441af": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get-api-v2-agent-pools-id-pull-secrets-742958": {
         "type": "object",
         "properties": {
           "data": {
@@ -6940,6 +7288,136 @@
       "head-health-3ad84b": {
         "nullable": true
       },
+      "hosted-capacities-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "in-flight": {
+                    "type": "integer"
+                  },
+                  "launchers-online": {
+                    "type": "integer"
+                  },
+                  "max-concurrent-jobs": {
+                    "type": "integer"
+                  },
+                  "placement-group": {
+                    "type": "string"
+                  },
+                  "pool-id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "queue-reason": {
+                    "type": "string"
+                  },
+                  "queued": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "identity-bindings-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "annotations": {
+                    "type": "object",
+                    "properties": {
+                      "azure.workload.identity/client-id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "eks.amazonaws.com/role-arn": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "declared-externally": {
+                    "type": "boolean"
+                  },
+                  "external-manager": {
+                    "type": "string"
+                  },
+                  "mechanism": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "object-present": {
+                    "nullable": true
+                  },
+                  "per-job-sa": {
+                    "type": "boolean"
+                  },
+                  "reference": {
+                    "type": "boolean"
+                  },
+                  "reported-at": {
+                    "nullable": true
+                  },
+                  "service-account": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "agent-pool": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "inventory-sources-collection": {
         "type": "object",
         "properties": {
@@ -6987,6 +7465,9 @@
                     "hosts-count": {
                       "type": "integer"
                     },
+                    "identity-binding-id": {
+                      "nullable": true
+                    },
                     "instance-filters": {
                       "type": "string"
                     },
@@ -7008,6 +7489,9 @@
                     "overwrite-vars": {
                       "type": "boolean"
                     },
+                    "run-image-id": {
+                      "nullable": true
+                    },
                     "source-type": {
                       "type": "string"
                     },
@@ -7016,6 +7500,9 @@
                     },
                     "sync-schedule": {
                       "type": "string"
+                    },
+                    "sync-timeout": {
+                      "type": "integer"
                     },
                     "update-cache-timeout": {
                       "type": "integer"
@@ -7145,6 +7632,9 @@
                   "hosts-count": {
                     "type": "integer"
                   },
+                  "identity-binding-id": {
+                    "nullable": true
+                  },
                   "instance-filters": {
                     "type": "string"
                   },
@@ -7166,6 +7656,11 @@
                   "overwrite-vars": {
                     "type": "boolean"
                   },
+                  "run-image-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
                   "source-type": {
                     "type": "string"
                   },
@@ -7174,6 +7669,9 @@
                   },
                   "sync-schedule": {
                     "type": "string"
+                  },
+                  "sync-timeout": {
+                    "type": "integer"
                   },
                   "update-cache-timeout": {
                     "type": "integer"
@@ -7943,8 +8441,14 @@
                     "ansible-job-retention-days": {
                       "type": "integer"
                     },
+                    "ansible-run-image-id": {
+                      "nullable": true
+                    },
                     "assessments-enforced": {
                       "type": "boolean"
+                    },
+                    "cache-size-limit": {
+                      "type": "integer"
                     },
                     "collaborator-auth-policy": {
                       "type": "string"
@@ -7971,6 +8475,9 @@
                     "external-id": {
                       "type": "string",
                       "format": "uuid"
+                    },
+                    "identity-binding-id": {
+                      "nullable": true
                     },
                     "max-ttl-enabled": {
                       "type": "boolean"
@@ -8082,6 +8589,9 @@
                         }
                       }
                     },
+                    "run-timeout": {
+                      "type": "integer"
+                    },
                     "send-passing-statuses-for-untriggered-speculative-plans": {
                       "type": "boolean"
                     },
@@ -8096,6 +8606,9 @@
                     },
                     "stacks-enabled": {
                       "type": "boolean"
+                    },
+                    "tofu-run-image-id": {
+                      "nullable": true
                     },
                     "two-factor-conformant": {
                       "type": "boolean"
@@ -8181,8 +8694,16 @@
                   "ansible-job-retention-days": {
                     "type": "integer"
                   },
+                  "ansible-run-image-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
                   "assessments-enforced": {
                     "type": "boolean"
+                  },
+                  "cache-size-limit": {
+                    "type": "integer"
                   },
                   "collaborator-auth-policy": {
                     "type": "string"
@@ -8209,6 +8730,11 @@
                   "external-id": {
                     "type": "string",
                     "format": "uuid"
+                  },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
                   },
                   "max-ttl-enabled": {
                     "type": "boolean"
@@ -8320,6 +8846,9 @@
                       }
                     }
                   },
+                  "run-timeout": {
+                    "type": "integer"
+                  },
                   "send-passing-statuses-for-untriggered-speculative-plans": {
                     "type": "boolean"
                   },
@@ -8334,6 +8863,11 @@
                   },
                   "stacks-enabled": {
                     "type": "boolean"
+                  },
+                  "tofu-run-image-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
                   },
                   "two-factor-conformant": {
                     "type": "boolean"
@@ -8530,12 +9064,40 @@
                 "type": "object",
                 "nullable": true,
                 "properties": {
+                  "cpu-limit": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "keep-failed-jobs-for": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "limits-required": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "local-readthrough": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "max-concurrent-jobs": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "memory-limit": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string",
                     "nullable": true
                   },
                   "organization-scoped": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "placement-group": {
+                    "type": "string",
                     "nullable": true
                   }
                 }
@@ -8970,6 +9532,10 @@
                     "type": "string",
                     "nullable": true
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "instance-filters": {
                     "type": "string",
                     "nullable": true
@@ -8986,12 +9552,20 @@
                     "type": "boolean",
                     "nullable": true
                   },
+                  "run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "source-type": {
                     "type": "string",
                     "nullable": true
                   },
                   "sync-schedule": {
                     "type": "string",
+                    "nullable": true
+                  },
+                  "sync-timeout": {
+                    "type": "integer",
                     "nullable": true
                   },
                   "update-cache-timeout": {
@@ -9057,6 +9631,10 @@
                     "type": "integer",
                     "nullable": true
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "job-slice-count": {
                     "type": "integer",
                     "nullable": true
@@ -9075,6 +9653,10 @@
                   },
                   "retention-days": {
                     "type": "integer",
+                    "nullable": true
+                  },
+                  "run-image-id": {
+                    "type": "string",
                     "nullable": true
                   },
                   "schedule-cron": {
@@ -9482,6 +10064,49 @@
           }
         }
       },
+      "patch-api-v2-identity-bindings-id-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "annotations": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": true
+                  },
+                  "mechanism": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "per-job-sa": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "reference": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "service-account": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "patch-api-v2-notification-configurations-id-request": {
         "type": "object",
         "properties": {
@@ -9608,6 +10233,10 @@
               "attributes": {
                 "type": "object",
                 "properties": {
+                  "ansible-run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "default-agent-pool-id": {
                     "type": "string",
                     "nullable": true
@@ -9620,8 +10249,16 @@
                     "type": "string",
                     "nullable": true
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string",
+                    "nullable": true
+                  },
+                  "run-timeout": {
+                    "type": "integer",
                     "nullable": true
                   },
                   "setting-overwrites": {
@@ -9637,6 +10274,14 @@
                         "nullable": true
                       }
                     }
+                  },
+                  "tofu-run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "tofu-version": {
+                    "type": "string",
+                    "nullable": true
                   }
                 }
               },
@@ -9710,8 +10355,16 @@
                     "type": "integer",
                     "nullable": true
                   },
+                  "ansible-run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "assessments-enforced": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "cache-size-limit": {
+                    "type": "integer",
                     "nullable": true
                   },
                   "collaborator-auth-policy": {
@@ -9735,8 +10388,16 @@
                   "email": {
                     "type": "string"
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string"
+                  },
+                  "run-timeout": {
+                    "type": "integer",
+                    "nullable": true
                   },
                   "send-passing-statuses-for-untriggered-speculative-plans": {
                     "type": "boolean",
@@ -9744,6 +10405,10 @@
                   },
                   "speculative-plan-management-enabled": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "tofu-run-image-id": {
+                    "type": "string",
                     "nullable": true
                   },
                   "user-tokens-enabled": {
@@ -10020,11 +10685,19 @@
                     "type": "boolean",
                     "nullable": true
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string"
                   },
                   "queue-all-runs": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "run-image-id": {
+                    "type": "string",
                     "nullable": true
                   },
                   "run-timeout": {
@@ -10198,6 +10871,9 @@
                   "global-remote-state": {
                     "type": "boolean"
                   },
+                  "identity-binding-id": {
+                    "nullable": true
+                  },
                   "latest-change-at": {
                     "type": "string",
                     "format": "date-time"
@@ -10254,6 +10930,9 @@
                   },
                   "resource-count": {
                     "type": "integer"
+                  },
+                  "run-image-id": {
+                    "nullable": true
                   },
                   "run-timeout": {
                     "type": "integer"
@@ -10463,6 +11142,10 @@
               "attributes": {
                 "type": "object",
                 "properties": {
+                  "ansible-run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "default-agent-pool-id": {
                     "type": "string",
                     "nullable": true
@@ -10475,8 +11158,16 @@
                     "type": "string",
                     "nullable": true
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string",
+                    "nullable": true
+                  },
+                  "run-timeout": {
+                    "type": "integer",
                     "nullable": true
                   },
                   "setting-overwrites": {
@@ -10492,6 +11183,14 @@
                         "nullable": true
                       }
                     }
+                  },
+                  "tofu-run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "tofu-version": {
+                    "type": "string",
+                    "nullable": true
                   }
                 }
               },
@@ -10566,6 +11265,86 @@
           }
         }
       },
+      "patch-api-v2-pull-secrets-id-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "reference": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "registry": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "registry-credential-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "secret-name": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "patch-api-v2-run-images-id-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "digest": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "image": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "kind": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "registry-credential-id": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "patch-api-v2-runners-id-request": {
         "type": "object",
         "properties": {
@@ -10620,11 +11399,23 @@
                       "additionalProperties": true
                     }
                   },
+                  "cache-verification": {
+                    "type": "string"
+                  },
                   "current-jobs": {
                     "type": "integer"
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "drain-requested-at": {
+                    "nullable": true
+                  },
+                  "driver": {
+                    "type": "string"
+                  },
+                  "hosted-strict": {
+                    "type": "boolean"
                   },
                   "hostname": {
                     "type": "string"
@@ -10642,10 +11433,19 @@
                     "type": "string",
                     "format": "date-time"
                   },
+                  "local-cache": {
+                    "type": "boolean"
+                  },
+                  "local-cache-size-limit": {
+                    "type": "integer"
+                  },
                   "max-concurrent-jobs": {
                     "type": "integer"
                   },
                   "name": {
+                    "type": "string"
+                  },
+                  "network-mode": {
                     "type": "string"
                   },
                   "os-type": {
@@ -11384,11 +12184,19 @@
                     "type": "boolean",
                     "nullable": true
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string"
                   },
                   "queue-all-runs": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "run-image-id": {
+                    "type": "string",
                     "nullable": true
                   },
                   "run-timeout": {
@@ -11562,6 +12370,10 @@
                   "global-remote-state": {
                     "type": "boolean"
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "latest-change-at": {
                     "type": "string",
                     "format": "date-time"
@@ -11619,8 +12431,9 @@
                   "resource-count": {
                     "type": "integer"
                   },
-                  "run-timeout": {
-                    "type": "integer"
+                  "run-image-id": {
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "setting-overwrites": {
                     "type": "object",
@@ -11899,6 +12712,63 @@
           }
         }
       },
+      "placements-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "attempt": {
+                    "type": "integer"
+                  },
+                  "driver": {
+                    "type": "string"
+                  },
+                  "identity-binding-id": {
+                    "nullable": true
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "image-digest": {
+                    "type": "string"
+                  },
+                  "image-level": {
+                    "type": "string"
+                  },
+                  "node": {
+                    "type": "string"
+                  },
+                  "placement-id": {
+                    "type": "string"
+                  },
+                  "queue-cap": {
+                    "nullable": true
+                  },
+                  "queue-in-flight": {
+                    "nullable": true
+                  },
+                  "queue-position": {
+                    "nullable": true
+                  },
+                  "queue-reason": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "plans-response": {
         "type": "object",
         "properties": {
@@ -12002,6 +12872,58 @@
               "attributes": {
                 "type": "object",
                 "properties": {
+                  "deployment": {
+                    "type": "object",
+                    "properties": {
+                      "cache-size-limit": {
+                        "type": "integer"
+                      },
+                      "hosted-default-max-concurrent-jobs": {
+                        "type": "integer"
+                      },
+                      "images-allowed-registries": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      },
+                      "job-log-max-bytes": {
+                        "type": "integer"
+                      },
+                      "job-rate-limit": {
+                        "type": "object",
+                        "properties": {
+                          "burst": {
+                            "type": "integer"
+                          },
+                          "rps": {
+                            "type": "integer"
+                          }
+                        }
+                      },
+                      "mirror": {
+                        "nullable": true
+                      },
+                      "run-timeout-default": {
+                        "type": "integer"
+                      },
+                      "runner-rate-limit": {
+                        "type": "object",
+                        "properties": {
+                          "burst": {
+                            "type": "integer"
+                          },
+                          "rps": {
+                            "type": "integer"
+                          }
+                        }
+                      },
+                      "sync-timeout": {
+                        "type": "integer"
+                      }
+                    }
+                  },
                   "organization-creation": {
                     "type": "string"
                   }
@@ -12119,6 +13041,111 @@
                 "properties": {
                   "description": {
                     "type": "string"
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post-api-v2-agent-pools-id-identity-bindings-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "annotations": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": true
+                  },
+                  "mechanism": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "per-job-sa": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "reference": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "service-account": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post-api-v2-agent-pools-id-jit-token-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "expires-in": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post-api-v2-agent-pools-id-pull-secrets-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "reference": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "registry": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "registry-credential-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "secret-name": {
+                    "type": "string",
+                    "nullable": true
                   }
                 }
               },
@@ -12264,6 +13291,47 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "placement": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "integer"
+                      },
+                      "driver": {
+                        "type": "string"
+                      },
+                      "identity-binding-id": {
+                        "nullable": true
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "image-digest": {
+                        "type": "string"
+                      },
+                      "image-level": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      },
+                      "placement-id": {
+                        "type": "string"
+                      },
+                      "queue-cap": {
+                        "nullable": true
+                      },
+                      "queue-in-flight": {
+                        "nullable": true
+                      },
+                      "queue-position": {
+                        "nullable": true
+                      },
+                      "queue-reason": {
+                        "type": "string"
+                      }
+                    }
                   },
                   "playbook-name": {
                     "type": "string"
@@ -12507,6 +13575,10 @@
                   "hostname-var": {
                     "type": "string"
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "instance-filters": {
                     "type": "string"
                   },
@@ -12521,11 +13593,19 @@
                     "type": "boolean",
                     "nullable": true
                   },
+                  "run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "source-type": {
                     "type": "string"
                   },
                   "sync-schedule": {
                     "type": "string"
+                  },
+                  "sync-timeout": {
+                    "type": "integer",
+                    "nullable": true
                   },
                   "update-cache-timeout": {
                     "type": "integer",
@@ -12718,6 +13798,47 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "placement": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "integer"
+                      },
+                      "driver": {
+                        "type": "string"
+                      },
+                      "identity-binding-id": {
+                        "nullable": true
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "image-digest": {
+                        "type": "string"
+                      },
+                      "image-level": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      },
+                      "placement-id": {
+                        "type": "string"
+                      },
+                      "queue-cap": {
+                        "nullable": true
+                      },
+                      "queue-in-flight": {
+                        "nullable": true
+                      },
+                      "queue-position": {
+                        "nullable": true
+                      },
+                      "queue-reason": {
+                        "type": "string"
+                      }
+                    }
                   },
                   "playbook-name": {
                     "type": "string"
@@ -12998,6 +14119,47 @@
                   "name": {
                     "type": "string"
                   },
+                  "placement": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "integer"
+                      },
+                      "driver": {
+                        "type": "string"
+                      },
+                      "identity-binding-id": {
+                        "nullable": true
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "image-digest": {
+                        "type": "string"
+                      },
+                      "image-level": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      },
+                      "placement-id": {
+                        "type": "string"
+                      },
+                      "queue-cap": {
+                        "nullable": true
+                      },
+                      "queue-in-flight": {
+                        "nullable": true
+                      },
+                      "queue-position": {
+                        "nullable": true
+                      },
+                      "queue-reason": {
+                        "type": "string"
+                      }
+                    }
+                  },
                   "playbook-name": {
                     "type": "string"
                   },
@@ -13235,6 +14397,47 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "placement": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "integer"
+                      },
+                      "driver": {
+                        "type": "string"
+                      },
+                      "identity-binding-id": {
+                        "nullable": true
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "image-digest": {
+                        "type": "string"
+                      },
+                      "image-level": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      },
+                      "placement-id": {
+                        "type": "string"
+                      },
+                      "queue-cap": {
+                        "nullable": true
+                      },
+                      "queue-in-flight": {
+                        "nullable": true
+                      },
+                      "queue-position": {
+                        "nullable": true
+                      },
+                      "queue-reason": {
+                        "type": "string"
+                      }
+                    }
                   },
                   "playbook-name": {
                     "type": "string"
@@ -14041,6 +15244,10 @@
                   "forks": {
                     "type": "integer"
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "job-slice-count": {
                     "type": "integer"
                   },
@@ -14052,6 +15259,10 @@
                   },
                   "retention-days": {
                     "type": "integer",
+                    "nullable": true
+                  },
+                  "run-image-id": {
+                    "type": "string",
                     "nullable": true
                   },
                   "schedule-cron": {
@@ -14392,6 +15603,47 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "placement": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "integer"
+                      },
+                      "driver": {
+                        "type": "string"
+                      },
+                      "identity-binding-id": {
+                        "nullable": true
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "image-digest": {
+                        "type": "string"
+                      },
+                      "image-level": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      },
+                      "placement-id": {
+                        "type": "string"
+                      },
+                      "queue-cap": {
+                        "nullable": true
+                      },
+                      "queue-in-flight": {
+                        "nullable": true
+                      },
+                      "queue-position": {
+                        "nullable": true
+                      },
+                      "queue-reason": {
+                        "type": "string"
+                      }
+                    }
                   },
                   "playbook-name": {
                     "type": "string"
@@ -15296,6 +16548,48 @@
           }
         }
       },
+      "post-api-v2-organizations-name-run-images-request": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "digest": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "image": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "kind": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "registry-credential-id": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "post-api-v2-organizations-name-tasks-request": {
         "type": "object",
         "properties": {
@@ -15793,6 +17087,10 @@
                     "type": "boolean",
                     "nullable": true
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -15801,6 +17099,10 @@
                   },
                   "queue-all-runs": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "run-image-id": {
+                    "type": "string",
                     "nullable": true
                   },
                   "run-timeout": {
@@ -15993,6 +17295,9 @@
                   "global-remote-state": {
                     "type": "boolean"
                   },
+                  "identity-binding-id": {
+                    "nullable": true
+                  },
                   "latest-change-at": {
                     "type": "string",
                     "format": "date-time"
@@ -16049,6 +17354,9 @@
                   },
                   "resource-count": {
                     "type": "integer"
+                  },
+                  "run-image-id": {
+                    "nullable": true
                   },
                   "run-timeout": {
                     "type": "integer"
@@ -16190,8 +17498,16 @@
                     "type": "integer",
                     "nullable": true
                   },
+                  "ansible-run-image-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "assessments-enforced": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "cache-size-limit": {
+                    "type": "integer",
                     "nullable": true
                   },
                   "collaborator-auth-policy": {
@@ -16215,8 +17531,16 @@
                   "email": {
                     "type": "string"
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "name": {
                     "type": "string"
+                  },
+                  "run-timeout": {
+                    "type": "integer",
+                    "nullable": true
                   },
                   "send-passing-statuses-for-untriggered-speculative-plans": {
                     "type": "boolean",
@@ -16224,6 +17548,10 @@
                   },
                   "speculative-plan-management-enabled": {
                     "type": "boolean",
+                    "nullable": true
+                  },
+                  "tofu-run-image-id": {
+                    "type": "string",
                     "nullable": true
                   },
                   "user-tokens-enabled": {
@@ -16415,6 +17743,25 @@
           "data"
         ]
       },
+      "post-api-v2-runner-cache-promotions-id-drop-5c208d": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "post-api-v2-runner-cache-promotions-id-drop-request": {
+        "type": "object",
+        "properties": {
+          "poisoned": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "post-api-v2-runner-deregister-491424": {
         "type": "object",
         "properties": {
@@ -16431,9 +17778,26 @@
           }
         }
       },
+      "post-api-v2-runner-drain-request": {
+        "type": "object",
+        "properties": {
+          "runner_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runner_id"
+        ]
+      },
       "post-api-v2-runner-heartbeat-b955dc": {
         "type": "object",
         "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "pending_jobs": {
             "type": "array",
             "items": {
@@ -16471,11 +17835,40 @@
           "current_jobs": {
             "type": "integer"
           },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "external_manager": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "managed_by": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "present": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
           "runner_id": {
             "type": "string"
           },
           "status": {
             "type": "string"
+          },
+          "wait": {
+            "type": "integer"
           }
         },
         "required": [
@@ -16493,6 +17886,47 @@
       "post-api-v2-runner-jobs-id-complete-request": {
         "type": "object",
         "properties": {
+          "cache_manifest": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "hashes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "type": "string"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer"
+                    },
+                    "source_url": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
           "error_message": {
             "type": "string"
           },
@@ -16525,6 +17959,19 @@
           },
           "status": {
             "type": "string"
+          },
+          "work_result": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "commit": {
+                "type": "string"
+              },
+              "inventory": {},
+              "stderr": {
+                "type": "string"
+              }
+            }
           }
         },
         "required": [
@@ -16574,6 +18021,96 @@
           "output": {
             "type": "string"
           },
+          "phase_state": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "phase": {
+                "type": "string"
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "address": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
+                    "details": {
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "type": "string"
+                    },
+                    "resource_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "additions": {
+                    "type": "integer"
+                  },
+                  "changes": {
+                    "type": "integer"
+                  },
+                  "destructions": {
+                    "type": "integer"
+                  },
+                  "failed": {
+                    "type": "integer"
+                  },
+                  "replace": {
+                    "type": "integer"
+                  },
+                  "total": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          },
+          "placement": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "driver": {
+                "type": "string"
+              },
+              "identity_binding_id": {
+                "type": "string"
+              },
+              "image": {
+                "type": "string"
+              },
+              "image_digest": {
+                "type": "string"
+              },
+              "image_level": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "placement_id": {
+                "type": "string"
+              }
+            }
+          },
           "runner_id": {
             "type": "string"
           },
@@ -16582,9 +18119,24 @@
           }
         },
         "required": [
-          "output",
           "runner_id"
         ]
+      },
+      "post-api-v2-runner-jobs-id-plan-6aa064": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "post-api-v2-runner-jobs-id-snapshot-bc5788": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
       },
       "post-api-v2-runner-jobs-id-start-f47007": {
         "type": "object",
@@ -16597,6 +18149,33 @@
       "post-api-v2-runner-jobs-id-start-request": {
         "type": "object",
         "properties": {
+          "placement": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "driver": {
+                "type": "string"
+              },
+              "identity_binding_id": {
+                "type": "string"
+              },
+              "image": {
+                "type": "string"
+              },
+              "image_digest": {
+                "type": "string"
+              },
+              "image_level": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "placement_id": {
+                "type": "string"
+              }
+            }
+          },
           "runner_id": {
             "type": "string"
           }
@@ -16627,9 +18206,43 @@
           }
         }
       },
+      "post-api-v2-runner-jobs-id-token-7bf44f": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "contract_version": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "pool": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
       "post-api-v2-runner-register-1039b3": {
         "type": "object",
         "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "poll_interval_seconds": {
             "type": "integer"
           },
@@ -16660,6 +18273,33 @@
               "type": "string"
             }
           },
+          "cache_verification": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "driver": {
+            "type": "string"
+          },
+          "engines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hosted": {
+            "type": "boolean"
+          },
+          "hosted_group": {
+            "type": "string"
+          },
+          "hosted_strict": {
+            "type": "boolean"
+          },
           "hostname": {
             "type": "string"
           },
@@ -16669,10 +18309,19 @@
               "type": "string"
             }
           },
+          "local_cache": {
+            "type": "boolean"
+          },
+          "local_cache_size_limit": {
+            "type": "integer"
+          },
           "max_concurrent_jobs": {
             "type": "integer"
           },
           "name": {
+            "type": "string"
+          },
+          "network_mode": {
             "type": "string"
           },
           "os_type": {
@@ -16686,7 +18335,6 @@
           }
         },
         "required": [
-          "agent_pool_id",
           "name"
         ]
       },
@@ -18380,6 +20028,10 @@
                   "type": "string",
                   "format": "date-time"
                 },
+                "expirationDate": {
+                  "type": "string",
+                  "format": "date-time"
+                },
                 "factors": {
                   "type": "object",
                   "properties": {
@@ -18967,6 +20619,9 @@
                 "attributes": {
                   "type": "object",
                   "properties": {
+                    "ansible-run-image-id": {
+                      "nullable": true
+                    },
                     "created-at": {
                       "type": "string",
                       "format": "date-time"
@@ -18977,11 +20632,17 @@
                     "description": {
                       "type": "string"
                     },
+                    "identity-binding-id": {
+                      "nullable": true
+                    },
                     "is-unified": {
                       "type": "boolean"
                     },
                     "name": {
                       "type": "string"
+                    },
+                    "run-timeout": {
+                      "type": "integer"
                     },
                     "setting-overwrites": {
                       "type": "object",
@@ -18993,6 +20654,12 @@
                           "type": "boolean"
                         }
                       }
+                    },
+                    "tofu-run-image-id": {
+                      "nullable": true
+                    },
+                    "tofu-version": {
+                      "type": "string"
                     },
                     "updated-at": {
                       "type": "string",
@@ -19086,6 +20753,11 @@
               "attributes": {
                 "type": "object",
                 "properties": {
+                  "ansible-run-image-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
                   "created-at": {
                     "type": "string",
                     "format": "date-time"
@@ -19098,6 +20770,11 @@
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
                   },
                   "inventories-count": {
                     "type": "integer"
@@ -19114,6 +20791,9 @@
                   "playbooks-count": {
                     "type": "integer"
                   },
+                  "run-timeout": {
+                    "type": "integer"
+                  },
                   "setting-overwrites": {
                     "type": "object",
                     "properties": {
@@ -19124,6 +20804,14 @@
                         "type": "boolean"
                       }
                     }
+                  },
+                  "tofu-run-image-id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
+                  "tofu-version": {
+                    "type": "string"
                   },
                   "updated-at": {
                     "type": "string",
@@ -19178,6 +20866,81 @@
                         "properties": {
                           "id": {
                             "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "pull-secrets-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "declared-externally": {
+                    "type": "boolean"
+                  },
+                  "external-manager": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "object-present": {
+                    "nullable": true
+                  },
+                  "reference": {
+                    "type": "boolean"
+                  },
+                  "registry": {
+                    "type": "string"
+                  },
+                  "registry-credential-id": {
+                    "nullable": true
+                  },
+                  "reported-at": {
+                    "nullable": true
+                  },
+                  "secret-name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "agent-pool": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
                           },
                           "type": {
                             "type": "string"
@@ -19267,13 +21030,39 @@
                   "busy-runners": {
                     "type": "integer"
                   },
+                  "capacity": {
+                    "type": "integer"
+                  },
+                  "headroom": {
+                    "type": "integer"
+                  },
                   "idle-runners": {
+                    "type": "integer"
+                  },
+                  "in-flight": {
                     "type": "integer"
                   },
                   "pending-ansible-jobs": {
                     "type": "integer"
                   },
+                  "pending-by-engine": {
+                    "type": "object",
+                    "properties": {
+                      "ansible": {
+                        "type": "integer"
+                      },
+                      "any": {
+                        "type": "integer"
+                      },
+                      "tofu": {
+                        "type": "integer"
+                      }
+                    }
+                  },
                   "pending-terraform-jobs": {
+                    "type": "integer"
+                  },
+                  "pending-work-items": {
                     "type": "integer"
                   },
                   "total-pending": {
@@ -19643,6 +21432,177 @@
           }
         }
       },
+      "run-images-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "string"
+                    },
+                    "image": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "registry-credential-id": {
+                      "nullable": true
+                    },
+                    "updated-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "organization": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "run-images-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "registry-credential-id": {
+                    "nullable": true
+                  },
+                  "updated-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "run-triggers-response": {
         "type": "object",
         "properties": {
@@ -19769,11 +21729,23 @@
                         "additionalProperties": true
                       }
                     },
+                    "cache-verification": {
+                      "type": "string"
+                    },
                     "current-jobs": {
                       "type": "integer"
                     },
                     "description": {
                       "type": "string"
+                    },
+                    "drain-requested-at": {
+                      "nullable": true
+                    },
+                    "driver": {
+                      "type": "string"
+                    },
+                    "hosted-strict": {
+                      "type": "boolean"
                     },
                     "hostname": {
                       "type": "string"
@@ -19792,10 +21764,19 @@
                       "type": "string",
                       "format": "date-time"
                     },
+                    "local-cache": {
+                      "type": "boolean"
+                    },
+                    "local-cache-size-limit": {
+                      "type": "integer"
+                    },
                     "max-concurrent-jobs": {
                       "type": "integer"
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "network-mode": {
                       "type": "string"
                     },
                     "os-type": {
@@ -19927,11 +21908,25 @@
                       "additionalProperties": true
                     }
                   },
+                  "cache-verification": {
+                    "type": "string"
+                  },
                   "current-jobs": {
                     "type": "integer"
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "drain-requested-at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "driver": {
+                    "type": "string"
+                  },
+                  "hosted-strict": {
+                    "type": "boolean"
                   },
                   "hostname": {
                     "type": "string"
@@ -19950,10 +21945,19 @@
                     "type": "string",
                     "format": "date-time"
                   },
+                  "local-cache": {
+                    "type": "boolean"
+                  },
+                  "local-cache-size-limit": {
+                    "type": "integer"
+                  },
                   "max-concurrent-jobs": {
                     "type": "integer"
                   },
                   "name": {
+                    "type": "string"
+                  },
+                  "network-mode": {
                     "type": "string"
                   },
                   "os-type": {
@@ -20239,6 +22243,13 @@
                         "type": "boolean"
                       }
                     }
+                  },
+                  "agent-pool-id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "agent-pool-name": {
+                    "type": "string"
                   },
                   "completed-at": {
                     "type": "string",
@@ -23079,6 +25090,356 @@
           }
         }
       },
+      "work-items-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "error-message": {
+                      "type": "string"
+                    },
+                    "finished-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "image": {
+                      "type": "string"
+                    },
+                    "image-level": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "placement": {
+                      "type": "object",
+                      "properties": {
+                        "attempt": {
+                          "type": "integer"
+                        },
+                        "driver": {
+                          "type": "string"
+                        },
+                        "identity-binding-id": {
+                          "nullable": true
+                        },
+                        "image": {
+                          "type": "string"
+                        },
+                        "image-digest": {
+                          "type": "string"
+                        },
+                        "image-level": {
+                          "type": "string"
+                        },
+                        "node": {
+                          "type": "string"
+                        },
+                        "placement-id": {
+                          "type": "string"
+                        },
+                        "queue-cap": {
+                          "nullable": true
+                        },
+                        "queue-in-flight": {
+                          "nullable": true
+                        },
+                        "queue-position": {
+                          "nullable": true
+                        },
+                        "queue-reason": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "queued-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "started-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "timeout-seconds": {
+                      "type": "integer"
+                    },
+                    "triggered-by": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "inventory": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "inventory-source": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "organization": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "work-items-response": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "commit": {
+                    "type": "string"
+                  },
+                  "created-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "error-message": {
+                    "type": "string"
+                  },
+                  "finished-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "image-level": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "output": {
+                    "type": "string"
+                  },
+                  "placement": {
+                    "type": "object",
+                    "properties": {
+                      "attempt": {
+                        "type": "integer"
+                      },
+                      "driver": {
+                        "type": "string"
+                      },
+                      "identity-binding-id": {
+                        "nullable": true
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "image-digest": {
+                        "type": "string"
+                      },
+                      "image-level": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      },
+                      "placement-id": {
+                        "type": "string"
+                      },
+                      "queue-cap": {
+                        "nullable": true
+                      },
+                      "queue-in-flight": {
+                        "nullable": true
+                      },
+                      "queue-position": {
+                        "nullable": true
+                      },
+                      "queue-reason": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "queued-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "started-at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "timeout-seconds": {
+                    "type": "integer"
+                  },
+                  "triggered-by": {
+                    "type": "string"
+                  }
+                }
+              },
+              "id": {
+                "type": "string"
+              },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "inventory": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "inventory-source": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "organization": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
       "workspace-tasks-response": {
         "type": "object",
         "properties": {
@@ -23384,6 +25745,9 @@
                     "global-remote-state": {
                       "type": "boolean"
                     },
+                    "identity-binding-id": {
+                      "nullable": true
+                    },
                     "latest-change-at": {
                       "type": "string",
                       "format": "date-time"
@@ -23441,8 +25805,8 @@
                     "resource-count": {
                       "type": "string"
                     },
-                    "run-timeout": {
-                      "type": "string"
+                    "run-image-id": {
+                      "nullable": true
                     },
                     "setting-overwrites": {
                       "type": "object",
@@ -23733,6 +26097,9 @@
                   "global-remote-state": {
                     "type": "boolean"
                   },
+                  "identity-binding-id": {
+                    "nullable": true
+                  },
                   "latest-change-at": {
                     "type": "string",
                     "format": "date-time"
@@ -23795,8 +26162,8 @@
                   "resource-count": {
                     "type": "integer"
                   },
-                  "run-timeout": {
-                    "type": "integer"
+                  "run-image-id": {
+                    "nullable": true
                   },
                   "setting-overwrites": {
                     "type": "object",
@@ -25194,6 +27561,249 @@
         ]
       }
     },
+    "/api/v2/agent-pools/{id}/identity-bindings": {
+      "get": {
+        "operationId": "get-api-v2-agent-pools-id-identity-bindings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-api-v2-agent-pools-id-identity-bindings-6441af"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/agent-pools/:id/identity-bindings",
+        "tags": [
+          "agent-pools"
+        ]
+      },
+      "post": {
+        "operationId": "post-api-v2-agent-pools-id-identity-bindings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "annotations": {
+                      "azure.workload.identity/client-id": "\u003cuuid\u003e"
+                    },
+                    "mechanism": "azure-workload-identity",
+                    "name": "golden-write-binding",
+                    "service-account": "sw-golden-write"
+                  },
+                  "type": "identity-bindings"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-api-v2-agent-pools-id-identity-bindings-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/identity-bindings-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/agent-pools/:id/identity-bindings",
+        "tags": [
+          "agent-pools"
+        ]
+      }
+    },
+    "/api/v2/agent-pools/{id}/jit-token": {
+      "post": {
+        "operationId": "post-api-v2-agent-pools-id-jit-token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "expires-in": 600
+                  },
+                  "type": "agent-jit-tokens"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-api-v2-agent-pools-id-jit-token-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/agent-jit-tokens-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/agent-pools/:id/jit-token",
+        "tags": [
+          "agent-pools"
+        ]
+      }
+    },
+    "/api/v2/agent-pools/{id}/pull-secrets": {
+      "get": {
+        "operationId": "get-api-v2-agent-pools-id-pull-secrets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-api-v2-agent-pools-id-pull-secrets-742958"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/agent-pools/:id/pull-secrets",
+        "tags": [
+          "agent-pools"
+        ]
+      },
+      "post": {
+        "operationId": "post-api-v2-agent-pools-id-pull-secrets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "name": "golden-write-quay",
+                    "reference": true,
+                    "registry": "quay.io",
+                    "secret-name": "registry-quay"
+                  },
+                  "type": "pull-secrets"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-api-v2-agent-pools-id-pull-secrets-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/pull-secrets-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/agent-pools/:id/pull-secrets",
+        "tags": [
+          "agent-pools"
+        ]
+      }
+    },
     "/api/v2/agent-pools/{id}/queue-depth": {
       "get": {
         "operationId": "get-api-v2-agent-pools-id-queue-depth",
@@ -26522,6 +29132,7 @@
                     "description": "Updated by the golden write harness",
                     "group-by-availability-zone": true,
                     "overwrite-vars": true,
+                    "run-image-id": "\u003cuuid\u003e",
                     "sync-schedule": "30 2 * * *",
                     "update-cache-timeout": 600,
                     "verbosity": 1
@@ -26601,6 +29212,37 @@
           }
         },
         "summary": "POST /api/v2/ansible/inventory-sources/:source_id/actions/sync",
+        "tags": [
+          "ansible/inventory-sources"
+        ]
+      }
+    },
+    "/api/v2/ansible/inventory-sources/{source_id}/effective-settings": {
+      "get": {
+        "operationId": "get-api-v2-ansible-inventory-sources-source_id-effective-settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/effective-settings-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/ansible/inventory-sources/:source_id/effective-settings",
         "tags": [
           "ansible/inventory-sources"
         ]
@@ -26725,7 +29367,9 @@
                       "compliance_profile": "cis-level-1"
                     },
                     "forks": 20,
+                    "identity-binding-id": "\u003cuuid\u003e",
                     "limit": "webservers",
+                    "run-image-id": "\u003cuuid\u003e",
                     "timeout-seconds": 1800
                   },
                   "relationships": {
@@ -26986,6 +29630,37 @@
           }
         },
         "summary": "DELETE /api/v2/ansible/job-templates/:id/credentials/:credential_id",
+        "tags": [
+          "ansible/job-templates"
+        ]
+      }
+    },
+    "/api/v2/ansible/job-templates/{id}/effective-settings": {
+      "get": {
+        "operationId": "get-api-v2-ansible-job-templates-id-effective-settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/effective-settings-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/ansible/job-templates/:id/effective-settings",
         "tags": [
           "ansible/job-templates"
         ]
@@ -29191,6 +31866,127 @@
         ]
       }
     },
+    "/api/v2/identity-bindings/{id}": {
+      "delete": {
+        "description": "Takes no request body.",
+        "operationId": "delete-api-v2-identity-bindings-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success. No content."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "DELETE /api/v2/identity-bindings/:id",
+        "tags": [
+          "identity-bindings"
+        ]
+      },
+      "get": {
+        "operationId": "get-api-v2-identity-bindings-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/identity-bindings-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/identity-bindings/:id",
+        "tags": [
+          "identity-bindings"
+        ]
+      },
+      "patch": {
+        "operationId": "patch-api-v2-identity-bindings-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "per-job-sa": true
+                  },
+                  "type": "identity-bindings"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/patch-api-v2-identity-bindings-id-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/identity-bindings-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "PATCH /api/v2/identity-bindings/:id",
+        "tags": [
+          "identity-bindings"
+        ]
+      }
+    },
     "/api/v2/notification-configurations/{id}": {
       "delete": {
         "description": "Takes no request body.",
@@ -29885,13 +32681,17 @@
                 "data": {
                   "attributes": {
                     "ansible-job-retention-days": 30,
+                    "ansible-run-image-id": "\u003cuuid\u003e",
                     "assessments-enforced": true,
+                    "cache-size-limit": 21474836480,
                     "collaborator-auth-policy": "two_factor_mandatory",
                     "cost-estimation-enabled": true,
                     "default-execution-mode": "agent",
                     "description": "Updated by the golden write harness",
                     "email": "platform-team@example.com",
-                    "speculative-plan-management-enabled": false
+                    "identity-binding-id": "\u003cuuid\u003e",
+                    "speculative-plan-management-enabled": false,
+                    "tofu-run-image-id": "\u003cuuid\u003e"
                   },
                   "relationships": {
                     "default-agent-pool": {
@@ -32091,6 +34891,37 @@
         ]
       }
     },
+    "/api/v2/organizations/{name}/hosted-capacity": {
+      "get": {
+        "operationId": "get-api-v2-organizations-name-hosted-capacity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/hosted-capacities-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/organizations/:name/hosted-capacity",
+        "tags": [
+          "hosted-capacity"
+        ]
+      }
+    },
     "/api/v2/organizations/{name}/oidc-configurations": {
       "get": {
         "operationId": "get-api-v2-organizations-name-oidc-configurations",
@@ -33338,6 +36169,106 @@
         "summary": "DELETE /api/v2/organizations/:name/registry/modules/:module_name/:provider/versions/:version",
         "tags": [
           "registry"
+        ]
+      }
+    },
+    "/api/v2/organizations/{name}/run-images": {
+      "get": {
+        "operationId": "get-api-v2-organizations-name-run-images",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter[kind]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/run-images-collection"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/organizations/:name/run-images",
+        "tags": [
+          "run-images"
+        ]
+      },
+      "post": {
+        "operationId": "post-api-v2-organizations-name-run-images",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "description": "An AWX execution environment",
+                    "digest": "sha256:abababababababababababababababababababababababababababababababab",
+                    "image": "ghcr.io/acme/awx-ee:24",
+                    "kind": "ansible",
+                    "name": "golden-write-ee"
+                  },
+                  "type": "run-images"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-api-v2-organizations-name-run-images-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/run-images-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/organizations/:name/run-images",
+        "tags": [
+          "run-images"
         ]
       }
     },
@@ -35078,6 +38009,55 @@
         ]
       }
     },
+    "/api/v2/organizations/{name}/work-items": {
+      "get": {
+        "operationId": "get-api-v2-organizations-name-work-items",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/work-items-collection"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/organizations/:name/work-items",
+        "tags": [
+          "work-items"
+        ]
+      }
+    },
     "/api/v2/organizations/{name}/workspaces": {
       "get": {
         "operationId": "get-api-v2-organizations-name-workspaces",
@@ -35684,8 +38664,11 @@
               "example": {
                 "data": {
                   "attributes": {
+                    "ansible-run-image-id": "\u003cuuid\u003e",
                     "description": "Updated by the golden write harness",
-                    "name": "golden-write-renamed"
+                    "identity-binding-id": "\u003cuuid\u003e",
+                    "name": "golden-write-renamed",
+                    "tofu-run-image-id": "\u003cuuid\u003e"
                   },
                   "relationships": {
                     "tag-bindings": {
@@ -36493,6 +39476,127 @@
         ]
       }
     },
+    "/api/v2/pull-secrets/{id}": {
+      "delete": {
+        "description": "Takes no request body.",
+        "operationId": "delete-api-v2-pull-secrets-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success. No content."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "DELETE /api/v2/pull-secrets/:id",
+        "tags": [
+          "pull-secrets"
+        ]
+      },
+      "get": {
+        "operationId": "get-api-v2-pull-secrets-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/pull-secrets-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/pull-secrets/:id",
+        "tags": [
+          "pull-secrets"
+        ]
+      },
+      "patch": {
+        "operationId": "patch-api-v2-pull-secrets-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "name": "ghcr-org"
+                  },
+                  "type": "pull-secrets"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/patch-api-v2-pull-secrets-id-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/pull-secrets-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "PATCH /api/v2/pull-secrets/:id",
+        "tags": [
+          "pull-secrets"
+        ]
+      }
+    },
     "/api/v2/registry-providers/{id}": {
       "delete": {
         "description": "Takes no request body.",
@@ -36554,6 +39658,127 @@
         "summary": "GET /api/v2/registry-providers/:id",
         "tags": [
           "registry-providers"
+        ]
+      }
+    },
+    "/api/v2/run-images/{id}": {
+      "delete": {
+        "description": "Takes no request body.",
+        "operationId": "delete-api-v2-run-images-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success. No content."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "DELETE /api/v2/run-images/:id",
+        "tags": [
+          "run-images"
+        ]
+      },
+      "get": {
+        "operationId": "get-api-v2-run-images-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/run-images-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/run-images/:id",
+        "tags": [
+          "run-images"
+        ]
+      },
+      "patch": {
+        "operationId": "patch-api-v2-run-images-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "example": {
+                "data": {
+                  "attributes": {
+                    "image": "ghcr.io/acme/tofu-aws-tools:1.11"
+                  },
+                  "type": "run-images"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/patch-api-v2-run-images-id-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/run-images-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "PATCH /api/v2/run-images/:id",
+        "tags": [
+          "run-images"
         ]
       }
     },
@@ -36621,6 +39846,216 @@
         ]
       }
     },
+    "/api/v2/runner/cache/promotions/{id}/drop": {
+      "post": {
+        "operationId": "post-api-v2-runner-cache-promotions-id-drop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "poisoned": true,
+                "reason": "the package hashes to a digest the lock file does not pin"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-api-v2-runner-cache-promotions-id-drop-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-api-v2-runner-cache-promotions-id-drop-5c208d"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /api/v2/runner/cache/promotions/:id/drop",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v2/runner/cache/{kind}/{sha256}": {
+      "get": {
+        "operationId": "get-api-v2-runner-cache-kind-sha256",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /api/v2/runner/cache/:kind/:sha256",
+        "tags": [
+          "runner"
+        ]
+      },
+      "put": {
+        "operationId": "put-api-v2-runner-cache-kind-sha256",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organization",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "promotion",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "verification",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "A binary body. Its content is not described here.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Success. No content."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "PUT /api/v2/runner/cache/:kind/:sha256",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
     "/api/v2/runner/deregister": {
       "post": {
         "operationId": "post-api-v2-runner-deregister",
@@ -36660,6 +40095,44 @@
           }
         },
         "summary": "POST /api/v2/runner/deregister",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v2/runner/drain": {
+      "post": {
+        "operationId": "post-api-v2-runner-drain",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "runner_id": "\u003cuuid\u003e"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-api-v2-runner-drain-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders.",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Success. No content."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /api/v2/runner/drain",
         "tags": [
           "runner"
         ]
@@ -36713,6 +40186,37 @@
         ]
       }
     },
+    "/api/v2/runner/images/{id}/pull-credential": {
+      "get": {
+        "operationId": "get-api-v2-runner-images-id-pull-credential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /api/v2/runner/images/:id/pull-credential",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
     "/api/v2/runner/jobs/{id}/artifacts": {
       "get": {
         "operationId": "get-api-v2-runner-jobs-id-artifacts",
@@ -36739,6 +40243,45 @@
           }
         },
         "summary": "GET /api/v2/runner/jobs/:id/artifacts",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v2/runner/jobs/{id}/blob/{name}": {
+      "get": {
+        "operationId": "get-api-v2-runner-jobs-id-blob-name",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /api/v2/runner/jobs/:id/blob/*name",
         "tags": [
           "runner"
         ]
@@ -36922,6 +40465,88 @@
         ]
       }
     },
+    "/api/v2/runner/jobs/{id}/plan": {
+      "get": {
+        "operationId": "get-api-v2-runner-jobs-id-plan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /api/v2/runner/jobs/:id/plan",
+        "tags": [
+          "runner"
+        ]
+      },
+      "post": {
+        "operationId": "post-api-v2-runner-jobs-id-plan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "A binary body. Its content is not described here.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-api-v2-runner-jobs-id-plan-6aa064"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /api/v2/runner/jobs/:id/plan",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
     "/api/v2/runner/jobs/{id}/playbook-snapshot": {
       "get": {
         "operationId": "get-api-v2-runner-jobs-id-playbook-snapshot",
@@ -36948,6 +40573,59 @@
           }
         },
         "summary": "GET /api/v2/runner/jobs/:id/playbook-snapshot",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v2/runner/jobs/{id}/snapshot": {
+      "post": {
+        "operationId": "post-api-v2-runner-jobs-id-snapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/gzip": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "A binary body. Its content is not described here.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-api-v2-runner-jobs-id-snapshot-bc5788"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /api/v2/runner/jobs/:id/snapshot",
         "tags": [
           "runner"
         ]
@@ -37089,6 +40767,69 @@
           }
         },
         "summary": "GET /api/v2/runner/jobs/:id/status",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v2/runner/jobs/{id}/token": {
+      "post": {
+        "description": "Takes no request body.",
+        "operationId": "post-api-v2-runner-jobs-id-token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-api-v2-runner-jobs-id-token-7bf44f"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "POST /api/v2/runner/jobs/:id/token",
+        "tags": [
+          "runner"
+        ]
+      }
+    },
+    "/api/v2/runner/queue-depth": {
+      "get": {
+        "operationId": "get-api-v2-runner-queue-depth",
+        "responses": {
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-403"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "GET /api/v2/runner/queue-depth",
         "tags": [
           "runner"
         ]
@@ -37275,6 +41016,48 @@
           }
         },
         "summary": "PATCH /api/v2/runners/:id",
+        "tags": [
+          "runners"
+        ]
+      }
+    },
+    "/api/v2/runners/{id}/actions/drain": {
+      "post": {
+        "description": "Takes no request body.",
+        "operationId": "post-api-v2-runners-id-actions-drain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runners-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "POST /api/v2/runners/:id/actions/drain",
         "tags": [
           "runners"
         ]
@@ -37744,6 +41527,37 @@
           }
         },
         "summary": "GET /api/v2/runs/:id/outputs",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v2/runs/{id}/placement": {
+      "get": {
+        "operationId": "get-api-v2-runs-id-placement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/placements-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/runs/:id/placement",
         "tags": [
           "runs"
         ]
@@ -41105,6 +44919,37 @@
         ]
       }
     },
+    "/api/v2/work-items/{id}": {
+      "get": {
+        "operationId": "get-api-v2-work-items-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/work-items-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/work-items/:id",
+        "tags": [
+          "work-items"
+        ]
+      }
+    },
     "/api/v2/workspaces/change-requests/{id}": {
       "delete": {
         "description": "Takes no request body.",
@@ -41352,6 +45197,8 @@
                     "description": "Updated by the golden write harness",
                     "file-triggers-enabled": true,
                     "global-remote-state": true,
+                    "identity-binding-id": "\u003cuuid\u003e",
+                    "run-image-id": "\u003cuuid\u003e",
                     "trigger-patterns": [
                       "modules/**"
                     ]
@@ -41822,6 +45669,37 @@
           }
         },
         "summary": "GET /api/v2/workspaces/:id/current-state-version-resources",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v2/workspaces/{id}/effective-settings": {
+      "get": {
+        "operationId": "get-api-v2-workspaces-id-effective-settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/effective-settings-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/workspaces/:id/effective-settings",
         "tags": [
           "workspaces"
         ]
@@ -45317,6 +49195,69 @@
           }
         },
         "summary": "GET /v1/modules/:namespace/:name/:provider/:version",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
+    "/v1/modules/{namespace}/{name}/{provider}/{version}/archive.tar.gz": {
+      "get": {
+        "operationId": "get-v1-modules-namespace-name-provider-version-archive-tar-gz",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "GET /v1/modules/:namespace/:name/:provider/:version/archive.tar.gz",
         "tags": [
           "v1"
         ]

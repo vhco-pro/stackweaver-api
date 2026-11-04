@@ -4,6 +4,8 @@ package registry
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,24 +108,20 @@ func (s *ModuleService) GetModuleVersion(namespace, name, provider, version stri
 	return s.moduleVersionRepo.GetByModuleAndVersion(module.ID, version)
 }
 
-// GetDownloadURL generates a presigned URL for downloading a module version
-func (s *ModuleService) GetDownloadURL(ctx context.Context, namespace, name, provider, version string) (string, error) {
+// OpenArchive opens a module version's tarball for streaming. The caller closes it.
+func (s *ModuleService) OpenArchive(ctx context.Context, namespace, name, provider, version string) (io.ReadCloser, error) {
 	moduleVersion, err := s.GetModuleVersion(namespace, name, provider, version)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-
 	if moduleVersion.TarballPath == "" {
-		return "", ErrModuleVersionNotAvailable
+		return nil, ErrModuleVersionNotAvailable
 	}
-
-	// Generate presigned URL (15 minutes expiry as per Terraform Registry spec)
-	url, err := s.storage.PresignGet(ctx, moduleVersion.TarballPath, 15*time.Minute)
+	archive, err := s.storage.GetStream(ctx, moduleVersion.TarballPath)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("opening the archive of %s/%s/%s %s: %w", namespace, name, provider, version, err)
 	}
-
-	return url, nil
+	return archive, nil
 }
 
 // TrackDownload records a download event

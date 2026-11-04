@@ -49,7 +49,7 @@ func TestRunnerJobArtifacts_CredentialOfAnotherOrganization(t *testing.T) {
 		return encrypted
 	}
 	sfx := uuid.NewString()[:8]
-	otherOrg := f.runnerB1.OrganizationID
+	otherOrg := f.runnerB1.OrgID()
 	// Everything of the other organization that could reach the runner, each a distinct string.
 	const (
 		otherAWSSecret = "aws-secret-of-the-other-organization"

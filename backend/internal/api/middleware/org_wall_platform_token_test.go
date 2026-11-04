@@ -34,7 +34,7 @@ func TestOrgWall_PlatformAdminTokenIsAPlainUserTokenInsideOrganizations(t *testi
 					method:    method,
 					tokenKind: models.APIKeyKindUser,
 					userID:    &user,
-					apiKey:    &models.APIKey{ID: uuid.New(), UserID: user, Kind: models.APIKeyKindUser, Scopes: scopes},
+					apiKey:    &models.APIKey{ID: uuid.New(), UserID: &user, Kind: models.APIKeyKindUser, Scopes: scopes},
 					resolver:  &resolver,
 				})
 			}

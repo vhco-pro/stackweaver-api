@@ -30,7 +30,6 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/security/gitargs"
 	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
@@ -64,7 +63,7 @@ type VCSAppInstallationHandlerV2 struct {
 	adoStatusService   *vcs.AzureDevOpsStatusService // For Azure DevOps PR status checks
 	registryPublisher  *RegistryPublishingHandler    // For tag push event handling
 	storageClient      storage.Client
-	ansibleQueue       queue.Queue // For inventory and playbook sync
+	workItems          *coreansible.WorkItemService // inventory and playbook syncs, as work items (#933, D2)
 
 	// appURL is the SPA's public origin (STACKWEAVER_APP_URL). GitHub returns a person who
 	// authorized the App to its /vcs/github/authorized page (SetAppURL).
@@ -126,7 +125,7 @@ func NewVCSAppInstallationHandlerV2(
 	vcsRegistry *vcs.ProviderRegistry,
 	registryPublisher *RegistryPublishingHandler,
 	storageClient storage.Client,
-	ansibleQueue queue.Queue,
+	workItems *coreansible.WorkItemService,
 ) *VCSAppInstallationHandlerV2 {
 	// Create status service from app manager if available
 	var statusService *vcs.GitHubStatusService
@@ -162,66 +161,29 @@ func NewVCSAppInstallationHandlerV2(
 		adoStatusService:   adoStatusService,
 		registryPublisher:  registryPublisher,
 		storageClient:      storageClient,
-		ansibleQueue:       ansibleQueue,
+		workItems:          workItems,
 	}
 }
 
-// inventorySyncPayload builds the ansible_sync queue payload for a VCS inventory,
-// pre-resolving a fresh, token-embedded clone URL server-side so the runner never
-// needs the provider's OAuth credentials. Resolution is best-effort: on failure
-// only the inventory_id is sent and the runner falls back to resolving from the DB.
-// playbookSyncPayload builds the webhook-triggered playbook sync message, resolving
-// a fresh token-embedded clone URL server-side (best-effort) so the runner needs no
-// VCS OAuth credentials. Mirrors inventorySyncPayload.
-//
-// A push has no caller to authorize, so the connection is loaded within the playbook's
-// organization: a playbook row that names another organization's connection gets no clone URL.
-func (h *VCSAppInstallationHandlerV2) playbookSyncPayload(ctx context.Context, pb *models.AnsiblePlaybook) map[string]any {
-	payload := map[string]any{"playbook_id": pb.ID.String()}
-	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || pb.VCSConnectionID == nil || pb.VCSRepository == "" {
-		return payload
+// requestInventorySync requests the webhook-triggered sync of an inventory as a work item. The
+// credential the clone needs is resolved when a launcher runs it, never carried on the request.
+func (h *VCSAppInstallationHandlerV2) requestInventorySync(inv *models.AnsibleInventory) {
+	if h.workItems == nil {
+		return
 	}
-	conn, err := h.playbookConnection(ctx, pb)
-	if err != nil {
-		logger.Warnf("Playbook %s: failed to load VCS connection for clone-URL pre-resolution: %v", pb.ID, err)
-		return payload
+	if _, err := h.workItems.RequestInventorySync(context.Background(), inv, "webhook"); err != nil {
+		logger.Errorf("Error requesting a sync of inventory %s: %v", inv.ID, err)
 	}
-	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, pb.VCSRepository)
-	if err != nil {
-		logger.Warnf("Playbook %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", pb.ID, err)
-		return payload
-	}
-	branch := pb.VCSBranch
-	if branch == "" {
-		branch = "main"
-	}
-	payload["clone_url"] = cloneURL
-	payload["branch"] = branch
-	return payload
 }
 
-func (h *VCSAppInstallationHandlerV2) inventorySyncPayload(ctx context.Context, inv *models.AnsibleInventory) map[string]any {
-	payload := map[string]any{"inventory_id": inv.ID.String(), "triggered_by": "webhook"}
-	if h.vcsRegistry == nil || h.vcsConnectionRepo == nil || inv.VCSConnectionID == nil || inv.VCSRepository == "" {
-		return payload
+// requestPlaybookSync requests the webhook-triggered snapshot of a playbook as a work item.
+func (h *VCSAppInstallationHandlerV2) requestPlaybookSync(pb *models.AnsiblePlaybook) {
+	if h.workItems == nil {
+		return
 	}
-	conn, err := h.inventoryConnection(ctx, inv)
-	if err != nil {
-		logger.Warnf("Inventory %s: failed to load VCS connection for clone-URL pre-resolution: %v", inv.ID, err)
-		return payload
+	if _, err := h.workItems.RequestPlaybookSnapshot(context.Background(), pb, "webhook"); err != nil {
+		logger.Errorf("Error requesting a sync of playbook %s: %v", pb.ID, err)
 	}
-	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, inv.VCSRepository)
-	if err != nil {
-		logger.Warnf("Inventory %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", inv.ID, err)
-		return payload
-	}
-	branch := inv.VCSBranch
-	if branch == "" {
-		branch = "main"
-	}
-	payload["clone_url"] = cloneURL
-	payload["branch"] = branch
-	return payload
 }
 
 // inventoryConnection loads the VCS connection an inventory names, within the inventory's
@@ -643,14 +605,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 		}
 		inv := inventory
 		syncedInventories++
-		if h.ansibleQueue != nil {
-			go func() {
-				syncMsg := h.inventorySyncPayload(context.Background(), &inv)
-				if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-					logger.Errorf("Error queuing sync for inventory %s: %v", inv.ID, err)
-				}
-			}()
-		}
+		h.requestInventorySync(&inv)
 	}
 	if h.playbookRepo != nil {
 		playbooks, _ := h.playbookRepo.ListByVCSRepositoryAndBranch(wp.Repository, branchName)
@@ -661,14 +616,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 			}
 			pb := playbook
 			syncedPlaybooks++
-			if h.ansibleQueue != nil {
-				go func() {
-					syncMsg := h.playbookSyncPayload(context.Background(), &pb)
-					if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-						logger.Errorf("Error queuing sync for playbook %s: %v", pb.ID, err)
-					}
-				}()
-			}
+			h.requestPlaybookSync(&pb)
 			h.launchWebhookTemplates(pb.ID, pb.Name, wp.Repository, branchName)
 		}
 	}
@@ -1863,15 +1811,7 @@ func (h *VCSAppInstallationHandlerV2) syncAnsibleOnGitHubPush(repositoryFullName
 		}
 		logger.Infof("Triggering sync for inventory: %s (ID: %s)", inventory.Name, inventory.ID)
 		syncedInventories++
-		if h.ansibleQueue != nil {
-			go func(inv models.AnsibleInventory) {
-				// Pre-resolve the clone URL server-side (same format the ansible-runner expects)
-				syncMsg := h.inventorySyncPayload(context.Background(), &inv)
-				if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-					logger.Errorf("Error queuing sync for inventory %s: %v", inv.ID, err)
-				}
-			}(inventory)
-		}
+		h.requestInventorySync(&inventory)
 	}
 
 	if h.playbookRepo == nil {
@@ -1888,14 +1828,7 @@ func (h *VCSAppInstallationHandlerV2) syncAnsibleOnGitHubPush(repositoryFullName
 		}
 		logger.Infof("Triggering sync for playbook: %s (ID: %s)", playbook.Name, playbook.ID)
 		syncedPlaybooks++
-		if h.ansibleQueue != nil {
-			go func(pb models.AnsiblePlaybook) {
-				syncMsg := map[string]interface{}{"playbook_id": pb.ID.String()}
-				if err := h.ansibleQueue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-					logger.Errorf("Error queuing sync for playbook %s: %v", pb.ID, err)
-				}
-			}(playbook)
-		}
+		h.requestPlaybookSync(&playbook)
 		h.launchWebhookTemplates(playbook.ID, playbook.Name, repositoryFullName, branchName)
 	}
 	return syncedInventories, syncedPlaybooks
@@ -2305,9 +2238,12 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 				if host == "" {
 					host = "localhost:5173" // Fallback to frontend default
 				}
-				scheme := "https"
-				if c.GetHeader("X-Forwarded-Proto") == "http" || c.Request.TLS == nil {
+				scheme := forwardedScheme(c)
+				if scheme == "" {
 					scheme = "http"
+					if c.Request.TLS != nil {
+						scheme = "https"
+					}
 				}
 
 				// Get organization name from workspace (need to fetch with project preloaded)

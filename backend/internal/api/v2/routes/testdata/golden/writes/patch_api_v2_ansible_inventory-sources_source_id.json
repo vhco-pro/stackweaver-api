@@ -15,6 +15,7 @@
           "description": "Updated by the golden write harness",
           "group-by-availability-zone": true,
           "overwrite-vars": true,
+          "run-image-id": "\u003cuuid\u003e",
           "sync-schedule": "30 2 * * *",
           "update-cache-timeout": 600,
           "verbosity": 1
@@ -68,6 +69,10 @@
                   "type": "string",
                   "nullable": true
                 },
+                "identity-binding-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "instance-filters": {
                   "type": "string",
                   "nullable": true
@@ -84,12 +89,20 @@
                   "type": "boolean",
                   "nullable": true
                 },
+                "run-image-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "source-type": {
                   "type": "string",
                   "nullable": true
                 },
                 "sync-schedule": {
                   "type": "string",
+                  "nullable": true
+                },
+                "sync-timeout": {
+                  "type": "integer",
                   "nullable": true
                 },
                 "update-cache-timeout": {
@@ -135,6 +148,7 @@
         "group-by-tag": "",
         "hostname-var": "public_ip",
         "hosts-count": 0,
+        "identity-binding-id": null,
         "instance-filters": "",
         "last-sync-at": null,
         "last-sync-error": "",
@@ -142,9 +156,11 @@
         "name": "aws-eu-west-1",
         "overwrite": false,
         "overwrite-vars": true,
+        "run-image-id": "\u003cuuid\u003e",
         "source-type": "aws",
         "status": "never_synced",
         "sync-schedule": "30 2 * * *",
+        "sync-timeout": 0,
         "update-cache-timeout": 600,
         "update-on-launch": true,
         "updated-at": "\u003ctimestamp\u003e",

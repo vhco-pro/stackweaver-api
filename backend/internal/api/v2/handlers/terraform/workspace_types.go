@@ -102,6 +102,8 @@ type WorkspaceAttributes struct {
 
 	Permissions       WorkspacePermissions       `json:"permissions"`
 	RunTimeout        int                        `json:"run-timeout,omitempty"`
+	RunImageID        *string                    `json:"run-image-id"`
+	IdentityBindingID *string                    `json:"identity-binding-id"`
 	SettingOverwrites WorkspaceSettingOverwrites `json:"setting-overwrites"`
 	VCSConnectionID   string                     `json:"vcs-connection-id,omitempty"`
 	VCSAccountName    string                     `json:"vcs-account-name,omitempty"`

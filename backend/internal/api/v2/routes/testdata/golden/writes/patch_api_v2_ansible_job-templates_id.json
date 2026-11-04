@@ -13,7 +13,9 @@
             "compliance_profile": "cis-level-1"
           },
           "forks": 20,
+          "identity-binding-id": "\u003cuuid\u003e",
           "limit": "webservers",
+          "run-image-id": "\u003cuuid\u003e",
           "timeout-seconds": 1800
         },
         "relationships": {
@@ -71,6 +73,10 @@
                   "type": "integer",
                   "nullable": true
                 },
+                "identity-binding-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "job-slice-count": {
                   "type": "integer",
                   "nullable": true
@@ -89,6 +95,10 @@
                 },
                 "retention-days": {
                   "type": "integer",
+                  "nullable": true
+                },
+                "run-image-id": {
+                  "type": "string",
                   "nullable": true
                 },
                 "schedule-cron": {
@@ -221,11 +231,13 @@
         },
         "forks": 20,
         "host-config-key": "\u003csecret\u003e",
+        "identity-binding-id": "\u003cuuid\u003e",
         "job-slice-count": 1,
         "launch-on-webhook": false,
         "limit": "webservers",
         "name": "baseline-compliance",
         "retention-days": null,
+        "run-image-id": "\u003cuuid\u003e",
         "schedule-cron": "",
         "schedule-enabled": false,
         "skip-tags": "",

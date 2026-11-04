@@ -1,0 +1,9 @@
+{
+  "method": "PUT",
+  "path": "/api/v2/runner/cache/:kind/:sha256",
+  "request": {
+    "content_type": "application/octet-stream",
+    "binary": true
+  },
+  "status": 201
+}

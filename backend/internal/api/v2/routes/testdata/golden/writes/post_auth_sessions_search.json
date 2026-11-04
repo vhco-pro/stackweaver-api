@@ -41,6 +41,7 @@
       {
         "changeDate": "\u003ctimestamp\u003e",
         "creationDate": "\u003ctimestamp\u003e",
+        "expirationDate": "\u003ctimestamp\u003e",
         "factors": {
           "password": {
             "verifiedAt": "\u003ctimestamp\u003e"

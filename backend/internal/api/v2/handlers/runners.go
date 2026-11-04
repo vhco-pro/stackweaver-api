@@ -5,6 +5,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -145,7 +146,7 @@ func (h *RunnerHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
-	if !h.requireManageAgentPools(c, runner.OrganizationID) {
+	if !h.requireManageAgentPools(c, runner.OrgID()) {
 		return
 	}
 
@@ -196,7 +197,7 @@ func (h *RunnerHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
-	if !h.requireManageAgentPools(c, runner.OrganizationID) {
+	if !h.requireManageAgentPools(c, runner.OrgID()) {
 		return
 	}
 
@@ -229,6 +230,44 @@ func (h *RunnerHandlerV2) Update(c *gin.Context) {
 	jsonapi.WriteDocument(c, http.StatusOK, buildRunnerResponse(runner))
 }
 
+// Drain asks a runner's launcher to drain (#933, D11): its next heartbeat answers drain, and the
+// launcher finishes its in-flight jobs, claims nothing more and deregisters. A hosted runner is
+// the platform's, not the organization's, and is not drained here.
+//
+// POST /api/v2/runners/:id/actions/drain
+func (h *RunnerHandlerV2) Drain(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid runner ID")
+		return
+	}
+	runner, err := h.runnerRepo.GetByID(id)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return
+	}
+	if runner.IsHosted() {
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+		return
+	}
+	if !h.requireManageAgentPools(c, runner.OrgID()) {
+		return
+	}
+	if err := h.runnerRepo.RequestDrain(runner.ID); err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	if runner, err = h.runnerRepo.GetByID(id); err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	jsonapi.WriteDocument(c, http.StatusAccepted, buildRunnerResponse(runner))
+}
+
 // Delete deletes a runner
 // DELETE /api/v2/runners/:id
 func (h *RunnerHandlerV2) Delete(c *gin.Context) {
@@ -249,7 +288,7 @@ func (h *RunnerHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	if !h.requireManageAgentPools(c, runner.OrganizationID) {
+	if !h.requireManageAgentPools(c, runner.OrgID()) {
 		return
 	}
 
@@ -304,24 +343,31 @@ func buildRunnerResponse(r *models.Runner) jsonapi.Resource[RunnerAttributes] {
 	}
 
 	attrs := RunnerAttributes{
-		Name:                 r.Name,
-		Description:          r.Description,
-		AgentPoolID:          r.AgentPoolID.String(),
-		RunnerType:           r.RunnerType,
-		Status:               r.Status,
-		Hostname:             r.Hostname,
-		IPAddress:            r.IPAddress,
-		OSType:               r.OSType,
-		OSVersion:            r.OSVersion,
-		AgentVersion:         r.AgentVersion,
-		Labels:               r.Labels,
-		TofuVersion:          r.TofuVersion,
-		AnsibleVersion:       r.AnsibleVersion,
-		AvailableCollections: r.AvailableCollections,
-		MaxConcurrentJobs:    r.MaxConcurrentJobs,
-		CurrentJobs:          r.CurrentJobs,
-		LastHeartbeatAt:      lastHeartbeat,
-		RegisteredAt:         r.RegisteredAt.Format("2006-01-02T15:04:05Z"),
+		Name:                       r.Name,
+		Description:                r.Description,
+		AgentPoolID:                r.PoolID().String(),
+		RunnerType:                 r.RunnerType,
+		Status:                     r.Status,
+		Hostname:                   r.Hostname,
+		IPAddress:                  r.IPAddress,
+		OSType:                     r.OSType,
+		OSVersion:                  r.OSVersion,
+		AgentVersion:               r.AgentVersion,
+		Labels:                     r.Labels,
+		TofuVersion:                r.TofuVersion,
+		AnsibleVersion:             r.AnsibleVersion,
+		AvailableCollections:       r.AvailableCollections,
+		MaxConcurrentJobs:          r.MaxConcurrentJobs,
+		CurrentJobs:                r.CurrentJobs,
+		LastHeartbeatAt:            lastHeartbeat,
+		RegisteredAt:               r.RegisteredAt.Format("2006-01-02T15:04:05Z"),
+		Driver:                     r.Driver,
+		NetworkMode:                r.NetworkMode,
+		LauncherSettingsAttributes: launcherSettings(r),
+	}
+	if r.DrainRequestedAt != nil {
+		at := r.DrainRequestedAt.UTC().Format(time.RFC3339)
+		attrs.DrainRequestedAt = &at
 	}
 
 	// Include pool name if preloaded
@@ -334,8 +380,8 @@ func buildRunnerResponse(r *models.Runner) jsonapi.Resource[RunnerAttributes] {
 		Type:       "runners",
 		Attributes: attrs,
 		Relationships: OrgAndAgentPoolRelationships{
-			Organization: jsonapi.ToOne(r.OrganizationID.String(), "organizations"),
-			AgentPool:    jsonapi.ToOne(r.AgentPoolID.String(), "agent-pools"),
+			Organization: jsonapi.ToOne(r.OrgID().String(), "organizations"),
+			AgentPool:    jsonapi.ToOne(r.PoolID().String(), "agent-pools"),
 		},
 	}
 }

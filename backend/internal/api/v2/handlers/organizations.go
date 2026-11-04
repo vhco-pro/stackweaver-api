@@ -15,6 +15,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
@@ -70,6 +71,15 @@ type OrganizationAttributes struct {
 	// DefaultExecutionMode is the org-wide default workspace execution mode
 	// (tfe_organization_default_settings): remote|agent|local.
 	DefaultExecutionMode *string `json:"default-execution-mode"`
+	// RunTimeout is a Stackweaver extension: the organization's level of the run timeout, in
+	// seconds, inherited by workspaces and job templates whose own level and project set none.
+	RunTimeout *int `json:"run-timeout"`
+	// Stackweaver extensions (#933, D6, D7, D8): the organization's run images, one per engine, its
+	// identity binding (empty clears either) and its cache bound in bytes (zero is the deployment's).
+	TofuRunImageID    *string `json:"tofu-run-image-id"`
+	AnsibleRunImageID *string `json:"ansible-run-image-id"`
+	IdentityBindingID *string `json:"identity-binding-id"`
+	CacheSizeLimit    *int64  `json:"cache-size-limit"`
 
 	// tfe_organization policy flags (all optional pointers so PATCH can distinguish unset from
 	// false). See the tfe_organization spec doc for the runtime each one drives.
@@ -124,6 +134,64 @@ func applyAnsibleJobRetentionDays(org *models.Organization, days *int) {
 	if days != nil && *days >= 0 {
 		org.AnsibleJobRetentionDays = *days
 	}
+}
+
+// applyOrgRunTimeout copies run-timeout onto the organization: zero inherits the deployment default,
+// an absent attribute changes nothing, and a negative number is refused with a detail.
+func applyOrgRunTimeout(org *models.Organization, seconds *int) (string, bool) {
+	if seconds == nil {
+		return "", true
+	}
+	if *seconds < 0 {
+		return "run-timeout must be zero (inherit) or a positive number of seconds", false
+	}
+	org.RunTimeout = *seconds
+	return "", true
+}
+
+// applyOrgLevelRefs sets the organization's run images, identity binding and cache bound, answering
+// a detail when one is invalid. Creating an organization sets none: it has no image or binding yet.
+func (h *OrganizationHandlerV2) applyOrgLevelRefs(org *models.Organization, attrs *OrganizationAttributes) (string, bool, error) {
+	if attrs.CacheSizeLimit != nil {
+		if *attrs.CacheSizeLimit < 0 {
+			return "cache-size-limit must be zero (the deployment's) or a positive number of bytes", false, nil
+		}
+		org.CacheSizeLimit = *attrs.CacheSizeLimit
+	}
+	if attrs.TofuRunImageID == nil && attrs.AnsibleRunImageID == nil && attrs.IdentityBindingID == nil {
+		return "", true, nil
+	}
+	refs := levelrefs.New(h.db)
+	for _, ref := range []struct {
+		kind string
+		raw  *string
+		dst  **uuid.UUID
+	}{
+		{models.RunImageKindTofu, attrs.TofuRunImageID, &org.TofuRunImageID},
+		{models.RunImageKindAnsible, attrs.AnsibleRunImageID, &org.AnsibleRunImageID},
+	} {
+		id, set, err := refs.RunImage(org.ID, ref.kind, ref.raw)
+		if err != nil {
+			if errors.Is(err, levelrefs.ErrInvalid) {
+				return err.Error(), false, nil
+			}
+			return "", false, err
+		}
+		if set {
+			*ref.dst = id
+		}
+	}
+	id, set, err := refs.IdentityBinding(org.ID, attrs.IdentityBindingID)
+	if err != nil {
+		if errors.Is(err, levelrefs.ErrInvalid) {
+			return err.Error(), false, nil
+		}
+		return "", false, err
+	}
+	if set {
+		org.IdentityBindingID = id
+	}
+	return "", true, nil
 }
 
 // organizationsType is the JSON:API resource type both organization request documents must carry.
@@ -219,25 +287,30 @@ type OrganizationPermissions struct {
 // drift on the provider's next plan. SessionTimeout and SessionRemember are always-null
 // (sessions are Zitadel's), typed as *int so the members stay present as JSON null.
 type OrganizationResponseAttributes struct {
-	Name                                              string `json:"name"`
-	ExternalID                                        string `json:"external-id"`
-	CreatedAt                                         string `json:"created-at"`
-	UpdatedAt                                         string `json:"updated-at"`
-	Email                                             string `json:"email"`
-	SessionTimeout                                    *int   `json:"session-timeout"`
-	SessionRemember                                   *int   `json:"session-remember"`
-	CollaboratorAuthPolicy                            string `json:"collaborator-auth-policy"`
-	CostEstimationEnabled                             bool   `json:"cost-estimation-enabled"`
-	DefaultTerraformVersion                           string `json:"default-terraform-version"`
-	DefaultExecutionMode                              string `json:"default-execution-mode"`
-	AnsibleJobRetentionDays                           int    `json:"ansible-job-retention-days"`
-	AnsibleAdhocModules                               string `json:"ansible-adhoc-modules"`
-	SpeculativePlanManagementEnabled                  bool   `json:"speculative-plan-management-enabled"`
-	AggregatedCommitStatusEnabled                     bool   `json:"aggregated-commit-status-enabled"`
-	AssessmentsEnforced                               bool   `json:"assessments-enforced"`
-	AllowForceDeleteWorkspaces                        bool   `json:"allow-force-delete-workspaces"`
-	UserTokensEnabled                                 bool   `json:"user-tokens-enabled"`
-	SendPassingStatusesForUntriggeredSpeculativePlans bool   `json:"send-passing-statuses-for-untriggered-speculative-plans"`
+	Name                                              string  `json:"name"`
+	ExternalID                                        string  `json:"external-id"`
+	CreatedAt                                         string  `json:"created-at"`
+	UpdatedAt                                         string  `json:"updated-at"`
+	Email                                             string  `json:"email"`
+	SessionTimeout                                    *int    `json:"session-timeout"`
+	SessionRemember                                   *int    `json:"session-remember"`
+	CollaboratorAuthPolicy                            string  `json:"collaborator-auth-policy"`
+	CostEstimationEnabled                             bool    `json:"cost-estimation-enabled"`
+	DefaultTerraformVersion                           string  `json:"default-terraform-version"`
+	DefaultExecutionMode                              string  `json:"default-execution-mode"`
+	RunTimeout                                        int     `json:"run-timeout"`
+	TofuRunImageID                                    *string `json:"tofu-run-image-id"`
+	AnsibleRunImageID                                 *string `json:"ansible-run-image-id"`
+	IdentityBindingID                                 *string `json:"identity-binding-id"`
+	CacheSizeLimit                                    int64   `json:"cache-size-limit"`
+	AnsibleJobRetentionDays                           int     `json:"ansible-job-retention-days"`
+	AnsibleAdhocModules                               string  `json:"ansible-adhoc-modules"`
+	SpeculativePlanManagementEnabled                  bool    `json:"speculative-plan-management-enabled"`
+	AggregatedCommitStatusEnabled                     bool    `json:"aggregated-commit-status-enabled"`
+	AssessmentsEnforced                               bool    `json:"assessments-enforced"`
+	AllowForceDeleteWorkspaces                        bool    `json:"allow-force-delete-workspaces"`
+	UserTokensEnabled                                 bool    `json:"user-tokens-enabled"`
+	SendPassingStatusesForUntriggeredSpeculativePlans bool    `json:"send-passing-statuses-for-untriggered-speculative-plans"`
 	// Declined surface (see the tfe_organization spec): echoed as drift-free constants.
 	OwnersTeamSAMLRoleID string `json:"owners-team-saml-role-id"`
 	EnforceHYOK          bool   `json:"enforce-hyok"`
@@ -280,6 +353,11 @@ func buildTFEOrganizationResponse(org *models.Organization, defaultProjectID *uu
 			CostEstimationEnabled:            org.CostEstimationEnabled,
 			DefaultTerraformVersion:          org.DefaultTofuVersion,
 			DefaultExecutionMode:             defaultExecutionMode,
+			RunTimeout:                       org.RunTimeout,
+			TofuRunImageID:                   levelrefs.UUIDString(org.TofuRunImageID),
+			AnsibleRunImageID:                levelrefs.UUIDString(org.AnsibleRunImageID),
+			IdentityBindingID:                levelrefs.UUIDString(org.IdentityBindingID),
+			CacheSizeLimit:                   org.CacheSizeLimit,
 			AnsibleJobRetentionDays:          org.AnsibleJobRetentionDays,
 			AnsibleAdhocModules:              org.AnsibleAdHocModules,
 			SpeculativePlanManagementEnabled: org.SpeculativePlanManagement(),
@@ -336,7 +414,7 @@ func (h *OrganizationHandlerV2) applyOrgDefaultSettings(org *models.Organization
 			}
 			// Tenant safety: the pool must exist and belong to THIS organization, or an org could
 			// point its default at another tenant's pool.
-			pool, err := h.agentPoolRepo.GetByID(poolID, false)
+			pool, err := h.agentPoolRepo.GetCustomerByID(poolID, false)
 			if err != nil || pool == nil || pool.OrganizationID != org.ID {
 				return "default agent pool not found in this organization", false
 			}
@@ -551,6 +629,10 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 		AnsibleJobRetentionDays: defaultAnsibleJobRetentionDays,
 	}
 	applyAnsibleJobRetentionDays(org, attrs.AnsibleJobRetentionDays)
+	if detail, ok := applyOrgRunTimeout(org, attrs.RunTimeout); !ok {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
+		return
+	}
 
 	// tfe_organization policy flags (the stock provider creates with name+email only and PATCHes
 	// the rest, but the wire contract accepts them on create too).
@@ -745,6 +827,17 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 		org.DefaultTofuVersion = *newDefaultTerraformVersion
 	}
 	applyAnsibleJobRetentionDays(org, attrs.AnsibleJobRetentionDays)
+	if detail, ok := applyOrgRunTimeout(org, attrs.RunTimeout); !ok {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
+		return
+	}
+	if detail, ok, err := h.applyOrgLevelRefs(org, attrs); err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	} else if !ok {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
+		return
+	}
 	if newAnsibleAdHocModules != nil {
 		org.AnsibleAdHocModules = *newAnsibleAdHocModules
 	}

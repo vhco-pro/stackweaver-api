@@ -72,7 +72,7 @@ func newBearerTestRig(t *testing.T) *bearerTestRig {
 		if key != bearerTestTFEToken {
 			return nil, errors.New("invalid api key")
 		}
-		return &models.APIKey{ID: uuid.New(), UserID: rig.user.ID, Kind: models.APIKeyKindUser}, nil
+		return &models.APIKey{ID: uuid.New(), UserID: &rig.user.ID, Kind: models.APIKeyKindUser}, nil
 	}})
 	rig.svc.issuer = "https://issuer.example"
 	rig.svc.verifier = &ZitadelVerifier{issuer: "https://issuer.example", keySet: staticKeySet{pub: &priv.PublicKey}}

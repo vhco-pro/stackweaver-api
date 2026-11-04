@@ -82,7 +82,7 @@ func (h *AgentTokenHandlerV2) resolvePool(c *gin.Context) (*models.AgentPool, bo
 		jsonAPIError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
 		return nil, false
 	}
-	pool, err := h.poolRepo.GetByID(poolID, false)
+	pool, err := h.poolRepo.GetCustomerByID(poolID, false)
 	if err != nil {
 		jsonAPIError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
 		return nil, false

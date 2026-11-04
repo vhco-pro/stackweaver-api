@@ -3,15 +3,19 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -20,6 +24,8 @@ import (
 
 // AgentPoolHandlerV2 handles TFE-compatible agent pool API.
 type AgentPoolHandlerV2 struct {
+	// platformAdmin is the verdict that gates a hosted pool's cap and group (SetPlatformAdmin).
+	platformAdmin *platformadmin.Service
 	poolRepo      *repository.AgentPoolRepository
 	apiKeyService *apikey.Service
 	runnerRepo    *repository.RunnerRepository
@@ -27,6 +33,10 @@ type AgentPoolHandlerV2 struct {
 	authService   *auth.Service
 	rbacService   *rbac.Service
 }
+
+// SetPlatformAdmin wires the platform administrator verdict the hosted pool's cap and group are
+// written under (#933, D9). Without it nobody writes them.
+func (h *AgentPoolHandlerV2) SetPlatformAdmin(s *platformadmin.Service) { h.platformAdmin = s }
 
 // NewAgentPoolHandlerV2 creates an AgentPoolHandlerV2.
 func NewAgentPoolHandlerV2(
@@ -68,6 +78,15 @@ type UpdateAgentPoolRequestV2 struct {
 		Attributes *struct {
 			Name               *string `json:"name,omitempty"`
 			OrganizationScoped *bool   `json:"organization-scoped,omitempty"`
+			// Native pool settings (#933, D15).
+			KeepFailedJobsFor *int    `json:"keep-failed-jobs-for,omitempty"`
+			CPULimit          *string `json:"cpu-limit,omitempty"`
+			MemoryLimit       *string `json:"memory-limit,omitempty"`
+			LimitsRequired    *bool   `json:"limits-required,omitempty"`
+			LocalReadthrough  *bool   `json:"local-readthrough,omitempty"`
+			// A hosted pool's cap and group, for a platform administrator only (D9).
+			MaxConcurrentJobs *int    `json:"max-concurrent-jobs,omitempty"`
+			PlacementGroup    *string `json:"placement-group,omitempty"`
 		} `json:"attributes,omitempty"`
 		Relationships *struct {
 			AllowedWorkspaces  *jsonAPIRelationship `json:"allowed-workspaces,omitempty"`
@@ -113,17 +132,33 @@ func formatAgentPoolResponse(p *models.AgentPool, orgName string, agentCount int
 		rel.ExcludedWorkspaces = &jsonapi.ManyRelationship{Data: refs}
 	}
 	return jsonapi.Resource[AgentPoolAttributes]{
-		ID:   p.ID.String(),
-		Type: "agent-pools",
-		Attributes: AgentPoolAttributes{
-			Name:               p.Name,
-			AgentCount:         agentCount,
-			OrganizationScoped: p.OrganizationScoped,
-			CreatedAt:          p.CreatedAt.Format(time.RFC3339),
-		},
+		ID:            p.ID.String(),
+		Type:          "agent-pools",
+		Attributes:    agentPoolAttributes(p, agentCount),
 		Relationships: rel,
 		Links:         jsonapi.SelfLink{Self: "/api/v2/agent-pools/" + p.ID.String()},
 	}
+}
+
+// agentPoolAttributes renders a pool's attributes, with the cap and group on a hosted pool only.
+func agentPoolAttributes(p *models.AgentPool, agentCount int) AgentPoolAttributes {
+	a := AgentPoolAttributes{
+		Name: p.Name, AgentCount: agentCount, OrganizationScoped: p.OrganizationScoped, CreatedAt: p.CreatedAt.Format(time.RFC3339),
+		Kind: p.Kind, KeepFailedJobsFor: p.KeepFailedJobsFor, CPULimit: p.CPULimit, MemoryLimit: p.MemoryLimit,
+		LimitsRequired: p.LimitsRequired, LocalReadthrough: !p.LocalReadthroughDisabled,
+	}
+	if a.Kind == "" {
+		a.Kind = models.AgentPoolKindCustomer
+	}
+	if p.IsHosted() {
+		cap := 0
+		if p.MaxConcurrentJobs != nil {
+			cap = *p.MaxConcurrentJobs
+		}
+		group := p.PlacementGroup
+		a.MaxConcurrentJobs, a.PlacementGroup = &cap, &group
+	}
+	return a
 }
 
 func (h *AgentPoolHandlerV2) requireManageAgentPools(c *gin.Context, orgID uuid.UUID) bool {
@@ -255,7 +290,7 @@ func (h *AgentPoolHandlerV2) Create(c *gin.Context) {
 	}
 
 	// Reload with relations
-	updated, _ := h.poolRepo.GetByID(pool.ID, true)
+	updated, _ := h.poolRepo.GetCustomerByID(pool.ID, true)
 	if updated != nil {
 		pool = updated
 	}
@@ -278,7 +313,7 @@ func (h *AgentPoolHandlerV2) GetByID(c *gin.Context) {
 		return
 	}
 
-	pool, err := h.poolRepo.GetByID(id, true)
+	pool, err := h.poolRepo.GetCustomerByID(id, true)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
@@ -316,6 +351,16 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 		return
 	}
 
+	var req UpdateAgentPoolRequestV2
+	if err := c.ShouldBindJSON(&req); err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.Data.Type != "agent-pools" {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'agent-pools'")
+		return
+	}
+
 	pool, err := h.poolRepo.GetByID(id, true)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -323,6 +368,10 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 			return
 		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to get agent pool")
+		return
+	}
+	if pool.IsHosted() {
+		h.updateHosted(c, pool, &req)
 		return
 	}
 	org, _ := h.orgRepo.GetByID(pool.OrganizationID)
@@ -333,14 +382,8 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 	if !h.requireManageAgentPools(c, pool.OrganizationID) {
 		return
 	}
-
-	var req UpdateAgentPoolRequestV2
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-	if req.Data.Type != "agent-pools" {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "data.type must be 'agent-pools'")
+	if a := req.Data.Attributes; a != nil && (a.MaxConcurrentJobs != nil || a.PlacementGroup != nil) {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "max-concurrent-jobs and placement-group exist on hosted pools only")
 		return
 	}
 
@@ -377,13 +420,18 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 		if req.Data.Attributes.OrganizationScoped != nil {
 			pool.OrganizationScoped = *req.Data.Attributes.OrganizationScoped
 		}
+		if detail := applyPoolSettings(pool, req.Data.Attributes.KeepFailedJobsFor, req.Data.Attributes.CPULimit, req.Data.Attributes.MemoryLimit,
+			req.Data.Attributes.LimitsRequired, req.Data.Attributes.LocalReadthrough); detail != "" {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+			return
+		}
 		if err := h.poolRepo.Update(pool); err != nil {
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update agent pool")
 			return
 		}
 	}
 
-	updated, _ := h.poolRepo.GetByID(id, true)
+	updated, _ := h.poolRepo.GetCustomerByID(id, true)
 	if updated != nil {
 		pool = updated
 	}
@@ -406,7 +454,7 @@ func (h *AgentPoolHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
-	pool, err := h.poolRepo.GetByID(id, false)
+	pool, err := h.poolRepo.GetCustomerByID(id, false)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
@@ -436,7 +484,7 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 		return
 	}
 
-	pool, err := h.poolRepo.GetByID(id, false)
+	pool, err := h.poolRepo.GetCustomerByID(id, false)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
@@ -462,10 +510,13 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 			ID:   r.ID.String(),
 			Type: "agents",
 			Attributes: AgentAttributes{
-				Name:       r.Name,
-				IPAddress:  r.IPAddress,
-				Status:     string(r.Status),
-				LastPingAt: r.LastHeartbeatAt,
+				Name:                       r.Name,
+				IPAddress:                  r.IPAddress,
+				Status:                     string(r.Status),
+				LastPingAt:                 r.LastHeartbeatAt,
+				Driver:                     r.Driver,
+				NetworkMode:                r.NetworkMode,
+				LauncherSettingsAttributes: launcherSettings(&r),
 			},
 		})
 	}
@@ -531,7 +582,7 @@ func (h *AgentPoolHandlerV2) QueueDepth(c *gin.Context) {
 		return
 	}
 
-	pool, err := h.poolRepo.GetByID(id, false)
+	pool, err := h.poolRepo.GetCustomerByID(id, false)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
@@ -557,10 +608,15 @@ func (h *AgentPoolHandlerV2) QueueDepth(c *gin.Context) {
 		Attributes: QueueDepthAttributes{
 			PendingTerraformJobs: depth.PendingTerraformJobs,
 			PendingAnsibleJobs:   depth.PendingAnsibleJobs,
+			PendingWorkItems:     depth.PendingWorkItems,
 			TotalPending:         depth.TotalPending,
 			BusyRunners:          depth.BusyRunners,
 			TotalRunners:         depth.TotalRunners,
 			IdleRunners:          depth.IdleRunners,
+			PendingByEngine:      QueueDepthEngines{Tofu: depth.PendingByEngine.Tofu, Ansible: depth.PendingByEngine.Ansible, Any: depth.PendingByEngine.Any},
+			Capacity:             depth.Capacity,
+			InFlight:             depth.InFlight,
+			Headroom:             depth.Headroom,
 		},
 	})
 }
@@ -618,4 +674,173 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 	}
 
 	return h.requireManageAgentPools(c, pool.OrganizationID)
+}
+
+// JITTokenRequest is the optional body of POST /agent-pools/:id/jit-token.
+type JITTokenRequest struct {
+	Data *struct {
+		Type       string `json:"type"`
+		Attributes *struct {
+			// ExpiresIn is the token's lifetime in seconds: ten minutes by default, an hour at most.
+			ExpiresIn *int `json:"expires-in,omitempty"`
+		} `json:"attributes,omitempty"`
+	} `json:"data,omitempty"`
+}
+
+// JITTokenAttributes is a just-in-time registration token, its plaintext shown once.
+type JITTokenAttributes struct {
+	Token     string    `json:"token"` //nolint:gosec // G117: the token is the response, shown once
+	ExpiresAt time.Time `json:"expires-at"`
+}
+
+// JITToken mints a just-in-time registration token for the pool (#933, D11): a one-time,
+// short-lived agent token that registers one launcher (the --single launcher an operator starts
+// per job) and is used up by that registration. The caller is the pool's own operator credential,
+// as for the queue depth: an agent token of the pool, an organization key carrying runner:register
+// on its organization, or a user who manages agent pools; never a fallback to a key owner's RBAC.
+//
+// POST /api/v2/agent-pools/:id/jit-token
+func (h *AgentPoolHandlerV2) JITToken(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid agent pool id")
+		return
+	}
+	pool, err := h.poolRepo.GetCustomerByID(id, false)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
+			return
+		}
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	if !h.authorizeQueueDepth(c, pool, id) {
+		return
+	}
+	var req JITTokenRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+	}
+	ttl := apikey.DefaultJITTokenTTL
+	if req.Data != nil && req.Data.Attributes != nil && req.Data.Attributes.ExpiresIn != nil {
+		secs := *req.Data.Attributes.ExpiresIn
+		if secs <= 0 || time.Duration(secs)*time.Second > apikey.MaxJITTokenTTL {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", "expires-in is a number of seconds up to an hour")
+			return
+		}
+		ttl = time.Duration(secs) * time.Second
+	}
+	owner, ok := h.jitOwner(c)
+	if !ok {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "a just-in-time token is minted with a user's credential")
+		return
+	}
+	key, token, err := h.apiKeyService.CreateJITToken(owner, pool.ID, pool.OrganizationID, ttl)
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[JITTokenAttributes]{
+		ID: key.ID.String(), Type: "agent-jit-tokens",
+		Attributes: JITTokenAttributes{Token: token, ExpiresAt: *key.ExpiresAt},
+	})
+}
+
+// jitOwner is the user a JIT token belongs to: the calling key's owner, or the signed-in user.
+func (h *AgentPoolHandlerV2) jitOwner(c *gin.Context) (uuid.UUID, bool) {
+	if v, ok := c.Get("user_id"); ok {
+		if id, ok := v.(uuid.UUID); ok && id != uuid.Nil {
+			return id, true
+		}
+	}
+	if h.authService != nil {
+		if user, err := h.authService.GetUserFromContext(c); err == nil && user != nil {
+			return user.ID, true
+		}
+	}
+	return uuid.Nil, false
+}
+
+// applyPoolSettings applies the native pool settings of a request, or names the one it refuses.
+func applyPoolSettings(pool *models.AgentPool, keep *int, cpu, mem *string, required, readthrough *bool) string {
+	if keep != nil {
+		if *keep < 0 {
+			return "keep-failed-jobs-for must be zero or a number of seconds"
+		}
+		pool.KeepFailedJobsFor = *keep
+	}
+	if cpu != nil {
+		pool.CPULimit = strings.TrimSpace(*cpu)
+	}
+	if mem != nil {
+		pool.MemoryLimit = strings.TrimSpace(*mem)
+	}
+	if required != nil {
+		pool.LimitsRequired = *required
+	}
+	if readthrough != nil {
+		pool.LocalReadthroughDisabled = !*readthrough
+	}
+	if pool.LimitsRequired && pool.CPULimit == "" && pool.MemoryLimit == "" {
+		return "limits-required needs a cpu-limit or a memory-limit"
+	}
+	return ""
+}
+
+// updateHosted writes a hosted pool's cap and placement group, the only settings of a hosted pool
+// anyone writes, and only a platform administrator (#933, D9, AC55, AC79). Anyone else asking for
+// those fields gets 403 naming them; any other change of a hosted pool answers as for a missing
+// pool, because the pool is not the organization's to configure, rename or delete (AC49, AC50).
+func (h *AgentPoolHandlerV2) updateHosted(c *gin.Context, pool *models.AgentPool, req *UpdateAgentPoolRequestV2) {
+	a := req.Data.Attributes
+	asksCap := a != nil && (a.MaxConcurrentJobs != nil || a.PlacementGroup != nil)
+	other := req.Data.Relationships != nil || (a != nil && (a.Name != nil || a.OrganizationScoped != nil || a.KeepFailedJobsFor != nil ||
+		a.CPULimit != nil || a.MemoryLimit != nil || a.LimitsRequired != nil || a.LocalReadthrough != nil))
+	if !asksCap {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
+		return
+	}
+	var admin *models.User
+	reason := "no platform administrator verdict is configured"
+	if h.platformAdmin != nil {
+		admin, reason = h.platformAdmin.Check(c)
+	}
+	if admin == nil {
+		logger.Warnf("hosted pool %s: refused a cap or group write: %s", pool.ID, reason)
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "max-concurrent-jobs and placement-group of a hosted pool are set by a platform administrator only")
+		return
+	}
+	if other {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "a hosted pool's only writable settings are max-concurrent-jobs and placement-group")
+		return
+	}
+	if a.MaxConcurrentJobs != nil {
+		if *a.MaxConcurrentJobs < 0 {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "max-concurrent-jobs must be zero (unlimited) or more")
+			return
+		}
+		pool.MaxConcurrentJobs = a.MaxConcurrentJobs
+	}
+	if a.PlacementGroup != nil {
+		g := strings.TrimSpace(*a.PlacementGroup)
+		if g == "" || len(g) > 100 {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "placement-group must be a name of 1 to 100 characters")
+			return
+		}
+		pool.PlacementGroup = g
+	}
+	if err := h.poolRepo.Update(pool); err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update agent pool")
+		return
+	}
+	logger.Infof("Platform administrator %s set hosted pool %s to cap %v, group %s", admin.ID, pool.ID, pool.MaxConcurrentJobs, pool.PlacementGroup)
+	orgName := ""
+	if org, _ := h.orgRepo.GetByID(pool.OrganizationID); org != nil {
+		orgName = org.Name
+	}
+	jsonapi.WriteDocument(c, http.StatusOK, formatAgentPoolResponse(pool, orgName, 0))
 }

@@ -1,0 +1,71 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/work-items",
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "attributes": {
+          "commit": "",
+          "created-at": "\u003ctimestamp\u003e",
+          "error-message": "",
+          "finished-at": "\u003ctimestamp\u003e",
+          "image": "",
+          "image-level": "platform",
+          "kind": "dynamic_source_sync",
+          "placement": {
+            "attempt": 1,
+            "driver": "container",
+            "identity-binding-id": null,
+            "image": "",
+            "image-digest": "",
+            "image-level": "platform",
+            "node": "launcher-01",
+            "placement-id": "sw-job-demo-sync",
+            "queue-cap": null,
+            "queue-in-flight": null,
+            "queue-position": null,
+            "queue-reason": ""
+          },
+          "queued-at": "\u003ctimestamp\u003e",
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "completed",
+          "timeout-seconds": 3600,
+          "triggered-by": "manual"
+        },
+        "id": "\u003cid\u003e",
+        "relationships": {
+          "inventory": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventories"
+            }
+          },
+          "inventory-source": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "inventory-sources"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "work-items"
+      }
+    ],
+    "meta": {
+      "pagination": {
+        "current-page": 1,
+        "next-page": null,
+        "page-size": 20,
+        "prev-page": null,
+        "total-count": 1,
+        "total-pages": 1
+      }
+    }
+  }
+}

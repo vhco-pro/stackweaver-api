@@ -24,6 +24,7 @@
         "file-triggers-enabled": true,
         "force-delete": false,
         "global-remote-state": false,
+        "identity-binding-id": null,
         "latest-change-at": "\u003ctimestamp\u003e",
         "locked": false,
         "locked-reason": null,
@@ -43,7 +44,7 @@
         },
         "queue-all-runs": true,
         "resource-count": 0,
-        "run-timeout": 7200,
+        "run-image-id": null,
         "setting-overwrites": {
           "agent-pool": false,
           "execution-mode": false

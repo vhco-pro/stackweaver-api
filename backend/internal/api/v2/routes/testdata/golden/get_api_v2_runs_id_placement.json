@@ -1,0 +1,25 @@
+{
+  "method": "GET",
+  "path": "/api/v2/runs/:id/placement",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "attempt": 0,
+        "driver": "",
+        "identity-binding-id": null,
+        "image": "",
+        "image-digest": "",
+        "image-level": "",
+        "node": "",
+        "placement-id": "",
+        "queue-cap": null,
+        "queue-in-flight": null,
+        "queue-position": null,
+        "queue-reason": ""
+      },
+      "id": "\u003cid\u003e",
+      "type": "placements"
+    }
+  }
+}

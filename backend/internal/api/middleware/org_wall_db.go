@@ -3,9 +3,11 @@
 package middleware
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
 )
@@ -50,6 +52,10 @@ type dbOrgResolver struct {
 	taskStage        *repository.TaskStageRepository
 	taskResult       *repository.TaskResultRepository
 	apiKey           *repository.APIKeyRepository
+	workItem         *repository.WorkItemRepository
+	identityBinding  *repository.IdentityBindingRepository
+	pullSecret       *repository.PullSecretRepository
+	db               *gorm.DB
 }
 
 // NewDBOrgResolver builds the production OrgResolver from a database handle.
@@ -83,6 +89,10 @@ func NewDBOrgResolver(db *gorm.DB) OrgResolver {
 		ansibleJobTpl:    repository.NewAnsibleJobTemplateRepository(db),
 		ansibleJobTplVar: repository.NewAnsibleJobTemplateVariableRepository(db),
 		ansibleJob:       repository.NewAnsibleJobRepository(db),
+		workItem:         repository.NewWorkItemRepository(db),
+		identityBinding:  repository.NewIdentityBindingRepository(db),
+		pullSecret:       repository.NewPullSecretRepository(db),
+		db:               db,
 		ansibleSchedule:  repository.NewAnsibleScheduleRepository(db),
 		ansibleWorkflow:  repository.NewAnsibleWorkflowRepository(db),
 		notificationCfg:  repository.NewNotificationConfigurationRepository(db),
@@ -375,7 +385,11 @@ func (r *dbOrgResolver) ByRunnerID(id string) (uuid.UUID, error) {
 	if err != nil {
 		return uuid.Nil, err
 	}
-	return runner.OrganizationID, nil
+	if runner.OrganizationID == nil {
+		// A hosted runner belongs to no organization; no organization route reaches it.
+		return uuid.Nil, errors.New("the runner is a hosted runner of no organization")
+	}
+	return *runner.OrganizationID, nil
 }
 
 func (r *dbOrgResolver) ByVCSConnectionID(id string) (uuid.UUID, error) {
@@ -515,6 +529,54 @@ func (r *dbOrgResolver) ByAnsibleJobTemplateVariableID(id string) (uuid.UUID, er
 		return uuid.Nil, err
 	}
 	return r.orgByJobTemplateUUID(v.JobTemplateID)
+}
+
+// ByWorkItemID resolves a work item's organization, which it carries itself (#933, D2).
+func (r *dbOrgResolver) ByWorkItemID(id string) (uuid.UUID, error) {
+	item, err := r.workItem.GetByID(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return item.OrganizationID, nil
+}
+
+// ByIdentityBindingID resolves an identity binding's organization, which it carries (#933, D8).
+func (r *dbOrgResolver) ByIdentityBindingID(id string) (uuid.UUID, error) {
+	bid, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	b, err := r.identityBinding.GetByID(bid)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return b.OrganizationID, nil
+}
+
+// ByPullSecretID resolves a pool pull Secret's organization, which it carries (#933, D8).
+func (r *dbOrgResolver) ByPullSecretID(id string) (uuid.UUID, error) {
+	pid, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	p, err := r.pullSecret.GetByID(pid)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return p.OrganizationID, nil
+}
+
+// ByRunImageID resolves a run image's organization, which it carries (#933, D6).
+func (r *dbOrgResolver) ByRunImageID(id string) (uuid.UUID, error) {
+	iid, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var img models.RunImage
+	if err := r.db.Select("organization_id").First(&img, "id = ?", iid).Error; err != nil {
+		return uuid.Nil, err
+	}
+	return img.OrganizationID, nil
 }
 
 func (r *dbOrgResolver) ByAnsibleJobID(id string) (uuid.UUID, error) {

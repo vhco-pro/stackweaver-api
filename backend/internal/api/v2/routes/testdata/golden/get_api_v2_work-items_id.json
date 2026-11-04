@@ -1,0 +1,60 @@
+{
+  "method": "GET",
+  "path": "/api/v2/work-items/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "commit": "",
+        "created-at": "\u003ctimestamp\u003e",
+        "error-message": "",
+        "finished-at": "\u003ctimestamp\u003e",
+        "image": "",
+        "image-level": "platform",
+        "kind": "dynamic_source_sync",
+        "output": "$ ansible-inventory -i aws_ec2.yml --list\n\nDiscovered 4 hosts in 2 groups\n",
+        "placement": {
+          "attempt": 1,
+          "driver": "container",
+          "identity-binding-id": null,
+          "image": "",
+          "image-digest": "",
+          "image-level": "platform",
+          "node": "launcher-01",
+          "placement-id": "sw-job-demo-sync",
+          "queue-cap": null,
+          "queue-in-flight": null,
+          "queue-position": null,
+          "queue-reason": ""
+        },
+        "queued-at": "\u003ctimestamp\u003e",
+        "started-at": "\u003ctimestamp\u003e",
+        "status": "completed",
+        "timeout-seconds": 3600,
+        "triggered-by": "manual"
+      },
+      "id": "\u003cid\u003e",
+      "relationships": {
+        "inventory": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "ansible-inventories"
+          }
+        },
+        "inventory-source": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "inventory-sources"
+          }
+        },
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "work-items"
+    }
+  }
+}

@@ -10,7 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 )
 
 // AUD-001 authorization helpers for the runner control plane.
@@ -85,12 +87,9 @@ func (h *RunnerAgentHandler) authorizeRunnerForRun(c *gin.Context, run *models.R
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to resolve run organization")
 		return false
 	}
-	if orgID != runner.OrganizationID {
-		writeRunnerForbidden(c, "run belongs to a different organization")
-		return false
-	}
-	if poolID != nil && *poolID != runner.AgentPoolID {
-		writeRunnerForbidden(c, "run is assigned to a different agent pool")
+	// Every run that reaches a runner carries a pool (the hosted one by default, #933 D9), so a
+	// run without one is no runner's business, as a pool-less Ansible job is not.
+	if !h.authorizePool(c, runner, orgID, poolID, run.RunnerID, "run") {
 		return false
 	}
 	if run.RunnerID != nil && *run.RunnerID != runner.ID {
@@ -100,6 +99,9 @@ func (h *RunnerAgentHandler) authorizeRunnerForRun(c *gin.Context, run *models.R
 	if requireAssigned && (run.RunnerID == nil || *run.RunnerID != runner.ID) {
 		writeRunnerForbidden(c, "run is not assigned to this runner")
 		return false
+	}
+	if p, ok := callingJob(c); ok {
+		return authorizeJobPrincipal(c, p, models.JobTypeTofuRun, run.ID, run.RunnerID, run.Attempt, runFinished(run))
 	}
 	return true
 }
@@ -118,19 +120,9 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJob(c *gin.Context, job *m
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to resolve job organization")
 		return false
 	}
-	if orgID != runner.OrganizationID {
-		writeRunnerForbidden(c, "job belongs to a different organization")
-		return false
-	}
-	// A job without an agent pool runs on the platform runner, which works from the
-	// queue and the database and never calls this API. No self-hosted runner has any
-	// business with it, so the pool must be set and must be the runner's own.
-	if poolID == nil {
-		writeRunnerForbidden(c, "job is not assigned to an agent pool")
-		return false
-	}
-	if *poolID != runner.AgentPoolID {
-		writeRunnerForbidden(c, "job is assigned to a different agent pool")
+	// A job without an agent pool is no runner's business, so the pool must be set and must be the
+	// runner's own, or for a hosted runner a hosted pool the job was reserved on for it.
+	if !h.authorizePool(c, runner, orgID, poolID, job.RunnerID, "job") {
 		return false
 	}
 	if job.RunnerID != nil && *job.RunnerID != runner.ID {
@@ -141,7 +133,99 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJob(c *gin.Context, job *m
 		writeRunnerForbidden(c, "job is not reserved by this runner")
 		return false
 	}
+	if p, ok := callingJob(c); ok {
+		return authorizeJobPrincipal(c, p, models.JobTypeAnsibleJob, job.ID.String(), job.RunnerID, job.Attempt, ansibleJobFinished(job))
+	}
 	return true
+}
+
+// authorizePool binds a job's organization and pool to the calling runner (#933, D9). A customer
+// runner reaches its own organization's jobs on its own pool. A hosted runner reaches a job of any
+// organization, but only on a hosted pool and only once the job is reserved for it, and a job token
+// it presents must be bound to the job's organization; a customer runner never reaches a hosted
+// pool's job, nor a hosted runner a customer pool's.
+func (h *RunnerAgentHandler) authorizePool(c *gin.Context, runner *models.Runner, orgID uuid.UUID, poolID, assignee *uuid.UUID, what string) bool {
+	if poolID == nil {
+		writeRunnerForbidden(c, what+" is not assigned to an agent pool")
+		return false
+	}
+	if !runner.IsHosted() {
+		if orgID != runner.OrgID() {
+			writeRunnerForbidden(c, what+" belongs to a different organization")
+			return false
+		}
+		if *poolID != runner.PoolID() {
+			writeRunnerForbidden(c, what+" is assigned to a different agent pool")
+			return false
+		}
+		return true
+	}
+	var pool models.AgentPool
+	if err := h.db.Select("id", "kind", "organization_id").First(&pool, "id = ?", *poolID).Error; err != nil || !pool.IsHosted() || pool.OrganizationID != orgID {
+		writeRunnerForbidden(c, what+" is not on a hosted pool")
+		return false
+	}
+	if assignee == nil || *assignee != runner.ID {
+		writeRunnerForbidden(c, what+" is not reserved for this hosted runner")
+		return false
+	}
+	if _, isJob := callingJob(c); isJob {
+		raw, _ := c.Get("api_key")
+		key, _ := raw.(*models.APIKey)
+		if key == nil || key.OrganizationID == nil || *key.OrganizationID != orgID {
+			writeRunnerForbidden(c, "this job token belongs to a different organization")
+			return false
+		}
+	}
+	return true
+}
+
+// callingJob returns the principal of the job token the caller presented, if it presented one
+// (middleware.RunnerAuth stores it).
+func callingJob(c *gin.Context) (apikey.JobPrincipal, bool) {
+	v, ok := c.Get(middleware.JobPrincipalKey)
+	if !ok {
+		return apikey.JobPrincipal{}, false
+	}
+	p, ok := v.(apikey.JobPrincipal)
+	return p, ok
+}
+
+// authorizeJobPrincipal binds a job token to the one job it was minted for (#933, D1, AC2): the
+// job must be the token's job, still claimed by the token's runner, in the token's attempt and not
+// terminal. The last two refusals carry the codes an executor stops on.
+func authorizeJobPrincipal(c *gin.Context, p apikey.JobPrincipal, kind models.JobType, jobID string, assignee *uuid.UUID, attempt int, finished bool) bool {
+	if p.Kind != kind || p.JobID != jobID {
+		writeRunnerForbidden(c, "this job token is for a different job")
+		return false
+	}
+	if assignee == nil || *assignee != p.RunnerID {
+		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTokenRevoked, "Forbidden", "the job is no longer assigned to this token's runner")
+		return false
+	}
+	// A row claimed before the attempt counter existed reads 0 and counts as its first attempt.
+	if max(attempt, 1) != p.Attempt {
+		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTokenRevoked, "Forbidden", "a later attempt of this job exists")
+		return false
+	}
+	if finished {
+		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTerminal, "Forbidden", "the job has finished")
+		return false
+	}
+	return true
+}
+
+// finishedRunStatuses are the statuses after which an OpenTofu run has no job left to execute.
+var finishedRunStatuses = []models.RunStatus{
+	models.RunStatusApplied,
+	models.RunStatusFailed,
+	models.RunStatusCancelled,
+	models.RunStatusCompleted,
+}
+
+// runFinished reports whether a run has reached a terminal status.
+func runFinished(run *models.Run) bool {
+	return slices.Contains(finishedRunStatuses, run.Status)
 }
 
 // finishedAnsibleJobStatuses are the terminal statuses of an Ansible job.

@@ -86,6 +86,10 @@
                 "forks": {
                   "type": "integer"
                 },
+                "identity-binding-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "job-slice-count": {
                   "type": "integer"
                 },
@@ -97,6 +101,10 @@
                 },
                 "retention-days": {
                   "type": "integer",
+                  "nullable": true
+                },
+                "run-image-id": {
+                  "type": "string",
                   "nullable": true
                 },
                 "schedule-cron": {
@@ -236,11 +244,13 @@
         },
         "forks": 10,
         "host-config-key": "",
+        "identity-binding-id": null,
         "job-slice-count": 2,
         "launch-on-webhook": false,
         "limit": "webservers",
         "name": "golden-write-template",
         "retention-days": 30,
+        "run-image-id": null,
         "schedule-cron": "",
         "schedule-enabled": false,
         "skip-tags": "slow",

@@ -1,0 +1,88 @@
+{
+  "method": "POST",
+  "path": "/api/v2/organizations/:name/run-images",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "description": "An AWX execution environment",
+          "digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "image": "ghcr.io/acme/awx-ee:24",
+          "kind": "ansible",
+          "name": "golden-write-ee"
+        },
+        "type": "run-images"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "digest": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "image": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "kind": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "registry-credential-id": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.runImageRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "An AWX execution environment",
+        "digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "image": "ghcr.io/acme/awx-ee:24",
+        "kind": "ansible",
+        "name": "golden-write-ee",
+        "registry-credential-id": null,
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "run-images"
+    }
+  }
+}

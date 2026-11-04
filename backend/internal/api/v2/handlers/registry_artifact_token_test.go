@@ -44,3 +44,16 @@ func TestArtifactToken_DisabledWhenNoSecret(t *testing.T) {
 		t.Error("verifyArtifactToken must fail closed when signing disabled")
 	}
 }
+
+// A provider version's capability token never opens a module archive, even with matching names.
+func TestModuleArchiveScopeIsDistinctFromProviders(t *testing.T) {
+	SetArtifactTokenSecret([]byte("test-secret-key-32-bytes-long!!!"))
+	t.Cleanup(func() { SetArtifactTokenSecret(nil) })
+	tok := mintArtifactToken(artifactScope("org", "greeting", "1.0.0"))
+	if verifyArtifactToken(tok, moduleArchiveScope("org", "greeting", "null", "1.0.0")) {
+		t.Fatal("a provider token opened a module archive")
+	}
+	if !verifyArtifactToken(mintArtifactToken(moduleArchiveScope("org", "greeting", "null", "1.0.0")), moduleArchiveScope("org", "greeting", "null", "1.0.0")) {
+		t.Fatal("a module archive token did not verify for its own scope")
+	}
+}

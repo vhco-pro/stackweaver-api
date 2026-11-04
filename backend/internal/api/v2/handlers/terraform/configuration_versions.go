@@ -125,10 +125,7 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 	if host == "" {
 		host = c.Request.Host
 	}
-	scheme := "https"
-	if c.GetHeader("X-Forwarded-Proto") == "http" || c.Request.TLS == nil {
-		scheme = "http"
-	}
+	scheme := requestScheme(c)
 	// Include upload token in URL query parameter
 	uploadURL := fmt.Sprintf("%s://%s/api/v2/configuration-versions/%s/upload?token=%s",
 		scheme, host, configVersion.ID, configVersion.UploadToken)
@@ -192,10 +189,7 @@ func (h *ConfigurationVersionHandlerV2) Get(c *gin.Context) {
 	if host == "" {
 		host = c.Request.Host
 	}
-	scheme := "https"
-	if c.GetHeader("X-Forwarded-Proto") == "http" || c.Request.TLS == nil {
-		scheme = "http"
-	}
+	scheme := requestScheme(c)
 	uploadURL := fmt.Sprintf("%s://%s/api/v2/configuration-versions/%s/upload", scheme, host, configVersion.ID)
 
 	jsonapi.WriteDocument(c, http.StatusOK, configurationVersionResource(configVersion.ID, ConfigurationVersionAttributes{
@@ -301,10 +295,7 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 	if host == "" {
 		host = c.Request.Host
 	}
-	scheme := "https"
-	if c.GetHeader("X-Forwarded-Proto") == "http" || c.Request.TLS == nil {
-		scheme = "http"
-	}
+	scheme := requestScheme(c)
 	uploadURL := fmt.Sprintf("%s://%s/api/v2/configuration-versions/%s/upload", scheme, host, configVersion.ID)
 	jsonapi.WriteDocument(c, http.StatusOK, configurationVersionResource(configVersion.ID, ConfigurationVersionAttributes{
 		Status:        configVersion.Status,

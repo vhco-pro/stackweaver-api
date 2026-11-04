@@ -131,7 +131,13 @@
     "data": {
       "attributes": {
         "agent-count": 0,
+        "cpu-limit": "",
         "created-at": "\u003ctimestamp\u003e",
+        "keep-failed-jobs-for": 0,
+        "kind": "customer",
+        "limits-required": false,
+        "local-readthrough": true,
+        "memory-limit": "",
         "name": "golden-write-pool",
         "organization-scoped": false
       },

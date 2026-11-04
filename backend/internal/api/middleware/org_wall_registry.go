@@ -11,6 +11,10 @@ var (
 	rProject                = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByProjectID(v) }
 	rWorkspace              = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByWorkspaceID(v) }
 	rRun                    = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunID(v) }
+	rWorkItem               = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByWorkItemID(v) }
+	rIdentityBinding        = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByIdentityBindingID(v) }
+	rPullSecret             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByPullSecretID(v) }
+	rRunImage               = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunImageID(v) }
 	rRunTrigger             = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByRunTriggerID(v) }
 	rNotificationConfig     = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByNotificationConfigID(v) }
 	rChangeRequest          = func(r OrgResolver, v string) (uuid.UUID, error) { return r.ByChangeRequestID(v) }
@@ -107,6 +111,8 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations":                                orgListCreate(),
 	"/api/v2/organizations/:name":                          orgByName(),
 	"/api/v2/organizations/:name/analytics":                orgByName(),
+	"/api/v2/organizations/:name/hosted-capacity":          orgByName(),
+	"/api/v2/organizations/:name/work-items":               orgByName(),
 	"/api/v2/organizations/:name/analytics/executions":     orgByName(),
 	"/api/v2/organizations/:name/entitlement-set":          orgByName(),
 	"/api/v2/organizations/:name/organization-memberships": orgByName(),
@@ -141,6 +147,12 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/agent-pools/:id/agents":          resource("id", rAgentPool),
 
 	"/api/v2/agent-pools/:id/authentication-tokens":    resource("id", rAgentPool),
+	"/api/v2/agent-pools/:id/identity-bindings":        resource("id", rAgentPool),
+	"/api/v2/identity-bindings/:id":                    resource("id", rIdentityBinding),
+	"/api/v2/agent-pools/:id/pull-secrets":             resource("id", rAgentPool),
+	"/api/v2/pull-secrets/:id":                         resource("id", rPullSecret),
+	"/api/v2/organizations/:name/run-images":           orgByName(),
+	"/api/v2/run-images/:id":                           resource("id", rRunImage),
 	"/api/v2/authentication-tokens/:id":                resource("id", rAuthToken),
 	"/api/v2/authentication-tokens/:id/actions/rotate": resource("id", rAuthToken),
 
@@ -152,6 +164,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/organizations/:name/runners":       orgByName(),
 	"/api/v2/organizations/:name/runners/stats": orgByName(),
 	"/api/v2/runners/:id":                       resource("id", rRunner),
+	"/api/v2/runners/:id/actions/drain":         resource("id", rRunner),
 
 	// --- ansible config (org/project) ---
 	"/api/v2/organizations/:name/ansible-config":           orgByName(),
@@ -189,6 +202,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/plans/:id/json-output":                          resource("id", rRun),
 	"/api/v2/configuration-versions/:id/download":            resource("id", rConfigVersion),
 	"/api/v2/workspaces/:id/effective-tag-bindings":          resource("id", rWorkspace),
+	"/api/v2/workspaces/:id/effective-settings":              resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/lock":                    resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/unlock":                  resource("id", rWorkspace),
 	"/api/v2/workspaces/:id/actions/force-unlock":            resource("id", rWorkspace),
@@ -228,6 +242,8 @@ var wallRegistry = map[string]routeEntry{
 	// org its owner belonged to (#806). Do not drop that call.
 	"/api/v2/runs":                           agnostic(),
 	"/api/v2/runs/:id":                       resource("id", rRun),
+	"/api/v2/work-items/:id":                 resource("id", rWorkItem),
+	"/api/v2/runs/:id/placement":             resource("id", rRun),
 	"/api/v2/runs/:id/plan":                  resource("id", rRun),
 	"/api/v2/runs/:id/task-stages":           resource("id", rRun),
 	"/api/v2/runs/:id/outputs":               resource("id", rRun),
@@ -304,34 +320,51 @@ var wallRegistry = map[string]routeEntry{
 	// runner:register on THAT pool's organization, honours agent-token pool binding,
 	// and otherwise falls back to manage-agent-pools RBAC.
 	"/api/v2/agent-pools/:id/queue-depth": agnostic(),
-	"/api/v2/runner/register":             agnostic(),
-	"/api/v2/runner/heartbeat":            agnostic(),
-	"/api/v2/runner/deregister":           agnostic(),
-	"/api/v2/runner/jobs/:id/start":       agnostic(),
-	"/api/v2/runner/jobs/:id/output":      agnostic(),
-	"/api/v2/runner/jobs/:id/complete":    agnostic(),
-	"/api/v2/runner/jobs/:id/state":       agnostic(),
-	"/api/v2/runner/jobs/:id/artifacts":   agnostic(),
-	"/api/v2/runner/jobs/:id/status":      agnostic(),
+	// The pool's operator credential mints its JIT token; the handler binds it to the pool, never
+	// falling back to the key owner's RBAC (#933, D11).
+	"/api/v2/agent-pools/:id/jit-token":  agnostic(),
+	"/api/v2/runner/register":            agnostic(),
+	"/api/v2/runner/heartbeat":           agnostic(),
+	"/api/v2/runner/deregister":          agnostic(),
+	"/api/v2/runner/jobs/:id/start":      agnostic(),
+	"/api/v2/runner/jobs/:id/token":      agnostic(),
+	"/api/v2/runner/jobs/:id/plan":       agnostic(),
+	"/api/v2/runner/jobs/:id/blob/*name": agnostic(),
+	"/api/v2/runner/jobs/:id/output":     agnostic(),
+	"/api/v2/runner/jobs/:id/complete":   agnostic(),
+	"/api/v2/runner/jobs/:id/state":      agnostic(),
+	"/api/v2/runner/jobs/:id/artifacts":  agnostic(),
+	"/api/v2/runner/jobs/:id/status":     agnostic(),
+	"/api/v2/runner/queue-depth":         agnostic(),
+	"/api/v2/runner/drain":               agnostic(),
+	// The cache routes bind the organization themselves: a customer launcher's own, or one whose
+	// work a hosted launcher holds (#933, D7).
+	"/api/v2/runner/cache/:kind/:sha256": agnostic(),
+	// A promotion is settled only by the runner it was handed to (#933, D7).
+	"/api/v2/runner/cache/promotions/:id/drop": agnostic(),
+	// A pull credential is served only to a launcher of the image's organization (#933, D6).
+	"/api/v2/runner/images/:id/pull-credential": agnostic(),
 	// Playbook preparation for self-hosted Ansible agents: the job-event channel and the
 	// cached-snapshot download. Same reasoning as artifacts/output above: RunnerAuth
 	// admits only a runner-scoped token and the handler binds the job to that runner.
 	"/api/v2/runner/jobs/:id/events":            agnostic(),
 	"/api/v2/runner/jobs/:id/playbook-snapshot": agnostic(),
+	"/api/v2/runner/jobs/:id/snapshot":          agnostic(),
 
 	// --- ansible: inventories ---
-	"/api/v2/organizations/:name/ansible/inventories":           orgByName(),
-	"/api/v2/ansible/inventories/:id":                           resource("id", rAnsibleInventory),
-	"/api/v2/ansible/inventories/:id/actions/sync":              resource("id", rAnsibleInventory),
-	"/api/v2/ansible/inventories/:id/ini":                       resource("id", rAnsibleInventory),
-	"/api/v2/ansible/inventories/:id/json":                      resource("id", rAnsibleInventory),
-	"/api/v2/ansible/inventories/:id/hosts":                     resource("id", rAnsibleInventory),
-	"/api/v2/ansible/inventories/:id/groups":                    resource("id", rAnsibleInventory),
-	"/api/v2/ansible/inventories/:id/sources":                   resource("id", rAnsibleInventory),
-	"/api/v2/ansible/hosts/:id":                                 resource("id", rAnsibleHost),
-	"/api/v2/ansible/groups/:id":                                resource("id", rAnsibleGroup),
-	"/api/v2/ansible/inventory-sources/:source_id":              resource("source_id", rAnsibleInventorySource),
-	"/api/v2/ansible/inventory-sources/:source_id/actions/sync": resource("source_id", rAnsibleInventorySource),
+	"/api/v2/organizations/:name/ansible/inventories":                 orgByName(),
+	"/api/v2/ansible/inventories/:id":                                 resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventories/:id/actions/sync":                    resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventories/:id/ini":                             resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventories/:id/json":                            resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventories/:id/hosts":                           resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventories/:id/groups":                          resource("id", rAnsibleInventory),
+	"/api/v2/ansible/inventories/:id/sources":                         resource("id", rAnsibleInventory),
+	"/api/v2/ansible/hosts/:id":                                       resource("id", rAnsibleHost),
+	"/api/v2/ansible/groups/:id":                                      resource("id", rAnsibleGroup),
+	"/api/v2/ansible/inventory-sources/:source_id":                    resource("source_id", rAnsibleInventorySource),
+	"/api/v2/ansible/inventory-sources/:source_id/effective-settings": resource("source_id", rAnsibleInventorySource),
+	"/api/v2/ansible/inventory-sources/:source_id/actions/sync":       resource("source_id", rAnsibleInventorySource),
 
 	// --- ansible: credentials ---
 	"/api/v2/organizations/:name/ansible/credentials": orgByName(),
@@ -369,13 +402,14 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/ansible/playbooks/:id/actions/sync":    resource("id", rAnsiblePlaybook),
 
 	// --- ansible: job templates ---
-	"/api/v2/organizations/:name/ansible/job-templates":   orgByName(),
-	"/api/v2/projects/:id/ansible/job-templates":          resource("id", rProject),
-	"/api/v2/ansible/job-templates/:id":                   resource("id", rAnsibleJobTemplate),
-	"/api/v2/ansible/job-templates/:id/launch":            resource("id", rAnsibleJobTemplate),
-	"/api/v2/ansible/job-templates/:id/variable-sets":     resource("id", rAnsibleJobTemplate),
-	"/api/v2/ansible/job-templates/:id/vars":              resource("id", rAnsibleJobTemplate),
-	"/api/v2/ansible/job-templates/:id/vars/:variable_id": resource("variable_id", rAnsibleJobTemplateVar),
+	"/api/v2/organizations/:name/ansible/job-templates":    orgByName(),
+	"/api/v2/projects/:id/ansible/job-templates":           resource("id", rProject),
+	"/api/v2/ansible/job-templates/:id":                    resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/effective-settings": resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/launch":             resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/variable-sets":      resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/vars":               resource("id", rAnsibleJobTemplate),
+	"/api/v2/ansible/job-templates/:id/vars/:variable_id":  resource("variable_id", rAnsibleJobTemplateVar),
 
 	// --- ansible: jobs ---
 	"/api/v2/organizations/:name/ansible/jobs":       orgByName(),
@@ -426,4 +460,21 @@ func orgListCreate() routeEntry { return routeEntry{agnostic: true, userBoundMut
 func WallClassified(fullPath string) bool {
 	_, ok := wallRegistry[fullPath]
 	return ok
+}
+
+// WallClass reports how a gin route pattern is classified in the org-resolution wall:
+// "agnostic", "org-by-name", "resource:<param>", or "" when it is not classified. Exported for
+// the parity tests that hold a spec's route table to the registry (the D15 table of #933).
+func WallClass(fullPath string) string {
+	entry, ok := wallRegistry[fullPath]
+	switch {
+	case !ok:
+		return ""
+	case entry.agnostic:
+		return "agnostic"
+	case entry.orgNameParam != "":
+		return "org-by-name"
+	default:
+		return "resource:" + entry.param
+	}
 }

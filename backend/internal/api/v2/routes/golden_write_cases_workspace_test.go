@@ -132,6 +132,8 @@ func init() {
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				doc := document("workspaces", map[string]any{
 					"description":           "Updated by the golden write harness",
+					"run-image-id":          goldenRunImage(t, w, "tofu"),
+					"identity-binding-id":   w.id("identity-bindings"),
 					"auto-apply":            true,
 					"file-triggers-enabled": true,
 					"trigger-patterns":      []string{"modules/**"},

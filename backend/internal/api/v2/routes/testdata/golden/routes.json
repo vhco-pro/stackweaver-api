@@ -207,6 +207,36 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/agent-pools/:id/identity-bindings",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*IdentityBindingHandler).List-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/agent-pools/:id/identity-bindings",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*IdentityBindingHandler).Create-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/agent-pools/:id/jit-token",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AgentPoolHandlerV2).JITToken-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/agent-pools/:id/pull-secrets",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*PullSecretHandler).List-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/agent-pools/:id/pull-secrets",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*PullSecretHandler).Create-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/agent-pools/:id/queue-depth",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*AgentPoolHandlerV2).QueueDepth-fm"
@@ -418,6 +448,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/ansible/inventory-sources/:source_id/effective-settings",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*EffectiveSettingsHandlerV2).GetInventorySource-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/ansible/inventory-syncs/:sync_id",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible.(*InventorySyncHandler).Get-fm"
@@ -469,6 +505,12 @@
       "path": "/api/v2/ansible/job-templates/:id/credentials/:credential_id",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible.(*PlaybookHandler).DetachTemplateCredential-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ansible/job-templates/:id/effective-settings",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*EffectiveSettingsHandlerV2).GetJobTemplate-fm"
     },
     {
       "method": "POST",
@@ -795,6 +837,24 @@
       "path": "/api/v2/dashboard/stats",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*DashboardHandler).GetStats-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/identity-bindings/:id",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*IdentityBindingHandler).Delete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/identity-bindings/:id",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*IdentityBindingHandler).Get-fm"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/identity-bindings/:id",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*IdentityBindingHandler).Update-fm"
     },
     {
       "method": "DELETE",
@@ -1207,6 +1267,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/organizations/:name/hosted-capacity",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*HostedCapacityHandler).Get-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/organizations/:name/oidc-configurations",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*OIDCConfigDispatchHandler).List-fm"
@@ -1358,6 +1424,21 @@
       "path": "/api/v2/organizations/:name/registry/modules/:module_name/:provider/versions/:version",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RegistryPublishingHandler).DeleteModuleVersion-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/run-images",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunImageHandler).List-fm",
+      "query": [
+        "filter[kind]"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/organizations/:name/run-images",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunImageHandler).Create-fm"
     },
     {
       "method": "GET",
@@ -1594,6 +1675,16 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/organizations/:name/work-items",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*WorkItemHandler).List-fm",
+      "query": [
+        "page[number]",
+        "page[size]"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/organizations/:name/workspaces",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*WorkspaceHandlerV2).ListByOrganization-fm",
@@ -1805,6 +1896,24 @@
     },
     {
       "method": "DELETE",
+      "path": "/api/v2/pull-secrets/:id",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*PullSecretHandler).Delete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/pull-secrets/:id",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*PullSecretHandler).Get-fm"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/pull-secrets/:id",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*PullSecretHandler).Update-fm"
+    },
+    {
+      "method": "DELETE",
       "path": "/api/v2/registry-providers/:id",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RegistryProviderResourceHandler).DeleteProviderByID-fm"
@@ -1814,6 +1923,24 @@
       "path": "/api/v2/registry-providers/:id",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RegistryProviderResourceHandler).GetProviderByID-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v2/run-images/:id",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunImageHandler).Delete-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/run-images/:id",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunImageHandler).Get-fm"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v2/run-images/:id",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunImageHandler).Update-fm"
     },
     {
       "method": "DELETE",
@@ -1828,10 +1955,46 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunTriggerHandlerV2).GetByID-fm"
     },
     {
+      "method": "GET",
+      "path": "/api/v2/runner/cache/:kind/:sha256",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).GetCacheEntry-fm",
+      "query": [
+        "organization"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v2/runner/cache/:kind/:sha256",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).PutCacheEntry-fm",
+      "query": [
+        "name",
+        "organization",
+        "platform",
+        "promotion",
+        "source",
+        "verification",
+        "version"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/cache/promotions/:id/drop",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).DropCachePromotion-fm"
+    },
+    {
       "method": "POST",
       "path": "/api/v2/runner/deregister",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).Deregister-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/drain",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).Drain-fm"
     },
     {
       "method": "POST",
@@ -1841,9 +2004,21 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/runner/images/:id/pull-credential",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).GetPullCredential-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/runner/jobs/:id/artifacts",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).GetJobArtifacts-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runner/jobs/:id/blob/*name",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).GetJobBlob-fm"
     },
     {
       "method": "POST",
@@ -1865,9 +2040,27 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/runner/jobs/:id/plan",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).DownloadPlan-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/plan",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).UploadPlan-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/runner/jobs/:id/playbook-snapshot",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).GetPlaybookSnapshot-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/snapshot",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).UploadSnapshot-fm"
     },
     {
       "method": "POST",
@@ -1886,6 +2079,18 @@
       "path": "/api/v2/runner/jobs/:id/status",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).GetJobStatus-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runner/jobs/:id/token",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).JobToken-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runner/queue-depth",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerAgentHandler).HostedQueueDepth-fm"
     },
     {
       "method": "POST",
@@ -1910,6 +2115,12 @@
       "path": "/api/v2/runners/:id",
       "mutating": true,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerHandlerV2).Update-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runners/:id/actions/drain",
+      "mutating": true,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RunnerHandlerV2).Drain-fm"
     },
     {
       "method": "POST",
@@ -1993,6 +2204,12 @@
       "path": "/api/v2/runs/:id/outputs",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetOutputs-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/placement",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetPlacement-fm"
     },
     {
       "method": "GET",
@@ -2510,6 +2727,12 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*VCSAppInstallationHandlerV2).HandleAzureDevOpsWebhook-fm"
     },
     {
+      "method": "GET",
+      "path": "/api/v2/work-items/:id",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*WorkItemHandler).Get-fm"
+    },
+    {
       "method": "DELETE",
       "path": "/api/v2/workspaces/:id",
       "mutating": true,
@@ -2600,6 +2823,12 @@
       "query": [
         "mode"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workspaces/:id/effective-settings",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*EffectiveSettingsHandlerV2).GetWorkspace-fm"
     },
     {
       "method": "GET",
@@ -3160,6 +3389,15 @@
       "path": "/v1/modules/:namespace/:name/:provider/:version",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RegistryModuleHandler).GetModuleVersion-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/modules/:namespace/:name/:provider/:version/archive.tar.gz",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*RegistryModuleHandler).DownloadModuleArchive-fm",
+      "query": [
+        "token"
+      ]
     },
     {
       "method": "GET",

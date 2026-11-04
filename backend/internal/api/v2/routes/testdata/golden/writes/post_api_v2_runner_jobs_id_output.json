@@ -14,6 +14,96 @@
         "output": {
           "type": "string"
         },
+        "phase_state": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "phase": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "created_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "details": {
+                    "type": "string"
+                  },
+                  "error_message": {
+                    "type": "string"
+                  },
+                  "resource_id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "summary": {
+              "type": "object",
+              "properties": {
+                "additions": {
+                  "type": "integer"
+                },
+                "changes": {
+                  "type": "integer"
+                },
+                "destructions": {
+                  "type": "integer"
+                },
+                "failed": {
+                  "type": "integer"
+                },
+                "replace": {
+                  "type": "integer"
+                },
+                "total": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "placement": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "driver": {
+              "type": "string"
+            },
+            "identity_binding_id": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "image_digest": {
+              "type": "string"
+            },
+            "image_level": {
+              "type": "string"
+            },
+            "node": {
+              "type": "string"
+            },
+            "placement_id": {
+              "type": "string"
+            }
+          }
+        },
         "runner_id": {
           "type": "string"
         },
@@ -22,12 +112,11 @@
         }
       },
       "required": [
-        "output",
         "runner_id"
       ]
     },
     "schema_source": "type",
-    "bound_type": "handlers.JobOutputRequest"
+    "bound_type": "runnercontract.JobOutputRequest"
   },
   "status": 200,
   "response": {

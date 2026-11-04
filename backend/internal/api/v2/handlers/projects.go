@@ -12,6 +12,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
 	"github.com/michielvha/stackweaver/backend/internal/api/pagination"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -29,7 +30,11 @@ type ProjectHandlerV2 struct {
 	authService     *auth.Service
 	activityService *activity.Service
 	rbacService     *rbac.Service
+	levelRefs       *levelrefs.Checker
 }
+
+// SetLevelRefs sets the checker of the run images and identity binding a project selects.
+func (h *ProjectHandlerV2) SetLevelRefs(c *levelrefs.Checker) { h.levelRefs = c }
 
 func NewProjectHandlerV2(projectRepo *repository.ProjectRepository, orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, agentPoolRepo *repository.AgentPoolRepository, tagRepo *repository.TagBindingRepository, authService *auth.Service, activityService *activity.Service, rbacService *rbac.Service) *ProjectHandlerV2 {
 	return &ProjectHandlerV2{
@@ -85,7 +90,7 @@ func (h *ProjectHandlerV2) applyProjectSettings(project *models.Project, attrs p
 				return "default-agent-pool-id is not a valid ID", false
 			}
 			// The pool must exist and belong to the project's organization (tenant safety).
-			pool, err := h.agentPoolRepo.GetByID(poolID, false)
+			pool, err := h.agentPoolRepo.GetCustomerByID(poolID, false)
 			if err != nil || pool == nil || pool.OrganizationID != project.OrganizationID {
 				return "default agent pool not found in this organization", false
 			}
@@ -97,6 +102,49 @@ func (h *ProjectHandlerV2) applyProjectSettings(project *models.Project, attrs p
 	if project.DefaultExecutionMode == "agent" && project.DefaultAgentPoolID == nil {
 		return "default-agent-pool-id is required when default-execution-mode is agent", false
 	}
+
+	// The project's level of the level rule (core/settings): the OpenTofu version and run timeout a
+	// workspace or job template without its own inherits. Empty or zero resets to inherit from the
+	// organization. These are not TFE execution settings, so they never mark the project overwritten.
+	if attrs.TofuVersion != nil {
+		project.TofuVersion = strings.TrimSpace(*attrs.TofuVersion)
+	}
+	if attrs.RunTimeout != nil {
+		if *attrs.RunTimeout < 0 {
+			return "run-timeout must be zero (inherit) or a positive number of seconds", false
+		}
+		project.RunTimeout = *attrs.RunTimeout
+	}
+	// The project's run images, one per engine, and its identity binding (#933, D6, D8). Empty
+	// clears the selection to inherit from the organization.
+	if attrs.TofuRunImageID != nil || attrs.AnsibleRunImageID != nil || attrs.IdentityBindingID != nil {
+		if h.levelRefs == nil {
+			return "run images and identity bindings are not configured", false
+		}
+		for _, ref := range []struct {
+			kind string
+			raw  *string
+			dst  **uuid.UUID
+		}{
+			{models.RunImageKindTofu, attrs.TofuRunImageID, &project.TofuRunImageID},
+			{models.RunImageKindAnsible, attrs.AnsibleRunImageID, &project.AnsibleRunImageID},
+		} {
+			id, set, err := h.levelRefs.RunImage(project.OrganizationID, ref.kind, ref.raw)
+			if err != nil {
+				return err.Error(), false
+			}
+			if set {
+				*ref.dst = id
+			}
+		}
+		id, set, err := h.levelRefs.IdentityBinding(project.OrganizationID, attrs.IdentityBindingID)
+		if err != nil {
+			return err.Error(), false
+		}
+		if set {
+			project.IdentityBindingID = id
+		}
+	}
 	return "", true
 }
 
@@ -105,6 +153,11 @@ type projectSettingsAttrs struct {
 	DefaultExecutionMode *string
 	DefaultAgentPoolID   *string
 	SettingOverwrites    *projectSettingOverwritesReq
+	TofuVersion          *string
+	RunTimeout           *int
+	TofuRunImageID       *string
+	AnsibleRunImageID    *string
+	IdentityBindingID    *string
 }
 
 // projectSettingOverwritesReq is TFE's setting-overwrites object on a project update.
@@ -167,6 +220,12 @@ type UpdateProjectRequestV2 struct {
 			// SettingOverwrites is computed by TFE; clearing a flag reverts to org defaults. Stackweaver
 			// has no org-default-settings yet, so `false` clears the project's own value (back to remote).
 			SettingOverwrites *projectSettingOverwritesReq `json:"setting-overwrites,omitempty"`
+			// Stackweaver extensions: the project's level of the level rule. Empty or zero inherits.
+			TofuVersion       *string `json:"tofu-version,omitempty"`
+			RunTimeout        *int    `json:"run-timeout,omitempty"`
+			TofuRunImageID    *string `json:"tofu-run-image-id,omitempty"`
+			AnsibleRunImageID *string `json:"ansible-run-image-id,omitempty"`
+			IdentityBindingID *string `json:"identity-binding-id,omitempty"`
 		} `json:"attributes"`
 		Relationships *tagBindingsRel `json:"relationships,omitempty"`
 	} `json:"data" binding:"required"`
@@ -212,8 +271,13 @@ func formatProjectResponse(project *models.Project, orgName string) jsonapi.Reso
 				DefaultExecutionMode: project.SettingsOverwritten,
 				DefaultAgentPool:     project.SettingsOverwritten,
 			},
-			CreatedAt: project.CreatedAt.Format(time.RFC3339),
-			UpdatedAt: project.UpdatedAt.Format(time.RFC3339),
+			TofuVersion:       project.TofuVersion,
+			RunTimeout:        project.RunTimeout,
+			TofuRunImageID:    levelrefs.UUIDString(project.TofuRunImageID),
+			AnsibleRunImageID: levelrefs.UUIDString(project.AnsibleRunImageID),
+			IdentityBindingID: levelrefs.UUIDString(project.IdentityBindingID),
+			CreatedAt:         project.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:         project.UpdatedAt.Format(time.RFC3339),
 		},
 		Relationships: relationships,
 		Links: jsonapi.SelfLink{
@@ -610,6 +674,11 @@ func (h *ProjectHandlerV2) Update(c *gin.Context) {
 		DefaultExecutionMode: attrs.DefaultExecutionMode,
 		DefaultAgentPoolID:   attrs.DefaultAgentPoolID,
 		SettingOverwrites:    attrs.SettingOverwrites,
+		TofuVersion:          attrs.TofuVersion,
+		RunTimeout:           attrs.RunTimeout,
+		TofuRunImageID:       attrs.TofuRunImageID,
+		AnsibleRunImageID:    attrs.AnsibleRunImageID,
+		IdentityBindingID:    attrs.IdentityBindingID,
 	}); !ok {
 		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Project Settings", msg)
 		return
@@ -756,6 +825,11 @@ func (h *ProjectHandlerV2) UpdateByID(c *gin.Context) {
 		DefaultExecutionMode: attrs.DefaultExecutionMode,
 		DefaultAgentPoolID:   attrs.DefaultAgentPoolID,
 		SettingOverwrites:    attrs.SettingOverwrites,
+		TofuVersion:          attrs.TofuVersion,
+		RunTimeout:           attrs.RunTimeout,
+		TofuRunImageID:       attrs.TofuRunImageID,
+		AnsibleRunImageID:    attrs.AnsibleRunImageID,
+		IdentityBindingID:    attrs.IdentityBindingID,
 	}); !ok {
 		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Project Settings", msg)
 		return

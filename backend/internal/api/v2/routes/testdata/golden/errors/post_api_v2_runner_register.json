@@ -5,7 +5,7 @@
   "body": {
     "errors": [
       {
-        "detail": "Key: 'RegisterRequest.AgentPoolID' Error:Field validation for 'AgentPoolID' failed on the 'required' tag\nKey: 'RegisterRequest.Name' Error:Field validation for 'Name' failed on the 'required' tag",
+        "detail": "Key: 'RegisterRequest.Name' Error:Field validation for 'Name' failed on the 'required' tag",
         "status": "400",
         "title": "Bad Request"
       }

@@ -14,11 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"gorm.io/gorm"
 )
 
 // seedPendingAnsibleJob inserts a released pending job into the given pool. It
@@ -86,8 +85,8 @@ func newAnsibleAgent(t *testing.T, db *gorm.DB, orgID, poolID uuid.UUID, name st
 	t.Helper()
 	r := &models.Runner{
 		ID:                uuid.New(),
-		OrganizationID:    orgID,
-		AgentPoolID:       poolID,
+		OrganizationID:    new(orgID),
+		AgentPoolID:       new(poolID),
 		Name:              name,
 		Status:            models.RunnerStatusOnline,
 		AnsibleVersion:    "2.16.0", // CanExecuteAnsible() true; no TofuVersion → tofu branch skipped
@@ -124,8 +123,8 @@ func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 	poolID := pool.ID
 	runner := &models.Runner{
 		ID:                uuid.New(),
-		OrganizationID:    org.ID,
-		AgentPoolID:       poolID,
+		OrganizationID:    new(org.ID),
+		AgentPoolID:       new(poolID),
 		Name:              "captest-runner-" + suffix,
 		Status:            models.RunnerStatusOnline,
 		AnsibleVersion:    "2.16.0", // makes CanExecuteAnsible() true

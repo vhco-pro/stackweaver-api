@@ -189,7 +189,7 @@ func setupRequestContract(t *testing.T) *requestContractFixture {
 		repository.NewAnsibleNotificationRepository(db), templateRepo, workflowRepo, orgRepo, authService, rbacService, nil, nil,
 	)
 	playbookHandler := NewPlaybookHandler(
-		playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, q,
+		playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, nil,
 		nil, repository.NewVCSConnectionRepository(db), jobService,
 	)
 	playbookHandler.SetCredentialRepo(credentialRepo)

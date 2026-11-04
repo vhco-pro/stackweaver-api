@@ -141,7 +141,7 @@ func TestAuthenticate_APIKeyTokenSucceeds(t *testing.T) {
 			if key != validToken {
 				return nil, errors.New("invalid api key")
 			}
-			return &models.APIKey{ID: apiKeyID, UserID: userID}, nil
+			return &models.APIKey{ID: apiKeyID, UserID: &userID}, nil
 		},
 	}
 	userRepo := &mockUserRepo{
@@ -238,7 +238,7 @@ func TestAuthenticate_APIKeyValidButOrphanedUser(t *testing.T) {
 
 	apiKey := &mockAPIKeyService{
 		verifyFn: func(string) (*models.APIKey, error) {
-			return &models.APIKey{ID: apiKeyID, UserID: missingUserID}, nil
+			return &models.APIKey{ID: apiKeyID, UserID: &missingUserID}, nil
 		},
 	}
 	userRepo := &mockUserRepo{
@@ -306,7 +306,7 @@ func TestAuthenticateMiddleware_OrgBoundTokenSetsBoundOrg(t *testing.T) {
 	orgID := uuid.New()
 	apiKey := &models.APIKey{
 		ID:             uuid.New(),
-		UserID:         userID,
+		UserID:         &userID,
 		Kind:           models.APIKeyKindOrg,
 		OrganizationID: &orgID,
 	}
@@ -385,7 +385,7 @@ func TestAuthenticateMiddleware_OrphanedAPIKeyIsTerminal(t *testing.T) {
 	// the api-key layer rather than fall through to JWT verification.
 	apiKeySvc := &mockAPIKeyService{
 		verifyFn: func(string) (*models.APIKey, error) {
-			return &models.APIKey{ID: uuid.New(), UserID: uuid.New()}, nil
+			return &models.APIKey{ID: uuid.New(), UserID: new(uuid.New())}, nil
 		},
 	}
 	userRepo := &mockUserRepo{
@@ -408,7 +408,7 @@ func TestAuthenticateMiddleware_UserBoundTokenSetsNoOrg(t *testing.T) {
 	userID := uuid.New()
 	apiKey := &models.APIKey{
 		ID:             uuid.New(),
-		UserID:         userID,
+		UserID:         new(userID),
 		Kind:           models.APIKeyKindUser,
 		OrganizationID: nil,
 	}

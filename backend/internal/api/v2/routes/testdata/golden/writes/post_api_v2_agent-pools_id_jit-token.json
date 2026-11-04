@@ -1,0 +1,52 @@
+{
+  "method": "POST",
+  "path": "/api/v2/agent-pools/:id/jit-token",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "data": {
+        "attributes": {
+          "expires-in": 600
+        },
+        "type": "agent-jit-tokens"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "expires-in": {
+                  "type": "integer",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.JITTokenRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "expires-at": "\u003ctimestamp\u003e",
+        "token": "\u003csecret\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "agent-jit-tokens"
+    }
+  }
+}

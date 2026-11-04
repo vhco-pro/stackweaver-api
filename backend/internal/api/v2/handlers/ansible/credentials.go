@@ -197,7 +197,8 @@ func (h *CredentialHandler) Create(c *gin.Context) {
 	switch credType {
 	case models.CredentialTypeSSH, models.CredentialTypeVault,
 		models.CredentialTypeMachineSSH, models.CredentialTypeAWSAccessKey,
-		models.CredentialTypeAzure, models.CredentialTypeGCP, models.CredentialTypeVMware:
+		models.CredentialTypeAzure, models.CredentialTypeGCP, models.CredentialTypeVMware,
+		models.CredentialTypeRegistry:
 		// Valid
 	default:
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid credential type")

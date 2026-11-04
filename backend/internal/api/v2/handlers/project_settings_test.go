@@ -77,3 +77,48 @@ func TestApplyProjectSettings(t *testing.T) {
 		}
 	})
 }
+
+// TestApplyProjectRunDefaults covers the project's level of the level rule (#933, D0): the OpenTofu
+// version and the run timeout a workspace or job template inherits. Neither touches the execution
+// settings or marks the project as overwriting them.
+func TestApplyProjectRunDefaults(t *testing.T) {
+	h := &ProjectHandlerV2{}
+	intPtr := func(i int) *int { return &i }
+
+	t.Run("version and timeout are stored", func(t *testing.T) {
+		p := &models.Project{DefaultExecutionMode: "remote"}
+		if msg, ok := h.applyProjectSettings(p, projectSettingsAttrs{TofuVersion: strPtr(" 1.9.0 "), RunTimeout: intPtr(1200)}); !ok {
+			t.Fatalf("rejected: %s", msg)
+		}
+		if p.TofuVersion != "1.9.0" || p.RunTimeout != 1200 {
+			t.Fatalf("got version %q timeout %d", p.TofuVersion, p.RunTimeout)
+		}
+		if p.SettingsOverwritten {
+			t.Fatal("run defaults must not mark the execution settings as overwritten")
+		}
+	})
+
+	t.Run("zero and empty reset to inherit", func(t *testing.T) {
+		p := &models.Project{TofuVersion: "1.9.0", RunTimeout: 1200}
+		if _, ok := h.applyProjectSettings(p, projectSettingsAttrs{TofuVersion: strPtr(""), RunTimeout: intPtr(0)}); !ok {
+			t.Fatal("reset rejected")
+		}
+		if p.TofuVersion != "" || p.RunTimeout != 0 {
+			t.Fatalf("got version %q timeout %d, want both cleared", p.TofuVersion, p.RunTimeout)
+		}
+	})
+
+	t.Run("a negative timeout is rejected", func(t *testing.T) {
+		p := &models.Project{}
+		if _, ok := h.applyProjectSettings(p, projectSettingsAttrs{RunTimeout: intPtr(-1)}); ok {
+			t.Fatal("negative timeout accepted")
+		}
+	})
+
+	t.Run("the response carries both attributes", func(t *testing.T) {
+		res := formatProjectResponse(&models.Project{TofuVersion: "1.9.0", RunTimeout: 1200}, "acme")
+		if res.Attributes.TofuVersion != "1.9.0" || res.Attributes.RunTimeout != 1200 {
+			t.Fatalf("got %+v", res.Attributes)
+		}
+	})
+}

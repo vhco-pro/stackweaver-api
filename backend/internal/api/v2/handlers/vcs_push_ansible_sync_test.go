@@ -9,7 +9,7 @@
 // linked to its repository and has nothing to do with a Terraform workspace.
 //
 // These cases send a push for a repository that only a playbook and an inventory track, through
-// the real webhook handler, and assert both are queued for sync and the delivery is recorded as a
+// the real webhook handler, and assert a sync is requested for both and the delivery is recorded as a
 // success. A push that changes neither path syncs nothing and is recorded as ignored.
 //
 // Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Cleanup is row-scoped.
@@ -20,13 +20,11 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -34,55 +32,40 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"gorm.io/gorm"
 )
 
-// syncQueue records ansible_sync jobs. The handlers enqueue from goroutines, so it is guarded.
-type syncQueue struct {
-	mu   sync.Mutex
-	jobs []map[string]any
+// syncRecorder reads the sync work items a push requested for the repositories this test seeded.
+// A sync is a work item (#933, D2); these tests read jobs on the ansible_sync queue before.
+type syncRecorder struct {
+	db    *gorm.DB
+	repos []string
 }
 
-func (q *syncQueue) Enqueue(_ context.Context, queueName string, job any) error {
-	if queueName != "ansible_sync" {
-		return nil
-	}
-	m, _ := job.(map[string]any)
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.jobs = append(q.jobs, m)
-	return nil
+// waitFor reports whether a work item naming id in column (playbook_id or inventory_id) exists.
+func (q *syncRecorder) waitFor(column, id string) bool {
+	var n int64
+	q.db.Model(&models.WorkItem{}).Where(column+" = ?", id).Count(&n)
+	return n > 0
 }
 
-func (q *syncQueue) Close() error { return nil }
-
-// waitFor reports whether a job naming id under key arrives within two seconds.
-func (q *syncQueue) waitFor(key, id string) bool {
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		q.mu.Lock()
-		for _, j := range q.jobs {
-			if fmt.Sprint(j[key]) == id {
-				q.mu.Unlock()
-				return true
-			}
-		}
-		q.mu.Unlock()
-		time.Sleep(20 * time.Millisecond)
-	}
-	return false
-}
-
-func (q *syncQueue) count() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return len(q.jobs)
+// count is how many sync work items name a playbook or an inventory of the seeded repositories.
+func (q *syncRecorder) count() int {
+	var n int64
+	q.db.Model(&models.WorkItem{}).
+		Where("playbook_id IN (SELECT id FROM ansible_playbooks WHERE vcs_repository IN ?) OR inventory_id IN (SELECT id FROM ansible_inventories WHERE vcs_repository IN ?)", q.repos, q.repos).
+		Count(&n)
+	return int(n)
 }
 
 // ansibleOnlyRepo seeds a project, the given connection, and a VCS playbook and inventory that
 // track repo on main through it. No workspace tracks repo.
-func ansibleOnlyRepo(t *testing.T, f *installationWebhookFixture, org *models.Organization, conn *models.VCSConnection, repo string) (*models.AnsiblePlaybook, *models.AnsibleInventory) {
+func ansibleOnlyRepo(t *testing.T, f *installationWebhookFixture, q *syncRecorder, org *models.Organization, conn *models.VCSConnection, repo string) (*models.AnsiblePlaybook, *models.AnsibleInventory) {
 	t.Helper()
+	q.repos = append(q.repos, repo)
+	hosted := models.NewHostedPool(org.ID)
 	project := &models.Project{ID: uuid.New(), OrganizationID: org.ID, Name: "push-sync-" + uuid.NewString()[:8]}
 	playbook := &models.AnsiblePlaybook{
 		ID: uuid.New(), ProjectID: project.ID, Name: "site", VCSConnectionID: &conn.ID,
@@ -92,12 +75,14 @@ func ansibleOnlyRepo(t *testing.T, f *installationWebhookFixture, org *models.Or
 		ID: uuid.New(), OrganizationID: org.ID, Name: "prod-" + uuid.NewString()[:8], Type: models.InventoryTypeVCS,
 		VCSConnectionID: &conn.ID, VCSRepository: repo, VCSBranch: "main", InventoryPath: "inventories/prod.yml",
 	}
-	for _, row := range []any{conn, project, playbook, inventory} {
+	for _, row := range []any{hosted, conn, project, playbook, inventory} {
 		if err := f.db.Create(row).Error; err != nil {
 			t.Fatalf("seed %T: %v", row, err)
 		}
 	}
 	t.Cleanup(func() {
+		f.db.Delete(&models.WorkItem{}, "organization_id = ?", org.ID)
+		f.db.Delete(&models.AgentPool{}, "id = ?", hosted.ID)
 		f.db.Delete(&models.WebhookEvent{}, "repository = ?", repo)
 		f.db.Delete(&models.AnsibleInventory{}, "id = ?", inventory.ID)
 		f.db.Delete(&models.AnsiblePlaybook{}, "id = ?", playbook.ID)
@@ -107,14 +92,14 @@ func ansibleOnlyRepo(t *testing.T, f *installationWebhookFixture, org *models.Or
 	return playbook, inventory
 }
 
-// pushHandler wires the fixture's handler for push deliveries, with a recording queue.
-func pushHandler(f *installationWebhookFixture) *syncQueue {
-	q := &syncQueue{}
+// pushHandler wires the fixture's handler for push deliveries, requesting its syncs as work items.
+func pushHandler(f *installationWebhookFixture) *syncRecorder {
+	q := &syncRecorder{db: f.db}
 	f.handler.workspaceRepo = repository.NewWorkspaceRepository(f.db)
 	f.handler.inventoryRepo = repository.NewAnsibleInventoryRepository(f.db)
 	f.handler.playbookRepo = repository.NewAnsiblePlaybookRepository(f.db)
 	f.handler.webhookEventRepo = repository.NewWebhookEventRepository(f.db)
-	f.handler.ansibleQueue = q
+	f.handler.workItems = coreansible.NewWorkItemService(f.db, nil)
 	return q
 }
 
@@ -137,7 +122,7 @@ func TestGitHubPush_SyncsAnsibleWithoutAWorkspace(t *testing.T) {
 		InstallationID: strconv.FormatInt(installation, 10), AccountName: "acme",
 	}
 	repo := "acme/ansible-only-" + uuid.NewString()[:8]
-	playbook, inventory := ansibleOnlyRepo(t, f, org, conn, repo)
+	playbook, inventory := ansibleOnlyRepo(t, f, q, org, conn, repo)
 
 	push := func(t *testing.T, changed ...string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -170,10 +155,10 @@ func TestGitHubPush_SyncsAnsibleWithoutAWorkspace(t *testing.T) {
 			t.Fatalf("delivery = %d, want 200.\nbody: %s", w.Code, w.Body.String())
 		}
 		if !q.waitFor("playbook_id", playbook.ID.String()) {
-			t.Errorf("no ansible_sync job for playbook %s; a repository no workspace tracks must still sync its playbooks", playbook.ID)
+			t.Errorf("no sync work item for playbook %s; a repository no workspace tracks must still sync its playbooks", playbook.ID)
 		}
 		if !q.waitFor("inventory_id", inventory.ID.String()) {
-			t.Errorf("no ansible_sync job for inventory %s; a repository no workspace tracks must still sync its inventories", inventory.ID)
+			t.Errorf("no sync work item for inventory %s; a repository no workspace tracks must still sync its inventories", inventory.ID)
 		}
 		ev := lastEvent(t, f, repo)
 		if ev.Status != "success" || ev.OrganizationID == nil || *ev.OrganizationID != org.ID {
@@ -192,7 +177,7 @@ func TestGitHubPush_SyncsAnsibleWithoutAWorkspace(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 		if n := q.count() - before; n != 0 {
-			t.Errorf("%d ansible_sync job(s) queued for a push that changed no tracked path; want none", n)
+			t.Errorf("%d sync work item(s) requested for a push that changed no tracked path; want none", n)
 		}
 		if ev := lastEvent(t, f, repo); ev.Status != "ignored" {
 			t.Errorf("event status = %q (%q), want ignored", ev.Status, ev.Message)
@@ -216,7 +201,7 @@ func TestAzureDevOpsPush_SyncsAnsibleWithoutAWorkspace(t *testing.T) {
 	adoOrg := "ado-push-sync-" + uuid.NewString()[:8]
 	conn := &models.VCSConnection{ID: uuid.New(), OrganizationID: org.ID, Provider: models.VCSProviderAzureDevOps, AccountName: adoOrg}
 	repo := "infra/ansible-only-" + uuid.NewString()[:8] // project/repository
-	playbook, inventory := ansibleOnlyRepo(t, f, org, conn, repo)
+	playbook, inventory := ansibleOnlyRepo(t, f, q, org, conn, repo)
 
 	project, repoName := "infra", repo[len("infra/"):]
 	payload, err := json.Marshal(map[string]any{
@@ -253,10 +238,10 @@ func TestAzureDevOpsPush_SyncsAnsibleWithoutAWorkspace(t *testing.T) {
 		t.Fatalf("delivery = %d, want 200.\nbody: %s", w.Code, w.Body.String())
 	}
 	if !q.waitFor("playbook_id", playbook.ID.String()) {
-		t.Errorf("no ansible_sync job for playbook %s; a repository no workspace tracks must still sync its playbooks", playbook.ID)
+		t.Errorf("no sync work item for playbook %s; a repository no workspace tracks must still sync its playbooks", playbook.ID)
 	}
 	if !q.waitFor("inventory_id", inventory.ID.String()) {
-		t.Errorf("no ansible_sync job for inventory %s; a repository no workspace tracks must still sync its inventories", inventory.ID)
+		t.Errorf("no sync work item for inventory %s; a repository no workspace tracks must still sync its inventories", inventory.ID)
 	}
 	ev := lastEvent(t, f, repo)
 	if ev.Status != "success" || ev.OrganizationID == nil || *ev.OrganizationID != org.ID {

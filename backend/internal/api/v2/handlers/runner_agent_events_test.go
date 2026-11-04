@@ -53,7 +53,7 @@ type agentPrepFixture struct {
 func runnerTokenFor(r *models.Runner) *models.APIKey {
 	return &models.APIKey{
 		Scopes:         models.StringArray{"runner:" + r.ID.String() + ":heartbeat", "runner:" + r.ID.String() + ":jobs"},
-		OrganizationID: &r.OrganizationID,
+		OrganizationID: r.OrganizationID,
 	}
 }
 
@@ -75,14 +75,16 @@ func setupAgentPrepFixture(t *testing.T) *agentPrepFixture {
 	conn := &models.VCSConnection{ID: uuid.New(), OrganizationID: orgA.ID, Provider: models.VCSProviderGitLab, AccessToken: "glpat-" + sfx, AccountName: "agentprep-" + sfx}
 
 	runner := func(org, pool uuid.UUID, name string) *models.Runner {
-		return &models.Runner{ID: uuid.New(), OrganizationID: org, AgentPoolID: pool, Name: name + "-" + sfx, Status: models.RunnerStatusOnline, AnsibleVersion: "2.16.0", MaxConcurrentJobs: 1}
+		return &models.Runner{ID: uuid.New(), OrganizationID: new(org), AgentPoolID: new(pool), Name: name + "-" + sfx, Status: models.RunnerStatusOnline, AnsibleVersion: "2.16.0", MaxConcurrentJobs: 1}
 	}
 	a1 := runner(orgA.ID, poolA.ID, "agentprep-a1")
 	a2 := runner(orgA.ID, poolA.ID, "agentprep-a2")
 	a3 := runner(orgA.ID, poolA2.ID, "agentprep-a3")
 	b1 := runner(orgB.ID, poolB.ID, "agentprep-b1")
 
-	for _, obj := range []any{orgA, orgB, projA, poolA, poolA2, poolB, inv, conn, a1, a2, a3, b1} {
+	// Organization A's hosted pool, where its syncs are created (#933, D2).
+	hostedA := models.NewHostedPool(orgA.ID)
+	for _, obj := range []any{orgA, orgB, projA, poolA, poolA2, poolB, hostedA, inv, conn, a1, a2, a3, b1} {
 		if err := db.Create(obj).Error; err != nil {
 			t.Fatalf("seeding %T: %v", obj, err)
 		}
@@ -90,7 +92,9 @@ func setupAgentPrepFixture(t *testing.T) *agentPrepFixture {
 	t.Cleanup(func() {
 		db.Where("id IN ?", []uuid.UUID{a1.ID, a2.ID, a3.ID, b1.ID}).Delete(&models.Runner{})
 		db.Where("id = ?", conn.ID).Delete(&models.VCSConnection{})
+		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.WorkItem{})
 		db.Where("id = ?", inv.ID).Delete(&models.AnsibleInventory{})
+		db.Where("organization_id IN ? AND kind = ?", []uuid.UUID{orgA.ID, orgB.ID}, models.AgentPoolKindHosted).Delete(&models.AgentPool{})
 		db.Where("id IN ?", []uuid.UUID{poolA.ID, poolA2.ID, poolB.ID}).Delete(&models.AgentPool{})
 		db.Where("id = ?", projA.ID).Delete(&models.Project{})
 		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.Organization{})
@@ -291,5 +295,46 @@ func TestRunnerJobEvents_RejectsOversizedBody(t *testing.T) {
 	}
 	if events := f.jobEvents(t, job.ID); len(events) != 0 {
 		t.Errorf("stored %d events from an oversized post, want none", len(events))
+	}
+}
+
+// TestRunnerJobOutput_PhaseStateUpserted pins the typed phase_state event of the output channel
+// (#933, D2, AC8): the executor streams per-resource progress and the API upserts the run's
+// RunPhaseState row, so the per-resource view is the same on every placement.
+func TestRunnerJobOutput_PhaseStateUpserted(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	h := &RunnerAgentHandler{db: f.db}
+	r := f.router(func(authed *gin.RouterGroup) {
+		authed.POST("/jobs/:id/output", h.JobOutput)
+	})
+	run := f.seedRun(t, f.runnerA1)
+	t.Cleanup(func() { f.db.Where("run_id = ?", run.ID).Delete(&models.RunPhaseState{}) })
+
+	post := func(status string, completed int) {
+		t.Helper()
+		body := map[string]any{
+			"runner_id": f.runnerA1.ID.String(),
+			"stream":    "apply",
+			"phase_state": map[string]any{
+				"phase": "apply",
+				"resources": []map[string]any{
+					{"address": "null_resource.a", "status": status, "action": "create"},
+				},
+				"summary": map[string]any{"additions": 1, "total": 1, "failed": 0, "changes": 0, "destructions": 0, "replace": 0, "completed": completed},
+			},
+		}
+		if rec := runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/jobs/"+run.ID+"/output", body); rec.Code != http.StatusOK {
+			t.Fatalf("output with a phase_state event: %d (%s)", rec.Code, rec.Body.String())
+		}
+	}
+	post("applying", 0)
+	post("completed", 1)
+
+	var rows []models.RunPhaseState
+	if err := f.db.Where("run_id = ?", run.ID).Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Phase != "apply" || len(rows[0].Resources) != 1 || rows[0].Resources[0].Status != "completed" {
+		t.Fatalf("phase state rows = %+v, want one apply row with the resource completed", rows)
 	}
 }

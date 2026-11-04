@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/jobs/:id/snapshot",
+  "request": {
+    "content_type": "application/gzip",
+    "binary": true
+  },
+  "status": 200,
+  "response": {
+    "status": "stored"
+  }
+}

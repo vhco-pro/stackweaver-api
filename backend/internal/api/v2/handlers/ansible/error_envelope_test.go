@@ -129,8 +129,8 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	rbacService := rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo)
 	inventoryService := ansiblesvc.NewInventoryService(inventoryRepo, orgRepo)
 	sourceService := ansiblesvc.NewInventorySourceService(sourceRepo, inventoryRepo, credentialRepo, nil)
-	// No queue: none of the cases below may dispatch a job, and a nil queue is what makes the
-	// "Sync queue not available" 500 reachable.
+	// No queue: none of the cases below may dispatch a job, and no work items service is what makes
+	// the "Syncs are not available" 500 reachable.
 	jobService := ansiblesvc.NewJobService(jobRepo, playbookRepo, inventoryRepo, templateRepo, projectRepo, nil)
 	jobService.SetOrganizationRepo(orgRepo)
 	schedulerService := ansiblesvc.NewSchedulerService(scheduleRepo, jobRepo, templateRepo, playbookRepo, sourceService, jobService, orgRepo)
@@ -445,7 +445,7 @@ func TestAnsibleErrorEnvelope(t *testing.T) {
 			"json: cannot unmarshal array into Go value of type ansible.UpdateInventorySourceRequest",
 		},
 		{"source: sync a disabled source", http.MethodPost, "/ansible/inventory-sources/" + f.disabledSource + "/actions/sync", "", 400, badRequest, "Inventory source is disabled"},
-		{"source: sync without a queue", http.MethodPost, "/ansible/inventory-sources/" + f.sourceID + "/actions/sync", "", 500, internal, "Sync queue not available"},
+		{"source: sync without work items", http.MethodPost, "/ansible/inventory-sources/" + f.sourceID + "/actions/sync", "", 500, internal, "Syncs are not available"},
 		{
 			"source: create with a credential of the wrong type", http.MethodPost, "/ansible/inventories/" + f.inventoryID + "/sources",
 			`{"data":{"attributes":{"name":"errenv-x","source-type":"aws","credential-id":"` + f.sshCredentialID + `"}}}`, 400, badRequest,

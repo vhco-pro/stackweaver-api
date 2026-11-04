@@ -18,11 +18,40 @@
         "current_jobs": {
           "type": "integer"
         },
+        "inventory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "external_manager": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "managed_by": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "present": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
         "runner_id": {
           "type": "string"
         },
         "status": {
           "type": "string"
+        },
+        "wait": {
+          "type": "integer"
         }
       },
       "required": [
@@ -30,10 +59,15 @@
       ]
     },
     "schema_source": "type",
-    "bound_type": "handlers.HeartbeatRequest"
+    "bound_type": "runnercontract.HeartbeatRequest"
   },
   "status": 200,
   "response": {
+    "capabilities": [
+      "blob",
+      "job-token",
+      "playbook-snapshot"
+    ],
     "pending_jobs": [
       {
         "job_id": "\u003cid\u003e",

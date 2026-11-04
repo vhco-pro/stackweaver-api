@@ -1,0 +1,95 @@
+{
+  "method": "POST",
+  "path": "/api/v2/agent-pools/:id/identity-bindings",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "annotations": {
+            "azure.workload.identity/client-id": "\u003cuuid\u003e"
+          },
+          "mechanism": "azure-workload-identity",
+          "name": "golden-write-binding",
+          "service-account": "sw-golden-write"
+        },
+        "type": "identity-bindings"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "annotations": {
+                  "type": "object",
+                  "nullable": true,
+                  "additionalProperties": true
+                },
+                "mechanism": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "per-job-sa": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "reference": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "service-account": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.identityBindingRequest"
+  },
+  "status": 201,
+  "response": {
+    "data": {
+      "attributes": {
+        "annotations": {
+          "azure.workload.identity/client-id": "\u003cuuid\u003e"
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "declared-externally": false,
+        "external-manager": "",
+        "mechanism": "azure-workload-identity",
+        "name": "golden-write-binding",
+        "object-present": null,
+        "per-job-sa": false,
+        "reference": false,
+        "reported-at": null,
+        "service-account": "sw-golden-write"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        }
+      },
+      "type": "identity-bindings"
+    }
+  }
+}

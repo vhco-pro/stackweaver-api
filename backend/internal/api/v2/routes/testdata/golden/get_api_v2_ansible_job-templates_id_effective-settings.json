@@ -1,0 +1,29 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/job-templates/:id/effective-settings",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "agent-pool-id": {
+          "level": "deployment",
+          "value": null
+        },
+        "identity-binding-id": {
+          "level": "deployment",
+          "value": null
+        },
+        "run-image-id": {
+          "level": "deployment",
+          "value": null
+        },
+        "run-timeout": {
+          "level": "deployment",
+          "value": 7200
+        }
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "effective-settings"
+    }
+  }
+}

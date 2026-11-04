@@ -33,6 +33,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"gorm.io/gorm"
 )
@@ -45,7 +46,7 @@ const otherVCSToken = "token-of-the-other-organization"
 func (f *agentPrepFixture) seedOtherConnection(t *testing.T) *models.VCSConnection {
 	t.Helper()
 	other := &models.VCSConnection{
-		ID: uuid.New(), OrganizationID: f.runnerB1.OrganizationID, Provider: models.VCSProviderGitLab,
+		ID: uuid.New(), OrganizationID: f.runnerB1.OrgID(), Provider: models.VCSProviderGitLab,
 		AccessToken: otherVCSToken, AccountName: "vcsscope-b-" + uuid.NewString()[:8],
 	}
 	if err := f.db.Create(other).Error; err != nil {
@@ -206,33 +207,28 @@ func TestWebhook_WorkspaceVCSConnectionOfAnotherOrganization(t *testing.T) {
 	}
 }
 
-// TestWebhookSyncPayload_PlaybookVCSConnectionOfAnotherOrganization is the sync a push queues for
-// a playbook.
-func TestWebhookSyncPayload_PlaybookVCSConnectionOfAnotherOrganization(t *testing.T) {
+// TestWebhookSync_PlaybookVCSConnectionOfAnotherOrganization is the sync a push requests for a
+// playbook. It is a work item and carries no clone URL (#933, D2): the connection's credential is
+// resolved only when a launcher runs it, within the playbook's organization, so a playbook naming
+// another organization's connection gets none (runner_agent_work_items_integration_test.go).
+func TestWebhookSync_PlaybookVCSConnectionOfAnotherOrganization(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	other := f.seedOtherConnection(t)
-	h := &VCSAppInstallationHandlerV2{
-		vcsRegistry:       vcs.NewProviderRegistry(nil, nil, nil, nil),
-		vcsConnectionRepo: repository.NewVCSConnectionRepository(f.db),
-	}
+	h := &VCSAppInstallationHandlerV2{workItems: coreansible.NewWorkItemService(f.db, nil)}
 
 	stored := f.storedPlaybookNaming(t, playbookSpec{}, other)
-	payload := h.playbookSyncPayload(t.Context(), stored)
-	if _, ok := payload["clone_url"]; ok {
-		t.Errorf("the sync payload carries a clone URL for a playbook naming another organization's connection")
+	h.requestPlaybookSync(stored)
+	var item models.WorkItem
+	if err := f.db.Where("playbook_id = ?", stored.ID).First(&item).Error; err != nil {
+		t.Fatalf("no sync was requested for playbook %s: %v", stored.ID, err)
 	}
-	if payload["playbook_id"] != stored.ID.String() {
-		t.Errorf("payload = %v, want the sync still requested for playbook %s", payload, stored.ID)
-	}
-
-	own := h.playbookSyncPayload(t.Context(), f.seedPlaybook(t, playbookSpec{}))
-	if cloneURL, _ := own["clone_url"].(string); !strings.HasSuffix(cloneURL, "@gitlab.com/acme/playbooks.git") {
-		t.Errorf("clone_url = %q, want the clone URL of the organization's own connection", own["clone_url"])
+	if item.Kind != models.WorkItemPlaybookSnapshot || item.TriggeredBy != "webhook" {
+		t.Errorf("the push requested %q triggered by %q, want a webhook playbook_snapshot", item.Kind, item.TriggeredBy)
 	}
 }
 
 // TestWebhook_InventoryVCSConnectionOfAnotherOrganization is a push for a VCS inventory: which
-// inventories a delivery is matched to, and the sync it queues for one.
+// inventories a delivery is matched to.
 //
 // The match is by the installation of the inventory's connection. An inventory of one
 // organization that names the other's connection must not be matched to a delivery of the
@@ -266,15 +262,6 @@ func TestWebhook_InventoryVCSConnectionOfAnotherOrganization(t *testing.T) {
 		vcsConnectionRepo: repository.NewVCSConnectionRepository(f.db),
 	}
 
-	t.Run("the sync payload", func(t *testing.T) {
-		if _, ok := h.inventorySyncPayload(t.Context(), &storedEarlier)["clone_url"]; ok {
-			t.Errorf("the sync payload carries a clone URL for an inventory naming another organization's connection")
-		}
-		payload := h.inventorySyncPayload(t.Context(), &own)
-		if cloneURL, _ := payload["clone_url"].(string); !strings.HasSuffix(cloneURL, "@gitlab.com/acme/inventories.git") {
-			t.Errorf("clone_url = %q, want the clone URL of the organization's own connection", payload["clone_url"])
-		}
-	})
 	t.Run("the delivery match", func(t *testing.T) {
 		both := []models.AnsibleInventory{storedEarlier, own}
 		if kept := h.filterInventoriesByInstallation(both, otherInstallation); len(kept) != 0 {

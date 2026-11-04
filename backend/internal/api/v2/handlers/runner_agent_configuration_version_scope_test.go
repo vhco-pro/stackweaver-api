@@ -39,7 +39,7 @@ func TestRunnerRunArtifacts_ConfigurationVersionOfAnotherWorkspace(t *testing.T)
 	// The archives are distinct strings, so that the response shows whose code it carries.
 	const ownCode, otherCode = "configuration of its own workspace", "configuration of the other organization"
 
-	otherProject := &models.Project{ID: uuid.New(), OrganizationID: f.runnerB1.OrganizationID, Name: "artcv-proj-" + sfx}
+	otherProject := &models.Project{ID: uuid.New(), OrganizationID: f.runnerB1.OrgID(), Name: "artcv-proj-" + sfx}
 	workspace := &models.Workspace{ID: "ws-" + sfx + "9160000", ProjectID: f.projectA, Name: "artcv-ws-" + sfx, ExecutionMode: "agent", AgentPoolID: &f.poolA}
 	otherWorkspace := &models.Workspace{ID: "ws-" + sfx + "9161111", ProjectID: otherProject.ID, Name: "artcv-ws-" + sfx}
 	version := func(suffix, workspaceID string) *models.ConfigurationVersion {
