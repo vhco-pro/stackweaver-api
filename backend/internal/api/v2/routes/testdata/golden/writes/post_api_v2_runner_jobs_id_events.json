@@ -31,7 +31,7 @@
       }
     },
     "schema_source": "type",
-    "bound_type": "handlers.JobEventRequest"
+    "bound_type": "runnercontract.JobEventRequest"
   },
   "status": 200,
   "response": {

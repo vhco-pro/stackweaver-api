@@ -68,6 +68,12 @@ func (f *fakeResolver) ByAnsibleJobTemplateVariableID(string) (uuid.UUID, error)
 
 func (f *fakeResolver) ByAnsibleJobID(string) (uuid.UUID, error) { return f.resolve() }
 
+func (f *fakeResolver) ByWorkItemID(string) (uuid.UUID, error) { return f.resolve() }
+
+func (f *fakeResolver) ByIdentityBindingID(string) (uuid.UUID, error) { return f.resolve() }
+func (f *fakeResolver) ByPullSecretID(string) (uuid.UUID, error)      { return f.resolve() }
+func (f *fakeResolver) ByRunImageID(string) (uuid.UUID, error)        { return f.resolve() }
+
 func (f *fakeResolver) ByAnsibleScheduleID(string) (uuid.UUID, error) { return f.resolve() }
 
 func (f *fakeResolver) ByAnsibleWorkflowID(string) (uuid.UUID, error) { return f.resolve() }

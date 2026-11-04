@@ -26,7 +26,6 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
-	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
 // slowStore serves snapshots whose first byte arrives only after delay, the way a large
@@ -199,8 +198,7 @@ func TestRunnerHardening_OverlongEventTaskIsRejected(t *testing.T) {
 func TestRunnerHardening_SyncRequestDoesNotOverwriteAConcurrentEdit(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	playbookRepo := repository.NewAnsiblePlaybookRepository(f.db)
-	q := &recordingQueue{}
-	requester := ansible.NewPlaybookSyncRequester(vcs.NewProviderRegistry(nil, nil, nil, nil), repository.NewVCSConnectionRepository(f.db), playbookRepo, q)
+	requester := ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo)
 
 	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached})
 	stale, err := playbookRepo.GetByID(pb.ID)
@@ -224,7 +222,7 @@ func TestRunnerHardening_SyncRequestDoesNotOverwriteAConcurrentEdit(t *testing.T
 	if after.LastSyncStatus != "syncing" || after.LastSyncError != "" {
 		t.Errorf("sync status = %q, error = %q; want syncing with the error cleared", after.LastSyncStatus, after.LastSyncError)
 	}
-	if len(q.queues) != 1 {
-		t.Errorf("enqueued %d message(s), want 1", len(q.queues))
+	if n := f.snapshotSyncs(t, pb.ID); n != 1 {
+		t.Errorf("requested %d sync work item(s), want 1", n)
 	}
 }

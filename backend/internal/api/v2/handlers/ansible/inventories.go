@@ -17,27 +17,10 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	vcs "github.com/michielvha/stackweaver/core/services/vcs"
 )
-
-// InventorySyncMessage represents a request to sync an inventory from VCS
-type InventorySyncMessage struct {
-	InventoryID uuid.UUID `json:"inventory_id"`
-	// CloneURL is a pre-authenticated, token-embedded clone URL resolved by the
-	// API at enqueue time. When set, the runner clones with it directly and does
-	// not need its own VCS OAuth credentials to refresh tokens. Empty falls back
-	// to the runner resolving the URL from the DB (legacy behaviour).
-	CloneURL string `json:"clone_url,omitempty"`
-	// Branch is the branch to clone, carried alongside CloneURL so the runner does
-	// not need to re-read it from the DB on the pre-resolved path.
-	Branch string `json:"branch,omitempty"`
-	// TriggeredBy records what started the sync (manual | webhook | launch);
-	// recorded in the sync history. Empty = manual.
-	TriggeredBy string `json:"triggered_by,omitempty"`
-}
 
 // InventoryHandler handles Ansible inventory API endpoints
 type InventoryHandler struct {
@@ -47,7 +30,7 @@ type InventoryHandler struct {
 	projectRepo       *repository.ProjectRepository
 	authService       *auth.Service
 	rbacService       *rbac.Service
-	queue             queue.Queue
+	workItems         *ansible.WorkItemService
 	vcsRegistry       *vcs.ProviderRegistry
 	vcsConnectionRepo *repository.VCSConnectionRepository
 }
@@ -60,7 +43,7 @@ func NewInventoryHandler(
 	projectRepo *repository.ProjectRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
-	redisQueue queue.Queue,
+	workItems *ansible.WorkItemService,
 	vcsRegistry *vcs.ProviderRegistry,
 	vcsConnectionRepo *repository.VCSConnectionRepository,
 ) *InventoryHandler {
@@ -71,41 +54,10 @@ func NewInventoryHandler(
 		projectRepo:       projectRepo,
 		authService:       authService,
 		rbacService:       rbacService,
-		queue:             redisQueue,
+		workItems:         workItems,
 		vcsRegistry:       vcsRegistry,
 		vcsConnectionRepo: vcsConnectionRepo,
 	}
-}
-
-// buildInventorySyncMessage builds the queue message for a VCS inventory sync.
-// It resolves a fresh, token-embedded clone URL server-side (where the VCS OAuth
-// credentials live) so the runner never needs those credentials and never has to
-// refresh tokens itself. Resolution is best-effort: on any failure the message is
-// returned without a CloneURL and the runner falls back to resolving from the DB.
-//
-// The connection is loaded within the inventory's organization (storedVCSConnection). An
-// inventory row that names a connection of another organization gets no clone URL here, and the
-// runner, which asks the same question, fails the sync.
-func (h *InventoryHandler) buildInventorySyncMessage(ctx context.Context, inventory *models.AnsibleInventory) InventorySyncMessage {
-	msg := InventorySyncMessage{InventoryID: inventory.ID}
-	if h.vcsRegistry == nil || inventory.VCSRepository == "" {
-		return msg
-	}
-	conn := h.storedVCSConnection(ctx, inventory)
-	if conn == nil {
-		return msg
-	}
-	cloneURL, err := h.vcsRegistry.ResolveCloneURL(ctx, conn, inventory.VCSRepository)
-	if err != nil {
-		logger.Warnf("Inventory %s: failed to pre-resolve clone URL (runner will fall back to DB): %v", inventory.ID, err)
-		return msg
-	}
-	msg.CloneURL = cloneURL
-	msg.Branch = inventory.VCSBranch
-	if msg.Branch == "" {
-		msg.Branch = "main"
-	}
-	return msg
 }
 
 // storedVCSConnection loads the connection a stored inventory names, within the inventory's
@@ -401,7 +353,7 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 	// Register ADO webhooks if this inventory is linked to an Azure DevOps repository
 	h.maybeRegisterADOWebhook(h.storedVCSConnection(c.Request.Context(), inventory), inventory.VCSRepository)
 
-	// Constructed inventories: persist rules + ordered inputs, then queue the
+	// Constructed inventories: persist rules + ordered inputs, then request the
 	// initial build.
 	if inventory.Type == models.InventoryTypeConstructed {
 		inventory.SourceVars = req.Data.Attributes.SourceVars
@@ -414,13 +366,12 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 		if err := h.inventoryRepo.Update(inventory); err != nil {
 			logger.Warnf("Failed to persist constructed inventory fields: %v", err)
 		}
-		if h.queue != nil {
-			syncMsg := InventorySyncMessage{InventoryID: inventory.ID, TriggeredBy: "manual"}
-			if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-				logger.Warnf("Failed to queue initial constructed inventory build: %v", err)
+		if h.workItems != nil {
+			if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
+				logger.Warnf("Failed to request the initial constructed inventory build: %v", err)
 				inventory.LastSyncStatus = "pending"
 				if updateErr := h.inventoryRepo.Update(inventory); updateErr != nil {
-					logger.Warnf("Failed to update inventory after build queue error: %v", updateErr)
+					logger.Warnf("Failed to update inventory after the build request error: %v", updateErr)
 				}
 			}
 		}
@@ -429,17 +380,16 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 	}
 
 	// Auto-trigger sync for VCS-backed inventories
-	if inventory.VCSConnectionID != nil && inventory.VCSRepository != "" && inventory.InventoryPath != "" && h.queue != nil {
+	if inventory.VCSConnectionID != nil && inventory.VCSRepository != "" && inventory.InventoryPath != "" && h.workItems != nil {
 		inventory.LastSyncStatus = "syncing"
 		if err := h.inventoryRepo.Update(inventory); err != nil {
 			logger.Warnf("Failed to update inventory sync status: %v", err)
 		}
 
-		syncMsg := h.buildInventorySyncMessage(c.Request.Context(), inventory)
-		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
+		if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
 			// Log error but don't fail the create request
 			inventory.LastSyncStatus = "pending"
-			inventory.LastSyncError = "Auto-sync failed to queue: " + err.Error()
+			inventory.LastSyncError = "Auto-sync could not be requested: " + err.Error()
 			if updateErr := h.inventoryRepo.Update(inventory); updateErr != nil {
 				logger.Warnf("Failed to update inventory after sync queue error: %v", updateErr)
 			}
@@ -934,19 +884,17 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 		return
 	}
 
-	// Queue sync job
-	if h.queue != nil {
-		syncMsg := h.buildInventorySyncMessage(c.Request.Context(), inventory)
-		syncMsg.TriggeredBy = "manual"
-		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
-			// Revert status on queue failure
+	// Request the sync work item
+	if h.workItems != nil {
+		if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
+			// Revert status when the sync cannot be requested
 			inventory.LastSyncStatus = "failed"
-			inventory.LastSyncError = "Failed to queue sync job: " + err.Error()
+			inventory.LastSyncError = "Failed to request the sync: " + err.Error()
 			if updateErr := h.inventoryRepo.Update(inventory); updateErr != nil {
-				logger.Warnf("Failed to update inventory after sync queue error: %v", updateErr)
+				logger.Warnf("Failed to update inventory after the sync request error: %v", updateErr)
 			}
 
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to queue sync job")
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
 			return
 		}
 	}

@@ -5,6 +5,7 @@ package middleware
 import (
 	"container/list"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -78,5 +79,20 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+// MiddlewareExcept is Middleware for every path except those under the given prefixes, which a
+// limiter keyed on something other than the address governs (the runner control plane, #933, D3).
+func (rl *IPRateLimiter) MiddlewareExcept(prefixes ...string) gin.HandlerFunc {
+	limit := rl.Middleware()
+	return func(c *gin.Context) {
+		for _, p := range prefixes {
+			if strings.HasPrefix(c.Request.URL.Path, p) {
+				c.Next()
+				return
+			}
+		}
+		limit(c)
 	}
 }

@@ -17,6 +17,47 @@
     "schema": {
       "type": "object",
       "properties": {
+        "cache_manifest": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "hashes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string"
+                  },
+                  "size_bytes": {
+                    "type": "integer"
+                  },
+                  "source_url": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "error_message": {
           "type": "string"
         },
@@ -49,6 +90,19 @@
         },
         "status": {
           "type": "string"
+        },
+        "work_result": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "commit": {
+              "type": "string"
+            },
+            "inventory": {},
+            "stderr": {
+              "type": "string"
+            }
+          }
         }
       },
       "required": [
@@ -57,7 +111,7 @@
       ]
     },
     "schema_source": "type",
-    "bound_type": "handlers.JobCompleteRequest"
+    "bound_type": "runnercontract.JobCompleteRequest"
   },
   "status": 200,
   "response": {

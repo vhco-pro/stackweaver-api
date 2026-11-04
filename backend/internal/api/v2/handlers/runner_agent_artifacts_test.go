@@ -31,7 +31,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 	"github.com/michielvha/stackweaver/core/services/ansible"
+	"github.com/michielvha/stackweaver/core/services/oidc"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/storage"
 	"github.com/michielvha/stackweaver/core/storage/storagetest"
@@ -140,12 +142,27 @@ func (f *agentPrepFixture) artifactsRouter(store storage.Client, q *recordingQue
 		playbookRepo:   playbookRepo,
 		vcsRegistry:    registryNoNetwork,
 		storageClient:  store,
-		syncRequester:  ansible.NewPlaybookSyncRequester(registryNoNetwork, repository.NewVCSConnectionRepository(f.db), playbookRepo, q),
+		syncRequester:  ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
+	}
+	if q != nil && q.err != nil {
+		// A requester that cannot request anything, the failure a sync request can meet.
+		h.syncRequester = ansible.NewPlaybookSnapshotRequester(nil, playbookRepo)
 	}
 	return f.router(func(authed *gin.RouterGroup) {
 		authed.GET("/jobs/:id/artifacts", h.GetJobArtifacts)
 		authed.GET("/jobs/:id/playbook-snapshot", h.GetPlaybookSnapshot)
 	})
+}
+
+// snapshotSyncs counts the playbook_snapshot work items requested for a playbook (#933, D2: a sync
+// is a work item; these tests counted messages on the ansible_sync queue before).
+func (f *agentPrepFixture) snapshotSyncs(t *testing.T, playbookID uuid.UUID) int {
+	t.Helper()
+	var n int64
+	if err := f.db.Model(&models.WorkItem{}).Where("playbook_id = ? AND kind = ?", playbookID, models.WorkItemPlaybookSnapshot).Count(&n).Error; err != nil {
+		t.Fatalf("counting sync work items: %v", err)
+	}
+	return int(n)
 }
 
 func runnerGet(t *testing.T, r *gin.Engine, key, path string) *httptest.ResponseRecorder {
@@ -232,8 +249,8 @@ func TestRunnerJobArtifacts_CachedPlaybookWithSnapshot(t *testing.T) {
 	if store.opened != 1 || store.closed != 1 {
 		t.Errorf("snapshot probe opened %d stream(s) and closed %d, want one opened and closed", store.opened, store.closed)
 	}
-	if len(q.queues) != 0 {
-		t.Errorf("enqueued %v, want no sync for a playbook that has its snapshot", q.queues)
+	if n := f.snapshotSyncs(t, pb.ID); n != 0 {
+		t.Errorf("requested %d sync(s), want none for a playbook that has its snapshot", n)
 	}
 }
 
@@ -267,8 +284,8 @@ func TestRunnerJobArtifacts_FreshPlaybook(t *testing.T) {
 	if len(src) != 1 || src["mode"] != "fresh" {
 		t.Errorf("playbook_source = %v, want only mode fresh", src)
 	}
-	if len(q.queues) != 0 {
-		t.Errorf("enqueued %v, want no sync for a fresh playbook", q.queues)
+	if n := f.snapshotSyncs(t, pb.ID); n != 0 {
+		t.Errorf("requested %d sync(s), want none for a fresh playbook", n)
 	}
 }
 
@@ -304,21 +321,14 @@ func TestRunnerJobArtifacts_CachedPlaybookWithoutSnapshot(t *testing.T) {
 			if got := f.reloadPlaybook(t, pb.ID).LastSyncStatus; got != "syncing" {
 				t.Errorf("playbook last_sync_status = %q, want syncing", got)
 			}
-			if len(q.queues) != 1 || q.queues[0] != "ansible_sync" {
-				t.Fatalf("enqueued on %v, want exactly one message on ansible_sync", q.queues)
-			}
-			msg, ok := q.payloads[0].(ansible.PlaybookSyncMessage)
-			if !ok {
-				t.Fatalf("payload is %T, want ansible.PlaybookSyncMessage", q.payloads[0])
-			}
-			if msg.PlaybookID != pb.ID || msg.Branch != "release" || !strings.HasSuffix(msg.CloneURL, "@gitlab.com/acme/playbooks.git") {
-				t.Errorf("sync message = %+v, want playbook %s on branch release with a pre-resolved clone URL", msg, pb.ID)
+			if n := f.snapshotSyncs(t, pb.ID); n != 1 {
+				t.Fatalf("requested %d sync work item(s), want exactly one", n)
 			}
 
 			// The job is offered again, or the agent retries the download: no second sync.
 			getArtifacts(t, r, job.ID)
-			if len(q.queues) != 1 {
-				t.Errorf("after a second artifacts call %d message(s) are queued, want still 1", len(q.queues))
+			if n := f.snapshotSyncs(t, pb.ID); n != 1 {
+				t.Errorf("after a second artifacts call %d sync(s) are requested, want still 1", n)
 			}
 		})
 	}
@@ -378,8 +388,8 @@ func TestRunnerJobArtifacts_NoPlaybookSourceWithoutVCS(t *testing.T) {
 			}
 		})
 	}
-	if len(q.queues) != 0 {
-		t.Errorf("enqueued %v, want no sync", q.queues)
+	if n := f.snapshotSyncs(t, pb.ID); n != 0 {
+		t.Errorf("requested %d sync(s), want none", n)
 	}
 }
 
@@ -535,8 +545,8 @@ func TestRunnerJobArtifacts_WithoutSnapshotCapabilityIsTheOldContract(t *testing
 						t.Errorf("artifacts carry %s = %v, want the key absent for an agent that did not announce playbook-snapshot", key, value)
 					}
 				}
-				if len(q.queues) != 0 {
-					t.Errorf("enqueued %v, want no sync: an older agent clones regardless", q.queues)
+				if n := f.snapshotSyncs(t, pb.ID); n != 0 {
+					t.Errorf("requested %d sync(s), want none: an older agent clones regardless", n)
 				}
 				if got := f.reloadPlaybook(t, pb.ID).LastSyncStatus; got != "failed" {
 					t.Errorf("playbook last_sync_status = %q, want it left at the seeded %q", got, "failed")
@@ -581,4 +591,75 @@ func fmtJSON(t *testing.T, v any) string {
 		t.Fatalf("encoding: %v", err)
 	}
 	return string(raw)
+}
+
+// TestRunnerJobArtifacts_CarryContractVersion pins that the artifacts document names the contract
+// major it is shaped by (#933, D2, AC72), so an executor can refuse one it does not know.
+func TestRunnerJobArtifacts_CarryContractVersion(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	r := f.artifactsRouter(newSnapshotStore(), &recordingQueue{})
+	pb := f.seedPlaybook(t, playbookSpec{noVCS: true})
+	job := f.seedJob(t, &pb.ID, nil)
+
+	doc := getArtifacts(t, r, job.ID)
+	if got := doc["contract_version"]; got != float64(1) {
+		t.Fatalf("contract_version = %v, want 1", got)
+	}
+}
+
+// TestRunnerJobArtifacts_AnsibleCarriesEveryPerRunToken pins that an Ansible job's artifacts carry
+// the platform-minted per-run tokens for AWS, GCP and Vault beside Azure, exactly as an OpenTofu
+// run's do (#933, D2, D8, AC37), and that both engines carry the deployment's mirror block.
+func TestRunnerJobArtifacts_AnsibleCarriesEveryPerRunToken(t *testing.T) {
+	t.Setenv("DEV_INSECURE_KEY", "1")
+	f := setupAgentPrepFixture(t)
+	signingKey, err := oidc.NewSigningKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sfx := uuid.NewString()[:8]
+	azure := &models.AzureOIDCConfiguration{ClientID: "az-client-" + sfx, SubscriptionID: "sub", TenantID: "tenant", OrganizationID: f.orgA}
+	aws := &models.AWSOIDCConfiguration{RoleARN: "arn:aws:iam::123456789012:role/sw-" + sfx, OrganizationID: f.orgA}
+	gcp := &models.GCPOIDCConfiguration{ServiceAccountEmail: "sw-" + sfx + "@p.iam.gserviceaccount.com", ProjectNumber: "42", WorkloadProviderName: "projects/42/locations/global/workloadIdentityPools/p/providers/sw", OrganizationID: f.orgA}
+	vault := &models.VaultOIDCConfiguration{Address: "https://vault.example.test:8200", RoleName: "sw-" + sfx, OrganizationID: f.orgA}
+	for _, cfg := range []any{azure, aws, gcp, vault} {
+		if err := f.db.Create(cfg).Error; err != nil {
+			t.Fatalf("seeding %T: %v", cfg, err)
+		}
+	}
+	t.Cleanup(func() {
+		f.db.Where("id = ?", azure.ID).Delete(&models.AzureOIDCConfiguration{})
+		f.db.Where("id = ?", aws.ID).Delete(&models.AWSOIDCConfiguration{})
+		f.db.Where("id = ?", gcp.ID).Delete(&models.GCPOIDCConfiguration{})
+		f.db.Where("id = ?", vault.ID).Delete(&models.VaultOIDCConfiguration{})
+	})
+
+	playbookRepo := repository.NewAnsiblePlaybookRepository(f.db)
+	registry := vcs.NewProviderRegistry(nil, nil, nil, nil)
+	h := &RunnerAgentHandler{
+		db: f.db, ansibleJobRepo: repository.NewAnsibleJobRepository(f.db), playbookRepo: playbookRepo,
+		vcsRegistry: registry, storageClient: newSnapshotStore(),
+		syncRequester: ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
+	}
+	h.SetOIDCServices(repository.NewAzureOIDCConfigurationRepository(f.db), repository.NewAWSOIDCConfigurationRepository(f.db),
+		repository.NewGCPOIDCConfigurationRepository(f.db), repository.NewVaultOIDCConfigurationRepository(f.db),
+		oidc.NewTokenService(signingKey, "https://stackweaver.example.com"))
+	h.SetMirror(&runnercontract.Mirror{ProviderNetworkMirror: "https://mirror.example.test/providers/", PipIndexURL: "https://pip.example.test/simple"})
+	r := f.router(func(authed *gin.RouterGroup) { authed.GET("/jobs/:id/artifacts", h.GetJobArtifacts) })
+
+	job := f.seedJob(t, nil, nil)
+	doc := getArtifacts(t, r, job.ID)
+	env, _ := doc["environment_vars"].(map[string]any)
+	for _, k := range []string{"AZURE_FEDERATED_TOKEN", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN", "GCP_OIDC_RAW_TOKEN", "GCP_OIDC_SERVICE_ACCOUNT_EMAIL", "VAULT_OIDC_RAW_TOKEN", "VAULT_OIDC_ADDRESS"} {
+		if v, _ := env[k].(string); v == "" {
+			t.Errorf("Ansible artifacts lack %s", k)
+		}
+	}
+	if env["AWS_ROLE_ARN"] != aws.RoleARN {
+		t.Errorf("AWS_ROLE_ARN = %v, want %s", env["AWS_ROLE_ARN"], aws.RoleARN)
+	}
+	mirror, _ := doc["mirror"].(map[string]any)
+	if mirror["provider_network_mirror"] != "https://mirror.example.test/providers/" || mirror["pip_index_url"] != "https://pip.example.test/simple" {
+		t.Errorf("mirror block = %v", doc["mirror"])
+	}
 }

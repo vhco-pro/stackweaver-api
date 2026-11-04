@@ -710,6 +710,10 @@ var familyTables = map[string]string{
 	"jobs":               "ansible_jobs",
 	"playbooks":          "ansible_playbooks",
 	"schedules":          "ansible_schedules",
+	"work-items":         "work_items",
+	"identity-bindings":  "identity_bindings",
+	"pull-secrets":       "pull_secrets",
+	"run-images":         "run_images",
 }
 
 // orderColumn picks a deterministic sort key for a table.

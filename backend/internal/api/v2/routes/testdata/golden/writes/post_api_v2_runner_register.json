@@ -40,6 +40,33 @@
             "type": "string"
           }
         },
+        "cache_verification": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "driver": {
+          "type": "string"
+        },
+        "engines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hosted": {
+          "type": "boolean"
+        },
+        "hosted_group": {
+          "type": "string"
+        },
+        "hosted_strict": {
+          "type": "boolean"
+        },
         "hostname": {
           "type": "string"
         },
@@ -49,10 +76,19 @@
             "type": "string"
           }
         },
+        "local_cache": {
+          "type": "boolean"
+        },
+        "local_cache_size_limit": {
+          "type": "integer"
+        },
         "max_concurrent_jobs": {
           "type": "integer"
         },
         "name": {
+          "type": "string"
+        },
+        "network_mode": {
           "type": "string"
         },
         "os_type": {
@@ -66,15 +102,19 @@
         }
       },
       "required": [
-        "agent_pool_id",
         "name"
       ]
     },
     "schema_source": "type",
-    "bound_type": "handlers.RegisterRequest"
+    "bound_type": "runnercontract.RegisterRequest"
   },
   "status": 201,
   "response": {
+    "capabilities": [
+      "blob",
+      "job-token",
+      "playbook-snapshot"
+    ],
     "poll_interval_seconds": 10,
     "runner_api_key": "\u003csecret\u003e",
     "runner_id": "\u003cuuid\u003e"

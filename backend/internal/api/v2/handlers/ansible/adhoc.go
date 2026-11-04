@@ -207,7 +207,7 @@ func (h *AdHocHandler) RunCommand(c *gin.Context) {
 		}
 		// Org boundary: the pool must belong to the inventory's org, or the
 		// command would be routed to another organization's runners.
-		pool, err := h.agentPoolRepo.GetByID(id, false)
+		pool, err := h.agentPoolRepo.GetCustomerByID(id, false)
 		if err != nil || pool.OrganizationID != inventory.OrganizationID {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Agent pool not found in this organization")
 			return

@@ -6,9 +6,15 @@
     "data": [
       {
         "attributes": {
+          "cache-verification": "",
+          "driver": "",
+          "hosted-strict": false,
           "ip-address": "",
           "last-ping-at": "\u003ctimestamp\u003e",
+          "local-cache": false,
+          "local-cache-size-limit": 0,
           "name": "build-agent-01",
+          "network-mode": "",
           "status": "offline"
         },
         "id": "\u003cuuid\u003e",

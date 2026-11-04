@@ -91,7 +91,12 @@ func SubjectForAPIKey(key *models.APIKey, isTeamMember func(teamID, userID uuid.
 		}
 	}
 	if subj.kind == subjectTeam {
-		member, err := isTeamMember(subj.teamID, key.UserID)
+		// A key without an owner is a member of no team.
+		if key.UserID == nil {
+			subj.denied = true
+			return subj, true, nil
+		}
+		member, err := isTeamMember(subj.teamID, *key.UserID)
 		if err != nil {
 			return Subject{}, false, fmt.Errorf("checking membership of team %s: %w", subj.teamID, err)
 		}

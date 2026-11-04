@@ -1,0 +1,29 @@
+{
+  "method": "GET",
+  "path": "/api/v2/run-images/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "created-at": "\u003ctimestamp\u003e",
+        "description": "The AWX execution environment, run as is",
+        "digest": "",
+        "image": "quay.io/ansible/awx-ee:24.6.1",
+        "kind": "ansible",
+        "name": "awx-ee",
+        "registry-credential-id": null,
+        "updated-at": "\u003ctimestamp\u003e"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "organization": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "organizations"
+          }
+        }
+      },
+      "type": "run-images"
+    }
+  }
+}

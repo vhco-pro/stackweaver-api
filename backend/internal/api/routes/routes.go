@@ -69,7 +69,9 @@ func SetupRoutes(
 
 	// Middleware
 	r.Use(middleware.CORSMiddleware(origins))
-	r.Use(middleware.NewIPRateLimiter(rateLimitFromEnv("RATE_LIMIT", 100, 200)).Middleware())
+	// The runner control plane is limited per runner and per job instead (#933, D3, AC74), so
+	// launchers behind one address never share one budget.
+	r.Use(middleware.NewIPRateLimiter(rateLimitFromEnv("RATE_LIMIT", 100, 200)).MiddlewareExcept("/api/v2/runner/"))
 	// Security headers on every response (JSON API + auth proxy). CSP is inert on
 	// JSON but nosniff/HSTS/etc. are real defense-in-depth. Applied globally after
 	// CORS so preflight (OPTIONS) short-circuits before it, and so the /auth group

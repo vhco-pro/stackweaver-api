@@ -1,0 +1,90 @@
+{
+  "method": "PATCH",
+  "path": "/api/v2/identity-bindings/:id",
+  "request": {
+    "content_type": "application/vnd.api+json",
+    "body": {
+      "data": {
+        "attributes": {
+          "per-job-sa": true
+        },
+        "type": "identity-bindings"
+      }
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "attributes": {
+              "type": "object",
+              "properties": {
+                "annotations": {
+                  "type": "object",
+                  "nullable": true,
+                  "additionalProperties": true
+                },
+                "mechanism": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "per-job-sa": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "reference": {
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "service-account": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            },
+            "type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.identityBindingRequest"
+  },
+  "status": 200,
+  "response": {
+    "data": {
+      "attributes": {
+        "annotations": {
+          "eks.amazonaws.com/role-arn": "arn:aws:iam::123456789012:role/stackweaver-deploy"
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "declared-externally": false,
+        "external-manager": "",
+        "mechanism": "aws-irsa",
+        "name": "deploy",
+        "object-present": null,
+        "per-job-sa": true,
+        "reference": false,
+        "reported-at": null,
+        "service-account": "sw-identity-deploy"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        }
+      },
+      "type": "identity-bindings"
+    }
+  }
+}

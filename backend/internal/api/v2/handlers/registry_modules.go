@@ -3,12 +3,15 @@
 package handlers
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
@@ -249,9 +252,7 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 		version = latestVersion.Version
 	}
 
-	// Get download URL (presigned)
-	downloadURL, err := h.moduleService.GetDownloadURL(c.Request.Context(), namespace, name, provider, version)
-	if err != nil {
+	if _, err := h.moduleService.GetModuleVersion(namespace, name, provider, version); err != nil {
 		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module version not available for download")
 		return
 	}
@@ -268,8 +269,57 @@ func (h *RegistryModuleHandler) DownloadModule(c *gin.Context) {
 		}
 	}()
 
-	// Redirect to presigned URL (302 as per Terraform Registry spec)
-	c.Redirect(http.StatusFound, downloadURL)
+	// The registry protocol answers 204 with the package location in X-Terraform-Get. The location
+	// is this host's archive endpoint, not object storage: a job reaches the registry host, and the
+	// storage endpoint is often private to the platform. It is a path on the host, which the client
+	// resolves against the URL it reached the registry on, so no proxy header has to name the
+	// scheme or host. OpenTofu and Terraform fetch the location without registry credentials, so
+	// it carries a short-lived capability token for this one version, minted only for a caller who
+	// passed the read check above.
+	location := fmt.Sprintf("/v1/modules/%s/%s/%s/%s/archive.tar.gz", namespace, name, provider, version)
+	if tok := mintArtifactToken(moduleArchiveScope(namespace, name, provider, version)); tok != "" {
+		location += "?token=" + tok
+	}
+	c.Header("X-Terraform-Get", location)
+	c.Status(http.StatusNoContent)
+}
+
+// moduleArchiveScope is the capability scope of one module version's archive. Its prefix keeps a
+// provider version's token, whose scope is namespace/name/version, from ever opening a module.
+func moduleArchiveScope(namespace, name, provider, version string) string {
+	return fmt.Sprintf("module/%s/%s/%s/%s", namespace, name, provider, version)
+}
+
+// DownloadModuleArchive streams a module version's tarball:
+// GET /v1/modules/:namespace/:name/:provider/:version/archive.tar.gz. A capability token minted by
+// DownloadModule opens it, as does the read access DownloadModule checks.
+func (h *RegistryModuleHandler) DownloadModuleArchive(c *gin.Context) {
+	namespace, name, provider, version := c.Param("namespace"), c.Param("name"), c.Param("provider"), c.Param("version")
+	module, err := h.moduleService.GetModule(namespace, name, provider)
+	if err != nil {
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module not found")
+		return
+	}
+	if !verifyArtifactToken(c.Query("token"), moduleArchiveScope(namespace, name, provider, version)) &&
+		!authorizeRegistryRead(c, h.authService, h.orgRepo, h.orgResolver, module.OrganizationID, false) {
+		return
+	}
+	archive, err := h.moduleService.OpenArchive(c.Request.Context(), namespace, name, provider, version)
+	if err != nil {
+		jsonapi.WriteRegistryError(c, http.StatusNotFound, "Module version not available for download")
+		return
+	}
+	defer func() {
+		if cerr := archive.Close(); cerr != nil {
+			logger.Warnf("Failed to close the archive of %s/%s/%s %s: %v", namespace, name, provider, version, cerr)
+		}
+	}()
+	c.Header("Content-Type", "application/gzip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+"-"+version+".tar.gz"))
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, archive); err != nil {
+		logger.Warnf("Failed to stream the archive of %s/%s/%s %s: %v", namespace, name, provider, version, err)
+	}
 }
 
 // GetModuleDownloadsSummary handles GET /v2/modules/:namespace/:name/:provider/downloads/summary

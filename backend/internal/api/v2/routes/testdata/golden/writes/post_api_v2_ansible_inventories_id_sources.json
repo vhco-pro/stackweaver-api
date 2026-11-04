@@ -68,6 +68,10 @@
                 "hostname-var": {
                   "type": "string"
                 },
+                "identity-binding-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "instance-filters": {
                   "type": "string"
                 },
@@ -82,11 +86,19 @@
                   "type": "boolean",
                   "nullable": true
                 },
+                "run-image-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "source-type": {
                   "type": "string"
                 },
                 "sync-schedule": {
                   "type": "string"
+                },
+                "sync-timeout": {
+                  "type": "integer",
+                  "nullable": true
                 },
                 "update-cache-timeout": {
                   "type": "integer",
@@ -134,6 +146,7 @@
         "group-by-tag": "Environment",
         "hostname-var": "private_ip",
         "hosts-count": 0,
+        "identity-binding-id": null,
         "instance-filters": "",
         "last-sync-at": null,
         "last-sync-error": "",
@@ -141,9 +154,11 @@
         "name": "aws-eu-central-1",
         "overwrite": true,
         "overwrite-vars": false,
+        "run-image-id": null,
         "source-type": "aws",
         "status": "never_synced",
         "sync-schedule": "0 */6 * * *",
+        "sync-timeout": 0,
         "update-cache-timeout": 300,
         "update-on-launch": true,
         "updated-at": "\u003ctimestamp\u003e",

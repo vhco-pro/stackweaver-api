@@ -23,7 +23,6 @@ package ansible
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -39,16 +38,6 @@ import (
 	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
-// capturedQueue records what a handler queued.
-type capturedQueue struct{ payloads []any }
-
-func (q *capturedQueue) Enqueue(_ context.Context, _ string, job any) error {
-	q.payloads = append(q.payloads, job)
-	return nil
-}
-
-func (q *capturedQueue) Close() error { return nil }
-
 // The tokens the fixture's connections clone with. They are distinct strings, so that a clone
 // URL shows whose connection built it.
 const (
@@ -57,12 +46,12 @@ const (
 )
 
 // vcsConnectionScopeFixture is neighbourScopeFixture with VCS connections: two in the first
-// organization and one in the second. The handlers are mounted over a queue that records and a
-// VCS registry that needs no network (GitLab builds its clone URL from the stored token).
+// organization and one in the second. The handlers request their syncs as work items (#933, D2),
+// which carry no clone URL: the credential is resolved when a launcher runs the work item, and
+// the artifacts route holds that rule (runner_agent_work_items_integration_test.go).
 type vcsConnectionScopeFixture struct {
 	*neighbourScopeFixture
 	router *gin.Engine
-	queue  *capturedQueue
 	orgID  uuid.UUID // the first organization
 
 	ownConnection, ownConnection2, otherConnection string
@@ -97,7 +86,13 @@ func setupVCSConnectionScope(t *testing.T) *vcsConnectionScopeFixture {
 	// Registered after the shared fixture's cleanup, so it runs before it: the connections are
 	// detached from the playbooks the shared cleanup removes, then deleted, each by identifier.
 	connectionIDs := []uuid.UUID{own.ID, own2.ID, other.ID}
+	hosted := models.NewHostedPool(orgID)
+	if err := db.Create(hosted).Error; err != nil {
+		t.Fatalf("seeding the hosted pool: %v", err)
+	}
 	t.Cleanup(func() {
+		db.Where("organization_id = ?", orgID).Delete(&models.WorkItem{})
+		db.Where("id = ?", hosted.ID).Delete(&models.AgentPool{})
 		db.Model(&models.AnsiblePlaybook{}).Where("vcs_connection_id IN ?", connectionIDs).Update("vcs_connection_id", nil)
 		// The inventories a test created or wrote directly are not among the shared fixture's.
 		db.Where("vcs_connection_id IN ?", connectionIDs).Delete(&models.AnsibleInventory{})
@@ -109,7 +104,7 @@ func setupVCSConnectionScope(t *testing.T) *vcsConnectionScopeFixture {
 	playbookRepo := repository.NewAnsiblePlaybookRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
 	rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), projectRepo)
-	queue := &capturedQueue{}
+	queue := ansiblesvc.NewWorkItemService(db, nil)
 
 	playbooks := NewPlaybookHandler(
 		playbookRepo, repository.NewAnsibleJobTemplateRepository(db), repository.NewAnsibleJobRepository(db),
@@ -131,7 +126,7 @@ func setupVCSConnectionScope(t *testing.T) *vcsConnectionScopeFixture {
 	router.PATCH("/api/v2/ansible/playbooks/:id", playbooks.UpdatePlaybook)
 
 	return &vcsConnectionScopeFixture{
-		neighbourScopeFixture: base, router: router, queue: queue, orgID: orgID,
+		neighbourScopeFixture: base, router: router, orgID: orgID,
 		ownConnection: own.ID.String(), ownConnection2: own2.ID.String(), otherConnection: other.ID.String(),
 	}
 }
@@ -139,6 +134,16 @@ func setupVCSConnectionScope(t *testing.T) *vcsConnectionScopeFixture {
 func (f *vcsConnectionScopeFixture) send(t *testing.T, method, path, body string) (int, []byte) {
 	t.Helper()
 	return storedAsSentCall(t, f.router, method, path, f.member, body)
+}
+
+// workItems is every work item of the first organization, oldest first.
+func (f *vcsConnectionScopeFixture) workItems(t *testing.T) []models.WorkItem {
+	t.Helper()
+	var rows []models.WorkItem
+	if err := f.db.Where("organization_id = ?", f.orgID).Order("created_at").Find(&rows).Error; err != nil {
+		t.Fatalf("reading the work items: %v", err)
+	}
+	return rows
 }
 
 // naming counts the rows of a table that name one of the second organization's connection.
@@ -210,8 +215,8 @@ func TestPlaybookVCSConnection_AnotherOrganizationReadsAsNotFound(t *testing.T) 
 	if got := f.naming(t, "ansible_playbooks"); got != 0 {
 		t.Errorf("%d playbook(s) name the other organization's connection", got)
 	}
-	if len(f.queue.payloads) != 0 {
-		t.Errorf("the refused requests queued %d sync(s)", len(f.queue.payloads))
+	if n := len(f.workItems(t)); n != 0 {
+		t.Errorf("the refused requests requested %d sync(s)", n)
 	}
 }
 
@@ -222,15 +227,12 @@ func TestPlaybookVCSConnection_OwnOrganizationIsAccepted(t *testing.T) {
 	if code != http.StatusCreated {
 		t.Fatalf("creating a playbook with its organization's connection: %d %s", code, body)
 	}
-	// The create queues the first sync, with the clone URL its own connection builds.
-	if len(f.queue.payloads) != 1 {
-		t.Fatalf("the create queued %d sync(s), want 1", len(f.queue.payloads))
+	// The create requests the first sync as a playbook_snapshot work item.
+	items := f.workItems(t)
+	if len(items) != 1 || items[0].Kind != models.WorkItemPlaybookSnapshot || items[0].PlaybookID == nil {
+		t.Fatalf("the create requested %+v, want one playbook_snapshot work item", items)
 	}
-	message, ok := f.queue.payloads[0].(ansiblesvc.PlaybookSyncMessage)
-	if !ok || !strings.Contains(message.CloneURL, ownVCSToken) {
-		t.Errorf("the create queued %+v, want a sync with a clone URL built from the organization's own token", f.queue.payloads[0])
-	}
-	created := message.PlaybookID.String()
+	created := items[0].PlaybookID.String()
 	if got := f.connectionOf(t, "ansible_playbooks", created); got != f.ownConnection {
 		t.Errorf("the playbook names connection %q, want %q", got, f.ownConnection)
 	}
@@ -255,8 +257,8 @@ func TestPlaybookVCSConnection_OwnOrganizationIsAccepted(t *testing.T) {
 	}
 }
 
-// An inventory names its VCS connection the same way, and creating one queues a sync straight
-// away with the clone URL resolved from the connection.
+// An inventory names its VCS connection the same way, and creating one requests a sync straight
+// away.
 
 func (f *vcsConnectionScopeFixture) inventoryDocument(t *testing.T, connection string) string {
 	t.Helper()
@@ -285,24 +287,10 @@ func (f *vcsConnectionScopeFixture) createInventory(t *testing.T) string {
 	return doc.Data.ID
 }
 
-// queuedCloneURLs is the clone URL of every inventory sync the handlers queued.
-func (f *vcsConnectionScopeFixture) queuedCloneURLs(t *testing.T) []string {
-	t.Helper()
-	var urls []string
-	for _, payload := range f.queue.payloads {
-		message, ok := payload.(InventorySyncMessage)
-		if !ok {
-			t.Fatalf("queued %T, want an InventorySyncMessage", payload)
-		}
-		urls = append(urls, message.CloneURL)
-	}
-	return urls
-}
-
 func TestInventoryVCSConnection_AnotherOrganizationReadsAsNotFound(t *testing.T) {
 	f := setupVCSConnectionScope(t)
 	own := f.createInventory(t)
-	f.queue.payloads = nil
+	requested := len(f.workItems(t))
 	inventoriesOf := func(t *testing.T) int64 {
 		t.Helper()
 		return f.rows(t, "SELECT count(*) FROM ansible_inventories WHERE project_id = ?", f.projectID)
@@ -330,8 +318,8 @@ func TestInventoryVCSConnection_AnotherOrganizationReadsAsNotFound(t *testing.T)
 	if got := f.connectionOf(t, "ansible_inventories", own); got != f.ownConnection {
 		t.Errorf("after the refused updates the inventory names %q, want %q", got, f.ownConnection)
 	}
-	if len(f.queue.payloads) != 0 {
-		t.Errorf("the refused requests queued %d sync(s)", len(f.queue.payloads))
+	if n := len(f.workItems(t)) - requested; n != 0 {
+		t.Errorf("the refused requests requested %d sync(s)", n)
 	}
 }
 
@@ -342,9 +330,9 @@ func TestInventoryVCSConnection_OwnOrganizationIsAccepted(t *testing.T) {
 	if got := f.connectionOf(t, "ansible_inventories", created); got != f.ownConnection {
 		t.Errorf("the inventory names connection %q, want %q", got, f.ownConnection)
 	}
-	// The create queues the first sync, with the clone URL its own connection builds.
-	if urls := f.queuedCloneURLs(t); len(urls) != 1 || !strings.Contains(urls[0], ownVCSToken) {
-		t.Errorf("the create queued clone URLs %q, want one built with the organization's own token", urls)
+	// The create requests the first sync as an inventory_file_sync work item.
+	if items := f.workItems(t); len(items) != 1 || items[0].Kind != models.WorkItemInventoryFileSync || items[0].InventoryID == nil || items[0].InventoryID.String() != created {
+		t.Errorf("the create requested %+v, want one inventory_file_sync work item for the inventory", items)
 	}
 
 	code, body := f.send(t, http.MethodPatch, "/api/v2/ansible/inventories/"+created,
@@ -358,7 +346,9 @@ func TestInventoryVCSConnection_OwnOrganizationIsAccepted(t *testing.T) {
 }
 
 // TestInventoryVCSConnection_StoredRowIsNotTrusted writes an inventory row directly, the way one
-// stored before the API checked the connection would be, and asks for a sync of it.
+// stored before the API checked the connection would be, and asks for a sync of it. The work item
+// it requests carries no credential; the artifacts route that runs it refuses the other
+// organization's connection (runner_agent_work_items_integration_test.go).
 func TestInventoryVCSConnection_StoredRowIsNotTrusted(t *testing.T) {
 	f := setupVCSConnectionScope(t)
 	other := uuid.MustParse(f.otherConnection)
@@ -374,12 +364,9 @@ func TestInventoryVCSConnection_StoredRowIsNotTrusted(t *testing.T) {
 	if code >= 500 {
 		t.Errorf("the sync request failed on the server: %d %s", code, body)
 	}
-	for _, cloneURL := range f.queuedCloneURLs(t) {
-		if cloneURL != "" {
-			t.Errorf("a sync was queued with a clone URL for an inventory naming another organization's connection")
-		}
-		if strings.Contains(cloneURL, otherVCSToken) {
-			t.Errorf("the queued sync carries the other organization's token")
+	for _, item := range f.workItems(t) {
+		if raw, _ := json.Marshal(item); strings.Contains(string(raw), otherVCSToken) || strings.Contains(string(raw), ownVCSToken) {
+			t.Errorf("a work item carries a VCS token: %s", raw)
 		}
 	}
 }

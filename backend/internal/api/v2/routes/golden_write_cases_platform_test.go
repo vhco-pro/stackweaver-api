@@ -8,6 +8,8 @@ package routes_test
 import (
 	"net/http"
 	"testing"
+
+	"github.com/michielvha/stackweaver/core/models"
 )
 
 // Write cases for the platform routes: organizations and their memberships, projects, teams and
@@ -83,6 +85,11 @@ func init() {
 						"ansible-job-retention-days":          30,
 						"speculative-plan-management-enabled": false,
 						"assessments-enforced":                true,
+						// The organization's run images, identity binding and cache bound (#933).
+						"tofu-run-image-id":    goldenRunImage(t, w, "tofu"),
+						"ansible-run-image-id": goldenRunImage(t, w, "ansible"),
+						"identity-binding-id":  w.id("identity-bindings"),
+						"cache-size-limit":     21474836480,
 					}),
 					"default-agent-pool", "agent-pools", w.id("agent-pools")))
 			},
@@ -176,7 +183,11 @@ func init() {
 			route: "PATCH /api/v2/projects/:id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/projects/:id"), platformTagBindings(
-					document("projects", map[string]any{"name": "golden-write-renamed", "description": "Updated by the golden write harness"}),
+					document("projects", map[string]any{
+						"name": "golden-write-renamed", "description": "Updated by the golden write harness",
+						"tofu-run-image-id": goldenRunImage(t, w, "tofu"), "ansible-run-image-id": goldenRunImage(t, w, "ansible"),
+						"identity-binding-id": w.id("identity-bindings"),
+					}),
 					[2]string{"environment", "production"}))
 			},
 		},
@@ -650,4 +661,14 @@ func init() {
 			},
 		},
 	)
+}
+
+// goldenRunImage is the seeded run image of kind (tofu or ansible), by its seeded name.
+func goldenRunImage(t *testing.T, w *writeRun, kind string) string {
+	t.Helper()
+	var img models.RunImage
+	if err := w.db.Where("kind = ?", kind).Order("name").First(&img).Error; err != nil {
+		t.Fatalf("no seeded %s run image: %v", kind, err)
+	}
+	return img.ID.String()
 }

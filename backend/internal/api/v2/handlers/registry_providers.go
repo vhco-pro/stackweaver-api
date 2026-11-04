@@ -479,11 +479,12 @@ func protocolList(protocols string) []string {
 // externalBaseURL reconstructs the scheme+host Terraform used to reach this API, honoring the
 // reverse-proxy / tunnel forwarded headers so download URLs are reachable from the client.
 func externalBaseURL(c *gin.Context) string {
-	scheme := "https"
-	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
-	} else if c.Request.TLS == nil {
+	scheme := forwardedScheme(c)
+	if scheme == "" {
 		scheme = "http"
+		if c.Request.TLS != nil {
+			scheme = "https"
+		}
 	}
 	host := c.Request.Host
 	if fwd := c.GetHeader("X-Forwarded-Host"); fwd != "" {

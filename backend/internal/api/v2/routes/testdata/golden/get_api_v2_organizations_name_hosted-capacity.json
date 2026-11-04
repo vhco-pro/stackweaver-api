@@ -1,0 +1,20 @@
+{
+  "method": "GET",
+  "path": "/api/v2/organizations/:name/hosted-capacity",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "in-flight": 0,
+        "launchers-online": 0,
+        "max-concurrent-jobs": 0,
+        "placement-group": "default",
+        "pool-id": "\u003cuuid\u003e",
+        "queue-reason": "no_hosted_capacity_in_group",
+        "queued": 0
+      },
+      "id": "demo",
+      "type": "hosted-capacities"
+    }
+  }
+}

@@ -12,12 +12,18 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 )
 
 // CallingRunnerKey is the gin-context key under which RunnerAuth stores the
 // authenticated *models.Runner. Handlers read it to bind every job-scoped
 // operation to the runner that owns the job (AUD-001).
 const CallingRunnerKey = "calling_runner"
+
+// JobPrincipalKey is the gin-context key under which RunnerAuth stores the apikey.JobPrincipal of a
+// job token (#933, D1). Its presence means the caller is an executor holding a token for one job;
+// the handlers then authorize the request against that job alone.
+const JobPrincipalKey = "job_principal"
 
 // RunnerAuth authenticates a caller on the /runner/* control plane as a specific
 // self-hosted runner and rejects everyone else.
@@ -48,6 +54,42 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 		if !exists || !ok || apiKey == nil {
 			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "missing API key")
 			c.Abort()
+			return
+		}
+
+		// A job token names its job, its runner and its attempt. It stands for that runner on the
+		// job-data routes only, and the handlers bind every request to the job it names.
+		if apiKey.Kind == models.APIKeyKindJob {
+			principal, ok := apikey.ParseJobPrincipal(apiKey.Scopes)
+			if !ok {
+				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "invalid job token")
+				c.Abort()
+				return
+			}
+			runner, err := runnerRepo.GetByID(principal.RunnerID)
+			if err != nil || runner == nil {
+				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "runner not found")
+				c.Abort()
+				return
+			}
+			// A job token is bound to its job's organization. A customer runner serves its own
+			// organization only; a hosted runner serves every organization's hosted pool, and the
+			// handlers hold the token to its job's organization (#933, D9).
+			if apiKey.OrganizationID == nil || (!runner.IsHosted() && (runner.OrganizationID == nil || *apiKey.OrganizationID != *runner.OrganizationID)) {
+				jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "runner/token organization mismatch")
+				c.Abort()
+				return
+			}
+			// Every job-data route names its job in the path; a job token is refused on any other
+			// job before a handler reads anything.
+			if id := c.Param("id"); id != "" && id != principal.JobID {
+				jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this job token is for a different job")
+				c.Abort()
+				return
+			}
+			c.Set(CallingRunnerKey, runner)
+			c.Set(JobPrincipalKey, principal)
+			c.Next()
 			return
 		}
 
@@ -85,15 +127,61 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 			return
 		}
 
-		// Defence in depth: the runner's org must match the token's bound org. A runner token
-		// always carries one, so a token without an org is refused rather than waved through.
-		if apiKey.OrganizationID == nil || *apiKey.OrganizationID != runner.OrganizationID {
+		// Defence in depth: a customer runner's token is an organization key bound to the runner's
+		// organization; a hosted runner's is an ownerless hosted key bound to none (#933, D9). Any
+		// other pairing, a NULL on one side with the other kind included, is refused.
+		if !runnerTokenMatches(apiKey, runner) {
 			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "runner/token organization mismatch")
 			c.Abort()
 			return
 		}
 
 		c.Set(CallingRunnerKey, runner)
+		c.Next()
+	}
+}
+
+// runnerTokenMatches reports whether a runner token's kind and organization fit its runner.
+func runnerTokenMatches(key *models.APIKey, runner *models.Runner) bool {
+	if runner.IsHosted() {
+		return key.Kind == models.APIKeyKindHosted && key.OrganizationID == nil && runner.OrganizationID == nil
+	}
+	return key.Kind != models.APIKeyKindHosted && key.OrganizationID != nil && runner.OrganizationID != nil &&
+		*key.OrganizationID == *runner.OrganizationID
+}
+
+// RequireRunnerToken refuses a job token on the routes only a runner token may use: heartbeat,
+// claim, job-token minting, drain and deregistration. A job token reaches one job's data and
+// nothing that acts for the runner.
+func RequireRunnerToken() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, isJob := c.Get(JobPrincipalKey); isJob {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "a job token may not use this endpoint")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// JobData guards a route that hands out or accepts one job's data: its artifacts, its playbook
+// snapshot, its state, its plan, its completion (#933, D1, AC3). A runner that declared the
+// job-token capability at registration reaches them only through the job token its executor holds,
+// so a stolen runner token reads no job's credentials. A runner that did not declare it, an agent
+// built before the job token, keeps its runner token on these routes for the deprecation window
+// (D14).
+func JobData() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, isJob := c.Get(JobPrincipalKey); isJob {
+			c.Next()
+			return
+		}
+		v, _ := c.Get(CallingRunnerKey)
+		if runner, ok := v.(*models.Runner); ok && runner.HasCapability(runnercontract.CapabilityJobToken) {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this runner reaches job data with a job token")
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }

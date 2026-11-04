@@ -3,7 +3,6 @@
 package ansible
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
@@ -12,19 +11,12 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 )
-
-// InventorySourceSyncMessage represents a request to sync a dynamic inventory source
-type InventorySourceSyncMessage struct {
-	SourceID uuid.UUID `json:"source_id"`
-	// TriggeredBy records what started the sync; recorded in the sync history.
-	TriggeredBy string `json:"triggered_by,omitempty"`
-}
 
 // InventorySourceHandler handles inventory source API requests
 type InventorySourceHandler struct {
@@ -32,7 +24,8 @@ type InventorySourceHandler struct {
 	inventoryService *ansible.InventoryService
 	authService      *auth.Service
 	rbacService      *rbac.Service
-	queue            queue.Queue
+	workItems        *ansible.WorkItemService
+	levelRefs        *levelrefs.Checker
 }
 
 // NewInventorySourceHandler creates a new inventory source handler
@@ -41,14 +34,14 @@ func NewInventorySourceHandler(
 	inventoryService *ansible.InventoryService,
 	authService *auth.Service,
 	rbacService *rbac.Service,
-	redisQueue queue.Queue,
+	workItems *ansible.WorkItemService,
 ) *InventorySourceHandler {
 	return &InventorySourceHandler{
 		sourceService:    sourceService,
 		inventoryService: inventoryService,
 		authService:      authService,
 		rbacService:      rbacService,
-		queue:            redisQueue,
+		workItems:        workItems,
 	}
 }
 
@@ -61,6 +54,44 @@ func (h *InventorySourceHandler) authorizeInventoryByID(c *gin.Context, inventor
 		return false
 	}
 	return authorizeInventoryResource(c, h.authService, h.rbacService, inventory, write)
+}
+
+// SetLevelRefs sets the checker of the run image and identity binding a source selects.
+func (h *InventorySourceHandler) SetLevelRefs(c *levelrefs.Checker) { h.levelRefs = c }
+
+// levelRefOptions checks the run image (an Ansible one) and identity binding a source selects
+// against its inventory's organization and sets them on opts, writing the 422 and returning false on
+// an invalid one (#933, D0, D6, D8).
+func (h *InventorySourceHandler) levelRefOptions(c *gin.Context, inventoryID uuid.UUID, opts *ansible.UpdateInventorySourceOptions, runImage, binding *string) bool {
+	if runImage == nil && binding == nil {
+		return true
+	}
+	inventory, err := h.inventoryService.GetInventory(inventoryID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
+		return false
+	}
+	if h.levelRefs == nil {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "run images and identity bindings are not configured")
+		return false
+	}
+	img, set, err := h.levelRefs.RunImage(inventory.OrganizationID, models.RunImageKindAnsible, runImage)
+	if err == nil {
+		opts.SetRunImage, opts.RunImageID = set, img
+		var b *uuid.UUID
+		if b, set, err = h.levelRefs.IdentityBinding(inventory.OrganizationID, binding); err == nil {
+			opts.SetIdentityBinding, opts.IdentityBindingID = set, b
+		}
+	}
+	if err != nil {
+		if errors.Is(err, levelrefs.ErrInvalid) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return false
+	}
+	return true
 }
 
 // authorizeSource resolves the source's parent inventory and gates the caller
@@ -99,6 +130,9 @@ type CreateInventorySourceRequest struct {
 			Overwrite          *bool                        `json:"overwrite"`
 			OverwriteVars      *bool                        `json:"overwrite-vars"`
 			Verbosity          *int                         `json:"verbosity"`
+			SyncTimeout        *int                         `json:"sync-timeout"`
+			RunImageID         *string                      `json:"run-image-id"`
+			IdentityBindingID  *string                      `json:"identity-binding-id"`
 			GroupByInstanceID  *bool                        `json:"group-by-instance-id"`
 			GroupByRegion      *bool                        `json:"group-by-region"`
 			GroupByAZ          *bool                        `json:"group-by-availability-zone"`
@@ -127,6 +161,9 @@ type UpdateInventorySourceRequest struct {
 			Overwrite          *bool                         `json:"overwrite"`
 			OverwriteVars      *bool                         `json:"overwrite-vars"`
 			Verbosity          *int                          `json:"verbosity"`
+			SyncTimeout        *int                          `json:"sync-timeout"`
+			RunImageID         *string                       `json:"run-image-id"`
+			IdentityBindingID  *string                       `json:"identity-binding-id"`
 			GroupByInstanceID  *bool                         `json:"group-by-instance-id"`
 			GroupByRegion      *bool                         `json:"group-by-region"`
 			GroupByAZ          *bool                         `json:"group-by-availability-zone"`
@@ -182,6 +219,7 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 		Overwrite:          attrs.Overwrite,
 		OverwriteVars:      attrs.OverwriteVars,
 		Verbosity:          attrs.Verbosity,
+		TimeoutSeconds:     attrs.SyncTimeout,
 		Enabled:            attrs.Enabled,
 		GroupByInstanceID:  attrs.GroupByInstanceID,
 		GroupByRegion:      attrs.GroupByRegion,
@@ -198,6 +236,9 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	}
 	if attrs.InstanceFilters != "" {
 		syncOpts.InstanceFilters = &attrs.InstanceFilters
+	}
+	if !h.levelRefOptions(c, inventoryID, &syncOpts, attrs.RunImageID, attrs.IdentityBindingID) {
+		return
 	}
 
 	source, err := h.sourceService.CreateInventorySourceWithOptions(
@@ -288,7 +329,8 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if _, ok := h.authorizeSource(c, id, true); !ok {
+	source, ok := h.authorizeSource(c, id, true)
+	if !ok {
 		return
 	}
 
@@ -317,6 +359,11 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 		Overwrite:          attrs.Overwrite,
 		OverwriteVars:      attrs.OverwriteVars,
 		Verbosity:          attrs.Verbosity,
+		TimeoutSeconds:     attrs.SyncTimeout,
+	}
+
+	if !h.levelRefOptions(c, source.InventoryID, &opts, attrs.RunImageID, attrs.IdentityBindingID) {
+		return
 	}
 
 	// Handle credential: empty string = clear credential (switch to OIDC), non-empty = set credential
@@ -333,7 +380,7 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 		}
 	}
 
-	source, err := h.sourceService.UpdateInventorySource(id, opts)
+	source, err = h.sourceService.UpdateInventorySource(id, opts)
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
@@ -392,22 +439,18 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 	// Reflect the syncing status in the response
 	source.Status = models.InventorySourceStatusSyncing
 
-	// Queue sync job to ansible-runner via Redis
-	if h.queue != nil {
-		syncMsg := InventorySourceSyncMessage{
-			SourceID:    id,
-			TriggeredBy: "manual",
-		}
-		if err := h.queue.Enqueue(context.Background(), "ansible_sync", syncMsg); err != nil {
+	// Request the sync work item; a launcher of the source's pool runs it (#933, D2).
+	if h.workItems != nil {
+		if _, err := h.workItems.RequestSourceSync(c.Request.Context(), source, "manual"); err != nil {
 			// Revert status
-			if markErr := h.sourceService.MarkSyncFailed(id, "Failed to queue sync job: "+err.Error()); markErr != nil {
-				logger.Warnf("Failed to update source after queue error: %v", markErr)
+			if markErr := h.sourceService.MarkSyncFailed(id, "Failed to request the sync: "+err.Error()); markErr != nil {
+				logger.Warnf("Failed to update source after the sync request error: %v", markErr)
 			}
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to queue sync job")
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
 			return
 		}
 	} else {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Sync queue not available")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Syncs are not available")
 		return
 	}
 
@@ -437,6 +480,9 @@ func formatInventorySourceResponse(source *models.AnsibleInventorySource) jsonap
 			Overwrite:               source.Overwrite,
 			OverwriteVars:           source.OverwriteVars,
 			Verbosity:               source.Verbosity,
+			SyncTimeout:             source.TimeoutSeconds,
+			RunImageID:              levelrefs.UUIDString(source.RunImageID),
+			IdentityBindingID:       levelrefs.UUIDString(source.IdentityBindingID),
 			GroupByInstanceID:       source.GroupByInstanceID,
 			GroupByRegion:           source.GroupByRegion,
 			GroupByAvailabilityZone: source.GroupByAvailabilityZone,

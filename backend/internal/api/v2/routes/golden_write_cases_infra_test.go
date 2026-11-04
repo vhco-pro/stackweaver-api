@@ -17,10 +17,14 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/queue"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 )
 
 // infraGPGPublicKey is the public half of a key generated once for these cases; the private half
@@ -262,6 +266,28 @@ func infraStartedRun(t *testing.T, w *writeRun, r infraRunner) string {
 	return runID
 }
 
+// infraClaimedWorkItem is a playbook_snapshot work item of the seeded playbook, on the runner's pool
+// and claimed by it, which is what a snapshot upload requires.
+func infraClaimedWorkItem(t *testing.T, w *writeRun, r infraRunner) string {
+	t.Helper()
+	pool := uuid.MustParse(r.poolID)
+	var owner models.AgentPool
+	if err := w.db.Select("id", "organization_id").First(&owner, "id = ?", pool).Error; err != nil {
+		t.Fatalf("loading the runner's pool: %v", err)
+	}
+	playbook := uuid.MustParse(w.id("playbooks"))
+	now := time.Now()
+	item := &models.WorkItem{
+		OrganizationID: owner.OrganizationID, Kind: models.WorkItemPlaybookSnapshot, PlaybookID: &playbook,
+		TriggeredBy: "manual", AgentPoolID: &pool, QueuedAt: &now, ImageLevel: "platform", TimeoutSeconds: 3600,
+	}
+	if err := w.db.Create(item).Error; err != nil {
+		t.Fatalf("creating the work item: %v", err)
+	}
+	w.mustSend(t, infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+item.ID+"/start", map[string]any{"runner_id": r.id}))
+	return item.ID
+}
+
 // Write cases for the registry, agent pools and runners (the runner protocol included), the
 // admin catalogue, notification configurations, workload-identity configurations, VCS
 // connections, inbound webhooks and the OAuth token endpoint. They register from three init
@@ -360,6 +386,83 @@ func init() {
 			responseSecrets: []string{"data.attributes.token"},
 		},
 
+		// --- identity bindings (#933, D8) -------------------------------------------------------
+		writeCase{
+			route: "POST /api/v2/agent-pools/:id/identity-bindings",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/agent-pools/:id/identity-bindings"),
+					document("identity-bindings", map[string]any{
+						"name": "golden-write-binding", "mechanism": "azure-workload-identity", "service-account": "sw-golden-write",
+						"annotations": map[string]string{"azure.workload.identity/client-id": "00000000-0000-0000-0000-000000000000"},
+					}))
+			},
+		},
+		writeCase{
+			// An organization's custom image for its OpenTofu runs (#933, D6); a level selects it.
+			route: "POST /api/v2/organizations/:name/run-images",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/run-images"),
+					document("run-images", map[string]any{
+						"name": "golden-write-ee", "kind": "ansible", "image": "ghcr.io/acme/awx-ee:24",
+						"digest": "sha256:" + strings.Repeat("ab", 32), "description": "An AWX execution environment",
+					}))
+			},
+		},
+		writeCase{
+			route: "PATCH /api/v2/run-images/:id",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/run-images/:id"),
+					document("run-images", map[string]any{"image": "ghcr.io/acme/tofu-aws-tools:1.11"}))
+			},
+		},
+		writeCase{
+			route: "DELETE /api/v2/run-images/:id",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				created := w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/organizations/:name/run-images"),
+					document("run-images", map[string]any{"name": "golden-write-doomed", "kind": "tofu", "image": "ghcr.io/acme/doomed:1"})))
+				return w.jsonRequest(t, http.MethodDelete, "/api/v2/run-images/"+dataID(t, created), nil)
+			},
+		},
+		writeCase{
+			route: "PATCH /api/v2/identity-bindings/:id",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/identity-bindings/:id"),
+					document("identity-bindings", map[string]any{"per-job-sa": true}))
+			},
+		},
+		// --- registry pull Secrets (#933, D8) ---------------------------------------------------
+		writeCase{
+			// A pull Secret declared in git that the pool's job pods use by name.
+			route: "POST /api/v2/agent-pools/:id/pull-secrets",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/agent-pools/:id/pull-secrets"),
+					document("pull-secrets", map[string]any{"name": "golden-write-quay", "secret-name": "registry-quay", "registry": "quay.io", "reference": true}))
+			},
+		},
+		writeCase{
+			route: "PATCH /api/v2/pull-secrets/:id",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/pull-secrets/:id"),
+					document("pull-secrets", map[string]any{"name": "ghcr-org"}))
+			},
+		},
+		writeCase{
+			route: "DELETE /api/v2/pull-secrets/:id",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				created := w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/agent-pools/:id/pull-secrets"),
+					document("pull-secrets", map[string]any{"name": "golden-write-doomed", "secret-name": "registry-doomed", "registry": "registry.example", "reference": true})))
+				return w.jsonRequest(t, http.MethodDelete, "/api/v2/pull-secrets/"+dataID(t, created), nil)
+			},
+		},
+		writeCase{
+			route: "DELETE /api/v2/identity-bindings/:id",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				created := w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/agent-pools/:id/identity-bindings"),
+					document("identity-bindings", map[string]any{"name": "golden-write-doomed", "mechanism": "aws-irsa", "service-account": "sw-golden-doomed"})))
+				return w.jsonRequest(t, http.MethodDelete, "/api/v2/identity-bindings/"+dataID(t, created), nil)
+			},
+		},
+
 		// --- runners: the management API -------------------------------------------------------
 		writeCase{
 			route: "PATCH /api/v2/runners/:id",
@@ -370,6 +473,25 @@ func init() {
 						"labels":      []string{"region:eu-west-1", "tier:build"},
 					}))
 			},
+		},
+		writeCase{
+			// An organization owner asks a runner's launcher to drain (#933, D11).
+			route: "POST /api/v2/runners/:id/actions/drain",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/runners/:id/actions/drain"), nil)
+			},
+		},
+		writeCase{
+			// The pool's agent token mints a one-time, short-lived registration token for a
+			// single-job launcher (#933, D11). The token comes back once.
+			route: "POST /api/v2/agent-pools/:id/jit-token",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				req := infraPlainRequest(t, w, http.MethodPost, "/api/v2/agent-pools/"+w.id("agent-pools")+"/jit-token",
+					document("agent-jit-tokens", map[string]any{"expires-in": 600}))
+				req.Header.Set("Authorization", "Bearer "+infraAgentToken(t, w))
+				return req
+			},
+			responseSecrets: []string{"data.attributes.token"},
 		},
 		writeCase{
 			route: "DELETE /api/v2/runners/:id",
@@ -413,6 +535,90 @@ func init() {
 				r := infraRegisterRunner(t, w)
 				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+infraAgentRun(t, w, r)+"/start",
 					map[string]any{"runner_id": r.id})
+			},
+		},
+		writeCase{
+			// The launcher mints the executor's job token after the claim. The token comes back
+			// once, here, and is the only credential the executor holds.
+			route: "POST /api/v2/runner/jobs/:id/token",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				r := infraRegisterRunner(t, w)
+				// The mint takes no body: the job is the path's, the runner the token's.
+				req := w.rawRequest(http.MethodPost, "/api/v2/runner/jobs/"+infraStartedRun(t, w, r)+"/token", "", nil)
+				req.Header.Set("Authorization", "Bearer "+r.token)
+				return req
+			},
+			responseSecrets: []string{"token"},
+		},
+		writeCase{
+			// A launcher's populator uploads an entry it verified against its source (#933, D7). The
+			// server re-hashes the body against the key before it stores anything; the query names
+			// what the entry is.
+			route: "PUT /api/v2/runner/cache/:kind/:sha256",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				r := infraRegisterRunner(t, w)
+				body := []byte("golden write provider package")
+				sum := sha256.Sum256(body)
+				req := w.rawRequest(http.MethodPut, "/api/v2/runner/cache/provider/"+hex.EncodeToString(sum[:])+
+					"?name=registry.opentofu.org/hashicorp/null&version=3.2.4&platform=linux_amd64", "application/octet-stream", body)
+				req.Header.Set("Authorization", "Bearer "+r.token)
+				return req
+			},
+		},
+		writeCase{
+			// A runner's own token asks for its drain, as SIGTERM would (#933, D11).
+			route: "POST /api/v2/runner/drain",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				r := infraRegisterRunner(t, w)
+				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/drain", map[string]any{"runner_id": r.id})
+			},
+		},
+		writeCase{
+			// A launcher's populator drops a promotion it could not verify; one it marks as a
+			// poisoning also leaves an event on the job and an audit record on the pool (#933, D7).
+			route: "POST /api/v2/runner/cache/promotions/:id/drop",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				r := infraRegisterRunner(t, w)
+				pool := uuid.MustParse(r.poolID)
+				var owner models.AgentPool
+				if err := w.db.Select("id", "organization_id").First(&owner, "id = ?", pool).Error; err != nil {
+					t.Fatalf("loading the runner's pool: %v", err)
+				}
+				p := &models.CachePromotion{
+					OrganizationID: owner.OrganizationID, AgentPoolID: &pool, RunnerID: uuid.MustParse(r.id),
+					JobKind: string(models.JobTypeTofuRun), JobID: "run-goldenwritecache",
+					Entry:  models.JSONB{"kind": "provider", "name": "registry.opentofu.org/hashicorp/null", "version": "3.2.4", "platform": "linux_amd64"},
+					Status: models.CachePromotionPending,
+				}
+				if err := w.db.Create(p).Error; err != nil {
+					t.Fatalf("creating the promotion: %v", err)
+				}
+				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/cache/promotions/"+p.ID.String()+"/drop",
+					map[string]any{"reason": "the package hashes to a digest the lock file does not pin", "poisoned": true})
+			},
+		},
+		writeCase{
+			// The plan phase uploads its saved plan as the raw plan file. The server seals it and
+			// stores it for the apply phase; a few bytes stand in for a real plan.
+			route: "POST /api/v2/runner/jobs/:id/plan",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				r := infraRegisterRunner(t, w)
+				req := w.rawRequest(http.MethodPost, "/api/v2/runner/jobs/"+infraStartedRun(t, w, r)+"/plan", "application/octet-stream", []byte("PK\x03\x04 golden write saved plan"))
+				req.Header.Set("Authorization", "Bearer "+r.token)
+				return req
+			},
+		},
+		writeCase{
+			// A playbook_snapshot work item (#933, D2, decision 18) uploads the tarball it captured,
+			// with the commit it was captured at; the server seals it at rest for the jobs that
+			// start from it. The work item is put on the runner's pool and claimed first.
+			route: "POST /api/v2/runner/jobs/:id/snapshot",
+			prepare: func(t *testing.T, w *writeRun) *http.Request {
+				r := infraRegisterRunner(t, w)
+				req := w.rawRequest(http.MethodPost, "/api/v2/runner/jobs/"+infraClaimedWorkItem(t, w, r)+"/snapshot", "application/gzip", []byte("\x1f\x8b golden write playbook snapshot"))
+				req.Header.Set("Authorization", "Bearer "+r.token)
+				req.Header.Set(runnercontract.HeaderSnapshotCommit, "4f1c2b9d8e7a6f5c4b3a29180716253443526170")
+				return req
 			},
 		},
 		writeCase{

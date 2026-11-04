@@ -1,0 +1,17 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/jobs/:id/token",
+  "request": {
+    "takes_none": true
+  },
+  "status": 200,
+  "response": {
+    "attempt": 1,
+    "contract_version": 1,
+    "expires_at": "\u003ctimestamp\u003e",
+    "job_id": "\u003cid\u003e",
+    "pool": {},
+    "timeout_seconds": 7200,
+    "token": "\u003csecret\u003e"
+  }
+}

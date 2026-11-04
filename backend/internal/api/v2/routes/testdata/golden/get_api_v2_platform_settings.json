@@ -5,6 +5,23 @@
   "body": {
     "data": {
       "attributes": {
+        "deployment": {
+          "cache-size-limit": 53687091200,
+          "hosted-default-max-concurrent-jobs": 0,
+          "images-allowed-registries": [],
+          "job-log-max-bytes": 67108864,
+          "job-rate-limit": {
+            "burst": 40,
+            "rps": 20
+          },
+          "mirror": null,
+          "run-timeout-default": 7200,
+          "runner-rate-limit": {
+            "burst": 40,
+            "rps": 20
+          },
+          "sync-timeout": 3600
+        },
         "organization-creation": "everyone"
       },
       "id": "platform",

@@ -6,9 +6,18 @@
     "data": {
       "attributes": {
         "busy-runners": 0,
+        "capacity": 0,
+        "headroom": 0,
         "idle-runners": 0,
+        "in-flight": 0,
         "pending-ansible-jobs": 0,
+        "pending-by-engine": {
+          "ansible": 0,
+          "any": 0,
+          "tofu": 0
+        },
         "pending-terraform-jobs": 0,
+        "pending-work-items": 0,
         "total-pending": 0,
         "total-runners": 1
       },

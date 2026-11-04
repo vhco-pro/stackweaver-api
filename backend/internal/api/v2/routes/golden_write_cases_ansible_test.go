@@ -244,6 +244,7 @@ func init() {
 				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/ansible/inventory-sources/:source_id"),
 					document("inventory-sources", map[string]any{
 						"description":                "Updated by the golden write harness",
+						"run-image-id":               goldenRunImage(t, w, "ansible"),
 						"config":                     map[string]any{"regions": []string{"eu-west-1", "eu-central-1"}},
 						"sync-schedule":              "30 2 * * *",
 						"update-cache-timeout":       600,
@@ -476,13 +477,15 @@ func init() {
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/ansible/job-templates/:id"), ansibleRelatedMany(
 					document("ansible-job-templates", map[string]any{
-						"description":        "Updated by the golden write harness",
-						"extra-vars":         map[string]any{"compliance_profile": "cis-level-1"},
-						"limit":              "webservers",
-						"forks":              20,
-						"timeout-seconds":    1800,
-						"allow-simultaneous": true,
-						"allow-callbacks":    true,
+						"description":         "Updated by the golden write harness",
+						"extra-vars":          map[string]any{"compliance_profile": "cis-level-1"},
+						"limit":               "webservers",
+						"forks":               20,
+						"timeout-seconds":     1800,
+						"run-image-id":        goldenRunImage(t, w, "ansible"),
+						"identity-binding-id": w.id("identity-bindings"),
+						"allow-simultaneous":  true,
+						"allow-callbacks":     true,
 					}),
 					"credentials", "ansible-credentials", w.id("credentials")))
 			},

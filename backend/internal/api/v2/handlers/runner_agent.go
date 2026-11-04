@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -24,13 +25,17 @@ import (
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/logbuffer"
 	"github.com/michielvha/stackweaver/core/services/oidc"
 	"github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/services/wakeup"
+	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/storage"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -72,6 +77,63 @@ type RunnerAgentHandler struct {
 	// through Redis (O(1) APPEND) instead of the O(n²) read-modify-write on object storage
 	// (AUD-028), and is copied to MinIO once at completion.
 	logBuffer *logbuffer.RedisLogBuffer
+	// inlineArtifactLimit overrides DefaultInlineArtifactLimit; zero keeps the default.
+	inlineArtifactLimit int
+	// registryHost is the host OpenTofu addresses the platform's private module registry by; when
+	// set, a job's artifacts carry a registry token for it (SetRegistryHost).
+	registryHost string
+	// mirror is the deployment's mirror, proxy and CA block served to every job (SetMirror).
+	mirror *runnercontract.Mirror
+	// allowedRegistries is images.allowed_registries, checked again at job start (SetAllowedRegistries).
+	allowedRegistries []string
+	// logLimits caps one job's stored output; the zero value reads the deployment's cap.
+	logLimits logbuffer.Limits
+	// outputBodyCap bounds one output request; zero means DefaultOutputBodyCap.
+	outputBodyCap int64
+	// wakeHub holds this replica's long-poll heartbeats, wakeRedis publishes wakeups to every
+	// replica, and longPollMax caps a heartbeat's wait (SetWakeup). Without a hub a heartbeat is
+	// answered at once.
+	wakeHub     *wakeup.Hub
+	wakeRedis   *redis.Client
+	longPollMax time.Duration
+	// workItems runs the sync work items (#933, D2; SetWorkItems). Without it none is offered.
+	workItems *ansible.WorkItemRuntime
+}
+
+// DefaultLongPollMax caps a heartbeat's wait below the idle timeouts of the proxies between a
+// launcher and the API (ingress-nginx's proxy-read-timeout defaults to 60 seconds; #933, D3).
+const DefaultLongPollMax = 25 * time.Second
+
+// SetWakeup enables the long-poll heartbeat: hub holds this replica's waiting heartbeats, rdb
+// publishes wakeups, and maxWait caps a requested wait (zero means DefaultLongPollMax).
+func (h *RunnerAgentHandler) SetWakeup(hub *wakeup.Hub, rdb *redis.Client, maxWait time.Duration) {
+	if maxWait <= 0 {
+		maxWait = DefaultLongPollMax
+	}
+	h.wakeHub, h.wakeRedis, h.longPollMax = hub, rdb, maxWait
+}
+
+// DefaultOutputBodyCap bounds one POST /runner/jobs/:id/output body (#933, D2, AC73).
+const DefaultOutputBodyCap = 4 << 20
+
+// jobLogLimits is the cap applied to a job's stored output.
+func (h *RunnerAgentHandler) jobLogLimits() logbuffer.Limits {
+	if h.logLimits.MaxBytes > 0 {
+		return h.logLimits
+	}
+	return logbuffer.Limits{MaxBytes: settings.JobLogMaxBytes(os.Getenv), TailBytes: logbuffer.DefaultTailBytes}
+}
+
+// SetMirror sets the deployment's mirror, proxy and CA block, served in every job's artifacts so a
+// job never depends on its launcher host's environment (#933, D2).
+func (h *RunnerAgentHandler) SetMirror(m *runnercontract.Mirror) {
+	h.mirror = m
+}
+
+// SetRegistryHost sets the host of the platform's private module registry, taken from its public
+// URL, for which a job token's artifacts carry a per-job registry token (#933, D2, AC14).
+func (h *RunnerAgentHandler) SetRegistryHost(host string) {
+	h.registryHost = host
 }
 
 // NewRunnerAgentHandlerWithRepos creates a new runner agent handler with all repositories
@@ -149,27 +211,11 @@ func (h *RunnerAgentHandler) SetLogBuffer(lb *logbuffer.RedisLogBuffer) {
 	h.logBuffer = lb
 }
 
-// RegisterRequest is the request body for runner registration
-type RegisterRequest struct {
-	AgentPoolID          string   `json:"agent_pool_id" binding:"required"`
-	Name                 string   `json:"name" binding:"required"`
-	Hostname             string   `json:"hostname"`
-	OSType               string   `json:"os_type"`
-	OSVersion            string   `json:"os_version"`
-	AgentVersion         string   `json:"agent_version"`
-	TofuVersion          string   `json:"tofu_version"`
-	AnsibleVersion       string   `json:"ansible_version"`
-	AvailableCollections []string `json:"available_collections"`
-	MaxConcurrentJobs    int      `json:"max_concurrent_jobs"`
-	Labels               []string `json:"labels"`
-}
+// RegisterRequest is runnercontract.RegisterRequest, the shared runner wire contract.
+type RegisterRequest = runnercontract.RegisterRequest
 
-// RegisterResponse is the response body for runner registration
-type RegisterResponse struct {
-	RunnerID            string `json:"runner_id"`
-	RunnerAPIKey        string `json:"runner_api_key"`
-	PollIntervalSeconds int    `json:"poll_interval_seconds"`
-}
+// RegisterResponse is runnercontract.RegisterResponse, the shared runner wire contract.
+type RegisterResponse = runnercontract.RegisterResponse
 
 // poolBindingVerdict is the pool-binding check shared by registration and the queue-depth read:
 // it answers 0 when a key may act on poolID, or the status and detail to refuse with. A binding
@@ -199,6 +245,22 @@ func grantsRunnerRegister(checker *apikey.ScopeChecker, orgID uuid.UUID) bool {
 // Requires an API key with runner:register scope
 // deriveRunnerType maps reported tool capabilities to a runner type. A runner that reports both
 // (or neither) is treated as combined.
+// runnerTypeFor is the stored runner type for the engines a runner declared (#933, D3, AC78), or,
+// for a runner that declared none, for the tool versions it reported.
+func runnerTypeFor(engines []string, tofuVersion, ansibleVersion string) models.RunnerType {
+	if len(engines) > 0 {
+		tofu, ansible := slices.Contains(engines, runnercontract.EngineTofu), slices.Contains(engines, runnercontract.EngineAnsible)
+		switch {
+		case tofu && !ansible:
+			return models.RunnerTypeTofu
+		case ansible && !tofu:
+			return models.RunnerTypeAnsible
+		}
+		return models.RunnerTypeCombined
+	}
+	return deriveRunnerType(tofuVersion, ansibleVersion)
+}
+
 func deriveRunnerType(tofuVersion, ansibleVersion string) models.RunnerType {
 	switch {
 	case tofuVersion != "" && ansibleVersion == "":
@@ -214,6 +276,17 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+
+	// The hosted registration secret registers the one platform-level hosted runner identity (#933,
+	// D9); every other key registers into a customer pool.
+	if kind, _ := c.Get("token_kind"); kind == models.APIKeyKindHosted {
+		h.registerHosted(c, req)
+		return
+	}
+	if req.Hosted {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "only the deployment's hosted registration secret registers a hosted launcher")
 		return
 	}
 
@@ -235,10 +308,25 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// A hosted pool is served by the hosted launchers alone (#933, D9): no organization key
+	// registers a runner into it.
+	if pool.IsHosted() {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "the hosted pool is served by the platform's hosted launchers; register into one of the organization's own pools")
+		return
+	}
+
 	// Get the API key from context (set by auth middleware)
 	apiKeyID, exists := c.Get("api_key_id")
 	if !exists {
 		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "API key required for runner registration")
+		return
+	}
+
+	// Only an organization key registers a runner into a customer pool: an agent token or an org
+	// key carrying runner:register (#933, AC65). A user token, a job token or any other kind is
+	// refused before its scopes are read, whatever they name.
+	if kind, _ := c.Get("token_kind"); kind != models.APIKeyKindOrg {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "only an agent token or an organization key carrying runner:register may register a runner")
 		return
 	}
 
@@ -273,6 +361,23 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		}
 	}
 
+	// A just-in-time token registers one launcher once (#933, D11): using it up is the same
+	// statement that checks it is still unused, so two registrations racing with it cannot both
+	// pass. A refused pool above did not use it.
+	if raw, ok := c.Get("api_key"); ok {
+		if k, ok := raw.(*models.APIKey); ok && k != nil && k.IsJITToken {
+			used, err := h.apiKeyService.UseJITToken(k.ID)
+			if err != nil {
+				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+				return
+			}
+			if !used {
+				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "this just-in-time token has been used or has expired")
+				return
+			}
+		}
+	}
+
 	// The runner-scoped token is owned by the same user as the registering key.
 	registeringUserID, _ := c.Get("user_id")
 	registeringUserUUID, _ := registeringUserID.(uuid.UUID)
@@ -282,7 +387,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	if existing != nil {
 		// Re-register: update the existing runner entry and return it
 		existing.Status = models.RunnerStatusOnline
-		existing.AgentPoolID = poolID
+		existing.AgentPoolID = &poolID
 		existing.IPAddress = c.ClientIP()
 		now := time.Now()
 		existing.LastHeartbeatAt = &now
@@ -296,14 +401,20 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		// whatever type it was first created with, so a runner whose capabilities changed - or one
 		// created under an older enum value - stays permanently unroutable: it heartbeats as Online
 		// while FindAvailableRunner never matches it and every job sits pending, silently.
-		existing.RunnerType = deriveRunnerType(req.TofuVersion, req.AnsibleVersion)
+		existing.RunnerType = runnerTypeFor(req.Engines, req.TofuVersion, req.AnsibleVersion)
+		// The capabilities are the binary's, so a re-registration replaces them.
+		existing.Capabilities = models.RunnerLabels(req.Capabilities)
+		existing.Driver, existing.NetworkMode = req.Driver, req.NetworkMode
+		applyLauncherSettings(existing, req)
+		// A new launcher process under the name is not draining (D11).
+		existing.DrainRequestedAt = nil
 		apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
 		existing.RegisteredWithAPIKeyID = &apiKeyUUID
 		if err := h.runnerRepo.Update(existing); err != nil {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to re-register runner")
 			return
 		}
-		logger.Infof("Runner re-registered: %s (ID: %s, pool: %s)", existing.Name, existing.ID, existing.AgentPoolID)
+		logger.Infof("Runner re-registered: %s (ID: %s, pool: %s)", existing.Name, existing.ID, poolID)
 
 		// Mint a fresh runner-scoped token on every registration (AUD-001): the
 		// runner authenticates the control plane with it, not the org registration
@@ -326,12 +437,14 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 			RunnerAPIKey: reRegKey,
 			Status:       "re-registered",
 			PendingJobs:  pendingJobs,
+			Capabilities: runnercontract.APICapabilities,
 		})
 		return
 	}
 
-	// Determine runner type based on versions
-	runnerType := deriveRunnerType(req.TofuVersion, req.AnsibleVersion)
+	// The engines the runner declared decide what it is offered; one that predates engines is typed
+	// by the tool versions it reports.
+	runnerType := runnerTypeFor(req.Engines, req.TofuVersion, req.AnsibleVersion)
 
 	// Get client IP
 	clientIP := c.ClientIP()
@@ -346,8 +459,8 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	}
 
 	runner := &models.Runner{
-		OrganizationID:         pool.OrganizationID,
-		AgentPoolID:            poolID,
+		OrganizationID:         &pool.OrganizationID,
+		AgentPoolID:            &poolID,
 		Name:                   req.Name,
 		RunnerType:             runnerType,
 		Status:                 models.RunnerStatusOnline,
@@ -361,10 +474,14 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		AvailableCollections:   models.RunnerCollections(req.AvailableCollections),
 		MaxConcurrentJobs:      maxJobs,
 		Labels:                 models.RunnerLabels(req.Labels),
+		Capabilities:           models.RunnerLabels(req.Capabilities),
+		Driver:                 req.Driver,
+		NetworkMode:            req.NetworkMode,
 		LastHeartbeatAt:        &now,
 		RegisteredAt:           now,
 		RegisteredWithAPIKeyID: &apiKeyUUID,
 	}
+	applyLauncherSettings(runner, req)
 
 	if err := h.runnerRepo.Create(runner); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create runner")
@@ -388,7 +505,71 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		RunnerID:            runner.ID.String(),
 		RunnerAPIKey:        runnerAPIKey,
 		PollIntervalSeconds: 10,
+		Capabilities:        runnercontract.APICapabilities,
 	})
+}
+
+// registerHosted registers a hosted launcher (#933, D9, AC69): one runner row of kind hosted with
+// no organization and no pool, named uniquely among hosted runners, serving every hosted pool of
+// its placement group, with a hosted runner token. Only the hosted registration secret gets here;
+// a hosted runner token, which is of the same kind, is refused.
+func (h *RunnerAgentHandler) registerHosted(c *gin.Context, req RegisterRequest) {
+	raw, _ := c.Get("api_key")
+	key, _ := raw.(*models.APIKey)
+	if !apikey.IsHostedRegistrationKey(key) {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "only the hosted registration secret may register a hosted launcher")
+		return
+	}
+	if h.apiKeyService == nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	group := strings.TrimSpace(req.HostedGroup)
+	if group == "" {
+		group = "default"
+	}
+	now := time.Now()
+	maxJobs := max(req.MaxConcurrentJobs, 1)
+	runner, err := h.runnerRepo.GetHostedByName(req.Name)
+	status := http.StatusOK
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		runner = &models.Runner{Kind: models.RunnerKindHosted, Name: req.Name, RegisteredAt: now}
+		status = http.StatusCreated
+	}
+	runner.Status = models.RunnerStatusOnline
+	runner.HostedGroup = group
+	runner.RunnerType = runnerTypeFor(req.Engines, req.TofuVersion, req.AnsibleVersion)
+	runner.Hostname, runner.IPAddress, runner.OSType, runner.OSVersion = req.Hostname, c.ClientIP(), req.OSType, req.OSVersion
+	runner.AgentVersion, runner.TofuVersion, runner.AnsibleVersion = req.AgentVersion, req.TofuVersion, req.AnsibleVersion
+	runner.MaxConcurrentJobs = maxJobs
+	runner.Labels = models.RunnerLabels(req.Labels)
+	runner.Capabilities = models.RunnerLabels(req.Capabilities)
+	runner.Driver, runner.NetworkMode = req.Driver, req.NetworkMode
+	applyLauncherSettings(runner, req)
+	runner.DrainRequestedAt = nil
+	runner.LastHeartbeatAt = &now
+	runner.RegisteredWithAPIKeyID = &key.ID
+	if status == http.StatusCreated {
+		err = h.runnerRepo.Create(runner)
+	} else {
+		err = h.runnerRepo.Update(runner)
+	}
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to register the hosted runner")
+		return
+	}
+	_ = h.apiKeyService.DeleteAPIKeysForRunner(runner.ID)
+	_, token, err := h.apiKeyService.CreateHostedRunnerToken(runner.ID, "runner-"+runner.Name)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to mint the hosted runner token")
+		return
+	}
+	logger.Infof("Hosted runner registered: %s (ID: %s, group: %s)", runner.Name, runner.ID, group)
+	c.JSON(status, RunnerRegisterResponse{RunnerID: runner.ID.String(), RunnerAPIKey: token, PollIntervalSeconds: 10, Capabilities: runnercontract.APICapabilities})
 }
 
 // generateRunnerAPIKey mints and persists a runner-scoped API key (AUD-001).
@@ -402,35 +583,21 @@ func (h *RunnerAgentHandler) generateRunnerAPIKey(runner *models.Runner, userID 
 		return "", fmt.Errorf("api key service not configured for runner token minting")
 	}
 	_ = h.apiKeyService.DeleteAPIKeysForRunner(runner.ID)
-	_, rawKey, err := h.apiKeyService.CreateRunnerToken(userID, runner.ID, runner.OrganizationID, "runner-"+runner.Name)
+	_, rawKey, err := h.apiKeyService.CreateRunnerToken(userID, runner.ID, runner.OrgID(), "runner-"+runner.Name)
 	if err != nil {
 		return "", err
 	}
 	return rawKey, nil
 }
 
-// HeartbeatRequest is the request body for runner heartbeat
-type HeartbeatRequest struct {
-	RunnerID          string `json:"runner_id" binding:"required"`
-	Status            string `json:"status"` // "online" or "busy"
-	CurrentJobs       int    `json:"current_jobs"`
-	AvailableCapacity int    `json:"available_capacity"`
-}
+// HeartbeatRequest is runnercontract.HeartbeatRequest, the shared runner wire contract.
+type HeartbeatRequest = runnercontract.HeartbeatRequest
 
-// HeartbeatResponse is the response body for runner heartbeat
-type HeartbeatResponse struct {
-	PendingJobs []PendingJob `json:"pending_jobs"`
-}
+// HeartbeatResponse is runnercontract.HeartbeatResponse, the shared runner wire contract.
+type HeartbeatResponse = runnercontract.HeartbeatResponse
 
-// PendingJob represents a job waiting to be executed
-type PendingJob struct {
-	JobID         string `json:"job_id"`
-	JobType       string `json:"job_type"`
-	WorkspaceID   string `json:"workspace_id"`
-	WorkspaceName string `json:"workspace_name"`
-	RunType       string `json:"run_type,omitempty"` // For terraform: "plan", "apply"
-	Priority      int    `json:"priority"`
-}
+// PendingJob is runnercontract.PendingJob, the shared runner wire contract.
+type PendingJob = runnercontract.PendingJob
 
 // Heartbeat processes a runner heartbeat and returns pending jobs
 // POST /api/v2/runner/heartbeat
@@ -465,6 +632,14 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
+	// The runner token lives as long as its runner keeps calling (#933, D1).
+	if raw, ok := c.Get("api_key"); ok && h.apiKeyService != nil {
+		if key, isKey := raw.(*models.APIKey); isKey {
+			if err := h.apiKeyService.RenewRunnerToken(key); err != nil {
+				logger.Warnf("heartbeat of runner %s: %v", runnerID, err)
+			}
+		}
+	}
 
 	// Find pending jobs for this runner's pool
 	pendingJobs := []PendingJob{}
@@ -480,25 +655,121 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 		availableCapacity = maxJobs - req.CurrentJobs
 	}
 
+	// A runner asked to drain is offered nothing and told so (D11).
+	draining := runner.DrainRequestedAt != nil
+	if draining {
+		availableCapacity = 0
+	}
+
 	// Only query for jobs if runner has capacity
 	if availableCapacity > 0 {
-		// Query pending jobs (Ansible and/or Terraform depending on runner type)
-		jobs, err := h.findPendingJobsForRunner(runner)
-		if err != nil {
-			// Log but don't fail the heartbeat
-			_ = err
-		} else {
-			pendingJobs = jobs
+		pendingJobs = h.offers(runner)
+		// The long poll (#933, D3): with nothing to offer, hold the request until a wakeup for the
+		// runner's pool or the wait ends, then query again. The waiter is registered before the
+		// second query, so work that became offerable between the two is not missed; while it waits
+		// the request holds a goroutine, no database connection.
+		if len(pendingJobs) == 0 && req.WaitSeconds > 0 && h.wakeHub != nil {
+			wait := min(time.Duration(req.WaitSeconds)*time.Second, h.longPollMax)
+			woken, forget := h.wakeHub.Wait(wakeKey(runner))
+			if pendingJobs = h.offers(runner); len(pendingJobs) == 0 {
+				timer := time.NewTimer(wait)
+				select {
+				case <-woken:
+				case <-timer.C:
+				case <-c.Request.Context().Done():
+				}
+				timer.Stop()
+				forget()
+				if c.Request.Context().Err() != nil {
+					return
+				}
+				// The runner was here for the whole wait: stamp it again, so the monitor measures
+				// only the time the launcher spends between requests, claiming what it is offered
+				// (AC17). A failed stamp leaves the one taken when the request arrived.
+				if err := h.runnerRepo.UpdateHeartbeat(runnerID, status, req.CurrentJobs); err != nil {
+					logger.Warnf("heartbeat of runner %s after its wait: %v", runnerID, err)
+				}
+				pendingJobs = h.offers(runner)
+			} else {
+				forget()
+			}
 		}
 	}
 
-	c.JSON(http.StatusOK, PendingJobsResponse{PendingJobs: pendingJobs})
+	resp := HeartbeatResponse{
+		PendingJobs: pendingJobs, Capabilities: runnercontract.APICapabilities,
+		Ensure:      h.ingestInventory(runner, req.Inventory),
+		HostedDepth: h.hostedDepth(runner),
+		Drain:       draining,
+		ReapRunners: h.lostPeers(runner),
+	}
+	if resp.CachePromotions = h.pendingPromotions(runner); len(resp.CachePromotions) > 0 {
+		resp.Mirror = h.mirror
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
-// JobStartRequest is the request body for starting a job
-type JobStartRequest struct {
-	RunnerID string `json:"runner_id" binding:"required"`
+// lostPeerWindow bounds how long after a runner was last heard from its leftovers are reaped: a
+// placement outlives its job's timeout by at most its keep window, so a week covers every one.
+const lostPeerWindow = 7 * 24 * time.Hour
+
+// lostPeers names the offline runners of the caller's pool or hosted group, whose leftover
+// placements the launcher stops and removes (#933, D3, AC67); a failed lookup names none.
+func (h *RunnerAgentHandler) lostPeers(runner *models.Runner) []string {
+	if h.runnerRepo == nil {
+		return nil
+	}
+	peers, err := h.runnerRepo.LostPeers(runner, lostPeerWindow)
+	if err != nil {
+		logger.Warnf("listing the lost peers of runner %s: %v", runner.ID, err)
+		return nil
+	}
+	return peers
 }
+
+// Drain asks a runner to drain (#933, D11): its next heartbeat answers drain and offers nothing,
+// and the launcher finishes its in-flight jobs, claims nothing more and deregisters, as on
+// SIGTERM. The caller is the runner's own token, so whatever holds it (the launcher, or the
+// operator that started it with a just-in-time token) drains it; another runner is refused.
+//
+// POST /api/v2/runner/drain
+func (h *RunnerAgentHandler) Drain(c *gin.Context) {
+	var req DrainRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	runner, ok := callingRunner(c)
+	if !ok {
+		writeRunnerForbidden(c, "runner identity required")
+		return
+	}
+	if req.RunnerID != runner.ID.String() {
+		writeRunnerForbidden(c, "a runner drains itself only")
+		return
+	}
+	if err := h.runnerRepo.RequestDrain(runner.ID); err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	c.Status(http.StatusAccepted)
+}
+
+// DrainRequest is runnercontract.DrainRequest, the shared runner wire contract.
+type DrainRequest = runnercontract.DrainRequest
+
+// offers is the work offered to runner now; a failed query offers nothing and the next heartbeat
+// asks again.
+func (h *RunnerAgentHandler) offers(runner *models.Runner) []PendingJob {
+	jobs, err := h.findPendingJobsForRunner(runner)
+	if err != nil || jobs == nil {
+		return []PendingJob{}
+	}
+	return jobs
+}
+
+// JobStartRequest is runnercontract.JobStartRequest, the shared runner wire contract.
+type JobStartRequest = runnercontract.JobStartRequest
 
 // JobStart marks a job as started
 // POST /api/v2/runner/jobs/:id/start
@@ -511,10 +782,18 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 		return
 	}
 
+	if isWorkItem(jobIDStr) {
+		h.jobStartWorkItem(c, jobIDStr, req.Placement)
+		return
+	}
+
 	// Determine if this is a Terraform run (ID starts with "run-") or Ansible job (UUID)
 	if strings.HasPrefix(jobIDStr, "run-") {
 		// Terraform run
 		h.jobStartTerraformRun(c, jobIDStr)
+		if c.Writer.Status() == http.StatusOK {
+			h.recordPlacement(models.JobTypeTofuRun, jobIDStr, req.Placement)
+		}
 		return
 	}
 
@@ -571,6 +850,8 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 	// here (at claim time) rather than at offer time, so capacity accounting and
 	// completion tracking reflect the runner that actually owns the job.
 	h.upsertJobExecution(jobID, runnerID)
+	h.revokeJobTokens(models.JobTypeAnsibleJob, jobIDStr)
+	h.recordPlacement(models.JobTypeAnsibleJob, jobIDStr, req.Placement)
 
 	response.Status(c, http.StatusOK, "started")
 }
@@ -638,40 +919,72 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 		return
 	}
 
+	// The API holds the workspace state lock for the phase (#933, D2, AC7), so the lock is the
+	// same on every driver and an executor that vanishes wedges nothing beyond the TTL. A run whose
+	// workspace another run holds is not started: the claim is undone and it stays pending, to be
+	// offered again once the lock is released.
+	if locked, lockErr := h.lockWorkspaceForRun(&run); lockErr != nil || !locked {
+		_ = repository.NewRunRepository(h.db).ClearDispatch(runID)
+		if lockErr != nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to lock the workspace state")
+			return
+		}
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "the workspace state is locked by another run; this run waits")
+		return
+	}
+
 	now := time.Now()
 
-	// Update run status based on current phase
+	// Only the phase's own columns are written: the row was loaded before the claim, and saving it
+	// whole would write the claim's dispatched_at and attempt back to their old values, leaving a
+	// started run looking unstarted (#933, AC9).
+	columns := map[string]any{"runner_id": runnerID}
 	switch run.Status { //nolint:exhaustive // only pending/pre_plan_completed and applying need action on job start
 	case models.RunStatusPending, models.RunStatusPrePlanCompleted:
 		// pre_plan_completed = the run's pre_plan task stage passed; it dispatches like pending
 		// (a run with an UNPASSED pre_plan stage never gets here - ClaimForDispatch refuses it).
-		run.Status = models.RunStatusPlanning
-		run.StartedAt = &now
+		columns["status"], columns["started_at"] = models.RunStatusPlanning, now
 	case models.RunStatusApplying:
 		// Apply phase start - already in applying status
-		run.ApplyStartedAt = &now
+		columns["apply_started_at"] = now
 	}
-	run.RunnerID = &runnerID
-	_ = h.db.Save(&run).Error
+	_ = h.db.Model(&models.Run{}).Where("id = ?", runID).Updates(columns).Error
+	h.revokeJobTokens(models.JobTypeTofuRun, runID)
 
 	response.Status(c, http.StatusOK, "started")
 }
 
-// JobOutputRequest is the request body for streaming job output
-type JobOutputRequest struct {
-	RunnerID string `json:"runner_id" binding:"required"`
-	Output   string `json:"output" binding:"required"`
-	Stream   string `json:"stream"` // "stdout" or "stderr"
-}
+// JobOutputRequest is runnercontract.JobOutputRequest, the shared runner wire contract.
+type JobOutputRequest = runnercontract.JobOutputRequest
 
 // JobOutput receives streaming output from a job and stores it as structured events
 // POST /api/v2/runner/jobs/:id/output
 func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 	jobIDStr := c.Param("id")
 
+	bodyCap := h.outputBodyCap
+	if bodyCap <= 0 {
+		bodyCap = DefaultOutputBodyCap
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, bodyCap)
 	var req JobOutputRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			jsonapi.WriteError(c, http.StatusRequestEntityTooLarge, "Request Entity Too Large", "the output body exceeds the size limit")
+			return
+		}
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	// A placement alone is a launcher reporting what it learnt after the claim: the image digest a
+	// kubelet pulled (the Kubernetes driver).
+	if req.Output == "" && req.PhaseState == nil && req.Placement == nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "output, phase_state or placement is required")
+		return
+	}
+	if isWorkItem(jobIDStr) {
+		h.jobOutputWorkItem(c, jobIDStr, req)
 		return
 	}
 
@@ -687,6 +1000,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 		if !h.authorizeRunnerForRun(c, &run, true) {
 			return
 		}
+		h.recordPlacement(models.JobTypeTofuRun, run.ID, req.Placement)
 		if h.storageClient != nil && req.Output != "" {
 			ctx := context.Background()
 			// Append output to the run's log in storage
@@ -701,15 +1015,32 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 			// remote-runner path uses - instead of the O(n²) read-modify-write on object storage.
 			// It is copied to MinIO once at JobComplete. Fall back to the object-storage append
 			// when no Redis buffer is configured.
+			// The stored output of a job is capped (#933, D2, AC73): past the cap the head and the
+			// end are kept and the log says how much was dropped; the job carries on.
+			var firstDrop bool
+			var appendErr error
 			if h.logBuffer != nil {
-				if err := h.logBuffer.Append(ctx, jobIDStr, phase, req.Output); err != nil {
-					logger.Warnf("Failed to append agent output to Redis for %s phase %s: %v", jobIDStr, phase, err)
-				}
-			} else if err := logbuffer.AppendStorageLog(ctx, h.storageClient, jobIDStr, phase, req.Output); err != nil {
-				logger.Warnf("Failed to append agent output to storage for %s phase %s: %v", jobIDStr, phase, err)
+				firstDrop, appendErr = h.logBuffer.AppendCapped(ctx, jobIDStr, phase, req.Output, h.jobLogLimits())
+			} else {
+				firstDrop, appendErr = logbuffer.AppendStorageLogCapped(ctx, h.storageClient, jobIDStr, phase, req.Output, h.jobLogLimits())
+			}
+			if appendErr != nil {
+				logger.Warnf("Failed to append agent output for %s phase %s: %v", jobIDStr, phase, appendErr)
+			}
+			if firstDrop {
+				logger.Infof("Run %s phase %s output passed the job log cap; the middle is dropped", jobIDStr, phase)
+			}
+		}
+		if req.PhaseState != nil {
+			if !h.storePhaseState(c, run.ID, req.PhaseState) {
+				return
 			}
 		}
 		response.Status(c, http.StatusOK, "received")
+		return
+	}
+	if req.Output == "" && req.Placement == nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "output is required")
 		return
 	}
 
@@ -733,12 +1064,15 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 	if !h.authorizeRunnerForAnsibleJob(c, outputJob, true) {
 		return
 	}
+	h.recordPlacement(models.JobTypeAnsibleJob, jobIDStr, req.Placement)
 
 	line := strings.TrimSpace(req.Output)
 	if line == "" {
 		response.Status(c, http.StatusOK, "received")
 		return
 	}
+	// The stored output of a job is capped (#933, D2, AC73); trimming runs after this line is stored.
+	defer h.capAnsibleOutput(jobID, int64(len(line)))
 
 	// Handle stderr output - store as stderr events
 	if req.Stream == "stderr" {
@@ -775,15 +1109,61 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 	response.Status(c, http.StatusOK, "received")
 }
 
-// JobEventRequest is the request body for a job event a runner records itself, as
-// opposed to the ansible-playbook output it streams through JobOutput.
-type JobEventRequest struct {
-	Event  string `json:"event"`
-	Task   string `json:"task"`
-	Stdout string `json:"stdout"`
-	Stderr string `json:"stderr"`
-	Failed bool   `json:"failed"`
+// capAnsibleOutput accounts n bytes of a job's output against the job log cap. Once the output
+// passes the cap's head it records one log_truncated event, and from then on keeps only the last
+// TailBytes of output after that event, counting what it drops on the event and the job.
+func (h *RunnerAgentHandler) capAnsibleOutput(jobID uuid.UUID, n int64) {
+	limits := h.jobLogLimits()
+	total, truncatedAt, err := h.ansibleJobRepo.AddOutputBytes(jobID, n)
+	if err != nil {
+		logger.Warnf("accounting the output of job %s: %v", jobID, err)
+		return
+	}
+	if total <= limits.MaxBytes-limits.TailBytes {
+		return
+	}
+	if truncatedAt == 0 {
+		marker := &models.AnsibleJobEvent{
+			JobID:     jobID,
+			Event:     "log_truncated",
+			EventData: map[string]interface{}{"dropped_bytes": 0, "max_bytes": limits.MaxBytes},
+			Stdout:    "",
+		}
+		if err := h.ansibleJobRepo.CreateEventNextCounter(marker); err != nil {
+			logger.Warnf("recording the truncation of job %s: %v", jobID, err)
+			return
+		}
+		if truncatedAt, err = h.ansibleJobRepo.MarkOutputTruncated(jobID, marker.Counter); err != nil {
+			logger.Warnf("recording the truncation of job %s: %v", jobID, err)
+			return
+		}
+	}
+	if _, err := h.ansibleJobRepo.TrimOutputTail(jobID, truncatedAt, limits.TailBytes); err != nil {
+		logger.Warnf("trimming the output of job %s: %v", jobID, err)
+	}
 }
+
+// storePhaseState upserts a run's per-resource state for one phase from a phase_state event
+// (#933, D2, AC8). It writes the error response and returns false when the event is invalid.
+func (h *RunnerAgentHandler) storePhaseState(c *gin.Context, runID string, ps *runnercontract.PhaseState) bool {
+	if ps.Phase != "plan" && ps.Phase != "apply" {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "phase_state.phase must be plan or apply")
+		return false
+	}
+	resources := ps.Resources
+	if resources == nil {
+		resources = models.ResourceStates{}
+	}
+	row := &models.RunPhaseState{RunID: runID, Phase: ps.Phase, Resources: resources, Summary: ps.Summary, ParsedAt: time.Now()}
+	if err := repository.NewRunPhaseStateRepository(h.db).Upsert(row); err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return false
+	}
+	return true
+}
+
+// JobEventRequest is runnercontract.JobEventRequest, the shared runner wire contract.
+type JobEventRequest = runnercontract.JobEventRequest
 
 // runnerJobEvents is the closed set of events a runner may record through JobEvents:
 // the playbook-preparation rows the platform runner writes straight to the database.
@@ -867,214 +1247,32 @@ func (h *RunnerAgentHandler) JobEvents(c *gin.Context) {
 
 // parseAndStoreAgentEvent parses a JSONL event from a self-hosted runner and stores it
 func (h *RunnerAgentHandler) parseAndStoreAgentEvent(jobID uuid.UUID, eventData map[string]interface{}, rawLine string) {
-	// AUD-063: the counter is assigned atomically at insert time by CreateEventNextCounter below,
-	// not read-then-incremented here where concurrent runner POSTs would collide.
-
-	// Extract common fields from JSONL event
-	host := ""
-	task := ""
-	playName := ""
-	eventType := "runner_on_ok"
-	changed := false
-	failed := false
-	skipped := false
-	unreachable := false
-	stdoutStr := ""
-
-	// Check for v2_playbook_on_stats - update job stats
-	if evtType, ok := eventData["_event"].(string); ok && evtType == "v2_playbook_on_stats" {
-		if stats, ok := eventData["stats"].(map[string]interface{}); ok {
-			var totalOk, totalChanged, totalFailed, totalSkipped, totalUnreachable, totalRescued, totalIgnored int
-			for _, hostStats := range stats {
-				if hs, ok := hostStats.(map[string]interface{}); ok {
-					if v, ok := hs["ok"].(float64); ok {
-						totalOk += int(v)
-					}
-					if v, ok := hs["changed"].(float64); ok {
-						totalChanged += int(v)
-					}
-					if v, ok := hs["failures"].(float64); ok {
-						totalFailed += int(v)
-					}
-					if v, ok := hs["skipped"].(float64); ok {
-						totalSkipped += int(v)
-					}
-					if v, ok := hs["unreachable"].(float64); ok {
-						totalUnreachable += int(v)
-					}
-					if v, ok := hs["rescued"].(float64); ok {
-						totalRescued += int(v)
-					}
-					if v, ok := hs["ignored"].(float64); ok {
-						totalIgnored += int(v)
-					}
-				}
-			}
-
-			// Update the ansible job stats directly
-			job, err := h.ansibleJobRepo.GetByID(jobID)
-			if err == nil {
-				// The stats map is keyed by host, so its size is the authoritative
-				// host count for the run - the only place it is reported.
-				job.HostsTotal = len(stats)
-				job.HostsOk = totalOk
-				job.HostsChanged = totalChanged
-				job.HostsFailed = totalFailed
-				job.HostsSkipped = totalSkipped
-				job.HostsUnreachable = totalUnreachable
-				job.HostsRescued = totalRescued
-				job.HostsIgnored = totalIgnored
-				_ = h.ansibleJobRepo.UpdateColumns(job, "hosts_total", "hosts_ok", "hosts_changed", "hosts_failed",
-					"hosts_skipped", "hosts_unreachable", "hosts_rescued", "hosts_ignored")
-			}
-		}
-
-		// Store the stats event
-		event := &models.AnsibleJobEvent{
-			JobID:     jobID,
-			Event:     "v2_playbook_on_stats",
-			EventData: eventData,
-			Stdout:    rawLine + "\n",
-			Timestamp: ansible.EventTimestamp(eventData, time.Now().UTC()),
-		}
-		_ = h.ansibleJobRepo.CreateEventNextCounter(event)
+	// AUD-063: the counter is assigned atomically at insert time by CreateEventNextCounter, not
+	// read-then-incremented here where concurrent runner POSTs would collide.
+	event, stats, ok := ansible.ParseJSONLEvent(jobID, eventData, rawLine, time.Now())
+	if !ok {
 		return
 	}
-
-	// Extract host
-	if h, ok := eventData["host"].(string); ok {
-		host = h
-	}
-
-	// Extract task name
-	if t, ok := eventData["task"].(string); ok {
-		task = t
-	} else if taskMap, ok := eventData["task"].(map[string]interface{}); ok {
-		if name, ok := taskMap["name"].(string); ok {
-			task = name
+	if stats != nil {
+		// The recap's totals are the job's stats; its host count is the authoritative one.
+		if job, err := h.ansibleJobRepo.GetByID(jobID); err == nil {
+			job.HostsTotal = stats.Hosts
+			job.HostsOk = stats.OK
+			job.HostsChanged = stats.Changed
+			job.HostsFailed = stats.Failed
+			job.HostsSkipped = stats.Skipped
+			job.HostsUnreachable = stats.Unreachable
+			job.HostsRescued = stats.Rescued
+			job.HostsIgnored = stats.Ignored
+			_ = h.ansibleJobRepo.UpdateColumns(job, "hosts_total", "hosts_ok", "hosts_changed", "hosts_failed",
+				"hosts_skipped", "hosts_unreachable", "hosts_rescued", "hosts_ignored")
 		}
 	}
-
-	// Extract play name
-	if p, ok := eventData["play"].(string); ok {
-		playName = p
-	} else if playMap, ok := eventData["play"].(map[string]interface{}); ok {
-		if name, ok := playMap["name"].(string); ok {
-			playName = name
-		}
-	}
-
-	// Check status flags
-	if v, ok := eventData["changed"].(bool); ok && v {
-		changed = true
-	}
-	if v, ok := eventData["failed"].(bool); ok && v {
-		failed = true
-		eventType = "runner_on_failed"
-	} else if v, ok := eventData["skipped"].(bool); ok && v {
-		skipped = true
-		eventType = "runner_on_skipped"
-	} else if v, ok := eventData["unreachable"].(bool); ok && v {
-		unreachable = true
-		eventType = "runner_on_unreachable"
-	}
-
-	// Extract output from various JSONL fields
-	if msg, ok := eventData["msg"].(string); ok && msg != "" {
-		stdoutStr = msg
-	}
-
-	// Check for result object (contains module output)
-	if result, ok := eventData["result"].(map[string]interface{}); ok {
-		if stdout, ok := result["stdout"].(string); ok && stdout != "" {
-			if stdoutStr != "" {
-				stdoutStr += "\n" + stdout
-			} else {
-				stdoutStr = stdout
-			}
-		}
-		if msg, ok := result["msg"].(string); ok && msg != "" {
-			if stdoutStr != "" {
-				stdoutStr += "\n" + msg
-			} else {
-				stdoutStr = msg
-			}
-		}
-		if stdoutLines, ok := result["stdout_lines"].([]interface{}); ok && len(stdoutLines) > 0 {
-			var lines []string
-			for _, l := range stdoutLines {
-				if s, ok := l.(string); ok {
-					lines = append(lines, s)
-				}
-			}
-			if len(lines) > 0 {
-				output := strings.Join(lines, "\n")
-				if stdoutStr != "" {
-					stdoutStr += "\n" + output
-				} else {
-					stdoutStr = output
-				}
-			}
-		}
-	}
-
-	// Skip events without meaningful content
-	if host == "" && task == "" && playName == "" && stdoutStr == "" && rawLine == "" {
-		return
-	}
-
-	// Store parsed task output in EventData for Events tab display
-	if stdoutStr != "" {
-		eventData["_parsed_output"] = stdoutStr
-	}
-
-	event := &models.AnsibleJobEvent{
-		JobID:     jobID,
-		Event:     eventType,
-		EventData: eventData,
-		Host:      host,
-		Task:      task,
-		Play:      playName,
-		Stdout:    rawLine + "\n",
-		Changed:   changed,
-		Failed:    failed,
-		Skipped:   skipped,
-		Timestamp: ansible.EventTimestamp(eventData, time.Now().UTC()),
-	}
-
-	if unreachable {
-		event.Failed = true
-	}
-
-	// Same derivation as the platform runner: the top-level flags read above are
-	// not what the jsonl callback emits on a result line, hosts[<name>] is.
-	if derived, ok := ansible.DeriveHostResult(eventData, ansible.EventVerb(eventData)); ok {
-		if derived.Host != "" {
-			event.Host = derived.Host
-		}
-		event.Event = derived.Event
-		event.Changed = derived.Changed
-		event.Failed = derived.Failed
-		event.Skipped = derived.Skipped
-	}
-
 	_ = h.ansibleJobRepo.CreateEventNextCounter(event)
 }
 
-// JobCompleteRequest is the request body for completing a job
-type JobCompleteRequest struct {
-	RunnerID             string `json:"runner_id" binding:"required"`
-	Status               string `json:"status" binding:"required"` // "completed", "failed", "canceled"
-	ExitCode             int    `json:"exit_code"`
-	ErrorMessage         string `json:"error_message,omitempty"`
-	Output               string `json:"output,omitempty"`      // Terraform/command output from runner
-	PlanJSON             string `json:"plan_json,omitempty"`   // Terraform plan JSON (from terraform show -json)
-	ResourceAdditions    int    `json:"resource_additions"`    // Number of resources to add
-	ResourceChanges      int    `json:"resource_changes"`      // Number of resources to change
-	ResourceDestructions int    `json:"resource_destructions"` // Number of resources to destroy
-	OutputChanges        int    `json:"output_changes"`        // Number of output changes
-	HasChanges           bool   `json:"has_changes"`           // Whether the plan has any changes
-}
+// JobCompleteRequest is runnercontract.JobCompleteRequest, the shared runner wire contract.
+type JobCompleteRequest = runnercontract.JobCompleteRequest
 
 // JobComplete marks a job as completed
 // POST /api/v2/runner/jobs/:id/complete
@@ -1087,9 +1285,27 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 		return
 	}
 
+	if isWorkItem(jobIDStr) {
+		h.jobCompleteWorkItem(c, jobIDStr, req)
+		return
+	}
+
 	// Determine if this is a Terraform run or Ansible job
 	if strings.HasPrefix(jobIDStr, "run-") {
 		h.jobCompleteTerraformRun(c, jobIDStr, req)
+		if c.Writer.Status() == http.StatusOK {
+			if req.Status == "completed" && req.CacheManifest != nil {
+				var run models.Run
+				if err := h.db.First(&run, "id = ?", jobIDStr).Error; err == nil {
+					if org, pool, err := h.runOrgAndPool(&run); err == nil {
+						h.recordCachePromotions(c, models.JobTypeTofuRun, jobIDStr, org, pool, req.CacheManifest)
+					}
+				}
+			}
+			h.revokeJobTokens(models.JobTypeTofuRun, jobIDStr)
+			h.releaseWorkspaceLock(jobIDStr)
+			h.wakeCallersPool(c)
+		}
 		return
 	}
 
@@ -1193,7 +1409,203 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 		}
 	}
 
+	if req.Status == "completed" && req.CacheManifest != nil {
+		if job, err := h.ansibleJobRepo.GetByID(jobID); err == nil {
+			if org, pool, err := h.ansibleJobOrgAndPool(job); err == nil {
+				h.recordCachePromotions(c, models.JobTypeAnsibleJob, jobIDStr, org, pool, req.CacheManifest)
+			}
+		}
+	}
+	h.revokeJobTokens(models.JobTypeAnsibleJob, jobIDStr)
+	h.wakeCallersPool(c)
 	response.Status(c, http.StatusOK, "completed")
+}
+
+// wakeCallersPool wakes the launchers of the calling runner's pool once a job of theirs ended:
+// its capacity is free, and for a run its workspace lock and for a hosted pool a slot of its cap.
+func (h *RunnerAgentHandler) wakeCallersPool(c *gin.Context) {
+	if runner, ok := callingRunner(c); ok {
+		wakeup.Publish(c.Request.Context(), h.wakeRedis, wakeKey(runner))
+	}
+}
+
+// wakeKey is the wakeup a runner's long poll waits on: its pool, or for a hosted runner every
+// hosted pool (wakeup.KeyHosted), which is what publishers for a hosted pool publish.
+func wakeKey(runner *models.Runner) string {
+	if runner.IsHosted() {
+		return wakeup.KeyHosted
+	}
+	return runner.PoolID().String()
+}
+
+// lockWorkspaceForRun takes the workspace state lock for a run's phase when the run writes state
+// (plan-and-apply and destroy, as the queue runner does), with the run as holder and its resolved
+// timeout as TTL. It reports false when another run holds the lock.
+func (h *RunnerAgentHandler) lockWorkspaceForRun(run *models.Run) (bool, error) {
+	if run.Operation != models.RunOperationPlanAndApply && run.Operation != models.RunOperationDestroy {
+		return true, nil
+	}
+	ws, err := repository.NewWorkspaceRepository(h.db).GetByID(run.WorkspaceID)
+	if err != nil {
+		return false, fmt.Errorf("loading workspace %s: %w", run.WorkspaceID, err)
+	}
+	timeout := settings.EffectiveWorkspaceRunTimeout(ws, settings.DeploymentRunTimeout(os.Getenv)).Value
+	holder := run.ID
+	err = repository.NewStateLockRepository(h.db).AcquireLock(&models.StateLock{
+		WorkspaceID: run.WorkspaceID,
+		LockID:      repository.RunStateLockID(run.ID),
+		Operation:   string(run.Operation),
+		LockedBy:    &holder,
+		ExpiresAt:   time.Now().Add(time.Duration(timeout) * time.Second),
+	})
+	if errors.Is(err, repository.ErrStateAlreadyLocked) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("locking workspace %s: %w", run.WorkspaceID, err)
+	}
+	return true, nil
+}
+
+// releaseWorkspaceLock releases the state lock a run holds once a phase completes.
+func (h *RunnerAgentHandler) releaseWorkspaceLock(runID string) {
+	var run models.Run
+	if err := h.db.Select("id", "workspace_id").First(&run, "id = ?", runID).Error; err != nil {
+		return
+	}
+	if err := repository.NewRunRepository(h.db).ReleaseStateLock(run.WorkspaceID, run.ID); err != nil {
+		logger.Warnf("releasing the state lock of run %s: %v", runID, err)
+	}
+}
+
+// MaxStateUploadBytes bounds one uploaded state.
+const MaxStateUploadBytes = 512 << 20
+
+// readStateUpload reads an uploaded state: the raw state file when the body is
+// application/octet-stream, otherwise the base64 state member of the JSON form. It writes the error
+// response and returns false when the body is unusable.
+func readStateUpload(c *gin.Context) ([]byte, bool) {
+	if strings.HasPrefix(c.ContentType(), "application/octet-stream") {
+		data, err := io.ReadAll(io.LimitReader(c.Request.Body, MaxStateUploadBytes+1))
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "reading the state")
+			return nil, false
+		}
+		if len(data) > MaxStateUploadBytes {
+			jsonapi.WriteError(c, http.StatusRequestEntityTooLarge, "Request Entity Too Large", "the state exceeds the size limit")
+			return nil, false
+		}
+		if len(data) == 0 {
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "the state is empty")
+			return nil, false
+		}
+		return data, true
+	}
+	var req struct {
+		RunnerID string `json:"runner_id"`
+		State    string `json:"state"` // base64-encoded terraform.tfstate
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
+		return nil, false
+	}
+	if req.State == "" {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "state field required")
+		return nil, false
+	}
+	data, err := base64.StdEncoding.DecodeString(req.State)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid base64 state data")
+		return nil, false
+	}
+	return data, true
+}
+
+// jobRegistryBlock mints a job's token for the platform's private module registry when the
+// artifacts are fetched with a job token, replacing any earlier one of the job. An agent fetching
+// with its runner token gets none: it predates the per-job token and reads the registry through
+// its host's own TF_TOKEN_ variables.
+func (h *RunnerAgentHandler) jobRegistryBlock(c *gin.Context, run *models.Run) *runnercontract.RegistryBlock {
+	if _, isJob := callingJob(c); !isJob || h.registryHost == "" || h.apiKeyService == nil {
+		return nil
+	}
+	if err := h.apiKeyService.RevokeJobRegistryTokens(models.JobTypeTofuRun, run.ID); err != nil {
+		logger.Warnf("replacing the registry token of run %s: %v", run.ID, err)
+	}
+	timeout := settings.EffectiveWorkspaceRunTimeout(&run.Workspace, settings.DeploymentRunTimeout(os.Getenv)).Value
+	expiresAt := time.Now().Add(time.Duration(timeout)*time.Second + apikey.JobTokenGrace)
+	token, err := h.apiKeyService.CreateJobRegistryToken(run.Workspace.Project.OrganizationID, models.JobTypeTofuRun, run.ID, expiresAt)
+	if err != nil {
+		logger.Warnf("minting the registry token of run %s: %v", run.ID, err)
+		return nil
+	}
+	return &runnercontract.RegistryBlock{Hosts: []runnercontract.RegistryHostToken{{Host: h.registryHost, Token: token}}}
+}
+
+// recordPlacement merges a launcher's or executor's placement report into the job's placement
+// record (#933, D4, AC77). A failure is logged: the record is informational and reconciliation
+// also lists the driver's own labelled placements.
+func (h *RunnerAgentHandler) recordPlacement(kind models.JobType, jobID string, report *runnercontract.Placement) {
+	if report == nil {
+		return
+	}
+	var table any
+	switch kind {
+	case models.JobTypeTofuRun:
+		table = &models.Run{}
+	case models.JobTypeWorkItem:
+		table = &models.WorkItem{}
+	case models.JobTypeAnsibleJob:
+		table = &models.AnsibleJob{}
+	}
+	// Only the placement columns are read, into a row of the job's own table.
+	columns := []string{"id", "placement_driver", "placement_placement_id", "placement_image", "placement_image_digest", "placement_image_level", "placement_identity_binding_id", "placement_node"}
+	var current models.JobPlacement
+	switch kind {
+	case models.JobTypeWorkItem:
+		var item models.WorkItem
+		if err := h.db.Select(columns).First(&item, "id = ?", jobID).Error; err != nil {
+			return
+		}
+		current = item.Placement
+	case models.JobTypeTofuRun:
+		var run models.Run
+		if err := h.db.Select(columns).First(&run, "id = ?", jobID).Error; err != nil {
+			return
+		}
+		current = run.Placement
+	case models.JobTypeAnsibleJob:
+		var job models.AnsibleJob
+		if err := h.db.Select(columns).First(&job, "id = ?", jobID).Error; err != nil {
+			return
+		}
+		current = job.Placement
+	}
+	current.Merge(report.ToModel())
+	err := h.db.Model(table).Where("id = ?", jobID).Updates(map[string]any{
+		"placement_driver":              current.Driver,
+		"placement_placement_id":        current.PlacementID,
+		"placement_image":               current.Image,
+		"placement_image_digest":        current.ImageDigest,
+		"placement_image_level":         current.ImageLevel,
+		"placement_identity_binding_id": current.IdentityBindingID,
+		"placement_node":                current.Node,
+	}).Error
+	if err != nil {
+		logger.Warnf("recording the placement of %s %s: %v", kind, jobID, err)
+	}
+}
+
+// revokeJobTokens deletes every job token of a job (#933, D1): at completion, and at a claim, which
+// starts a new attempt the earlier attempts' tokens must not reach. A failure is logged, not
+// returned: the attempt and terminal checks refuse a token that survives.
+func (h *RunnerAgentHandler) revokeJobTokens(kind models.JobType, jobID string) {
+	if h.apiKeyService == nil {
+		return
+	}
+	if err := h.apiKeyService.RevokeJobTokens(kind, jobID); err != nil {
+		logger.Warnf("revoking job tokens of %s %s: %v", kind, jobID, err)
+	}
 }
 
 // jobCompleteTerraformRun handles job completion for Terraform runs
@@ -1328,6 +1740,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 					logger.Warnf("Failed to clear dispatch claim for auto-applied run %s: %v", runID, clearErr)
 				}
 				run.DispatchedAt = nil // keep the in-memory struct consistent with the cleared claim for the Save below
+				run.RunnerID = nil     // the apply phase is offered afresh, as ClearDispatch releases the reservation
 			default:
 				logger.Infof("Run %s plan completed, waiting for user confirmation (not VCS-triggered or workspace auto-apply disabled)", runID)
 			}
@@ -1440,93 +1853,33 @@ func (h *RunnerAgentHandler) Deregister(c *gin.Context) {
 	response.Status(c, http.StatusOK, "deregistered")
 }
 
-// JobArtifactsResponse contains all files needed to execute an ansible job
-type JobArtifactsResponse struct {
-	JobID            string                 `json:"job_id"`
-	JobType          string                 `json:"job_type"` // "ansible_job" or "tofu_run"
-	PlaybookContent  string                 `json:"playbook_content,omitempty"`
-	PlaybookPath     string                 `json:"playbook_path,omitempty"`
-	InventoryContent string                 `json:"inventory_content,omitempty"`
-	AnsibleCfg       string                 `json:"ansible_cfg,omitempty"`
-	ExtraVars        map[string]interface{} `json:"extra_vars,omitempty"`
-	EnvironmentVars  map[string]string      `json:"environment_vars,omitempty"` // Cloud auth env vars (OIDC, etc.)
-	Credential       *CredentialArtifact    `json:"credential,omitempty"`
-	// Vaults carries every attached vault credential (multi-vault support);
-	// the runner writes each to a file and passes --vault-id <id>@<file>.
-	Vaults []VaultArtifact `json:"vaults,omitempty"`
-	// GCPServiceAccount is a decrypted service-account JSON. It travels as content and
-	// not as variables in EnvironmentVars because the variables name a file, and only the
-	// runner knows where it wrote it: the runner calls ansible.GCPCredentialEnv, the same
-	// function the platform runner calls.
-	GCPServiceAccount string            `json:"gcp_service_account,omitempty"`
-	JobConfig         *AnsibleJobConfig `json:"job_config,omitempty"`
-	// VCS is the token-embedded clone URL. It is set only when the runner has to
-	// clone: a fresh playbook, or a cached one that has no snapshot yet.
-	VCS *VCSArtifact `json:"vcs,omitempty"`
-	// ProjectID namespaces the runner's Galaxy cache, one cache per project.
-	ProjectID string `json:"project_id,omitempty"`
-	// PlaybookSource tells the runner where a VCS-backed playbook's files come from.
-	// Absent for ad hoc jobs and playbooks without a VCS connection.
-	PlaybookSource *PlaybookSourceArtifact `json:"playbook_source,omitempty"`
-}
+// JobArtifactsResponse is runnercontract.AnsibleArtifacts, the shared runner wire contract.
+type JobArtifactsResponse = runnercontract.AnsibleArtifacts
 
-// PlaybookSourceArtifact is a VCS-backed playbook's source mode as resolved for one job.
-// Mode "cached" with CapturedAt set means the runner downloads the snapshot from
-// /runner/jobs/:id/playbook-snapshot and no VCS artifact is sent. Mode "cached" without
-// CapturedAt means no snapshot exists yet: the runner clones this once and a sync has
-// been queued. Mode "fresh" means the runner clones.
-type PlaybookSourceArtifact struct {
-	Mode       string     `json:"mode"` // "cached" or "fresh"
-	Commit     string     `json:"commit,omitempty"`
-	CapturedAt *time.Time `json:"captured_at,omitempty"`
-	SizeBytes  int64      `json:"size_bytes,omitempty"`
-}
+// PlaybookSourceArtifact is runnercontract.PlaybookSource, the shared runner wire contract.
+type PlaybookSourceArtifact = runnercontract.PlaybookSource
 
-// VaultArtifact is one decrypted vault password for the runner.
-type VaultArtifact struct {
-	Password string `json:"password"` //nolint:gosec // G117: intentional credential field for runner artifacts
-	VaultID  string `json:"vault_id,omitempty"`
-}
+// VaultArtifact is runnercontract.Vault, the shared runner wire contract.
+type VaultArtifact = runnercontract.Vault
 
-// VCSArtifact contains VCS info for cloning the repository on a self-hosted runner
-type VCSArtifact struct {
-	RepoURL    string `json:"repo_url"`
-	Branch     string `json:"branch"`
-	Repository string `json:"repository"` // e.g. "owner/repo"
-}
+// VCSArtifact is runnercontract.VCS, the shared runner wire contract.
+type VCSArtifact = runnercontract.VCS
 
-// CredentialArtifact contains decrypted credential data for job execution
-type CredentialArtifact struct {
-	Type       string `json:"type"` // "ssh", "vault", "cloud"
-	Username   string `json:"username,omitempty"`
-	Password   string `json:"password,omitempty"` //nolint:gosec // G117: intentional credential field for runner artifacts
-	SSHKey     string `json:"ssh_key,omitempty"`
-	VaultToken string `json:"vault_token,omitempty"`
-	// BecomePassword is injected as ansible_become_pass when the job escalates.
-	BecomePassword string `json:"become_password,omitempty"` //nolint:gosec // G117: intentional credential field for runner artifacts
-}
+// CredentialArtifact is runnercontract.Credential, the shared runner wire contract.
+type CredentialArtifact = runnercontract.Credential
 
-// AnsibleJobConfig contains ansible-specific execution configuration
-type AnsibleJobConfig struct {
-	Limit          string `json:"limit,omitempty"`
-	Tags           string `json:"tags,omitempty"`
-	SkipTags       string `json:"skip_tags,omitempty"`
-	Verbosity      int    `json:"verbosity"`
-	Forks          int    `json:"forks"`
-	BecomeEnabled  bool   `json:"become_enabled"`
-	DiffMode       bool   `json:"diff_mode"`
-	TimeoutSeconds int    `json:"timeout_seconds,omitempty"` // kills the run when exceeded (0 = none)
-}
+// AnsibleJobConfig is runnercontract.AnsibleJobConfig, the shared runner wire contract.
+type AnsibleJobConfig = runnercontract.AnsibleJobConfig
 
 // runnerCapabilitiesHeader is how a runner announces, on the artifacts request, what it
 // can do: a comma-separated list of capability tokens. It is sent per request rather
 // than stored at registration, so it is true for the exact binary making the call.
-const runnerCapabilitiesHeader = "X-Stackweaver-Runner-Capabilities"
+const runnerCapabilitiesHeader = runnercontract.CapabilitiesHeader
 
 // runnerCapabilityPlaybookSnapshot is announced by a runner that honours playbook_source:
 // it downloads a cached playbook's snapshot instead of cloning. A runner that does not
 // announce it can only clone, so it is sent the clone URL and nothing else changes for it.
-const runnerCapabilityPlaybookSnapshot = "playbook-snapshot"
+const runnerCapabilityPlaybookSnapshot = runnercontract.CapabilityPlaybookSnapshot
 
 // runnerCapabilities returns the set of capabilities the calling runner announced.
 func runnerCapabilities(c *gin.Context) map[string]bool {
@@ -1579,11 +1932,37 @@ func (h *RunnerAgentHandler) resolvePlaybookSource(ctx context.Context, playbook
 	// on the playbook, and the artifact must not depend on that write succeeding.
 	vcsArtifact := h.playbookVCSArtifact(ctx, playbook)
 	if h.syncRequester != nil {
-		if err := h.syncRequester.Request(ctx, playbook); err != nil {
+		if err := h.syncRequester.RequestTriggered(ctx, playbook, "launch"); err != nil {
 			logger.Warnf("Playbook %s has no snapshot and a sync could not be queued (this run clones regardless): %v", playbook.ID, err)
 		}
 	}
 	return source, vcsArtifact
+}
+
+// snapshotOnlySource is the playbook source of a job whose executor holds a job token: the
+// playbook's snapshot, whatever its source mode (a fresh-mode one is taken at launch). A playbook that has none yet gets a sync, and the
+// job fails with the reason rather than run without its files; it answers the request then.
+func (h *RunnerAgentHandler) snapshotOnlySource(c *gin.Context, job *models.AnsibleJob, playbook *models.AnsiblePlaybook) (*PlaybookSourceArtifact, bool) {
+	ctx := c.Request.Context()
+	if h.playbookSnapshotExists(ctx, playbook) {
+		// The mode travels with the snapshot: a fresh-mode one was captured for this launch.
+		return &PlaybookSourceArtifact{Mode: playbookSourceMode(playbook), Commit: playbook.CachedCommit, CapturedAt: playbook.CachedAt, SizeBytes: playbook.CachedSizeBytes}, true
+	}
+	if h.syncRequester != nil {
+		if err := h.syncRequester.RequestTriggered(ctx, playbook, "launch"); err != nil {
+			logger.Warnf("Playbook %s has no snapshot and a sync could not be requested: %v", playbook.ID, err)
+		}
+	}
+	const reason = "the playbook has no snapshot yet: a sync was requested; launch the job again once it completes"
+	if h.ansibleJobRepo != nil {
+		if err := h.db.Model(&models.AnsibleJob{}).Where("id = ? AND status IN ?", job.ID,
+			[]models.AnsibleJobStatus{models.AnsibleJobStatusPending, models.AnsibleJobStatusRunning}).
+			Updates(map[string]any{"status": models.AnsibleJobStatusFailed, "error_message": reason}).Error; err != nil {
+			logger.Warnf("failing job %s without a playbook snapshot: %v", job.ID, err)
+		}
+	}
+	jsonapi.WriteError(c, http.StatusConflict, "Conflict", reason)
+	return nil, false
 }
 
 // playbookSnapshotExists reports whether a cached playbook has a snapshot a runner can
@@ -1648,8 +2027,8 @@ func (h *RunnerAgentHandler) playbookVCSArtifact(ctx context.Context, playbook *
 }
 
 // playbookSnapshotStreamTimeout bounds one snapshot response. It matches the time the
-// runner allows itself for the download (see downloadPlaybookSnapshot in the
-// ansible-runner), so neither side gives up before the other.
+// executor allows itself for the download (see ansibleexec.Execute), so neither side
+// gives up before the other.
 const playbookSnapshotStreamTimeout = 10 * time.Minute
 
 // GetPlaybookSnapshot streams the cached snapshot of a job's playbook to the self-hosted
@@ -1698,7 +2077,10 @@ func (h *RunnerAgentHandler) GetPlaybookSnapshot(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook has no VCS repository, so it has no snapshot")
 		return
 	}
-	if playbookSourceMode(playbook) == models.PlaybookSourceModeFresh {
+	// An executor with a job token starts every job from a snapshot, a fresh-mode one too: that
+	// playbook is captured at the branch head for each launch (decision 18). An old agent with a
+	// runner token still clones a fresh-mode playbook and has no use for its snapshot.
+	if _, executorWithJobToken := callingJob(c); !executorWithJobToken && playbookSourceMode(playbook) == models.PlaybookSourceModeFresh {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook's source mode is fresh: it is cloned, not served from a snapshot")
 		return
 	}
@@ -1746,11 +2128,15 @@ func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "job id required")
 		return
 	}
+	if isWorkItem(jobIDStr) {
+		h.workItemStatus(c, jobIDStr)
+		return
+	}
 	// Terraform jobs use run ID (run-xxx)
 	if strings.HasPrefix(jobIDStr, "run-") {
 		// Select the fields the authorization check needs (AUD-001) in addition to status.
 		var run models.Run
-		if err := h.db.Select("status", "workspace_id", "agent_pool_id", "runner_id").First(&run, "id = ?", jobIDStr).Error; err != nil {
+		if err := h.db.Select("id", "status", "workspace_id", "agent_pool_id", "runner_id", "attempt").First(&run, "id = ?", jobIDStr).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
 				return
@@ -1824,6 +2210,11 @@ func (h *RunnerAgentHandler) ansibleJobCredentialIDs(c *gin.Context, job *models
 func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	jobIDStr := c.Param("id")
 
+	if isWorkItem(jobIDStr) {
+		h.getWorkItemArtifacts(c, jobIDStr)
+		return
+	}
+
 	// Determine if this is a Terraform run or Ansible job
 	if strings.HasPrefix(jobIDStr, "run-") {
 		h.getTerraformRunArtifacts(c, jobIDStr)
@@ -1870,8 +2261,10 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	snapshotCapable := runnerCapabilities(c)[runnerCapabilityPlaybookSnapshot]
 
 	response := JobArtifactsResponse{
-		JobID:   job.ID.String(),
-		JobType: "ansible_job",
+		JobID:           job.ID.String(),
+		JobType:         "ansible_job",
+		ContractVersion: runnercontract.Version,
+		Mirror:          h.mirror,
 		JobConfig: &AnsibleJobConfig{
 			Limit:          job.Limit,
 			Tags:           job.Tags,
@@ -1904,8 +2297,18 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		playbook, err := h.playbookRepo.GetByID(*job.PlaybookID)
 		if err == nil {
 			response.PlaybookPath = playbook.PlaybookPath
+			_, executorWithJobToken := callingJob(c)
 			switch {
 			case !isVCSBacked(playbook):
+			case executorWithJobToken:
+				// An executor holding a job token runs the playbook's snapshot and is never handed
+				// a clone URL (#933, decision 18, AC68); the launch held the job until a
+				// playbook_snapshot work item captured it.
+				source, ok := h.snapshotOnlySource(c, job, playbook)
+				if !ok {
+					return
+				}
+				response.PlaybookSource = source
 			case snapshotCapable:
 				response.PlaybookSource, response.VCS = h.resolvePlaybookSource(c.Request.Context(), playbook)
 			default:
@@ -1989,6 +2392,8 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 				if v := decrypt(cred.Password); v != "" {
 					response.EnvironmentVars["VMWARE_PASSWORD"] = v
 				}
+			case models.CredentialTypeRegistry:
+				// Never served to a job: only the launcher pulls a run image with it (#933, D6).
 			}
 		}
 	}
@@ -2060,57 +2465,18 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		response.ExtraVars = job.ExtraVars
 	}
 
-	// OIDC Workload Identity: Inject Azure OIDC env vars for self-hosted Ansible runners.
-	// This enables Ansible playbooks on self-hosted runners to authenticate to Azure via OIDC.
-	if h.azureOIDCRepo != nil && h.oidcTokenService != nil {
-		var project models.Project
-		if err := h.db.First(&project, "id = ?", job.ProjectID).Error; err == nil {
-			configs, oidcErr := h.azureOIDCRepo.GetByOrganization(project.OrganizationID)
-			if oidcErr != nil {
-				logger.Warnf("Failed to look up Azure OIDC configurations for self-hosted Ansible runner (job %s): %v", job.ID, oidcErr)
-			} else if len(configs) > 0 {
-				oidcConfig := configs[0]
-
-				var org models.Organization
-				_ = h.db.First(&org, "id = ?", project.OrganizationID)
-
-				token, tokenErr := h.oidcTokenService.GenerateWorkloadToken(oidc.WorkloadTokenRequest{
-					Audience:         "api://AzureADTokenExchange",
-					OrganizationName: org.Name,
-					OrganizationID:   project.OrganizationID.String(),
-					ProjectName:      project.Name,
-					ProjectID:        project.ID.String(),
-					ResourceType:     oidc.ResourceTypeJob,
-					ResourceName:     job.Name,
-					ActionKind:       oidc.ActionRun,
-					ActionID:         job.ID.String(),
-				})
-				if tokenErr != nil {
-					logger.Warnf("Failed to generate OIDC token for self-hosted Ansible runner (job %s): %v", job.ID, tokenErr)
-				} else {
-					if response.EnvironmentVars == nil {
-						response.EnvironmentVars = map[string]string{}
-					}
-					// An attached Azure credential wins over org-level OIDC.
-					if response.EnvironmentVars["AZURE_CLIENT_ID"] == "" {
-						response.EnvironmentVars["AZURE_CLIENT_ID"] = oidcConfig.ClientID
-						response.EnvironmentVars["AZURE_TENANT_ID"] = oidcConfig.TenantID
-						// azure.azcollection reads the legacy AZURE_TENANT name; the
-						// runner's startup bridge can't help here because artifact env
-						// vars are appended at exec time, after the bridge ran.
-						response.EnvironmentVars["AZURE_TENANT"] = oidcConfig.TenantID
-						response.EnvironmentVars["AZURE_SUBSCRIPTION_ID"] = oidcConfig.SubscriptionID
-						response.EnvironmentVars["AZURE_FEDERATED_TOKEN"] = token
-						response.EnvironmentVars["ARM_OIDC_TOKEN"] = token
-						response.EnvironmentVars["ARM_CLIENT_ID"] = oidcConfig.ClientID
-						response.EnvironmentVars["ARM_SUBSCRIPTION_ID"] = oidcConfig.SubscriptionID
-						response.EnvironmentVars["ARM_TENANT_ID"] = oidcConfig.TenantID
-						response.EnvironmentVars["ARM_USE_OIDC"] = "true"
-						logger.Infof("Injected OIDC workload identity token for self-hosted Ansible runner (job %s, org=%s)", job.ID, org.Name)
-					}
-				}
-			}
-		}
+	// Workload identity: the platform-minted per-run tokens for Azure, AWS, GCP and Vault, the same
+	// four an OpenTofu run's artifacts carry (#933, D2, D8, AC37).
+	// A job never starts without an identity its organization configured.
+	environment, err := h.ansibleWorkloadIdentityEnv(job, response.EnvironmentVars)
+	if err != nil {
+		refuseWithoutIdentity(c, jobIDStr, err)
+		return
+	}
+	response.EnvironmentVars = environment
+	// A runner that cannot start from a snapshot predates the cache too, and gets neither.
+	if org, _, err := h.ansibleJobOrgAndPool(job); err == nil && snapshotCapable {
+		response.Cache = h.ansibleCacheDescriptor(c.Request.Context(), org, job)
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -2128,7 +2494,7 @@ func (h *RunnerAgentHandler) runConfigurationVersion(run *models.Run) (*models.C
 // to execute a run: configuration tarball, variables, environment variables, and workspace metadata.
 func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID string) {
 	var run models.Run
-	if err := h.db.Preload("Workspace").First(&run, "id = ?", runID).Error; err != nil {
+	if err := h.db.Preload("Workspace.Project.Organization").First(&run, "id = ?", runID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 		} else {
@@ -2143,46 +2509,61 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	if !h.authorizeRunnerForRun(c, &run, false) {
 		return
 	}
-
-	// Resolve terraform version: workspace -> org default
-	tfVersion := run.Workspace.TofuVersion
-	if tfVersion == "" {
-		// Look up org default via workspace -> project -> organization
-		var project models.Project
-		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
-			var org models.Organization
-			if err := h.db.First(&org, "id = ?", project.OrganizationID).Error; err == nil {
-				tfVersion = org.DefaultTofuVersion
-			}
-		}
+	// A finished run has nothing left to prepare, so its artifacts are served to no token
+	// (#933, D1: the finished-job refusal of both engines).
+	if runFinished(&run) {
+		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTerminal, "Forbidden", "the run has finished; its artifacts are no longer served")
+		return
 	}
+
+	// The OpenTofu version resolves by the shared level rule: workspace, project, organization,
+	// else the newest release the organization caches; empty, the executor takes the newest
+	// upstream release.
+	tofuVersion, _ := settings.EffectiveTofuVersion(&run.Workspace)
+	tfVersion := h.runTofuVersion(run.Workspace.Project.OrganizationID, tofuVersion.Value)
 
 	response := AgentJobArtifacts{
 		JobID:            run.ID,
 		JobType:          "tofu_run",
+		ContractVersion:  runnercontract.Version,
 		TofuVersion:      tfVersion,
 		WorkingDirectory: run.Workspace.WorkingDirectory,
+		Plan:             h.planDescriptor(c.Request.Context(), &run),
+		Registry:         h.jobRegistryBlock(c, &run),
+		Mirror:           h.mirror,
 	}
 
 	// Get configuration tarball from storage if configuration version exists. The version is
 	// looked up within the run's workspace first: a run row that names a configuration version
 	// uploaded to another workspace finds none, and the runner is handed none of its code.
+	var tarball []byte
 	if run.ConfigurationVersionID != nil && h.storageClient != nil {
 		if configVersion, cvErr := h.runConfigurationVersion(&run); cvErr == nil {
 			storageKey := models.ConfigurationTarballKey(configVersion.ID)
 			ctx := context.Background()
 			if data, err := h.storageClient.Get(ctx, storageKey); err == nil {
-				response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
+				tarball = data
+				if len(data) > h.inlineLimit() && runnerCan(c, runnercontract.CapabilityBlob) {
+					response.ConfigTarballBlob = blobRef(run.ID, blobConfigTarball, data)
+				} else {
+					response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
+				}
 			}
 		} else {
 			logger.Warnf("Configuration version lookup failed for run %s: %v", runID, cvErr)
 		}
 	}
+	response.Cache = h.runCacheDescriptor(run.Workspace.Project.OrganizationID, &run, tfVersion, tarball)
 
 	// Get VCS info from workspace for cloning (fallback when no config version). The connection
 	// is loaded within the workspace's organization: a workspace row that names another
 	// organization's connection finds none, and the runner is handed no clone URL for it.
-	if run.ConfigurationVersionID == nil && run.Workspace.VCSConnectionID != nil && run.Workspace.VCSRepository != "" {
+	//
+	// An executor holding a job token is never handed a clone URL (#933, decision 18, AC68): its run
+	// starts from the configuration version a configuration_snapshot work item captured. Only an
+	// old agent, authenticating with its runner token, is served one, for the deprecation window.
+	_, executorWithJobToken := callingJob(c)
+	if !executorWithJobToken && run.ConfigurationVersionID == nil && run.Workspace.VCSConnectionID != nil && run.Workspace.VCSRepository != "" {
 		scope := repository.NewOrganizationScope(h.db).WithContext(c.Request.Context())
 		if vcsConn, err := scope.VCSConnectionForProject(*run.Workspace.VCSConnectionID, run.Workspace.ProjectID); err == nil {
 			ctx := c.Request.Context()
@@ -2249,207 +2630,14 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		}
 	}
 
-	// OIDC Workload Identity: Inject Azure OIDC token into environment variables for self-hosted runners.
-	// This is the equivalent of what the platform-hosted runner does in processJob().
-	if h.azureOIDCRepo != nil && h.oidcTokenService != nil {
-		// Resolve organization ID via workspace -> project -> organization
-		var project models.Project
-		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
-			configs, oidcErr := h.azureOIDCRepo.GetByOrganization(project.OrganizationID)
-			if oidcErr != nil {
-				logger.Warnf("Failed to look up Azure OIDC configurations for self-hosted runner (run %s): %v", runID, oidcErr)
-			} else if len(configs) > 0 {
-				config := configs[0]
-
-				// Determine run phase
-				runPhase := "plan"
-				if run.Status == models.RunStatusApplying {
-					runPhase = "apply"
-				}
-
-				// Look up org and workspace names for token claims
-				var org models.Organization
-				_ = h.db.First(&org, "id = ?", project.OrganizationID)
-
-				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
-					Audience:         "api://AzureADTokenExchange",
-					OrganizationName: org.Name,
-					OrganizationID:   project.OrganizationID.String(),
-					ProjectName:      project.Name,
-					ProjectID:        project.ID.String(),
-					WorkspaceName:    run.Workspace.Name,
-					WorkspaceID:      run.WorkspaceID,
-					RunID:            run.ID,
-					RunPhase:         runPhase,
-				})
-				if tokenErr != nil {
-					logger.Warnf("Failed to generate OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
-				} else {
-					// Ensure environment_vars map exists
-					envVars := response.EnvironmentVars
-					if envVars == nil {
-						envVars = make(map[string]string)
-					}
-					envVars["TFC_WORKLOAD_IDENTITY_TOKEN"] = token
-					envVars["ARM_OIDC_TOKEN"] = token
-					envVars["ARM_CLIENT_ID"] = config.ClientID
-					envVars["ARM_SUBSCRIPTION_ID"] = config.SubscriptionID
-					envVars["ARM_TENANT_ID"] = config.TenantID
-					envVars["ARM_USE_OIDC"] = "true"
-					response.EnvironmentVars = envVars
-					logger.Infof("Injected OIDC workload identity token for self-hosted runner (run %s, org=%s)", runID, org.Name)
-				}
-			}
-		}
+	// Workload identity: the platform-minted per-run tokens for Azure, AWS, GCP and Vault (#933, D8).
+	// A run never starts without an identity its organization configured.
+	environment, err := h.tofuWorkloadIdentityEnv(&run, response.EnvironmentVars)
+	if err != nil {
+		refuseWithoutIdentity(c, runID, err)
+		return
 	}
-
-	// AWS OIDC (self-hosted runner): inject keyless-auth env for the aws provider. AWS reads the token
-	// from a file, which we can't write on the agent's host - so we pass the raw token as
-	// AWS_WEB_IDENTITY_TOKEN and the agent materializes it (materializeAWSWebIdentityToken).
-	if h.awsOIDCRepo != nil && h.oidcTokenService != nil {
-		var project models.Project
-		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
-			configs, oidcErr := h.awsOIDCRepo.GetByOrganization(project.OrganizationID)
-			if oidcErr != nil {
-				logger.Warnf("Failed to look up AWS OIDC configurations for self-hosted runner (run %s): %v", runID, oidcErr)
-			} else if len(configs) > 0 {
-				awsConfig := configs[0]
-				runPhase := "plan"
-				if run.Status == models.RunStatusApplying {
-					runPhase = "apply"
-				}
-				var org models.Organization
-				_ = h.db.First(&org, "id = ?", project.OrganizationID)
-				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
-					Audience:         "sts.amazonaws.com",
-					OrganizationName: org.Name,
-					OrganizationID:   project.OrganizationID.String(),
-					ProjectName:      project.Name,
-					ProjectID:        project.ID.String(),
-					WorkspaceName:    run.Workspace.Name,
-					WorkspaceID:      run.WorkspaceID,
-					RunID:            run.ID,
-					RunPhase:         runPhase,
-				})
-				if tokenErr != nil {
-					logger.Warnf("Failed to generate AWS OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
-				} else {
-					envVars := response.EnvironmentVars
-					if envVars == nil {
-						envVars = make(map[string]string)
-					}
-					envVars["AWS_ROLE_ARN"] = awsConfig.RoleARN
-					envVars["AWS_ROLE_SESSION_NAME"] = fmt.Sprintf("stackweaver-%s", run.ID)
-					// Raw token: the agent writes it to a file and sets AWS_WEB_IDENTITY_TOKEN_FILE.
-					envVars["AWS_WEB_IDENTITY_TOKEN"] = token
-					response.EnvironmentVars = envVars
-					logger.Infof("Injected AWS OIDC workload identity for self-hosted runner (run %s, org=%s, role=%s)", runID, org.Name, awsConfig.RoleARN)
-				}
-			}
-		}
-	}
-
-	// GCP OIDC (self-hosted runner): inject keyless-auth env for the google provider via Workload
-	// Identity Federation. GCP reads an external-account credential-config JSON (referenced by
-	// GOOGLE_APPLICATION_CREDENTIALS) that in turn points at a token file - neither of which we can
-	// write on the agent's host. So we pass the raw token + the config attrs and the agent
-	// materializes both files (materializeGCPWorkloadIdentity).
-	if h.gcpOIDCRepo != nil && h.oidcTokenService != nil {
-		var project models.Project
-		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
-			configs, oidcErr := h.gcpOIDCRepo.GetByOrganization(project.OrganizationID)
-			if oidcErr != nil {
-				logger.Warnf("Failed to look up GCP OIDC configurations for self-hosted runner (run %s): %v", runID, oidcErr)
-			} else if len(configs) > 0 {
-				gcpConfig := configs[0]
-				runPhase := "plan"
-				if run.Status == models.RunStatusApplying {
-					runPhase = "apply"
-				}
-				var org models.Organization
-				_ = h.db.First(&org, "id = ?", project.OrganizationID)
-				// WIF audience is the full provider resource name prefixed with //iam.googleapis.com/.
-				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
-					Audience:         "//iam.googleapis.com/" + gcpConfig.WorkloadProviderName,
-					OrganizationName: org.Name,
-					OrganizationID:   project.OrganizationID.String(),
-					ProjectName:      project.Name,
-					ProjectID:        project.ID.String(),
-					WorkspaceName:    run.Workspace.Name,
-					WorkspaceID:      run.WorkspaceID,
-					RunID:            run.ID,
-					RunPhase:         runPhase,
-				})
-				if tokenErr != nil {
-					logger.Warnf("Failed to generate GCP OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
-				} else {
-					envVars := response.EnvironmentVars
-					if envVars == nil {
-						envVars = make(map[string]string)
-					}
-					// Raw token + attrs: the agent writes the token + credential-config files and sets
-					// GOOGLE_APPLICATION_CREDENTIALS (materializeGCPWorkloadIdentity).
-					envVars["GCP_OIDC_RAW_TOKEN"] = token
-					envVars["GCP_OIDC_SERVICE_ACCOUNT_EMAIL"] = gcpConfig.ServiceAccountEmail
-					envVars["GCP_OIDC_WORKLOAD_PROVIDER_NAME"] = gcpConfig.WorkloadProviderName
-					envVars["GCP_OIDC_PROJECT_NUMBER"] = gcpConfig.ProjectNumber
-					response.EnvironmentVars = envVars
-					logger.Infof("Injected GCP OIDC workload identity for self-hosted runner (run %s, org=%s, sa=%s)", runID, org.Name, gcpConfig.ServiceAccountEmail)
-				}
-			}
-		}
-	}
-
-	// Vault OIDC (self-hosted runner): inject the raw token + Vault config so the agent can perform the
-	// JWT login itself. Only the agent's host can reach the customer's Vault, so - unlike Azure/AWS/GCP
-	// where the cloud provider does the exchange - the agent runs the login (materializeVaultToken) and
-	// exports VAULT_ADDR + VAULT_TOKEN for the run's vault provider.
-	if h.vaultOIDCRepo != nil && h.oidcTokenService != nil {
-		var project models.Project
-		if err := h.db.First(&project, "id = ?", run.Workspace.ProjectID).Error; err == nil {
-			configs, oidcErr := h.vaultOIDCRepo.GetByOrganization(project.OrganizationID)
-			if oidcErr != nil {
-				logger.Warnf("Failed to look up Vault OIDC configurations for self-hosted runner (run %s): %v", runID, oidcErr)
-			} else if len(configs) > 0 {
-				vaultConfig := configs[0]
-				runPhase := "plan"
-				if run.Status == models.RunStatusApplying {
-					runPhase = "apply"
-				}
-				var org models.Organization
-				_ = h.db.First(&org, "id = ?", project.OrganizationID)
-				// Vault JWT auth validates the token's aud against the role's bound_audiences.
-				token, tokenErr := h.oidcTokenService.GenerateToken(oidc.TokenRequest{
-					Audience:         oidc.VaultWorkloadIdentityAudience,
-					OrganizationName: org.Name,
-					OrganizationID:   project.OrganizationID.String(),
-					ProjectName:      project.Name,
-					ProjectID:        project.ID.String(),
-					WorkspaceName:    run.Workspace.Name,
-					WorkspaceID:      run.WorkspaceID,
-					RunID:            run.ID,
-					RunPhase:         runPhase,
-				})
-				if tokenErr != nil {
-					logger.Warnf("Failed to generate Vault OIDC token for self-hosted runner (run %s): %v", runID, tokenErr)
-				} else {
-					envVars := response.EnvironmentVars
-					if envVars == nil {
-						envVars = make(map[string]string)
-					}
-					// Raw token + attrs: the agent performs the Vault login and sets VAULT_TOKEN.
-					envVars["VAULT_OIDC_RAW_TOKEN"] = token
-					envVars["VAULT_OIDC_ADDRESS"] = vaultConfig.Address
-					envVars["VAULT_OIDC_ROLE"] = vaultConfig.RoleName
-					envVars["VAULT_OIDC_NAMESPACE"] = vaultConfig.Namespace
-					envVars["VAULT_OIDC_AUTH_PATH"] = vaultConfig.JWTAuthPath
-					envVars["VAULT_OIDC_ENCODED_CACERT"] = vaultConfig.TLSCACertificate
-					response.EnvironmentVars = envVars
-					logger.Infof("Injected Vault OIDC workload identity for self-hosted runner (run %s, org=%s, addr=%s)", runID, org.Name, vaultConfig.Address)
-				}
-			}
-		}
-	}
+	response.EnvironmentVars = environment
 
 	// TFE-compatible: Include latest state so the self-hosted runner can restore it.
 	// Self-hosted runners use fresh temp dirs per job, so they need the current state
@@ -2463,7 +2651,11 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 			// state to plaintext before base64-encoding it into the job payload.
 			ctx := context.Background()
 			if stateData, err := h.stateService.GetStateObject(ctx, run.WorkspaceID, latestState.Version); err == nil && len(stateData) > 0 {
-				response.StateJSON = base64.StdEncoding.EncodeToString(stateData)
+				if len(stateData) > h.inlineLimit() && runnerCan(c, runnercontract.CapabilityBlob) {
+					response.StateBlob = blobRef(run.ID, blobState, stateData)
+				} else {
+					response.StateJSON = base64.StdEncoding.EncodeToString(stateData)
+				}
 				logger.Infof("Including state version %d (%d bytes) in artifacts for run %s", latestState.Version, len(stateData), runID)
 			}
 		}
@@ -2487,6 +2679,9 @@ func (h *RunnerAgentHandler) projectNameByID(projectID uuid.UUID) string {
 // pollers get disjoint work; the agent then claims each via JobStart.
 // Supports both Ansible jobs and Terraform runs depending on runner type.
 func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]PendingJob, error) {
+	if runner.IsHosted() {
+		return h.hostedOffers(runner)
+	}
 	pendingJobs := []PendingJob{}
 
 	// Capacity-aware, distribution-safe offering. `maxJobs` bounds how much work a
@@ -2565,7 +2760,7 @@ func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]
 				FROM picked
 				WHERE ansible_jobs.id = picked.id
 				RETURNING ansible_jobs.*`,
-				models.AnsibleJobStatusPending, runner.AgentPoolID, capacity, runner.ID).
+				models.AnsibleJobStatusPending, runner.PoolID(), capacity, runner.ID).
 				Scan(&reserved).Error; err != nil {
 				return pendingJobs, err
 			}
@@ -2579,48 +2774,164 @@ func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]
 		}
 	}
 
-	// Query Terraform runs if runner can execute them.
-	// Only return runs whose workspace is still agent (execution_mode = 'agent'); if workspace
-	// was switched to remote, the run may still have agent_pool_id set until orchestrator clears it.
-	// (Terraform distribution is deferred to the platform-runner rework.)
+	// OpenTofu runs are reserved the way Ansible jobs are (#933, D2, AC9): a runner's own
+	// unstarted reservations are offered again first, then new runs are reserved up to its free
+	// capacity under FOR UPDATE SKIP LOCKED, so concurrent pollers take disjoint runs and no runner
+	// is handed more than it can run. The capacity is shared with the Ansible jobs above.
 	if runner.CanExecuteTerraform() {
-		var runs []models.Run
-		if err := h.db.Joins("JOIN workspaces ON workspaces.id = runs.workspace_id").
-			Where("runs.status IN ? AND runs.agent_pool_id = ? AND workspaces.execution_mode = ?",
-				[]models.RunStatus{models.RunStatusPending, models.RunStatusApplying}, runner.AgentPoolID, "agent").
-			Preload("Workspace").Order("runs.created_at ASC").Limit(5).Find(&runs).Error; err == nil {
-			for _, run := range runs {
-				// Map operation to run type for the agent
-				runType := "plan"
-				switch run.Operation {
-				case models.RunOperationPlanAndApply:
-					if run.Status == models.RunStatusApplying {
-						runType = "apply"
-					} else {
-						runType = "plan"
-					}
-				case models.RunOperationPlanOnly:
-					runType = "plan"
-				case models.RunOperationDestroy:
-					// TFE-compatible: destroy runs follow the same two-phase flow as plan-and-apply
-					if run.Status == models.RunStatusApplying {
-						runType = "apply-destroy"
-					} else {
-						runType = "plan-destroy"
-					}
-				}
-				pendingJobs = append(pendingJobs, PendingJob{
-					JobID:         run.ID,
-					JobType:       "tofu_run",
-					WorkspaceID:   run.WorkspaceID,
-					WorkspaceName: run.Workspace.Name,
-					RunType:       runType,
-				})
+		runRepo := repository.NewRunRepository(h.db)
+		held, err := runRepo.HeldForRunner(runner.ID, maxJobs)
+		if err != nil {
+			return pendingJobs, err
+		}
+		busy, err := h.outstandingFor(runner)
+		if err != nil {
+			return pendingJobs, err
+		}
+		runs := held
+		if capacity := maxJobs - busy; capacity > 0 {
+			reserved, err := runRepo.ReserveForRunner(runner.ID, runner.PoolID(), capacity)
+			if err != nil {
+				return pendingJobs, err
 			}
+			runs = append(runs, reserved...)
+		}
+		for _, run := range runs {
+			pendingJobs = append(pendingJobs, h.runOffer(&run))
 		}
 	}
 
+	// Work items (#933, D2) are reserved the same way, from the same capacity, for a runner that
+	// declared it runs them; only an Ansible-capable one is offered the inventory kinds.
+	if h.offersWorkItems(runner) {
+		items, err := h.workItemOffersFor(runner, maxJobs)
+		if err != nil {
+			return pendingJobs, err
+		}
+		pendingJobs = append(pendingJobs, items...)
+	}
+
 	return pendingJobs, nil
+}
+
+// workItemOffersFor is a customer runner's work item offers: its own unstarted reservations, then
+// new ones up to the capacity its runs, jobs and work items leave free.
+func (h *RunnerAgentHandler) workItemOffersFor(runner *models.Runner, maxJobs int) ([]PendingJob, error) {
+	items := h.workItems.Items()
+	held, err := items.HeldForRunner(runner.ID, maxJobs)
+	if err != nil {
+		return nil, err
+	}
+	busy, err := h.outstandingFor(runner)
+	if err != nil {
+		return nil, err
+	}
+	if capacity := maxJobs - busy; capacity > 0 {
+		reserved, err := items.ReserveForRunner(runner.ID, runner.PoolID(), capacity, runner.CanExecuteAnsible())
+		if err != nil {
+			return nil, err
+		}
+		held = append(held, reserved...)
+	}
+	offers := make([]PendingJob, 0, len(held))
+	for i := range held {
+		offers = append(offers, workItemOffer(&held[i]))
+	}
+	return offers, nil
+}
+
+// outstandingFor counts what a runner holds and has not finished: runs, Ansible jobs and work
+// items, reserved or running.
+func (h *RunnerAgentHandler) outstandingFor(runner *models.Runner) (int, error) {
+	runs, err := repository.NewRunRepository(h.db).CountOutstandingForRunner(runner.ID)
+	if err != nil {
+		return 0, err
+	}
+	var jobs int64
+	if err := h.db.Model(&models.AnsibleJob{}).
+		Where("runner_id = ? AND status IN ?", runner.ID, []models.AnsibleJobStatus{models.AnsibleJobStatusPending, models.AnsibleJobStatusRunning}).
+		Count(&jobs).Error; err != nil {
+		return 0, err
+	}
+	var items int64
+	if h.workItems != nil {
+		if items, err = h.workItems.Items().CountOutstandingForRunner(runner.ID); err != nil {
+			return 0, err
+		}
+	}
+	return int(runs + jobs + items), nil
+}
+
+// hostedOffers is the work offered to a hosted runner (#933, D9): its own unstarted reservations
+// first, then new reservations across every hosted pool of its placement group, fairly and under
+// each pool's cap, up to its free capacity.
+func (h *RunnerAgentHandler) hostedOffers(runner *models.Runner) ([]PendingJob, error) {
+	offers := []PendingJob{}
+	maxJobs := max(runner.MaxConcurrentJobs, 1)
+	held, err := repository.HostedHeld(h.db, runner.ID, maxJobs)
+	if err != nil {
+		return offers, err
+	}
+	busy, err := h.outstandingFor(runner)
+	if err != nil {
+		return offers, err
+	}
+	all := held
+	if capacity := maxJobs - busy; capacity > 0 {
+		group := runner.HostedGroup
+		if group == "" {
+			group = "default"
+		}
+		reserved, err := repository.ReserveHosted(h.db, runner.ID, group, capacity, settings.HostedDefaultMaxConcurrentJobs(os.Getenv),
+			repository.HostedEngines{Tofu: runner.CanExecuteTerraform(), Ansible: runner.CanExecuteAnsible(), WorkItems: h.offersWorkItems(runner)})
+		if err != nil {
+			return offers, err
+		}
+		all.Runs = append(all.Runs, reserved.Runs...)
+		all.Jobs = append(all.Jobs, reserved.Jobs...)
+		all.WorkItems = append(all.WorkItems, reserved.WorkItems...)
+	}
+	for i := range all.WorkItems {
+		offers = append(offers, workItemOffer(&all.WorkItems[i]))
+	}
+	for i := range all.Jobs {
+		offers = append(offers, PendingJob{JobID: all.Jobs[i].ID.String(), JobType: "ansible_job", WorkspaceName: h.projectNameByID(all.Jobs[i].ProjectID)})
+	}
+	for i := range all.Runs {
+		offers = append(offers, h.runOffer(&all.Runs[i]))
+	}
+	return offers, nil
+}
+
+// runOffer is the offer of one OpenTofu run's next phase.
+func (h *RunnerAgentHandler) runOffer(run *models.Run) PendingJob {
+	runType := "plan"
+	switch run.Operation {
+	case models.RunOperationPlanOnly:
+		runType = "plan"
+	case models.RunOperationPlanAndApply:
+		if run.Status == models.RunStatusApplying {
+			runType = "apply"
+		}
+	case models.RunOperationDestroy:
+		// TFE-compatible: destroy runs follow the same two-phase flow as plan-and-apply.
+		runType = "plan-destroy"
+		if run.Status == models.RunStatusApplying {
+			runType = "apply-destroy"
+		}
+	}
+	workspaceName := ""
+	var ws models.Workspace
+	if err := h.db.Select("name").First(&ws, "id = ?", run.WorkspaceID).Error; err == nil {
+		workspaceName = ws.Name
+	}
+	return PendingJob{
+		JobID:         run.ID,
+		JobType:       "tofu_run",
+		WorkspaceID:   run.WorkspaceID,
+		WorkspaceName: workspaceName,
+		RunType:       runType,
+	}
 }
 
 // injectPasswordIntoInventory adds ansible_password to all hosts in the inventory JSON.
@@ -2713,24 +3024,9 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		RunnerID string `json:"runner_id"`
-		State    string `json:"state"` // base64-encoded terraform.tfstate
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-
-	if req.State == "" {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "state field required")
-		return
-	}
-
-	// Decode base64 state
-	stateData, err := base64.StdEncoding.DecodeString(req.State)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "invalid base64 state data")
+	// A large state arrives as the raw state file (#933, D2); the JSON form carries it base64.
+	stateData, ok := readStateUpload(c)
+	if !ok {
 		return
 	}
 
@@ -2831,6 +3127,8 @@ type RunnerReRegisterResponse struct {
 	RunnerAPIKey string       `json:"runner_api_key"`
 	Status       string       `json:"status"`
 	PendingJobs  []PendingJob `json:"pending_jobs"`
+	// Capabilities are the API's (runnercontract.APICapabilities).
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // RunnerRegisterResponse answers a first-time runner registration.
@@ -2838,6 +3136,8 @@ type RunnerRegisterResponse struct {
 	RunnerID            string `json:"runner_id"`
 	RunnerAPIKey        string `json:"runner_api_key"`
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
+	// Capabilities are the API's (runnercontract.APICapabilities).
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // PendingJobsResponse is the runner poll response.
@@ -2849,4 +3149,11 @@ type PendingJobsResponse struct {
 type StateVersionSavedResponse struct {
 	Status  string `json:"status"`
 	Version int    `json:"version"`
+}
+
+// applyLauncherSettings copies the launcher's reported deployment-level settings onto its runner
+// row (#933, D0, D15).
+func applyLauncherSettings(r *models.Runner, req runnercontract.RegisterRequest) {
+	r.HostedStrict, r.CacheVerification = req.HostedStrict, req.CacheVerification
+	r.LocalCache, r.LocalCacheSizeLimit = req.LocalCache, req.LocalCacheSizeLimit
 }

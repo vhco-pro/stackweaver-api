@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -68,6 +69,11 @@ func authorizeRegistryRead(c *gin.Context, authService *auth.Service, orgRepo *r
 	}
 	user := registryCaller(c, authService)
 	if user == nil {
+		// A job's registry token (#933, D2) has no user: it reads its own organization's private
+		// artifacts and nothing else.
+		if registryJobTokenFor(c, orgID) {
+			return true
+		}
 		jsonapi.WriteRegistryError(c, http.StatusUnauthorized, "authentication required for private registry")
 		return false
 	}
@@ -87,6 +93,11 @@ func registryAccessibleOrgs(c *gin.Context, authService *auth.Service, orgRepo *
 	accessible := make(map[uuid.UUID]bool)
 	user := registryCaller(c, authService)
 	if user == nil {
+		for _, id := range orgIDs {
+			if registryJobTokenFor(c, id) {
+				accessible[id] = true
+			}
+		}
 		return accessible
 	}
 	checked := make(map[uuid.UUID]bool)
@@ -100,4 +111,15 @@ func registryAccessibleOrgs(c *gin.Context, authService *auth.Service, orgRepo *
 		}
 	}
 	return accessible
+}
+
+// registryJobTokenFor reports whether the request authenticated with a job's registry token for
+// orgID. registryCaller has already authenticated the Bearer token, so the key is on the context.
+func registryJobTokenFor(c *gin.Context, orgID uuid.UUID) bool {
+	raw, ok := c.Get("api_key")
+	if !ok {
+		return false
+	}
+	key, ok := raw.(*models.APIKey)
+	return ok && apikey.IsJobRegistryTokenFor(key, orgID)
 }

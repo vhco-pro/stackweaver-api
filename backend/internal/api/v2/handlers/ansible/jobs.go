@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/placement"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -515,7 +516,10 @@ func (h *JobHandler) Get(c *gin.Context) {
 		return
 	}
 
-	jsonapi.WriteDocument(c, http.StatusOK, formatJobResponse(job))
+	doc := formatJobResponse(job)
+	doc.Attributes.Placement = placement.WithQueue(h.jobService.HostedQueueAt, doc.Attributes.Placement, job.AgentPoolID, job.CreatedAt,
+		job.Status == models.AnsibleJobStatusPending && job.RunnerID == nil)
+	jsonapi.WriteDocument(c, http.StatusOK, doc)
 }
 
 // Cancel cancels a job
@@ -948,6 +952,7 @@ func formatJobResponse(job *models.AnsibleJob) jsonapi.Resource[JobAttributes] {
 		UpdatedAt:        job.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 
 		InventorySyncWarnings: formatInventorySyncWarnings(job.InventorySyncWarnings),
+		Placement:             placement.FromModel(job.Attempt, job.Placement),
 	}
 
 	if job.JobType == models.AnsibleJobTypeAdHoc {

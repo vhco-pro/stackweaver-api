@@ -16,7 +16,6 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/ansiblefiles"
 	"github.com/michielvha/stackweaver/core/models"
 	corerepo "github.com/michielvha/stackweaver/core/repository"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 )
 
 // maxBulkImportEntries caps a single bulk-import request.
@@ -56,24 +55,23 @@ func playbookNameCandidates(filePath, repository, requested string) []string {
 	return candidates
 }
 
-// enqueueInitialSync marks a VCS-backed playbook as syncing and enqueues its
-// initial sync. Failures are recorded on the playbook rather than returned:
+// enqueueInitialSync marks a VCS-backed playbook as syncing and requests its
+// initial sync as a work item. Failures are recorded on the playbook rather than returned:
 // creation already succeeded and the playbook stays usable (cached-mode runs
 // auto-sync on cache miss).
 func (h *PlaybookHandler) enqueueInitialSync(playbook *models.AnsiblePlaybook) {
-	if playbook.VCSConnectionID == nil || playbook.VCSRepository == "" || h.queue == nil {
+	if playbook.VCSConnectionID == nil || playbook.VCSRepository == "" || h.workItems == nil {
 		return
 	}
 	playbook.LastSyncStatus = "syncing"
 	if err := h.playbookRepo.Update(playbook); err != nil {
 		logger.Warnf("Failed to update playbook sync status: %v", err)
 	}
-	syncMsg := h.syncRequester.Message(context.Background(), playbook)
-	if err := h.queue.Enqueue(context.Background(), ansible.PlaybookSyncQueue, syncMsg); err != nil {
+	if _, err := h.workItems.RequestPlaybookSnapshot(context.Background(), playbook, "manual"); err != nil {
 		playbook.LastSyncStatus = "pending"
-		playbook.LastSyncError = "Auto-sync failed to queue: " + err.Error()
+		playbook.LastSyncError = "Auto-sync could not be requested: " + err.Error()
 		if updateErr := h.playbookRepo.Update(playbook); updateErr != nil {
-			logger.Warnf("Failed to update playbook after sync queue error: %v", updateErr)
+			logger.Warnf("Failed to update playbook after the sync request error: %v", updateErr)
 		}
 	}
 }

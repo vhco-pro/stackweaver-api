@@ -36,8 +36,17 @@ var byDesign = map[string]string{
 	// The runner control plane, spoken by the runner binaries.
 	"POST /api/v2/runner/register":                   "the runner control plane",
 	"POST /api/v2/runner/deregister":                 "the runner control plane",
+	"POST /api/v2/runner/drain":                      "the runner control plane, 202 Accepted with no body",
 	"POST /api/v2/runner/heartbeat":                  "the runner control plane",
+	"GET /api/v2/runner/queue-depth":                 "the runner control plane",
+	"GET /api/v2/runner/cache/{kind}/{sha256}":       "the runner control plane, a content-addressed binary body",
+	"PUT /api/v2/runner/cache/{kind}/{sha256}":       "the runner control plane, a content-addressed binary body",
+	"POST /api/v2/runner/cache/promotions/{id}/drop": "the runner control plane",
+	"GET /api/v2/runner/images/{id}/pull-credential": "the runner control plane",
 	"POST /api/v2/runner/jobs/{id}/start":            "the runner control plane",
+	"POST /api/v2/runner/jobs/{id}/token":            "the runner control plane",
+	"POST /api/v2/runner/jobs/{id}/plan":             "the runner control plane",
+	"GET /api/v2/runner/jobs/{id}/plan":              "the runner control plane",
 	"POST /api/v2/runner/jobs/{id}/complete":         "the runner control plane",
 	"POST /api/v2/runner/jobs/{id}/events":           "the runner control plane",
 	"POST /api/v2/runner/jobs/{id}/output":           "the runner control plane",
@@ -45,6 +54,7 @@ var byDesign = map[string]string{
 	"GET /api/v2/runner/jobs/{id}/status":            "the runner control plane",
 	"GET /api/v2/runner/jobs/{id}/artifacts":         "the runner control plane",
 	"GET /api/v2/runner/jobs/{id}/playbook-snapshot": "the runner control plane",
+	"POST /api/v2/runner/jobs/{id}/snapshot":         "the runner control plane",
 
 	// Webhook receivers, in the format the sender defines.
 	"POST /api/v2/vcs-connections/azure-devops/webhook": "Azure DevOps service hook deliveries",

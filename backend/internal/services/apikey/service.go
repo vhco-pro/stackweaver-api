@@ -210,7 +210,7 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 
 	// Create the API key record
 	apiKey := &models.APIKey{
-		UserID:         userID,
+		UserID:         &userID,
 		Name:           name,
 		Kind:           models.APIKeyKindOrg,
 		KeyHash:        keyHash,
@@ -270,7 +270,7 @@ func (s *Service) CreateUserTokenWithScopes(userID uuid.UUID, name string, expir
 	}
 
 	apiKey := &models.APIKey{
-		UserID:    userID,
+		UserID:    &userID,
 		Name:      name,
 		Kind:      models.APIKeyKindUser,
 		KeyHash:   keyHash,
@@ -315,14 +315,16 @@ func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name stri
 		"runner:" + runnerID.String() + ":jobs",
 	}
 
+	expiresAt := time.Now().Add(RunnerTokenTTL)
 	apiKey := &models.APIKey{
-		UserID:         userID,
+		UserID:         &userID,
 		Name:           name,
 		Kind:           models.APIKeyKindOrg,
 		KeyHash:        keyHash,
 		KeyPrefix:      GetKeyPrefix(key),
 		Scopes:         scopes,
 		OrganizationID: &orgID,
+		ExpiresAt:      &expiresAt,
 	}
 
 	if err := s.apiKeyRepo.Create(apiKey); err != nil {
@@ -330,6 +332,26 @@ func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name stri
 	}
 
 	return apiKey, key, nil
+}
+
+// RunnerTokenTTL is how long a runner token lives without a heartbeat (#933, D1). Every heartbeat
+// past half of it renews it (RenewRunnerToken), so a running launcher never sees it expire, while
+// the token of a runner that stopped calling dies on its own.
+const RunnerTokenTTL = 24 * time.Hour
+
+// RenewRunnerToken extends a runner token to RunnerTokenTTL from now once less than half of that
+// remains, so a heartbeat costs a write at most twice a day.
+func (s *Service) RenewRunnerToken(key *models.APIKey) error {
+	if key == nil || key.ID == uuid.Nil {
+		return nil
+	}
+	if key.ExpiresAt != nil && time.Until(*key.ExpiresAt) > RunnerTokenTTL/2 {
+		return nil
+	}
+	if err := s.apiKeyRepo.SetExpiresAt(key.ID, time.Now().Add(RunnerTokenTTL)); err != nil {
+		return fmt.Errorf("renewing runner token %s: %w", key.ID, err)
+	}
+	return nil
 }
 
 // orgTokenName is the display name given to every organization authentication token
@@ -360,7 +382,7 @@ func (s *Service) CreateOrganizationToken(userID, orgID uuid.UUID, expiresAt *ti
 	}
 
 	apiKey := &models.APIKey{
-		UserID:         userID,
+		UserID:         &userID,
 		Name:           orgTokenName,
 		Kind:           models.APIKeyKindOrg,
 		KeyHash:        keyHash,
@@ -418,7 +440,7 @@ func (s *Service) CreateAuditTrailToken(userID, orgID uuid.UUID, expiresAt *time
 	}
 
 	apiKey := &models.APIKey{
-		UserID:         userID,
+		UserID:         &userID,
 		Name:           auditTokenName,
 		Kind:           models.APIKeyKindOrg,
 		KeyHash:        keyHash,
@@ -478,7 +500,7 @@ func (s *Service) CreateTeamToken(userID, teamID, orgID uuid.UUID, expiresAt *ti
 	}
 
 	apiKey := &models.APIKey{
-		UserID:         userID,
+		UserID:         &userID,
 		Name:           teamTokenName,
 		Kind:           models.APIKeyKindOrg,
 		KeyHash:        keyHash,
@@ -529,6 +551,38 @@ func (s *Service) CreateAgentToken(userID, poolID, orgID uuid.UUID, description 
 	return apiKey, key, nil
 }
 
+// JIT registration token lifetimes (#933, D11): long enough for an operator to start the pod that
+// presents it, short enough that a leaked one is worth little.
+const (
+	DefaultJITTokenTTL = 10 * time.Minute
+	MaxJITTokenTTL     = time.Hour
+)
+
+// CreateJITToken mints a just-in-time registration token for one pool: an agent token that
+// registers one launcher once (IsJITToken) and expires after ttl, clamped to MaxJITTokenTTL.
+// It returns the stored key and the plaintext, shown once.
+func (s *Service) CreateJITToken(userID, poolID, orgID uuid.UUID, ttl time.Duration) (*models.APIKey, string, error) {
+	if ttl <= 0 {
+		ttl = DefaultJITTokenTTL
+	}
+	ttl = min(ttl, MaxJITTokenTTL)
+	apiKey, key, err := newAgentToken(userID, poolID, orgID, "just-in-time registration")
+	if err != nil {
+		return nil, "", err
+	}
+	expires := time.Now().UTC().Add(ttl)
+	apiKey.IsJITToken, apiKey.ExpiresAt = true, &expires
+	if err := s.apiKeyRepo.Create(apiKey); err != nil {
+		return nil, "", fmt.Errorf("storing the just-in-time token: %w", err)
+	}
+	return apiKey, key, nil
+}
+
+// UseJITToken uses a just-in-time registration token up, reporting whether it was still unused.
+func (s *Service) UseJITToken(id uuid.UUID) (bool, error) {
+	return s.apiKeyRepo.UseJITToken(id)
+}
+
 // newAgentToken builds (but does not store) an agent token record and returns it with its plaintext.
 func newAgentToken(userID, poolID, orgID uuid.UUID, description string) (*models.APIKey, string, error) {
 	key, err := GenerateAPIKey()
@@ -542,7 +596,7 @@ func newAgentToken(userID, poolID, orgID uuid.UUID, description string) (*models
 	}
 
 	return &models.APIKey{
-		UserID:         userID,
+		UserID:         &userID,
 		Name:           description,
 		Kind:           models.APIKeyKindOrg,
 		KeyHash:        keyHash,
@@ -649,7 +703,7 @@ func (s *Service) GetAPIKey(id uuid.UUID, userID uuid.UUID) (*models.APIKey, err
 	}
 
 	// Verify ownership
-	if apiKey.UserID != userID {
+	if apiKey.UserID == nil || *apiKey.UserID != userID {
 		return nil, fmt.Errorf("API key not found")
 	}
 
@@ -664,7 +718,7 @@ func (s *Service) DeleteAPIKey(id uuid.UUID, userID uuid.UUID) error {
 		return err
 	}
 
-	if apiKey.UserID != userID {
+	if apiKey.UserID == nil || *apiKey.UserID != userID {
 		return fmt.Errorf("API key not found")
 	}
 

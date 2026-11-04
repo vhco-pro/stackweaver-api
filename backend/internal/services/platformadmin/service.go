@@ -89,40 +89,49 @@ func Status(u *models.User) (admin, declared bool) {
 // effective on the next request. A refused request gets 404, as TFE answers a non-administrator,
 // and Require returns false.
 func (s *Service) Require(c *gin.Context) (*models.User, bool) {
-	deny := func(userID any, reason string) (*models.User, bool) {
+	user, reason := s.Check(c)
+	if user == nil {
+		userID, _ := c.Get("user_id")
 		logger.Warnf("platform admin: refused %s %s for user %v: %s", c.Request.Method, c.FullPath(), userID, reason)
 		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
 		return nil, false
 	}
-	userID, _ := c.Get("user_id")
+	return user, true
+}
+
+// Check is the platform administrator verdict without a response (#933, D9): the same
+// auth-method, token-kind, platform:admin-scope and flag test Require applies, for a handler that
+// gates one field of a request and answers the refusal itself. It returns the administrator, or
+// nil and the reason the caller is not one.
+func (s *Service) Check(c *gin.Context) (*models.User, string) {
 	switch method := c.GetString("auth_method"); method {
 	case "session":
 	case "api_key":
 		// Only a user token that carries platform:admin; an organization-bound key is refused
 		// by its kind before its scopes or its owner are looked at.
 		if kind := c.GetString("token_kind"); kind != models.APIKeyKindUser {
-			return deny(userID, fmt.Sprintf("a %q token cannot act as a platform administrator", kind))
+			return nil, fmt.Sprintf("a %q token cannot act as a platform administrator", kind)
 		}
 		raw, _ := c.Get("api_key_scopes")
 		scopes, _ := raw.([]string)
 		checker, err := apikey.NewScopeChecker(scopes)
 		if err != nil || !checker.HasPlatformAdmin() {
-			return deny(userID, "the token does not carry the platform:admin scope")
+			return nil, "the token does not carry the platform:admin scope"
 		}
 	default:
-		return deny(userID, fmt.Sprintf("identity %q cannot act as a platform administrator", method))
+		return nil, fmt.Sprintf("identity %q cannot act as a platform administrator", method)
 	}
 	if s.callers == nil {
-		return deny(userID, "no caller resolver")
+		return nil, "no caller resolver"
 	}
 	user, err := s.callers.GetUserFromContext(c)
 	if err != nil || user == nil {
-		return deny(userID, "caller not found")
+		return nil, "caller not found"
 	}
 	if admin, _ := Status(user); !admin {
-		return deny(user.ID, "not a platform administrator")
+		return nil, "not a platform administrator"
 	}
-	return user, true
+	return user, ""
 }
 
 // IsPlatformAdmin reports whether the user is a platform administrator, for callers that shape a

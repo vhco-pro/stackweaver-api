@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -69,9 +70,9 @@ func setupRunnerAuthzFixture(t *testing.T) *runnerAuthzFixture {
 	poolB := &models.AgentPool{ID: uuid.New(), OrganizationID: orgB.ID, Name: "poolB-" + sfx}
 	wsA := &models.Workspace{ID: "ws-" + sfx + "0000000", ProjectID: projA.ID, Name: "wsA", AgentPoolID: &poolA.ID}
 
-	runnerA1 := &models.Runner{ID: uuid.New(), OrganizationID: orgA.ID, AgentPoolID: poolA.ID, Name: "a1-" + sfx}
-	runnerA2 := &models.Runner{ID: uuid.New(), OrganizationID: orgA.ID, AgentPoolID: poolA.ID, Name: "a2-" + sfx}
-	runnerB1 := &models.Runner{ID: uuid.New(), OrganizationID: orgB.ID, AgentPoolID: poolB.ID, Name: "b1-" + sfx}
+	runnerA1 := &models.Runner{ID: uuid.New(), OrganizationID: new(orgA.ID), AgentPoolID: new(poolA.ID), Name: "a1-" + sfx}
+	runnerA2 := &models.Runner{ID: uuid.New(), OrganizationID: new(orgA.ID), AgentPoolID: new(poolA.ID), Name: "a2-" + sfx}
+	runnerB1 := &models.Runner{ID: uuid.New(), OrganizationID: new(orgB.ID), AgentPoolID: new(poolB.ID), Name: "b1-" + sfx}
 
 	runA := &models.Run{ID: "run-" + sfx + "0000000", WorkspaceID: wsA.ID, AgentPoolID: &poolA.ID, RunnerID: &runnerA1.ID, Status: models.RunStatusPlanning}
 	runUnassigned := &models.Run{ID: "run-" + sfx + "1111111", WorkspaceID: wsA.ID, AgentPoolID: &poolA.ID, Status: models.RunStatusPending}
@@ -265,5 +266,74 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.want, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestRunnerAuthz_PoollessRunRefused pins that an OpenTofu run with no pool is refused like a
+// pool-less Ansible job (#933, D1, D9): every run reaching a runner carries a pool, the hosted one
+// by default, so a run without one is no runner's business.
+func TestRunnerAuthz_PoollessRunRefused(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	r, _ := f.attemptRouter()
+	ws := &models.Workspace{ProjectID: f.projectA, Name: "poolless-ws-" + uuid.NewString()[:8]}
+	if err := f.db.Create(ws).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := &models.Run{WorkspaceID: ws.ID, Status: models.RunStatusPending, Operation: models.RunOperationPlanOnly}
+	if err := f.db.Create(run).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		f.db.Where("id = ?", run.ID).Delete(&models.Run{})
+		f.db.Where("id = ?", ws.ID).Delete(&models.Workspace{})
+	})
+	if rec := runnerDo(t, r, "a1", http.MethodGet, "/api/v2/runner/jobs/"+run.ID+"/status", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("status of a pool-less run: %d, want 403", rec.Code)
+	}
+	if rec := runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/jobs/"+run.ID+"/start", map[string]any{"runner_id": f.runnerA1.ID.String()}); rec.Code != http.StatusForbidden {
+		t.Errorf("claiming a pool-less run: %d, want 403", rec.Code)
+	}
+}
+
+// TestRunnerAuthz_HeartbeatRenewsTheRunnerToken pins that a runner token expires unless its runner
+// keeps heartbeating (#933, D1): it is minted with RunnerTokenTTL and a heartbeat renews it once
+// half of that has passed.
+func TestRunnerAuthz_HeartbeatRenewsTheRunnerToken(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	r, svc := f.credentialRouter()
+	sfx := uuid.NewString()[:8]
+	owner := &models.User{ID: uuid.New(), ZitadelSubject: "renewal-" + sfx, Email: "renewal-" + sfx + "@test.local"}
+	if err := f.db.Create(owner).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Where("id = ?", owner.ID).Delete(&models.User{}) })
+	key, _, err := svc.CreateRunnerToken(owner.ID, f.runnerA1.ID, f.orgA, "renewal-"+sfx)
+	if err == nil {
+		t.Cleanup(func() { f.db.Where("id = ?", key.ID).Delete(&models.APIKey{}) })
+	}
+	if err != nil {
+		t.Fatalf("minting a runner token: %v", err)
+	}
+	if key.ExpiresAt == nil || time.Until(*key.ExpiresAt) < apikey.RunnerTokenTTL-time.Minute {
+		t.Fatalf("a new runner token expires at %v, want about %s from now", key.ExpiresAt, apikey.RunnerTokenTTL)
+	}
+
+	// Most of its life has passed.
+	soon := time.Now().Add(time.Hour)
+	if err := f.db.Model(&models.APIKey{}).Where("id = ?", key.ID).Update("expires_at", soon).Error; err != nil {
+		t.Fatal(err)
+	}
+	key.ExpiresAt = &soon
+	f.keys["renew"] = key
+
+	if rec := runnerDo(t, r, "renew", http.MethodPost, "/api/v2/runner/heartbeat", map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "online"}); rec.Code != http.StatusOK {
+		t.Fatalf("heartbeat: %d (%s)", rec.Code, rec.Body.String())
+	}
+	var stored models.APIKey
+	if err := f.db.First(&stored, "id = ?", key.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.ExpiresAt == nil || time.Until(*stored.ExpiresAt) < apikey.RunnerTokenTTL-time.Minute {
+		t.Errorf("after the heartbeat the token expires at %v, want it renewed to about %s from now", stored.ExpiresAt, apikey.RunnerTokenTTL)
 	}
 }

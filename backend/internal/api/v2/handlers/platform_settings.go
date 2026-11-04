@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -28,6 +29,8 @@ func NewPlatformSettingsHandlerV2(admins *platformadmin.Service, authService *au
 // PlatformSettingsAttributes is the platform-settings resource.
 type PlatformSettingsAttributes struct {
 	OrganizationCreation string `json:"organization-creation"`
+	// Deployment is the deployment's runner settings (#933, D15).
+	Deployment DeploymentSettingsAttributes `json:"deployment"`
 }
 
 // Show returns the platform settings.
@@ -42,6 +45,7 @@ func (h *PlatformSettingsHandlerV2) Show(c *gin.Context) {
 		Type: "platform-settings",
 		Attributes: PlatformSettingsAttributes{
 			OrganizationCreation: string(h.admins.OrganizationCreation()),
+			Deployment:           deploymentSettings(os.Getenv, os.ReadFile),
 		},
 	})
 }

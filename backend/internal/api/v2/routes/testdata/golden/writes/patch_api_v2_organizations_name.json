@@ -7,13 +7,17 @@
       "data": {
         "attributes": {
           "ansible-job-retention-days": 30,
+          "ansible-run-image-id": "\u003cuuid\u003e",
           "assessments-enforced": true,
+          "cache-size-limit": 21474836480,
           "collaborator-auth-policy": "two_factor_mandatory",
           "cost-estimation-enabled": true,
           "default-execution-mode": "agent",
           "description": "Updated by the golden write harness",
           "email": "platform-team@example.com",
-          "speculative-plan-management-enabled": false
+          "identity-binding-id": "\u003cuuid\u003e",
+          "speculative-plan-management-enabled": false,
+          "tofu-run-image-id": "\u003cuuid\u003e"
         },
         "relationships": {
           "default-agent-pool": {
@@ -52,8 +56,16 @@
                   "type": "integer",
                   "nullable": true
                 },
+                "ansible-run-image-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "assessments-enforced": {
                   "type": "boolean",
+                  "nullable": true
+                },
+                "cache-size-limit": {
+                  "type": "integer",
                   "nullable": true
                 },
                 "collaborator-auth-policy": {
@@ -77,8 +89,16 @@
                 "email": {
                   "type": "string"
                 },
+                "identity-binding-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "name": {
                   "type": "string"
+                },
+                "run-timeout": {
+                  "type": "integer",
+                  "nullable": true
                 },
                 "send-passing-statuses-for-untriggered-speculative-plans": {
                   "type": "boolean",
@@ -86,6 +106,10 @@
                 },
                 "speculative-plan-management-enabled": {
                   "type": "boolean",
+                  "nullable": true
+                },
+                "tofu-run-image-id": {
+                  "type": "string",
                   "nullable": true
                 },
                 "user-tokens-enabled": {
@@ -139,7 +163,9 @@
         "allow-force-delete-workspaces": false,
         "ansible-adhoc-modules": "",
         "ansible-job-retention-days": 30,
+        "ansible-run-image-id": "\u003cuuid\u003e",
         "assessments-enforced": true,
+        "cache-size-limit": 21474836480,
         "collaborator-auth-policy": "two_factor_mandatory",
         "cost-estimation-enabled": true,
         "created-at": "\u003ctimestamp\u003e",
@@ -148,6 +174,7 @@
         "email": "platform-team@example.com",
         "enforce-hyok": false,
         "external-id": "\u003cuuid\u003e",
+        "identity-binding-id": "\u003cuuid\u003e",
         "max-ttl-enabled": false,
         "name": "demo",
         "owners-team-saml-role-id": "",
@@ -185,11 +212,13 @@
           "can-update-ssh-keys": true,
           "can-view-explorer": true
         },
+        "run-timeout": 0,
         "send-passing-statuses-for-untriggered-speculative-plans": false,
         "session-remember": null,
         "session-timeout": null,
         "speculative-plan-management-enabled": false,
         "stacks-enabled": false,
+        "tofu-run-image-id": "\u003cuuid\u003e",
         "two-factor-conformant": false,
         "updated-at": "\u003ctimestamp\u003e",
         "user-tokens-enabled": true

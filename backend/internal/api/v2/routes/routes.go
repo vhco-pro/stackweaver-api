@@ -5,8 +5,11 @@ package routes
 import (
 	"context"
 	"crypto/rand"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
@@ -14,10 +17,12 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	ansibleHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible"
 	terraformHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/openapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/cachejanitor"
 	"github.com/michielvha/stackweaver/backend/internal/services/logtoken"
 	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
@@ -36,7 +41,10 @@ import (
 	"github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/services/wakeup"
+	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/storage"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -176,6 +184,7 @@ func SetupV2Routes(
 	orgHandler.SetPlatformAdmin(platformAdmin)
 	tagBindingRepo := repository.NewTagBindingRepository(db)
 	projectHandler := handlers.NewProjectHandlerV2(projectRepo, orgRepo, teamRepo, agentPoolRepo, tagBindingRepo, authService, activityService, rbacService)
+	projectHandler.SetLevelRefs(levelrefs.New(db))
 	tagBindingHandler := handlers.NewTagBindingHandlerV2(tagBindingRepo, projectRepo, workspaceRepo, orgRepo, authService, rbacService)
 	teamHandler := handlers.NewTeamHandlerV2(teamRepo, orgRepo, authService, rbacService)
 	teamWorkspaceAccessHandler := handlers.NewTeamWorkspaceAccessHandlerV2(teamRepo, workspaceRepo, projectRepo, orgRepo, authService, rbacService, orgResolver)
@@ -285,6 +294,13 @@ func SetupV2Routes(
 	// Reference: go-tfe/agent_pool.go, terraform-provider-tfe agent_pool resources
 	runnerRepo := repository.NewRunnerRepository(db)
 	agentPoolHandler := handlers.NewAgentPoolHandlerV2(agentPoolRepo, runnerRepo, orgRepo, authService, rbacService)
+	agentPoolHandler.SetPlatformAdmin(platformAdmin)
+	hostedCapacityHandler := handlers.NewHostedCapacityHandler(orgRepo, agentPoolRepo, repository.NewRunRepository(db), authService, rbacService)
+	v2.GET("/organizations/:name/hosted-capacity", hostedCapacityHandler.Get)
+	// The syncs of the platform's control plane (#933, D2, D15).
+	workItemHandler := handlers.NewWorkItemHandler(orgRepo, repository.NewWorkItemRepository(db), authService, rbacService)
+	v2.GET("/organizations/:name/work-items", workItemHandler.List)
+	v2.GET("/work-items/:id", workItemHandler.Get)
 	orgAgentPools := v2.Group("/organizations/:name/agent-pools")
 	{
 		orgAgentPools.GET("", agentPoolHandler.List)
@@ -299,6 +315,9 @@ func SetupV2Routes(
 		// middleware.RunnerAuth, which requires a token bound to one runner and
 		// rejects registration keys outright.
 		agentPools.GET("/:id/queue-depth", agentPoolHandler.QueueDepth)
+		// A one-time, short-lived registration token for a single-job launcher (#933, D11),
+		// authorized like the queue depth: the pool's own operator credential.
+		agentPools.POST("/:id/jit-token", agentPoolHandler.JITToken)
 		agentPools.GET("/:id", agentPoolHandler.GetByID)
 		agentPools.PATCH("/:id", agentPoolHandler.Update)
 		agentPools.DELETE("/:id", agentPoolHandler.Delete)
@@ -376,6 +395,8 @@ func SetupV2Routes(
 		runners.GET("/:id", runnerHandler.GetByID)
 		runners.PATCH("/:id", runnerHandler.Update)
 		runners.DELETE("/:id", runnerHandler.Delete)
+		// Ask the runner's launcher to drain (#933, D11).
+		runners.POST("/:id/actions/drain", runnerHandler.Drain)
 	}
 
 	// Ansible Config (ansible.cfg management at org/project scope)
@@ -431,6 +452,19 @@ func SetupV2Routes(
 	v2.GET("/workspaces/:id/tag-bindings", tagBindingHandler.GetWorkspaceTagBindings)
 	v2.PATCH("/workspaces/:id/tag-bindings", tagBindingHandler.PatchWorkspaceTagBindings)
 	v2.GET("/workspaces/:id/effective-tag-bindings", tagBindingHandler.GetWorkspaceEffectiveTagBindings)
+
+	// Effective settings (#933, D0): every multi-level setting of a launching object, resolved by the
+	// level rule, with the level each value came from.
+	effectiveSettingsHandler := handlers.NewEffectiveSettingsHandlerV2(
+		workspaceRepo,
+		repository.NewAnsibleJobTemplateRepository(db),
+		repository.NewAnsibleInventorySourceRepository(db),
+		repository.NewAnsibleInventoryRepository(db),
+		projectRepo, orgRepo, authService, rbacService,
+	)
+	v2.GET("/workspaces/:id/effective-settings", effectiveSettingsHandler.GetWorkspace)
+	v2.GET("/ansible/job-templates/:id/effective-settings", effectiveSettingsHandler.GetJobTemplate)
+	v2.GET("/ansible/inventory-sources/:source_id/effective-settings", effectiveSettingsHandler.GetInventorySource)
 
 	// Notification configurations (tfe_notification_configuration): workspace run-notifications with
 	// real delivery (generic HMAC webhook / Slack / Teams). Delivery fires from the orchestrator poll.
@@ -557,6 +591,11 @@ func SetupV2Routes(
 	if err != nil {
 		logger.Warnf("Failed to initialize storage: %v (storage features will be limited)", err)
 	}
+	// Configuration tarballs and playbook snapshots are sealed at rest by the one encrypting
+	// helper, whichever handler writes or reads them (#933, D2, AC73).
+	if storageClient != nil {
+		storageClient = storage.NewSealed(storageClient, atRestCrypto, storage.ArtifactSealRules()...)
+	}
 	// AUD-053: a delete prunes the objects of what it removes: state files, run logs, plans,
 	// configuration tarballs, playbook content and registry artifacts.
 	if storageClient != nil {
@@ -575,6 +614,8 @@ func SetupV2Routes(
 		logger.Warnf("Failed to initialize Redis queue for log streaming: %v (log streaming will fall back to MinIO)", logQueueErr)
 	} else {
 		logBufferService = logbuffer.NewRedisLogBuffer(redisLogQueue.Client())
+		// Every run this API creates wakes its pool's launchers once committed (#933, AC19).
+		repository.SetRunWaker(wakeup.PoolWaker(redisLogQueue.Client()))
 	}
 
 	// Initialize run handler with storage client (for logs endpoint)
@@ -594,6 +635,7 @@ func SetupV2Routes(
 	{
 		tfRuns.POST("", runHandler.Create)
 		tfRuns.GET("/:id", runHandler.Get)
+		tfRuns.GET("/:id/placement", runHandler.GetPlacement)
 		tfRuns.GET("/:id/plan", runHandler.GetPlan)
 		tfRuns.GET("/:id/outputs", runHandler.GetOutputs)
 		tfRuns.GET("/:id/logs", runHandler.GetLogs)               // Generic endpoint (backward compatible)
@@ -898,6 +940,29 @@ func SetupV2Routes(
 	// runner registration handler enforces the pool binding. Create/List are pool-scoped; Read/Delete
 	// are by token id at the top-level /authentication-tokens/:id (go-tfe AgentTokens.Read/Delete).
 	agentTokenHandler := handlers.NewAgentTokenHandlerV2(tokenAPIKeyService, authService, rbacService, agentPoolRepo)
+	// Identity bindings a customer pool offers its job pods (#933, D8).
+	identityBindingHandler := handlers.NewIdentityBindingHandler(agentPoolRepo, repository.NewIdentityBindingRepository(db), authService, rbacService)
+	v2.GET("/agent-pools/:id/identity-bindings", identityBindingHandler.List)
+	v2.POST("/agent-pools/:id/identity-bindings", identityBindingHandler.Create)
+	v2.GET("/identity-bindings/:id", identityBindingHandler.Get)
+	v2.PATCH("/identity-bindings/:id", identityBindingHandler.Update)
+	v2.DELETE("/identity-bindings/:id", identityBindingHandler.Delete)
+	// Registry pull Secrets per customer pool (#933, D8, D15): created by the pool's launcher or
+	// referenced by name, under the same clash and hand-over rule as identity bindings.
+	pullSecretHandler := handlers.NewPullSecretHandler(agentPoolRepo, repository.NewPullSecretRepository(db), db, authService, rbacService)
+	v2.GET("/agent-pools/:id/pull-secrets", pullSecretHandler.List)
+	v2.POST("/agent-pools/:id/pull-secrets", pullSecretHandler.Create)
+	v2.GET("/pull-secrets/:id", pullSecretHandler.Get)
+	v2.PATCH("/pull-secrets/:id", pullSecretHandler.Update)
+	v2.DELETE("/pull-secrets/:id", pullSecretHandler.Delete)
+
+	// An organization's run images (#933, D6, D15).
+	runImageHandler := handlers.NewRunImageHandler(db, repository.NewOrganizationRepository(db), authService, rbacService)
+	v2.GET("/organizations/:name/run-images", runImageHandler.List)
+	v2.POST("/organizations/:name/run-images", runImageHandler.Create)
+	v2.GET("/run-images/:id", runImageHandler.Get)
+	v2.PATCH("/run-images/:id", runImageHandler.Update)
+	v2.DELETE("/run-images/:id", runImageHandler.Delete)
 	v2.POST("/agent-pools/:id/authentication-tokens", agentTokenHandler.Create)
 	v2.GET("/agent-pools/:id/authentication-tokens", agentTokenHandler.List)
 	v2.GET("/authentication-tokens/:id", agentTokenHandler.ReadByID)
@@ -1017,7 +1082,7 @@ func SetupV2Routes(
 				vcsRegistry,
 				registryPublishingHandler,
 				storageClient,
-				ansibleQueueForWebhook,
+				workItemService(db, ansibleQueueForWebhook),
 			)
 			// Push events also launch templates that opted into webhook launches
 			appHandler.SetTemplateLauncher(
@@ -1066,7 +1131,7 @@ func SetupV2Routes(
 				vcsRegistry,
 				registryPublishingHandler,
 				storageClient,
-				ansibleQueueForInstall,
+				workItemService(db, ansibleQueueForInstall),
 			)
 			// The App's user authorization returns to the SPA's /vcs/github/authorized page.
 			appHandler.SetAppURL(os.Getenv("STACKWEAVER_APP_URL"))
@@ -1114,7 +1179,7 @@ func SetupV2Routes(
 				vcsRegistry,
 				registryPublishingHandler,
 				storageClient,
-				ansibleQueueForADO,
+				workItemService(db, ansibleQueueForADO),
 			)
 			// Push events also launch templates that opted into webhook launches
 			adoHandler.SetTemplateLauncher(
@@ -1192,6 +1257,7 @@ func SetupV2Routes(
 		registryV1Modules.GET("/:namespace/:name/:provider", moduleHandler.GetModule)
 		registryV1Modules.GET("/:namespace/:name/:provider/:version", moduleHandler.GetModuleVersion)
 		registryV1Modules.GET("/:namespace/:name/:provider/:version/download", moduleHandler.DownloadModule)
+		registryV1Modules.GET("/:namespace/:name/:provider/:version/archive.tar.gz", moduleHandler.DownloadModuleArchive)
 		registryV1Modules.GET("/:namespace/:name/:provider/download", moduleHandler.DownloadModule)
 	}
 
@@ -1392,15 +1458,9 @@ func SetupV2Routes(
 	// Initialize inventory service for generating proper Ansible inventory content
 	runnerInventoryService := ansible.NewInventoryService(ansibleInventoryRepo, orgRepo)
 
-	// A cached-mode job that reaches a self-hosted runner before its playbook has a
-	// snapshot clones once, and the artifacts endpoint queues a sync to repair the cache.
-	// Assign the queue on success only: a nil *RedisQueue stored in a queue.Queue is a
-	// typed-nil that passes != nil checks and panics on Enqueue.
-	var playbookSyncQueue queue.Queue
-	if ansibleRedisQueue != nil {
-		playbookSyncQueue = ansibleRedisQueue
-	}
-	playbookSyncRequester := ansible.NewPlaybookSyncRequester(vcsRegistry, vcsConnectionRepo, ansiblePlaybookRepo, playbookSyncQueue)
+	// A cached-mode job that reaches a runner before its playbook has a snapshot makes the
+	// artifacts endpoint request a sync work item to repair the cache (#933, D2).
+	playbookSyncRequester := ansible.NewPlaybookSnapshotRequester(ansibleServices.WorkItems, ansiblePlaybookRepo)
 
 	runnerAgentHandler := handlers.NewRunnerAgentHandlerWithRepos(
 		runnerRepo, runnerJobExecRepo, agentPoolRepo, tokenAPIKeyService,
@@ -1408,6 +1468,7 @@ func SetupV2Routes(
 		ansibleCredentialRepo, ansibleConfigRepo, runnerInventoryService, vcsRegistry, runnerCryptoSvc,
 		variableService, storageClient, playbookSyncRequester, db,
 	)
+	runnerAgentHandler.SetWorkItems(ansible.NewWorkItemRuntime(db, runnerInventoryService, ansibleServices.InventorySources))
 
 	// Wire OIDC workload identity services for self-hosted runners
 	// This allows the artifacts endpoint to generate OIDC tokens for runners
@@ -1430,12 +1491,33 @@ func SetupV2Routes(
 	// AUD-028: stream agent job output through the shared Redis log buffer (O(1) APPEND) when
 	// available, copied to MinIO once at completion, instead of the O(n²) object-storage append.
 	runnerAgentHandler.SetLogBuffer(logBufferService)
+	// The platform's private module registry, addressed by the API's public host: a job token's
+	// artifacts carry a per-job token for it (#933, D2).
+	if host := registryHostFromEnv(); host != "" {
+		runnerAgentHandler.SetRegistryHost(host)
+	}
+	// The deployment's mirror, proxy and CA block, served to every job (#933, D2).
+	runnerAgentHandler.SetMirror(settings.DeploymentMirror())
+	// images.allowed_registries, checked at job start as it is when a run image is saved (#933, D6).
+	runnerAgentHandler.SetAllowedRegistries(settings.AllowedRegistries(os.Getenv))
+	// The per-organization caches stay under their cache_size_limit (#933, D7, AC36). Every API
+	// replica sweeps; a sweep that races another deletes nothing twice.
+	if storageClient != nil && os.Getenv("CACHE_JANITOR") != "off" {
+		(&cachejanitor.Janitor{DB: db, Store: storageClient, DefaultLimit: settings.DeploymentCacheSizeLimit(os.Getenv), PromotionRetention: 7 * 24 * time.Hour}).Start(context.Background(), time.Hour)
+	}
+	// The long-poll heartbeat, woken across replicas through Redis (#933, D3, D10).
+	if redisLogQueue != nil {
+		hub := wakeup.NewHub(redisLogQueue.Client())
+		hub.Start(context.Background())
+		runnerAgentHandler.SetWakeup(hub, redisLogQueue.Client(), longPollMaxFromEnv())
+	}
 
 	runnerAgent := v2.Group("/runner")
+	runnerRateLimit := middleware.RunnerPrincipalRateLimit(middleware.RunnerRateBudgetsFromEnv())
 	{
 		// Registration bootstraps the runner identity, so it stays on the org-scoped
 		// runner:register key path (the runner has no per-runner token yet).
-		runnerAgent.POST("/register", runnerAgentHandler.Register)
+		runnerAgent.POST("/register", runnerRateLimit, runnerAgentHandler.Register)
 
 		// AUD-001: every other runner control-plane route requires a runner-scoped
 		// token (minted at registration). RunnerAuth authenticates the caller as one
@@ -1443,22 +1525,42 @@ func SetupV2Routes(
 		// then bind each job to that runner's org/pool/assignment. Registered after
 		// /register so the middleware does not apply to it.
 		runnerAuthed := runnerAgent.Group("")
-		runnerAuthed.Use(middleware.RunnerAuth(runnerRepo))
+		runnerAuthed.Use(middleware.RunnerAuth(runnerRepo), runnerRateLimit)
 		{
-			runnerAuthed.POST("/heartbeat", runnerAgentHandler.Heartbeat)
-			runnerAuthed.POST("/deregister", runnerAgentHandler.Deregister)
-			runnerAuthed.POST("/jobs/:id/start", runnerAgentHandler.JobStart)
+			// A job token (#933, D1) reaches one job's data and nothing that acts for the runner.
+			runnerAuthed.POST("/heartbeat", middleware.RequireRunnerToken(), runnerAgentHandler.Heartbeat)
+			runnerAuthed.GET("/queue-depth", middleware.RequireRunnerToken(), runnerAgentHandler.HostedQueueDepth)
+			runnerAuthed.POST("/deregister", middleware.RequireRunnerToken(), runnerAgentHandler.Deregister)
+			// The runner's own token asks for its drain, as SIGTERM would (#933, D11).
+			runnerAuthed.POST("/drain", middleware.RequireRunnerToken(), runnerAgentHandler.Drain)
+			runnerAuthed.POST("/jobs/:id/start", middleware.RequireRunnerToken(), runnerAgentHandler.JobStart)
+			runnerAuthed.POST("/jobs/:id/token", middleware.RequireRunnerToken(), runnerAgentHandler.JobToken)
 			runnerAuthed.POST("/jobs/:id/output", runnerAgentHandler.JobOutput)
 			// Playbook-preparation events (Galaxy install, source banner). The body is
 			// capped so a runner cannot push arbitrarily large stdout/stderr into the
 			// events table.
 			runnerAuthed.POST("/jobs/:id/events", middleware.MaxBodyBytes(1<<20), runnerAgentHandler.JobEvents)
-			runnerAuthed.POST("/jobs/:id/complete", runnerAgentHandler.JobComplete)
-			runnerAuthed.POST("/jobs/:id/state", runnerAgentHandler.UploadState)
-			runnerAuthed.GET("/jobs/:id/artifacts", runnerAgentHandler.GetJobArtifacts)
+			runnerAuthed.POST("/jobs/:id/complete", middleware.JobData(), runnerAgentHandler.JobComplete)
+			runnerAuthed.POST("/jobs/:id/state", middleware.JobData(), runnerAgentHandler.UploadState)
+			// The saved plan of a run's plan phase, applied as is by its apply phase (#933, D2).
+			runnerAuthed.POST("/jobs/:id/plan", middleware.JobData(), runnerAgentHandler.UploadPlan)
+			runnerAuthed.GET("/jobs/:id/plan", middleware.JobData(), runnerAgentHandler.DownloadPlan)
+			// An artifact too large to inline, served once per attempt (#933, D2).
+			runnerAuthed.GET("/jobs/:id/blob/*name", middleware.JobData(), runnerAgentHandler.GetJobBlob)
+			runnerAuthed.GET("/jobs/:id/artifacts", middleware.JobData(), runnerAgentHandler.GetJobArtifacts)
 			// The cached snapshot of the job's playbook, streamed from object storage.
-			runnerAuthed.GET("/jobs/:id/playbook-snapshot", runnerAgentHandler.GetPlaybookSnapshot)
+			runnerAuthed.GET("/jobs/:id/playbook-snapshot", middleware.JobData(), runnerAgentHandler.GetPlaybookSnapshot)
+			// The snapshot a playbook_snapshot work item captured (#933, D2, decision 18).
+			runnerAuthed.POST("/jobs/:id/snapshot", middleware.JobData(), runnerAgentHandler.UploadSnapshot)
 			runnerAuthed.GET("/jobs/:id/status", runnerAgentHandler.GetJobStatus)
+			// The per-organization cache (#933, D7): a launcher reads entries into its node-local copy
+			// and its populator writes verified ones; a job token reaches neither route, and reads its
+			// own organization's entries through its blob route.
+			runnerAuthed.GET("/cache/:kind/:sha256", middleware.RequireRunnerToken(), runnerAgentHandler.GetCacheEntry)
+			runnerAuthed.PUT("/cache/:kind/:sha256", middleware.RequireRunnerToken(), runnerAgentHandler.PutCacheEntry)
+			runnerAuthed.POST("/cache/promotions/:id/drop", middleware.RequireRunnerToken(), middleware.MaxBodyBytes(64<<10), runnerAgentHandler.DropCachePromotion)
+			// A run image's registry credential, for the launcher's pull and never a job (#933, D6).
+			runnerAuthed.GET("/images/:id/pull-credential", middleware.RequireRunnerToken(), runnerAgentHandler.GetPullCredential)
 		}
 	}
 
@@ -1520,7 +1622,53 @@ func newWebhookTemplateLaunchService(db *gorm.DB, q queue.Queue, vcsRegistry *vc
 		variableService,
 		q,
 	)
+	jobService.SetDeploymentRunTimeout(settings.DeploymentRunTimeout(os.Getenv))
 	jobService.SetInventorySourceRepo(repository.NewAnsibleInventorySourceRepository(db))
-	jobService.SetVCSResolver(vcsRegistry, vcsConnectionRepo)
+	jobService.SetWorkItems(workItemService(db, q))
 	return jobService
+}
+
+// workItemService builds the service the sync work items are created through (#933, D2), waking
+// launchers through q's Redis client when q is a Redis queue.
+func workItemService(db *gorm.DB, q queue.Queue) *ansible.WorkItemService {
+	var rdb *redis.Client
+	if rq, ok := q.(*queue.RedisQueue); ok && rq != nil {
+		rdb = rq.Client()
+	}
+	return ansible.NewWorkItemService(db, rdb)
+}
+
+// longPollMaxFromEnv caps a launcher heartbeat's wait: RUNNER_LONG_POLL_MAX_SECONDS, below the
+// idle timeout of every proxy between the launchers and the API; unset means the handler's default.
+func longPollMaxFromEnv() time.Duration {
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("RUNNER_LONG_POLL_MAX_SECONDS"))); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return 0
+}
+
+// registryHostFromEnv is the host module sources name the platform's private registry by.
+func registryHostFromEnv() string { return registryHostFrom(os.Getenv) }
+
+// registryHostFrom reads the registry host: STACKWEAVER_REGISTRY_HOST (a host or a URL), which the
+// chart sets from the API's public URL, else the host of STACKWEAVER_PUBLIC_URL or API_URL, else
+// that of STACKWEAVER_APP_URL, where a single-origin install serves the registry beside the SPA.
+// A job's registry token is minted for this host (#933, D2); with none, jobs get no token.
+func registryHostFrom(getenv func(string) string) string {
+	if v := strings.TrimSpace(getenv("STACKWEAVER_REGISTRY_HOST")); v != "" {
+		if !strings.Contains(v, "://") {
+			return strings.TrimSuffix(v, "/")
+		}
+		if u, err := url.Parse(v); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+	for _, name := range []string{"STACKWEAVER_PUBLIC_URL", "API_URL", "STACKWEAVER_APP_URL"} {
+		if v := strings.TrimSpace(getenv(name)); v != "" {
+			if u, err := url.Parse(v); err == nil && u.Host != "" {
+				return u.Host
+			}
+		}
+	}
+	return ""
 }

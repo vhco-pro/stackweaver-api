@@ -9,6 +9,7 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	ansibleHandlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/crypto"
@@ -18,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/core/services/oidc"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	vcs "github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/settings"
 	"gorm.io/gorm"
 )
 
@@ -26,6 +28,11 @@ import (
 type AnsibleRouteServices struct {
 	WorkflowEngine *ansible.WorkflowEngineService
 	JobService     *ansible.JobService
+	// WorkItems creates the sync work items (#933, D2).
+	WorkItems *ansible.WorkItemService
+	// InventorySources builds a dynamic source's sync command, with its credentials and OIDC
+	// services wired.
+	InventorySources *ansible.InventorySourceService
 }
 
 // SetupAnsibleWorkflowRoutes sets up workflow-specific routes (called after other repos are initialized)
@@ -131,9 +138,9 @@ func SetupAnsibleRoutes(
 
 	// Create job service with variable set support
 	jobService := ansible.NewJobServiceWithVariables(jobRepo, playbookRepo, inventoryRepo, templateRepo, projectRepo, variableService, redisQueue)
-	// Wire the VCS resolver so job launches pre-resolve a token-embedded playbook
-	// clone URL server-side (runner then needs no VCS OAuth credentials).
-	jobService.SetVCSResolver(vcsRegistry, vcsConnectionRepo)
+	jobService.SetDeploymentRunTimeout(settings.DeploymentRunTimeout(os.Getenv))
+	workItems := workItemService(db, redisQueue)
+	jobService.SetWorkItems(workItems)
 
 	// Initialize new repositories for inventory sources and schedules
 	inventorySourceRepo := repository.NewAnsibleInventorySourceRepository(db)
@@ -237,19 +244,21 @@ func SetupAnsibleRoutes(
 	variableSetHandlerForAnsible := handlers.NewVariableSetHandlerV2(variableSetRepoForAnsible, variableSetVariableRepoForAnsible, orgRepo, projectRepo, nil, templateRepo, authService, rbacService, variableService)
 
 	// Initialize Ansible Handlers
-	inventoryHandler := ansibleHandlers.NewInventoryHandler(inventoryService, inventoryRepo, orgRepo, projectRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo)
+	inventoryHandler := ansibleHandlers.NewInventoryHandler(inventoryService, inventoryRepo, orgRepo, projectRepo, authService, rbacService, workItems, vcsRegistry, vcsConnectionRepo)
 	hostHandler := ansibleHandlers.NewHostHandler(inventoryService, inventoryRepo, authService, rbacService)
 	groupHandler := ansibleHandlers.NewGroupHandler(inventoryService, inventoryRepo, authService, rbacService)
 	credentialHandler := ansibleHandlers.NewCredentialHandler(credentialService, orgRepo, projectRepo, authService, rbacService)
 	agentPoolRepo := repository.NewAgentPoolRepository(db)
-	playbookHandler := ansibleHandlers.NewPlaybookHandler(playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, redisQueue, vcsRegistry, vcsConnectionRepo, jobService)
+	playbookHandler := ansibleHandlers.NewPlaybookHandler(playbookRepo, templateRepo, jobRepo, scheduleRepo, projectRepo, orgRepo, authService, rbacService, workItems, vcsRegistry, vcsConnectionRepo, jobService)
 	playbookHandler.SetCredentialRepo(credentialRepo)
 	playbookHandler.SetAgentPoolRepo(agentPoolRepo)
 	jobHandler := ansibleHandlers.NewJobHandler(jobService, projectRepo, orgRepo, templateRepo, authService, rbacService)
 	adHocHandler := ansibleHandlers.NewAdHocHandler(inventoryRepo, orgRepo, credentialRepo, projectRepo, agentPoolRepo, jobService, authService, rbacService)
 
 	// Initialize new handlers
-	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, inventoryService, authService, rbacService, redisQueue)
+	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, inventoryService, authService, rbacService, workItems)
+	inventorySourceHandler.SetLevelRefs(levelrefs.New(db))
+	playbookHandler.SetLevelRefs(levelrefs.New(db))
 	inventorySyncHandler := ansibleHandlers.NewInventorySyncHandler(inventorySyncRepo, inventoryRepo, authService, rbacService)
 	scheduleHandler := ansibleHandlers.NewScheduleHandler(schedulerService, orgRepo, authService, rbacService)
 	collectionsHandler := ansibleHandlers.NewCollectionsHandler(jobService, authService, rbacService)
@@ -534,5 +543,5 @@ func SetupAnsibleRoutes(
 	// GET /api/v2/ansible/jobs/:id/collections
 	jobs.GET("/:id/collections", collectionsHandler.ListJobCollections)
 
-	return &AnsibleRouteServices{WorkflowEngine: workflowEngine, JobService: jobService}
+	return &AnsibleRouteServices{WorkflowEngine: workflowEngine, JobService: jobService, WorkItems: workItems, InventorySources: inventorySourceService}
 }

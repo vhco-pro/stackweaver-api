@@ -9,6 +9,33 @@
     "schema": {
       "type": "object",
       "properties": {
+        "placement": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "driver": {
+              "type": "string"
+            },
+            "identity_binding_id": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "image_digest": {
+              "type": "string"
+            },
+            "image_level": {
+              "type": "string"
+            },
+            "node": {
+              "type": "string"
+            },
+            "placement_id": {
+              "type": "string"
+            }
+          }
+        },
         "runner_id": {
           "type": "string"
         }
@@ -18,7 +45,7 @@
       ]
     },
     "schema_source": "type",
-    "bound_type": "handlers.JobStartRequest"
+    "bound_type": "runnercontract.JobStartRequest"
   },
   "status": 200,
   "response": {

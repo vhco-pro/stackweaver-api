@@ -1,0 +1,34 @@
+{
+  "method": "GET",
+  "path": "/api/v2/identity-bindings/:id",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "annotations": {
+          "eks.amazonaws.com/role-arn": "arn:aws:iam::123456789012:role/stackweaver-deploy"
+        },
+        "created-at": "\u003ctimestamp\u003e",
+        "declared-externally": false,
+        "external-manager": "",
+        "mechanism": "aws-irsa",
+        "name": "deploy",
+        "object-present": null,
+        "per-job-sa": false,
+        "reference": false,
+        "reported-at": null,
+        "service-account": "sw-identity-deploy"
+      },
+      "id": "\u003cuuid\u003e",
+      "relationships": {
+        "agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        }
+      },
+      "type": "identity-bindings"
+    }
+  }
+}

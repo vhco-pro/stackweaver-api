@@ -34,6 +34,7 @@ import (
 	"github.com/michielvha/stackweaver/core/services/logbuffer"
 	"github.com/michielvha/stackweaver/core/services/logparser"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/storage"
 	"gorm.io/gorm"
 )
@@ -213,49 +214,6 @@ func decodeCreateRunRequest(c *gin.Context) (*CreateRunRequestV2, bool) {
 		return nil, false
 	}
 	return &req, true
-}
-
-// resolveEffectiveAgentPool resolves which agent pool a run dispatches to, walking TFE's execution
-// settings chain from most specific to least:
-//
-//	workspace  (its own execution_mode + agent pool)
-//	  -> project       (tfe_project_settings, when Project.SettingsOverwritten)
-//	    -> organization (tfe_organization_default_settings)
-//
-// A workspace "does not overwrite" when its execution mode is unset or "remote", the same signal TFE
-// uses for its setting-overwrites. A project defers to the org unless it has explicitly overwritten its
-// settings, which is exactly what Project.SettingsOverwritten records.
-//
-// Only agent mode produces a pool: remote and local execution have none, so those levels resolve to nil
-// and the run dispatches normally.
-//
-// The workspace must be loaded with its Project and the Project's Organization for the outer levels to
-// be consulted; a missing preload degrades to the workspace's own pool rather than guessing.
-func resolveEffectiveAgentPool(workspace *models.Workspace) *uuid.UUID {
-	// A workspace that overwrote its own execution mode keeps its own pool: the levels above never
-	// apply to it.
-	if workspace.ExecutionMode != "" && workspace.ExecutionMode != "remote" {
-		return workspace.AgentPoolID
-	}
-
-	// The workspace defers. The project wins next if it defaults to agent execution with a pool.
-	project := &workspace.Project
-	if project.DefaultExecutionMode == "agent" && project.DefaultAgentPoolID != nil {
-		return project.DefaultAgentPoolID
-	}
-
-	// The project specified its own (non-agent) settings, so it has deliberately opted out of agent
-	// execution and must not fall through to an org-wide agent default.
-	if project.SettingsOverwritten {
-		return workspace.AgentPoolID
-	}
-
-	// Nothing below the org expressed a preference: apply the org default.
-	if project.Organization.DefaultExecutionMode == "agent" && project.Organization.DefaultAgentPoolID != nil {
-		return project.Organization.DefaultAgentPoolID
-	}
-
-	return workspace.AgentPoolID
 }
 
 // resolveRunOperation maps the go-tfe intent attributes to a run operation and the per-run
@@ -842,9 +800,20 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	logger.Infof("Run creation: operation=%s applyable=%v auto_apply=%v", operation, applyable, perRunAutoApply)
 
 	// TFE execution-settings inheritance, resolved at run time down the chain
-	// workspace -> project (tfe_project_settings) -> organization (tfe_organization_default_settings).
-	// The most specific level that actually specifies settings wins.
-	effectiveAgentPoolID := resolveEffectiveAgentPool(workspace)
+	// workspace -> project (tfe_project_settings) -> organization (tfe_organization_default_settings)
+	// by the shared level rule, which the orchestrator also routes on.
+	effectiveAgentPoolID := settings.EffectiveExecution(workspace).Value.PoolID
+
+	// The run's identity binding, by the same level rule, must be one its pool offers (#933, D8,
+	// AC44): refused here, at creation, rather than at placement.
+	if _, err := h.runRepo.IdentityBindings().Offered(settings.EffectiveWorkspaceIdentity(workspace).Value, effectiveAgentPoolID); err != nil {
+		if errors.Is(err, repository.ErrBindingNotOffered) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+			return
+		}
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
 
 	// TFE-compatible: every run plans first. A plan-and-apply or destroy run then waits at `planned`
 	// for a confirmation, unless the caller sent `auto-apply: true` (AutoApply) or the run came
@@ -1827,6 +1796,26 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 		// `planned` (no post-plan tasks) and `post_plan_completed` (post-plan task stage passed -
 		// tfe_workspace_run treats `planned` as pending when a post-plan stage exists).
 		confirmable := []models.RunStatus{models.RunStatusPlanned, models.RunStatusPostPlanCompleted}
+		// A run whose apply was lost with its launcher is re-queued here, by a person, and never on
+		// its own (#933, decision 16): it goes back to its apply phase, unclaimed, and its saved plan
+		// is applied as a new attempt. The executor refuses the plan if the state moved meanwhile.
+		if planRun.Status == models.RunStatusFailed && planRun.ErrorMessage == repository.LostDuringApply {
+			ok, err := h.runRepo.RequeueLostApply(planRun.ID)
+			if err != nil {
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to re-queue the lost apply")
+				return
+			}
+			if !ok {
+				jsonapi.WriteError(c, http.StatusConflict, "Conflict", "The run's lost apply was already re-queued.")
+				return
+			}
+			if planRun, err = h.runRepo.GetByID(planRun.ID); err != nil {
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve updated run")
+				return
+			}
+			jsonapi.WriteDocument(c, http.StatusAccepted, formatRunResponse(planRun, c, h.configVersionRepo, h.runRepo))
+			return
+		}
 		if planRun.Status != models.RunStatusPlanned && planRun.Status != models.RunStatusPostPlanCompleted {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Run must be in 'planned' status before applying")
 			return
@@ -1996,6 +1985,10 @@ func (h *RunHandlerV2) Cancel(c *gin.Context) {
 	if err := h.taskStageRepo.CancelPendingForRun(run.ID); err != nil {
 		logger.Warnf("Failed to cancel task stages for canceled run %s: %v", run.ID, err)
 	}
+	// A canceled run releases the workspace state lock it holds (#933, D2).
+	if err := h.runRepo.ReleaseStateLock(run.WorkspaceID, run.ID); err != nil {
+		logger.Warnf("Failed to release the state lock of canceled run %s: %v", run.ID, err)
+	}
 
 	// TFE returns 202 Accepted for action endpoints (no body)
 	// According to TFE API docs: https://developer.hashicorp.com/terraform/enterprise/api-docs/run
@@ -2089,6 +2082,10 @@ func (h *RunHandlerV2) ForceCancel(c *gin.Context) {
 	if !ok {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run cannot be force-cancelled in current state")
 		return
+	}
+	// A force-canceled run releases the workspace state lock it holds (#933, D2).
+	if err := h.runRepo.ReleaseStateLock(run.WorkspaceID, run.ID); err != nil {
+		logger.Warnf("Failed to release the state lock of force-canceled run %s: %v", run.ID, err)
 	}
 
 	// TFE returns 202 Accepted for action endpoints (no body)

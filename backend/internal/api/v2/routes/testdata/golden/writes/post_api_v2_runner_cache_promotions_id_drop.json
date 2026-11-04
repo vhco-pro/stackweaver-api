@@ -1,0 +1,28 @@
+{
+  "method": "POST",
+  "path": "/api/v2/runner/cache/promotions/:id/drop",
+  "request": {
+    "content_type": "application/json",
+    "body": {
+      "poisoned": true,
+      "reason": "the package hashes to a digest the lock file does not pin"
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "poisoned": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "schema_source": "type",
+    "bound_type": "handlers.DropCachePromotionRequest"
+  },
+  "status": 200,
+  "response": {
+    "status": "dropped"
+  }
+}

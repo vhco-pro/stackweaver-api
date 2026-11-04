@@ -19,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 )
 
 // shortTokenID returns a 16-hex-char SHA-256 prefix of the token, suitable
@@ -189,6 +190,30 @@ type AuthError struct {
 
 func (e *AuthError) Error() string { return e.Detail }
 
+// errJobTokenRevoked answers an executor whose job token was revoked: the job completed, turned
+// terminal or was dispatched again. It carries the job-token-revoked code, the one answer that
+// makes an executor stop (#933, D2, AC67, AC72); every other token that does not verify stays 401.
+var errJobTokenRevoked = &AuthError{Status: http.StatusForbidden, Title: "Forbidden", Detail: "this job token was revoked: the job ended or another attempt holds it"}
+
+// revokedJobTokens is implemented by a verifier that can tell a revoked job token from an unknown
+// one (apikey.Service).
+type revokedJobTokens interface {
+	IsRevokedJobToken(key string) bool
+}
+
+// writeAuthError answers a failed authentication with its error document.
+func writeAuthError(c *gin.Context, err error) {
+	if errors.Is(err, errJobTokenRevoked) {
+		jsonapi.WriteCodedError(c, errJobTokenRevoked.Status, runnercontract.ErrorCodeJobTokenRevoked, errJobTokenRevoked.Title, errJobTokenRevoked.Detail)
+		return
+	}
+	var authErr *AuthError
+	if !errors.As(err, &authErr) {
+		authErr = &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid token"}
+	}
+	jsonapi.WriteError(c, authErr.Status, authErr.Title, authErr.Detail)
+}
+
 // Authenticate verifies a `tfe-` API token and establishes the caller on the request: the user, and for an API token its kind, its organization and the
 // subject it is judged as (rbac.Subject). Every place that accepts a credential, whether from the
 // Authorization header or elsewhere, goes through it, so a token is the same token wherever it
@@ -218,6 +243,10 @@ func (s *Service) authenticateAPIKey(c *gin.Context, tokenString string) error {
 	}
 	apiKey, err := s.apiKeyService.VerifyAPIKey(tokenString)
 	if err != nil || apiKey == nil {
+		if r, ok := s.apiKeyService.(revokedJobTokens); ok && r.IsRevokedJobToken(tokenString) {
+			logger.Infof("auth: revoked job token presented (id: %s)", shortTokenID(tokenString))
+			return errJobTokenRevoked
+		}
 		logger.Warnf("auth: api token rejected: unknown or revoked (id: %s)", shortTokenID(tokenString))
 		return rejected
 	}
@@ -228,9 +257,15 @@ func (s *Service) authenticateAPIKey(c *gin.Context, tokenString string) error {
 // organization and the subject it is judged as.
 func (s *Service) establishAPIKey(c *gin.Context, apiKey *models.APIKey) error {
 	rejected := &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid or revoked API token"}
-	user, err := s.userRepo.GetByID(apiKey.UserID)
-	if err != nil {
-		return rejected
+	// A key the platform minted for itself (the hosted registration secret, a hosted runner token,
+	// a job token) has no owner: it authenticates as itself and establishes no user.
+	var user *models.User
+	if apiKey.UserID != nil {
+		u, err := s.userRepo.GetByID(*apiKey.UserID)
+		if err != nil {
+			return rejected
+		}
+		user = u
 	}
 	// The subject is resolved before anything is set, so a failure leaves the request untouched.
 	subj, scoped, err := rbac.SubjectForAPIKey(apiKey, s.apiKeyService.IsTeamMember)
@@ -240,9 +275,11 @@ func (s *Service) establishAPIKey(c *gin.Context, apiKey *models.APIKey) error {
 	}
 	_ = s.apiKeyService.UpdateLastUsed(apiKey.ID)
 
-	c.Set("user_id", user.ID)
-	c.Set("user_email", user.Email)
-	c.Set("user_name", user.Name)
+	if user != nil {
+		c.Set("user_id", user.ID)
+		c.Set("user_email", user.Email)
+		c.Set("user_name", user.Name)
+	}
 	c.Set("auth_method", "api_key")
 	// Store API key details for runner registration and scope checks
 	c.Set("api_key_id", apiKey.ID)
@@ -404,11 +441,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 				return
 			}
 			if c.GetHeader("Authorization") == "" {
-				var authErr *AuthError
-				if !errors.As(err, &authErr) {
-					authErr = &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid token"}
-				}
-				jsonapi.WriteError(c, authErr.Status, authErr.Title, authErr.Detail)
+				writeAuthError(c, err)
 				c.Abort()
 				return
 			}
@@ -443,11 +476,7 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		}
 
 		if err := s.Authenticate(c, parts[1]); err != nil {
-			var authErr *AuthError
-			if !errors.As(err, &authErr) {
-				authErr = &AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid token"}
-			}
-			jsonapi.WriteError(c, authErr.Status, authErr.Title, authErr.Detail)
+			writeAuthError(c, err)
 			c.Abort()
 			return
 		}

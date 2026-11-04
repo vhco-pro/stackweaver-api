@@ -15,10 +15,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	vcs "github.com/michielvha/stackweaver/core/services/vcs"
@@ -27,20 +27,19 @@ import (
 
 // PlaybookHandler handles Ansible playbook API endpoints
 type PlaybookHandler struct {
-	playbookRepo      *repository.AnsiblePlaybookRepository
-	templateRepo      *repository.AnsibleJobTemplateRepository
-	jobRepo           *repository.AnsibleJobRepository
-	scheduleRepo      *repository.AnsibleScheduleRepository
-	projectRepo       *repository.ProjectRepository
-	orgRepo           *repository.OrganizationRepository
-	authService       *auth.Service
-	rbacService       *rbac.Service
-	queue             queue.Queue
+	playbookRepo *repository.AnsiblePlaybookRepository
+	templateRepo *repository.AnsibleJobTemplateRepository
+	jobRepo      *repository.AnsibleJobRepository
+	scheduleRepo *repository.AnsibleScheduleRepository
+	projectRepo  *repository.ProjectRepository
+	orgRepo      *repository.OrganizationRepository
+	authService  *auth.Service
+	rbacService  *rbac.Service
+	// workItems creates the playbook's snapshot syncs as work items (#933, D2).
+	workItems         *ansible.WorkItemService
 	vcsRegistry       *vcs.ProviderRegistry
 	vcsConnectionRepo *repository.VCSConnectionRepository
-	// syncRequester builds the playbook sync message; the runner control plane shares
-	// it, so both describe a sync to the worker the same way.
-	syncRequester *ansible.PlaybookSyncRequester
+	levelRefs         *levelrefs.Checker
 	// credentialRepo backs the template multi-credential endpoints (wired via
 	// SetCredentialRepo).
 	credentialRepo *repository.AnsibleCredentialRepository
@@ -71,7 +70,7 @@ func NewPlaybookHandler(
 	orgRepo *repository.OrganizationRepository,
 	authService *auth.Service,
 	rbacService *rbac.Service,
-	redisQueue queue.Queue,
+	workItems *ansible.WorkItemService,
 	vcsRegistry *vcs.ProviderRegistry,
 	vcsConnectionRepo *repository.VCSConnectionRepository,
 	jobService *ansible.JobService,
@@ -86,10 +85,9 @@ func NewPlaybookHandler(
 		orgRepo:           orgRepo,
 		authService:       authService,
 		rbacService:       rbacService,
-		queue:             redisQueue,
+		workItems:         workItems,
 		vcsRegistry:       vcsRegistry,
 		vcsConnectionRepo: vcsConnectionRepo,
-		syncRequester:     ansible.NewPlaybookSyncRequester(vcsRegistry, vcsConnectionRepo, playbookRepo, redisQueue),
 	}
 	if vcsRegistry != nil {
 		h.providers = vcsRegistry
@@ -112,7 +110,7 @@ func (h *PlaybookHandler) validateAgentPoolInOrg(c *gin.Context, poolID, orgID u
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Agent pool validation unavailable")
 		return false
 	}
-	pool, err := h.agentPoolRepo.GetByID(poolID, false)
+	pool, err := h.agentPoolRepo.GetCustomerByID(poolID, false)
 	if err != nil || pool.OrganizationID != orgID {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Agent pool not found in this organization")
 		return false
@@ -292,6 +290,9 @@ type CreateJobTemplateRequest struct {
 			AllowSimultaneous bool  `json:"allow-simultaneous"`
 			RetentionDays     *int  `json:"retention-days"`
 			JobSliceCount     int   `json:"job-slice-count"`
+			// The template's run image and identity binding (#933, D6, D8); empty inherits.
+			RunImageID        *string `json:"run-image-id"`
+			IdentityBindingID *string `json:"identity-binding-id"`
 		} `json:"attributes"`
 		Relationships struct {
 			Project struct {
@@ -352,6 +353,8 @@ type UpdateJobTemplateRequest struct {
 			ScheduleCron      *string                    `json:"schedule-cron,omitempty"`
 			Enabled           *bool                      `json:"enabled,omitempty"`
 			TimeoutSeconds    *int                       `json:"timeout-seconds,omitempty"`
+			RunImageID        *string                    `json:"run-image-id,omitempty"`
+			IdentityBindingID *string                    `json:"identity-binding-id,omitempty"`
 			AllowSimultaneous *bool                      `json:"allow-simultaneous,omitempty"`
 			// A negative value clears the override (inherit the org setting).
 			RetentionDays   *int  `json:"retention-days,omitempty"`
@@ -877,18 +880,17 @@ func (h *PlaybookHandler) SyncPlaybook(c *gin.Context) {
 		return
 	}
 
-	// Queue sync job
-	if h.queue != nil {
-		syncMsg := h.syncRequester.Message(context.Background(), playbook)
-		if err := h.queue.Enqueue(context.Background(), ansible.PlaybookSyncQueue, syncMsg); err != nil {
-			// Revert status on queue failure
+	// Request the snapshot work item
+	if h.workItems != nil {
+		if _, err := h.workItems.RequestPlaybookSnapshot(c.Request.Context(), playbook, "manual"); err != nil {
+			// Revert status when the sync cannot be requested
 			playbook.LastSyncStatus = "failed"
-			playbook.LastSyncError = "Failed to queue sync job: " + err.Error()
+			playbook.LastSyncError = "Failed to request the sync: " + err.Error()
 			if updateErr := h.playbookRepo.Update(playbook); updateErr != nil {
-				logger.Warnf("Failed to update playbook after sync queue error: %v", updateErr)
+				logger.Warnf("Failed to update playbook after the sync request error: %v", updateErr)
 			}
 
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to queue sync job")
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
 			return
 		}
 	}
@@ -1150,6 +1152,9 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 	if template.Forks == 0 {
 		template.Forks = 5
 	}
+	if !h.applyTemplateLevelRefs(c, template, org.ID, req.Data.Attributes.RunImageID, req.Data.Attributes.IdentityBindingID) {
+		return
+	}
 
 	if err := h.templateRepo.Create(template); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create job template")
@@ -1159,6 +1164,40 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 	h.applyTemplateCredentials(c, template, credentialIDs)
 
 	jsonapi.WriteDocument(c, http.StatusCreated, formatJobTemplateResponse(template))
+}
+
+// SetLevelRefs sets the checker of the run image and identity binding a template selects.
+func (h *PlaybookHandler) SetLevelRefs(c *levelrefs.Checker) { h.levelRefs = c }
+
+// applyTemplateLevelRefs sets the run image (an Ansible one) and identity binding a template selects
+// (#933, D0, D6, D8), writing the 422 and returning false on an invalid one.
+func (h *PlaybookHandler) applyTemplateLevelRefs(c *gin.Context, t *models.AnsibleJobTemplate, orgID uuid.UUID, runImage, binding *string) bool {
+	if runImage == nil && binding == nil {
+		return true
+	}
+	if h.levelRefs == nil {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "run images and identity bindings are not configured")
+		return false
+	}
+	img, set, err := h.levelRefs.RunImage(orgID, models.RunImageKindAnsible, runImage)
+	if err == nil && set {
+		t.RunImageID = img
+	}
+	if err == nil {
+		var b *uuid.UUID
+		if b, set, err = h.levelRefs.IdentityBinding(orgID, binding); err == nil && set {
+			t.IdentityBindingID = b
+		}
+	}
+	if err != nil {
+		if errors.Is(err, levelrefs.ErrInvalid) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return false
+	}
+	return true
 }
 
 // UpdateTemplate updates a job template
@@ -1257,6 +1296,16 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 	}
 	if req.Data.Attributes.TimeoutSeconds != nil {
 		template.TimeoutSeconds = *req.Data.Attributes.TimeoutSeconds
+	}
+	if req.Data.Attributes.RunImageID != nil || req.Data.Attributes.IdentityBindingID != nil {
+		project, err := h.projectRepo.GetByID(template.ProjectID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load the template's project")
+			return
+		}
+		if !h.applyTemplateLevelRefs(c, template, project.OrganizationID, req.Data.Attributes.RunImageID, req.Data.Attributes.IdentityBindingID) {
+			return
+		}
 	}
 	if req.Data.Attributes.AllowSimultaneous != nil {
 		template.AllowSimultaneous = *req.Data.Attributes.AllowSimultaneous
@@ -1596,6 +1645,8 @@ func formatJobTemplateResponse(template *models.AnsibleJobTemplate) jsonapi.Reso
 			ScheduleCron:      template.ScheduleCron,
 			Enabled:           !template.Disabled,
 			TimeoutSeconds:    template.TimeoutSeconds,
+			RunImageID:        levelrefs.UUIDString(template.RunImageID),
+			IdentityBindingID: levelrefs.UUIDString(template.IdentityBindingID),
 			AllowSimultaneous: template.AllowSimultaneous,
 			RetentionDays:     template.RetentionDays,
 			JobSliceCount:     template.JobSliceCount,

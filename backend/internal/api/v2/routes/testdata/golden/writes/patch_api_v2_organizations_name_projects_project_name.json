@@ -22,6 +22,10 @@
             "attributes": {
               "type": "object",
               "properties": {
+                "ansible-run-image-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "default-agent-pool-id": {
                   "type": "string",
                   "nullable": true
@@ -34,8 +38,16 @@
                   "type": "string",
                   "nullable": true
                 },
+                "identity-binding-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "name": {
                   "type": "string",
+                  "nullable": true
+                },
+                "run-timeout": {
+                  "type": "integer",
                   "nullable": true
                 },
                 "setting-overwrites": {
@@ -51,6 +63,14 @@
                       "nullable": true
                     }
                   }
+                },
+                "tofu-run-image-id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "tofu-version": {
+                  "type": "string",
+                  "nullable": true
                 }
               }
             },
@@ -105,15 +125,20 @@
   "response": {
     "data": {
       "attributes": {
+        "ansible-run-image-id": null,
         "created-at": "\u003ctimestamp\u003e",
         "default-execution-mode": "agent",
         "description": "Updated by the golden write harness",
+        "identity-binding-id": null,
         "is-unified": false,
         "name": "data",
+        "run-timeout": 0,
         "setting-overwrites": {
           "default-agent-pool": true,
           "default-execution-mode": true
         },
+        "tofu-run-image-id": null,
+        "tofu-version": "",
         "updated-at": "\u003ctimestamp\u003e"
       },
       "id": "\u003cuuid\u003e",

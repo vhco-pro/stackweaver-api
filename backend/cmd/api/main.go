@@ -31,6 +31,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/terraform"
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
 	"github.com/michielvha/stackweaver/core/crypto"
+	"github.com/michielvha/stackweaver/core/envfile"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -40,6 +41,7 @@ import (
 	statesvc "github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/tofu"
 	"gopkg.in/yaml.v3"
 )
@@ -63,7 +65,7 @@ func main() {
 	// Before anything reads the environment: load the env file a Docker Compose install names,
 	// so values zitadel-init generated after this container was created are in place. The
 	// logger is not initialised yet, so a failure goes to stderr.
-	if err := loadEnvFileFromEnvironment(); err != nil {
+	if err := envfile.LoadGeneratedFromEnvironment(); err != nil {
 		fmt.Fprintln(os.Stderr, "startup:", err)
 		os.Exit(1)
 	}
@@ -104,6 +106,13 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Failed to connect to database: %v", err)
 	}
+	// The plan JSON runs store is sealed at rest under ENCRYPTION_KEY (#933, D2, AC73); every
+	// process that reads or writes runs sets the same sealer before it touches one.
+	planSealer, err := crypto.NewCryptoService(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
+	if err != nil {
+		logger.Fatalf("Setting up encryption at rest of plan output: %v", err)
+	}
+	models.SetPlanOutputSealer(planSealer)
 
 	// Run database migrations
 	logger.Info("Running database migrations...")
@@ -214,10 +223,31 @@ func main() {
 		logger.Fatalf("Failed to run database migrations: %v", err)
 	}
 
+	// Seal the plan JSON of runs stored before encryption at rest (#933, AC73). It runs beside the
+	// API, which reads both forms meanwhile, and resumes at the next start if it stops part way.
+	go func() {
+		n, err := repository.NewRunRepository(db).SealPlanOutputs(context.Background(), 100)
+		if err != nil {
+			logger.Warnf("Sealing the plan output of earlier runs stopped after %d runs: %v", n, err)
+			return
+		}
+		if n > 0 {
+			logger.Infof("Sealed the plan output of %d earlier runs at rest", n)
+		}
+	}()
+
 	// Ad hoc jobs have no playbook; AutoMigrate never relaxes an existing NOT
 	// NULL constraint, so drop it explicitly (idempotent).
 	if err := db.Exec("ALTER TABLE ansible_jobs ALTER COLUMN playbook_id DROP NOT NULL").Error; err != nil {
 		logger.Warnf("Failed to drop NOT NULL on ansible_jobs.playbook_id: %v", err)
+	}
+
+	// Every organization has its hosted pool (#933, D9): the backfill gives one to each that predates
+	// it, idempotently and safely on several replicas at once.
+	if n, err := models.EnsureHostedPools(db); err != nil {
+		logger.Fatalf("Failed to create the organizations' hosted pools: %v", err)
+	} else if n > 0 {
+		logger.Infof("Created the hosted pool of %d organization(s)", n)
 	}
 
 	// users.email is unique case-insensitively, and only for non-empty values. The step lives in
@@ -596,6 +626,16 @@ func main() {
 	projectRepo := repository.NewProjectRepository(db)
 	teamRepo := repository.NewTeamRepository(db)
 	apiKeyService := apikey.NewService(apiKeyRepo, orgRepo, projectRepo, teamRepo)
+	// The deployment's hosted registration secret, stored as a hash only and replaced when it
+	// changes, so a rotated-out value is refused from this start on (#933, D9, AC69). Without it no
+	// hosted launcher can register and hosted pools wait for capacity.
+	if secret := strings.TrimSpace(os.Getenv("STACKWEAVER_HOSTED_SECRET")); secret != "" {
+		if _, err := apiKeyService.UpsertHostedSecret(apikey.HostedSecretName, secret); err != nil {
+			logger.Fatalf("Storing the hosted registration secret: %v", err)
+		}
+	} else {
+		logger.Warnf("STACKWEAVER_HOSTED_SECRET is not set: no hosted launcher can register, so runs and jobs on hosted pools stay pending")
+	}
 
 	// Set API key service in auth service for authentication
 	authService.SetAPIKeyService(apiKeyService)
@@ -724,6 +764,7 @@ func main() {
 		// sources sync first and the job is held until they settle.
 		jobService.SetInventorySourceRepo(inventorySourceRepo)
 		jobService.SetOrganizationRepo(repository.NewOrganizationRepository(db))
+		jobService.SetDeploymentRunTimeout(settings.DeploymentRunTimeout(os.Getenv))
 
 		// Create scheduler service
 		schedulerService = ansible.NewSchedulerService(
@@ -821,6 +862,7 @@ func main() {
 	if runnerMonitorEnabled {
 		runnerRepo := repository.NewRunnerRepository(db)
 		runnerMonitorService = runner.NewMonitorService(runnerRepo)
+		runnerMonitorService.SetLostLauncherHandling(repository.NewRunRepository(db), apiKeyService)
 		go runnerMonitorService.Start(context.Background())
 		logger.Info("Runner Monitor Service started")
 	} else {

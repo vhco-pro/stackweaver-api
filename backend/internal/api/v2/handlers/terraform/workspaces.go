@@ -19,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/helpers"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
@@ -91,7 +92,7 @@ func (h *WorkspaceHandlerV2) validatePoolAccess(poolID uuid.UUID, workspaceID st
 	if err != nil || !inOrganization {
 		return false, notFound
 	}
-	pool, err := h.poolRepo.GetByID(poolID, true)
+	pool, err := h.poolRepo.GetCustomerByID(poolID, true)
 	if err != nil {
 		return false, notFound
 	}
@@ -139,6 +140,32 @@ func CheckPoolAccess(pool *models.AgentPool, workspaceID string, projectID *uuid
 // answer does not confirm that the identifier is real. Terraform Enterprise documents no status
 // or body for a workspace that names an OAuth token or an installation it may not use, so the
 // answer is this API's own: the 400 "VCS connection not found" an unknown identifier always got.
+
+// applyLevelRefs sets the run image and identity binding a workspace selects (#933, D0, D6, D8),
+// writing the 422 and returning false on an invalid one. An absent attribute leaves the selection,
+// an empty one clears it.
+func (h *WorkspaceHandlerV2) applyLevelRefs(c *gin.Context, workspace *models.Workspace, orgID uuid.UUID, runImage, binding *string) bool {
+	refs := levelrefs.New(h.db)
+	img, set, err := refs.RunImage(orgID, models.RunImageKindTofu, runImage)
+	if err == nil && set {
+		workspace.RunImageID = img
+	}
+	if err == nil {
+		var b *uuid.UUID
+		if b, set, err = refs.IdentityBinding(orgID, binding); err == nil && set {
+			workspace.IdentityBindingID = b
+		}
+	}
+	if err != nil {
+		if errors.Is(err, levelrefs.ErrInvalid) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return false
+	}
+	return true
+}
 
 // vcsRepoConnectionID resolves the connection a TFE `vcs-repo` block names to an identifier:
 // through `github-app-installation-id`, through `oauth-token-id` (a connection identifier here),
@@ -272,6 +299,8 @@ type CreateWorkspaceRequestV2 struct {
 			SourceURL                  string          `json:"source-url,omitempty"`
 			TagNames                   []string        `json:"tag-names,omitempty"`
 			RunTimeout                 *int            `json:"run-timeout,omitempty"`
+			RunImageID                 *string         `json:"run-image-id,omitempty"`
+			IdentityBindingID          *string         `json:"identity-binding-id,omitempty"`
 			ForceDelete                *bool           `json:"force-delete,omitempty"`
 		} `json:"attributes"`
 		Relationships struct {
@@ -390,6 +419,8 @@ type UpdateWorkspaceRequestV2 struct {
 			AssessmentsEnabled         *bool           `json:"assessments-enabled,omitempty"`
 			TagNames                   []string        `json:"tag-names,omitempty"`
 			RunTimeout                 *int            `json:"run-timeout,omitempty"`
+			RunImageID                 *string         `json:"run-image-id,omitempty"`
+			IdentityBindingID          *string         `json:"identity-binding-id,omitempty"`
 			ForceDelete                *bool           `json:"force-delete,omitempty"`
 		} `json:"attributes"`
 		Relationships *struct {
@@ -829,6 +860,9 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		// does, on organization owner permission, which DeleteByID checks when it is asked.
 		Permissions: WorkspacePermissions{CanForceDelete: true},
 		RunTimeout:  workspace.RunTimeout, // StackWeaver extension; omitted at 0
+		// Stackweaver extensions (#933, D6, D8): the level's own selections, null to defer.
+		RunImageID:        levelrefs.UUIDString(workspace.RunImageID),
+		IdentityBindingID: levelrefs.UUIDString(workspace.IdentityBindingID),
 	}
 
 	if workspace.AgentPoolID != nil {
@@ -1230,7 +1264,7 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		GlobalRemoteState:          false, // Default
 		StructuredRunOutputEnabled: true,  // Default
 		AssessmentsEnabled:         false, // Default
-		RunTimeout:                 7200,  // Default: 2 hours
+		RunTimeout:                 0,     // Defer: project, organization, then the deployment default
 	}
 
 	// Apply optional boolean fields from request (overriding defaults)
@@ -1287,9 +1321,13 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		workspace.VCSTagsRegex = attrs.VCSRepo.TagsRegex
 	}
 
-	// Set run timeout if provided (custom extension, not in TFE spec)
-	if attrs.RunTimeout != nil && *attrs.RunTimeout > 0 {
+	// Set run timeout if provided (custom extension, not in TFE spec). Zero defers to the project,
+	// the organization and the deployment default (core/settings.EffectiveRunTimeout).
+	if attrs.RunTimeout != nil && *attrs.RunTimeout >= 0 {
 		workspace.RunTimeout = *attrs.RunTimeout
+	}
+	if !h.applyLevelRefs(c, workspace, org.ID, attrs.RunImageID, attrs.IdentityBindingID) {
+		return
 	}
 
 	// Set agent pool ID if execution mode is "agent" and pool ID is provided
@@ -1562,12 +1600,15 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		}
 	}
 
-	// Update run timeout if provided (custom extension, not in TFE spec)
-	if attrs.RunTimeout != nil && *attrs.RunTimeout > 0 {
+	// Update run timeout if provided (custom extension, not in TFE spec). Zero resets it to inherit.
+	if attrs.RunTimeout != nil && *attrs.RunTimeout >= 0 {
 		if workspace.RunTimeout != *attrs.RunTimeout {
 			changes["run_timeout"] = *attrs.RunTimeout
 		}
 		workspace.RunTimeout = *attrs.RunTimeout
+	}
+	if !h.applyLevelRefs(c, workspace, org.ID, attrs.RunImageID, attrs.IdentityBindingID) {
+		return
 	}
 
 	// Update auto-apply-run-trigger
@@ -2270,9 +2311,12 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		workspace.WorkingDirectory = attrs.WorkingDirectory
 	}
 
-	// Update run timeout
-	if attrs.RunTimeout != nil && *attrs.RunTimeout > 0 {
+	// Update run timeout; zero resets it to inherit.
+	if attrs.RunTimeout != nil && *attrs.RunTimeout >= 0 {
 		workspace.RunTimeout = *attrs.RunTimeout
+	}
+	if project != nil && !h.applyLevelRefs(c, workspace, project.OrganizationID, attrs.RunImageID, attrs.IdentityBindingID) {
+		return
 	}
 
 	// Update VCS connection. The loaded connection is replaced together with its identifier, or

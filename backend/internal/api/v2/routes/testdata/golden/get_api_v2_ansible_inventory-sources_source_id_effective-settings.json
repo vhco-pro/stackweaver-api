@@ -1,0 +1,25 @@
+{
+  "method": "GET",
+  "path": "/api/v2/ansible/inventory-sources/:source_id/effective-settings",
+  "status": 200,
+  "body": {
+    "data": {
+      "attributes": {
+        "identity-binding-id": {
+          "level": "deployment",
+          "value": null
+        },
+        "run-image-id": {
+          "level": "deployment",
+          "value": null
+        },
+        "run-timeout": {
+          "level": "deployment",
+          "value": 3600
+        }
+      },
+      "id": "\u003cuuid\u003e",
+      "type": "effective-settings"
+    }
+  }
+}
