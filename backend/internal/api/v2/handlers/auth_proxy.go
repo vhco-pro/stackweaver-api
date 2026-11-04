@@ -1542,7 +1542,8 @@ func (p *AuthProxy) FinalizeAuthRequest(c *gin.Context) {
 // Creates a new Zitadel session (user check, challenges).
 func (p *AuthProxy) CreateSession(c *gin.Context) {
 	var reqBody map[string]any
-	if err := c.ShouldBindJSON(&reqBody); err != nil {
+	// A JSON null binds without error and leaves the map nil.
+	if err := c.ShouldBindJSON(&reqBody); err != nil || reqBody == nil {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -1564,6 +1565,8 @@ func (p *AuthProxy) CreateSession(c *gin.Context) {
 	case NotificationModeEmail:
 		p.stripReturnCodeFlags(reqBody)
 	}
+
+	p.setSessionLifetime(reqBody)
 
 	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPost, "/v2/sessions", reqBody)
 	if err != nil {
@@ -1817,7 +1820,7 @@ func randomDecoySessionID() string {
 // what real users do (their Zitadel ids are stable). The HMAC secret
 // is per-process (rotated on restart) so an attacker can't precompute
 // the fake-id space.
-func buildDecoyGetSessionResponse(entry *sessionEntry, decoySecret []byte) []byte {
+func buildDecoyGetSessionResponse(entry *sessionEntry, decoySecret []byte, lifetime time.Duration) []byte {
 	type userFactor struct {
 		VerifiedAt     string `json:"verifiedAt"`
 		ID             string `json:"id"`
@@ -1828,16 +1831,19 @@ func buildDecoyGetSessionResponse(entry *sessionEntry, decoySecret []byte) []byt
 		User userFactor `json:"user"`
 	}
 	type decoySession struct {
-		ID           string  `json:"id"`
-		CreationDate string  `json:"creationDate"`
-		ChangeDate   string  `json:"changeDate"`
-		Sequence     string  `json:"sequence"`
-		Factors      factors `json:"factors"`
+		ID             string  `json:"id"`
+		CreationDate   string  `json:"creationDate"`
+		ChangeDate     string  `json:"changeDate"`
+		Sequence       string  `json:"sequence"`
+		Factors        factors `json:"factors"`
+		ExpirationDate string  `json:"expirationDate"`
 	}
 	type wrapper struct {
 		Session decoySession `json:"session"`
 	}
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")
+	const layout = "2006-01-02T15:04:05.000000000Z"
+	created := time.Now().UTC()
+	now := created.Format(layout)
 	loginName := entry.LoginName
 	body := wrapper{
 		Session: decoySession{
@@ -1848,6 +1854,8 @@ func buildDecoyGetSessionResponse(entry *sessionEntry, decoySecret []byte) []byt
 			// [1, 50] to defeat "always 1" statistical fingerprinting.
 			// Determinism preserved per loginName.
 			Sequence: deriveDecoySequence(decoySecret, loginName),
+			// Real sessions carry the lifetime the proxy gives them (setSessionLifetime).
+			ExpirationDate: created.Add(lifetime).Format(layout),
 			Factors: factors{
 				User: userFactor{
 					VerifiedAt:     now,
@@ -2167,7 +2175,8 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 	}
 
 	var reqBody map[string]any
-	if err := c.ShouldBindJSON(&reqBody); err != nil {
+	// A JSON null binds without error and leaves the map nil.
+	if err := c.ShouldBindJSON(&reqBody); err != nil || reqBody == nil {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -2268,6 +2277,9 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 		return
 	}
 
+	// Added after the password-attempt check above, which must see the body the browser sent.
+	p.setSessionLifetime(reqBody)
+
 	respBody, statusCode, err := p.proxyJSON(c.Request.Context(), http.MethodPatch, "/v2/sessions/"+sessionID, reqBody)
 	if err != nil {
 		// Transport-level error - no auth verdict. Roll back the
@@ -2311,6 +2323,30 @@ func (p *AuthProxy) UpdateSession(c *gin.Context) {
 	}
 
 	c.Data(statusCode, "application/json", respBody)
+}
+
+// zitadelSessionLifetimeMargin is how much longer a Zitadel session lives than the browser session
+// built on it. The browser session starts when the sign-in is redeemed, a little after the last
+// Zitadel session step, and the liveness check ends a browser session whose Zitadel session is gone.
+const zitadelSessionLifetimeMargin = 15 * time.Minute
+
+// setSessionLifetime gives the Zitadel session a lifetime on every create and update the proxy
+// forwards: the browser session's absolute limit plus a margin. Zitadel counts it from the request
+// (reduceLifetimeSet), so each sign-in step restarts it and a session reused through the account
+// picker outlives the browser session built on it, while an abandoned sign-in expires instead of
+// staying in Zitadel. The browser cannot choose it.
+func (p *AuthProxy) setSessionLifetime(reqBody map[string]any) {
+	reqBody["lifetime"] = strconv.FormatInt(int64(p.zitadelSessionLifetime()/time.Second), 10) + "s"
+}
+
+// zitadelSessionLifetime is the lifetime setSessionLifetime gives a Zitadel session. Decoy sessions
+// report the same expiry, so a decoy for an unknown login name stays indistinguishable.
+func (p *AuthProxy) zitadelSessionLifetime() time.Duration {
+	limits := auth.DefaultSessionLimits
+	if p.config.BrowserSessions != nil {
+		limits = p.config.BrowserSessions.Limits()
+	}
+	return limits.Absolute + zitadelSessionLifetimeMargin
 }
 
 // isPureSinglePasswordCheck reports whether the request body is
@@ -2374,7 +2410,7 @@ func (p *AuthProxy) GetSession(c *gin.Context) {
 	// with deterministic hash-derived ids so repeated probes of the
 	// same unknown loginName look identical to a real user.
 	if entry := p.findSessionEntry(c, sessionID); entry != nil && entry.Decoy {
-		c.Data(http.StatusOK, "application/json", buildDecoyGetSessionResponse(entry, p.decoySecret))
+		c.Data(http.StatusOK, "application/json", buildDecoyGetSessionResponse(entry, p.decoySecret, p.zitadelSessionLifetime()))
 		return
 	}
 
@@ -2502,7 +2538,7 @@ func (p *AuthProxy) SearchSessions(c *gin.Context) {
 	// All entries are decoys → no upstream call needed; synthesize the
 	// whole response.
 	if len(realIDs) == 0 {
-		body := buildDecoySearchSessionsResponse(decoyEntries, p.decoySecret)
+		body := buildDecoySearchSessionsResponse(decoyEntries, p.decoySecret, p.zitadelSessionLifetime())
 		c.Data(http.StatusOK, "application/json", body)
 		return
 	}
@@ -2524,7 +2560,7 @@ func (p *AuthProxy) SearchSessions(c *gin.Context) {
 	// one row per cookie session, matching the row count + shape of a
 	// real all-real result.
 	if statusCode == http.StatusOK && len(decoyEntries) > 0 {
-		spliced := spliceDecoyRowsIntoSearchResponse(respBody, decoyEntries, p.decoySecret)
+		spliced := spliceDecoyRowsIntoSearchResponse(respBody, decoyEntries, p.decoySecret, p.zitadelSessionLifetime())
 		if spliced != nil {
 			c.Data(http.StatusOK, "application/json", spliced)
 			return
@@ -2555,10 +2591,10 @@ type searchSessionsListDetails struct {
 // array. Round 22 Finding 2: the previous splicer stripped Zitadel's
 // `details` envelope; this helper is now reused by both the all-decoy
 // and mixed paths so the envelope handling is consistent.
-func extractDecoyRows(decoys []sessionEntry, secret []byte) []json.RawMessage {
+func extractDecoyRows(decoys []sessionEntry, secret []byte, lifetime time.Duration) []json.RawMessage {
 	rows := make([]json.RawMessage, 0, len(decoys))
 	for i := range decoys {
-		body := buildDecoyGetSessionResponse(&decoys[i], secret)
+		body := buildDecoyGetSessionResponse(&decoys[i], secret, lifetime)
 		var wrapped struct {
 			Session json.RawMessage `json:"session"`
 		}
@@ -2578,8 +2614,8 @@ func extractDecoyRows(decoys []sessionEntry, secret []byte) []json.RawMessage {
 // Round 22 Finding 2: the prior version emitted just `{"sessions":
 // [...]}`, dropping Zitadel's `details: {totalResult, timestamp}`
 // envelope - wire-distinguishable from a real-only response.
-func buildDecoySearchSessionsResponse(decoys []sessionEntry, secret []byte) []byte {
-	rows := extractDecoyRows(decoys, secret)
+func buildDecoySearchSessionsResponse(decoys []sessionEntry, secret []byte, lifetime time.Duration) []byte {
+	rows := extractDecoyRows(decoys, secret, lifetime)
 	body := struct {
 		Details  searchSessionsListDetails `json:"details"`
 		Sessions []json.RawMessage         `json:"sessions"`
@@ -2606,7 +2642,7 @@ func buildDecoySearchSessionsResponse(decoys []sessionEntry, secret []byte) []by
 // preserved (the row-count divergence vs the cookie size IS still a
 // secondary leak; reaching this branch requires an upstream JSON
 // parse failure which would itself indicate a bigger problem).
-func spliceDecoyRowsIntoSearchResponse(realBody []byte, decoys []sessionEntry, secret []byte) []byte {
+func spliceDecoyRowsIntoSearchResponse(realBody []byte, decoys []sessionEntry, secret []byte, lifetime time.Duration) []byte {
 	var parsed struct {
 		Details  json.RawMessage   `json:"details"`
 		Sessions []json.RawMessage `json:"sessions"`
@@ -2614,7 +2650,7 @@ func spliceDecoyRowsIntoSearchResponse(realBody []byte, decoys []sessionEntry, s
 	if err := json.Unmarshal(realBody, &parsed); err != nil {
 		return nil
 	}
-	decoyRows := extractDecoyRows(decoys, secret)
+	decoyRows := extractDecoyRows(decoys, secret, lifetime)
 	// Bound check the cap argument to `make` so CodeQL's
 	// go/allocation-size-overflow query is satisfied and a malicious
 	// upstream cannot trigger an oversized allocation (Wave 8 / D4).
