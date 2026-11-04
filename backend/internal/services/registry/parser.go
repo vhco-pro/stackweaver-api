@@ -258,16 +258,16 @@ func (p *ModuleParser) extractTypeString(expr hclsyntax.Expression, fileBytes []
 
 		return fmt.Sprintf("{ %s }", strings.Join(items, " "))
 	case *hclsyntax.TupleConsExpr:
-		// Tuple type definition
+		// Bracketed type arguments; the enclosing call supplies tuple().
 		if len(e.Exprs) == 0 {
-			return "tuple([])"
+			return "[]"
 		}
 
 		var typeStrs []string
 		for _, expr := range e.Exprs {
 			typeStrs = append(typeStrs, p.extractTypeString(expr, fileBytes))
 		}
-		return fmt.Sprintf("tuple([%s])", strings.Join(typeStrs, ", "))
+		return fmt.Sprintf("[%s]", strings.Join(typeStrs, ", "))
 	default:
 		// For unknown expression types, extract from source as fallback
 		if fileBytes != nil {
@@ -312,7 +312,7 @@ func (p *ModuleParser) ctyValueToInterface(val cty.Value) interface{} {
 		return val.True()
 	case ty.IsListType() || ty.IsSetType():
 		// Handle lists and sets of any element type recursively
-		var result []interface{}
+		result := make([]any, 0)
 		for it := val.ElementIterator(); it.Next(); {
 			_, v := it.Element()
 			result = append(result, p.ctyValueToInterface(v))
@@ -336,7 +336,7 @@ func (p *ModuleParser) ctyValueToInterface(val cty.Value) interface{} {
 		return result
 	case ty.IsTupleType():
 		// Handle tuples (lists with specific element types) recursively
-		var result []interface{}
+		result := make([]any, 0)
 		for it := val.ElementIterator(); it.Next(); {
 			_, v := it.Element()
 			result = append(result, p.ctyValueToInterface(v))
@@ -407,11 +407,27 @@ func (p *ModuleParser) parseDependencies(path string) ([]ProviderDependency, err
 	// Find terraform block with required_providers
 	for _, block := range body.Blocks {
 		if block.Type == "terraform" && block.Body != nil {
-			// Look for required_providers attribute (it's an attribute, not a block)
+			var requirements []cty.Value
+			// Preserve the legacy attribute form.
 			if attr, ok := block.Body.Attributes["required_providers"]; ok {
-				// Parse provider requirements
 				val, _ := attr.Expr.Value(nil)
-				if val.Type().IsObjectType() {
+				requirements = append(requirements, val)
+			}
+			// Modern declarations are attributes inside a required_providers block.
+			for _, providers := range block.Body.Blocks {
+				if providers.Type == "required_providers" {
+					values := make(map[string]cty.Value, len(providers.Body.Attributes))
+					for name, attr := range providers.Body.Attributes {
+						val, _ := attr.Expr.Value(nil)
+						values[name] = val
+					}
+					requirements = append(requirements, cty.ObjectVal(values))
+				}
+			}
+
+			// Convert both forms with the same source and version defaults.
+			for _, val := range requirements {
+				if val.Type().IsObjectType() && val.IsKnown() && !val.IsNull() {
 					for k, v := range val.AsValueMap() {
 						dep := ProviderDependency{
 							Name:   k,
@@ -419,20 +435,20 @@ func (p *ModuleParser) parseDependencies(path string) ([]ProviderDependency, err
 						}
 
 						// Extract source and version from the provider value
-						if v.Type().IsObjectType() {
+						if v.Type().IsObjectType() && v.IsKnown() && !v.IsNull() {
 							for propName, propVal := range v.AsValueMap() {
 								switch propName {
 								case "source":
-									if propVal.Type() == cty.String {
+									if propVal.Type() == cty.String && propVal.IsKnown() && !propVal.IsNull() {
 										dep.Source = propVal.AsString()
 									}
 								case "version":
-									if propVal.Type() == cty.String {
+									if propVal.Type() == cty.String && propVal.IsKnown() && !propVal.IsNull() {
 										dep.Version = propVal.AsString()
 									}
 								}
 							}
-						} else if v.Type() == cty.String {
+						} else if v.Type() == cty.String && v.IsKnown() && !v.IsNull() {
 							// Simple string value (version constraint)
 							dep.Version = v.AsString()
 						}
