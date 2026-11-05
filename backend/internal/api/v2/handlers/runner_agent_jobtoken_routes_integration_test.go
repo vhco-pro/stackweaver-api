@@ -16,6 +16,7 @@ package handlers
 import (
 	"encoding/base64"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -51,8 +52,10 @@ func (f *agentPrepFixture) jobDataRouter(t *testing.T) (*gin.Engine, *apikey.Ser
 		cryptoService:  cs,
 		syncRequester:  ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
 	}
+	f.jobDataStore = h.storageClient.(*snapshotStore)
 	return f.router(func(authed *gin.RouterGroup) {
 		authed.POST("/jobs/:id/token", middleware.RequireRunnerToken(), h.JobToken)
+		authed.POST("/jobs/:id/output", h.JobOutput)
 		authed.GET("/jobs/:id/status", h.GetJobStatus)
 		authed.GET("/jobs/:id/artifacts", middleware.JobData(), h.GetJobArtifacts)
 		authed.POST("/jobs/:id/complete", middleware.JobData(), h.JobComplete)
@@ -173,6 +176,11 @@ func TestJobToken_TerminalRefusedOnEveryDataRoute(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, call := range f.runDataCalls(run.ID) {
+				// A canceled run's own executor may still upload the state of what its interrupted
+				// apply changed and report its completion (TestJobToken_CanceledRunAcceptsTheFinalReport).
+				if status == models.RunStatusCancelled && (strings.HasSuffix(call.path, "/state") || strings.HasSuffix(call.path, "/complete")) {
+					continue
+				}
 				code, ecode, body := f.doJobData(t, r, name, call)
 				if code != http.StatusForbidden || ecode != runnercontract.ErrorCodeJobTerminal {
 					t.Errorf("%s %s after the run turned %s: status %d code %q, want 403 %s (%s)", call.method, call.path, status, code, ecode, runnercontract.ErrorCodeJobTerminal, body)

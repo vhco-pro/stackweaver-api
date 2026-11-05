@@ -997,7 +997,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 			return
 		}
-		if !h.authorizeRunnerForRun(c, &run, true) {
+		if !h.authorizeRunnerForRunReport(c, &run) {
 			return
 		}
 		h.recordPlacement(models.JobTypeTofuRun, run.ID, req.Placement)
@@ -1596,6 +1596,27 @@ func (h *RunnerAgentHandler) recordPlacement(kind models.JobType, jobID string, 
 	}
 }
 
+// appendCancelMarker ends the log of the phase a canceled run was in with cancelMarker, after the
+// interrupted engine's last output. The phase is apply once the plan completed, as the log reader
+// expects (plan.log or apply.log).
+func (h *RunnerAgentHandler) appendCancelMarker(ctx context.Context, run *models.Run) {
+	phase := "plan"
+	if run.PlanCompletedAt != nil && run.Operation != models.RunOperationPlanOnly {
+		phase = "apply"
+	}
+	line := "\n" + cancelMarker + "\n"
+	var err error
+	switch {
+	case h.logBuffer != nil:
+		_, err = h.logBuffer.AppendCapped(ctx, run.ID, phase, line, h.jobLogLimits())
+	case h.storageClient != nil:
+		_, err = logbuffer.AppendStorageLogCapped(ctx, h.storageClient, run.ID, phase, line, h.jobLogLimits())
+	}
+	if err != nil {
+		logger.Warnf("Failed to append the cancel marker to run %s phase %s: %v", run.ID, phase, err)
+	}
+}
+
 // revokeJobTokens deletes every job token of a job (#933, D1): at completion, and at a claim, which
 // starts a new attempt the earlier attempts' tokens must not reach. A failure is logged, not
 // returned: the attempt and terminal checks refuse a token that survives.
@@ -1621,9 +1642,14 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 	}
 
 	// AUD-001: only the assigned runner may complete a run - this handler flips run
-	// status (planned/applied/failed), can trigger auto-apply, and finalizes logs.
-	if !h.authorizeRunnerForRun(c, &run, true) {
+	// status (planned/applied/failed), can trigger auto-apply, and finalizes logs. A canceled run
+	// still takes the completion of the attempt that was running (authorizeRunnerForRunReport).
+	if !h.authorizeRunnerForRunReport(c, &run) {
 		return
+	}
+	canceled := run.Status == models.RunStatusCancelled
+	if canceled {
+		h.appendCancelMarker(c.Request.Context(), &run)
 	}
 
 	// JobComplete is terminal for whichever phase this job ran, so no more output will
@@ -1783,6 +1809,10 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			return
 		}
 	case "failed":
+		if canceled {
+			// The engine exited non-zero because it was interrupted: the run stays canceled.
+			break
+		}
 		run.Status = models.RunStatusFailed
 		// Use ErrorMessage if provided, fall back to Output for error context
 		errMsg := req.ErrorMessage
@@ -1793,7 +1823,9 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 		run.CompletedAt = &now
 	case "canceled":
 		run.Status = models.RunStatusCancelled
-		run.CompletedAt = &now
+		if run.CompletedAt == nil {
+			run.CompletedAt = &now
+		}
 	default:
 		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid status")
 		return
@@ -3050,8 +3082,9 @@ func (h *RunnerAgentHandler) UploadState(c *gin.Context) {
 
 	// AUD-001: writing state to a workspace is the highest-impact write on this
 	// plane (a poisoned state hijacks the next apply). Only the assigned runner in
-	// the run's org+pool may upload it. The body runner_id is not trusted.
-	if !h.authorizeRunnerForRun(c, &run, true) {
+	// the run's org+pool may upload it. The body runner_id is not trusted. A canceled run still takes
+	// the state its interrupted apply saved (authorizeRunnerForRunReport).
+	if !h.authorizeRunnerForRunReport(c, &run) {
 		return
 	}
 
