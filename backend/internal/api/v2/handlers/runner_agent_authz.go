@@ -124,6 +124,17 @@ func (h *RunnerAgentHandler) authorizeRunnerForRunAs(c *gin.Context, run *models
 // authorizeRunnerForRun. requireAssigned checks the job's reservation
 // (job.RunnerID) rather than a RunnerJobExecution row.
 func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJob(c *gin.Context, job *models.AnsibleJob, requireAssigned bool) bool {
+	return h.authorizeRunnerForAnsibleJobAs(c, job, requireAssigned, ansibleJobFinished(job))
+}
+
+// authorizeRunnerForAnsibleJobReport is authorizeRunnerForRunReport for an Ansible job: its output,
+// events and completion are still taken from the attempt that was running when it was canceled,
+// so its log keeps what the interrupted playbook printed, as a run's does.
+func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJobReport(c *gin.Context, job *models.AnsibleJob) bool {
+	return h.authorizeRunnerForAnsibleJobAs(c, job, true, ansibleJobFinished(job) && job.Status != models.AnsibleJobStatusCanceled)
+}
+
+func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJobAs(c *gin.Context, job *models.AnsibleJob, requireAssigned, finished bool) bool {
 	runner, ok := callingRunner(c)
 	if !ok {
 		writeRunnerForbidden(c, "runner identity required")
@@ -148,7 +159,7 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJob(c *gin.Context, job *m
 		return false
 	}
 	if p, ok := callingJob(c); ok {
-		return authorizeJobPrincipal(c, p, models.JobTypeAnsibleJob, job.ID.String(), job.RunnerID, job.Attempt, ansibleJobFinished(job))
+		return authorizeJobPrincipal(c, p, models.JobTypeAnsibleJob, job.ID.String(), job.RunnerID, job.Attempt, finished)
 	}
 	return true
 }
@@ -232,6 +243,9 @@ func authorizeJobPrincipal(c *gin.Context, p apikey.JobPrincipal, kind models.Jo
 // cancelMarker ends the log of a run canceled while its job ran, after whatever the interrupted
 // engine printed, so the log says how the run ended.
 const cancelMarker = "Stackweaver: the run was canceled."
+
+// jobCancelMarker is the last event of an Ansible job canceled while it ran.
+const jobCancelMarker = "Stackweaver: the job was canceled."
 
 // finishedRunStatuses are the statuses after which an OpenTofu run has no job left to execute.
 var finishedRunStatuses = []models.RunStatus{

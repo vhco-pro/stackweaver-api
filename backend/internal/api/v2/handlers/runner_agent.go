@@ -1061,7 +1061,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 		return
 	}
-	if !h.authorizeRunnerForAnsibleJob(c, outputJob, true) {
+	if !h.authorizeRunnerForAnsibleJobReport(c, outputJob) {
 		return
 	}
 	h.recordPlacement(models.JobTypeAnsibleJob, jobIDStr, req.Placement)
@@ -1209,7 +1209,7 @@ func (h *RunnerAgentHandler) JobEvents(c *gin.Context) {
 		return
 	}
 	// AUD-001: only the runner that owns the job may write its events.
-	if !h.authorizeRunnerForAnsibleJob(c, job, true) {
+	if !h.authorizeRunnerForAnsibleJobReport(c, job) {
 		return
 	}
 
@@ -1329,10 +1329,12 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 	// AUD-001: only the runner that owns the job may complete it - otherwise a
 	// caller could force-complete/fail another tenant's job. Gate on the job's
 	// org/pool/reservation before mutating any status.
+	wasCanceled := false
 	if completeJob, jErr := h.ansibleJobRepo.GetByID(jobID); jErr == nil {
-		if !h.authorizeRunnerForAnsibleJob(c, completeJob, true) {
+		if !h.authorizeRunnerForAnsibleJobReport(c, completeJob) {
 			return
 		}
+		wasCanceled = completeJob.Status == models.AnsibleJobStatusCanceled
 	} else if runner, rok := callingRunner(c); !rok || exec.RunnerID != runner.ID {
 		// Job row gone but the exec record must still belong to the caller.
 		writeRunnerForbidden(c, "job is not owned by this runner")
@@ -1362,7 +1364,16 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 	// Update the ansible job status and finalize stats
 	if h.ansibleJobRepo != nil {
 		job, err := h.ansibleJobRepo.GetByID(jobID)
-		if err == nil {
+		if err == nil && wasCanceled {
+			// Canceled while it ran: the executor's report ends its log, and the job stays canceled
+			// whatever the interrupted playbook's exit says.
+			_ = h.ansibleJobRepo.CreateEventNextCounter(&models.AnsibleJobEvent{JobID: jobID, Event: "runner_output", Stdout: jobCancelMarker})
+			if job.FinishedAt == nil {
+				now := time.Now()
+				job.FinishedAt = &now
+				_ = h.ansibleJobRepo.UpdateColumns(job, "finished_at")
+			}
+		} else if err == nil {
 			now := time.Now()
 			job.FinishedAt = &now
 

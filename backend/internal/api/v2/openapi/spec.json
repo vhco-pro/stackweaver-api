@@ -2107,6 +2107,23 @@
               "relationships": {
                 "type": "object",
                 "properties": {
+                  "agent-pool": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
                   "credentials": {
                     "type": "object",
                     "properties": {
@@ -12331,7 +12348,8 @@
                     }
                   },
                   "agent-pool-id": {
-                    "nullable": true
+                    "type": "string",
+                    "format": "uuid"
                   },
                   "allow-destroy-plan": {
                     "type": "boolean"
@@ -12500,7 +12518,16 @@
                     "type": "object",
                     "properties": {
                       "data": {
-                        "nullable": true
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        }
                       }
                     }
                   },
@@ -29373,6 +29400,12 @@
                     "timeout-seconds": 1800
                   },
                   "relationships": {
+                    "agent-pool": {
+                      "data": {
+                        "id": "\u003cuuid\u003e",
+                        "type": "agent-pools"
+                      }
+                    },
                     "credentials": {
                       "data": [
                         {
@@ -45191,10 +45224,12 @@
               "example": {
                 "data": {
                   "attributes": {
+                    "agent-pool-id": "\u003cuuid\u003e",
                     "allow-destroy-plan": false,
                     "assessments-enabled": true,
                     "auto-apply": true,
                     "description": "Updated by the golden write harness",
+                    "execution-mode": "agent",
                     "file-triggers-enabled": true,
                     "global-remote-state": true,
                     "identity-binding-id": "\u003cuuid\u003e",

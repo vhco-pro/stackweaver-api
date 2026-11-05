@@ -18,6 +18,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/settings"
 	"gorm.io/gorm"
 )
 
@@ -110,8 +111,8 @@ func (h *ProjectHandlerV2) applyProjectSettings(project *models.Project, attrs p
 		project.TofuVersion = strings.TrimSpace(*attrs.TofuVersion)
 	}
 	if attrs.RunTimeout != nil {
-		if *attrs.RunTimeout < 0 {
-			return "run-timeout must be zero (inherit) or a positive number of seconds", false
+		if detail := settings.CheckRunTimeout("run-timeout", *attrs.RunTimeout); detail != "" {
+			return detail, false
 		}
 		project.RunTimeout = *attrs.RunTimeout
 	}

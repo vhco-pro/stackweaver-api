@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/tofu"
 	"gorm.io/gorm"
 )
@@ -137,16 +139,43 @@ func applyAnsibleJobRetentionDays(org *models.Organization, days *int) {
 }
 
 // applyOrgRunTimeout copies run-timeout onto the organization: zero inherits the deployment default,
-// an absent attribute changes nothing, and a negative number is refused with a detail.
+// an absent attribute changes nothing, and a negative number or one above
+// settings.MaxRunTimeoutSeconds is refused with a detail.
 func applyOrgRunTimeout(org *models.Organization, seconds *int) (string, bool) {
 	if seconds == nil {
 		return "", true
 	}
-	if *seconds < 0 {
-		return "run-timeout must be zero (inherit) or a positive number of seconds", false
+	if detail := settings.CheckRunTimeout("run-timeout", *seconds); detail != "" {
+		return detail, false
 	}
 	org.RunTimeout = *seconds
 	return "", true
+}
+
+// cacheLimitAllowed holds an organization's cache size limit to the deployment's (#933, D7): the
+// limit is a storage quota, so an organization owner may set it up to CACHE_SIZE_LIMIT and only a
+// platform administrator above it, as for a hosted pool's cap. Lowering a limit a platform
+// administrator raised, or resetting it to the deployment's, is always allowed. It writes the 403
+// and returns false on a refusal.
+func (h *OrganizationHandlerV2) cacheLimitAllowed(c *gin.Context, org *models.Organization, bytes *int64) bool {
+	if bytes == nil || *bytes <= org.CacheSizeLimit {
+		return true
+	}
+	ceiling := settings.DeploymentCacheSizeLimit(os.Getenv)
+	if *bytes <= ceiling {
+		return true
+	}
+	reason := "no platform administrator verdict is configured"
+	if h.admins != nil {
+		var admin *models.User
+		if admin, reason = h.admins.Check(c); admin != nil {
+			return true
+		}
+	}
+	logger.Warnf("organization %s: refused a cache-size-limit above the deployment's: %s", org.Name, reason)
+	jsonapi.WriteError(c, http.StatusForbidden, "Forbidden",
+		fmt.Sprintf("cache-size-limit above the deployment's %d bytes is set by a platform administrator only", ceiling))
+	return false
 }
 
 // applyOrgLevelRefs sets the organization's run images, identity binding and cache bound, answering
@@ -829,6 +858,9 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	applyAnsibleJobRetentionDays(org, attrs.AnsibleJobRetentionDays)
 	if detail, ok := applyOrgRunTimeout(org, attrs.RunTimeout); !ok {
 		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Invalid Attribute", detail)
+		return
+	}
+	if !h.cacheLimitAllowed(c, org, attrs.CacheSizeLimit) {
 		return
 	}
 	if detail, ok, err := h.applyOrgLevelRefs(org, attrs); err != nil {

@@ -1,8 +1,9 @@
 // Copyright (c) 2026 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
 // Package cachejanitor bounds the per-organization caches (#933, D7, AC36): each organization's
-// entries are kept under its resolved cache_size_limit, least recently used first out, and settled
-// promotions are removed once past their retention.
+// entries are kept under its resolved cache_size_limit, least recently used first out, the entries
+// of an organization that is gone are removed, and settled promotions are removed once past their
+// retention.
 package cachejanitor
 
 import (
@@ -42,11 +43,14 @@ func (j *Janitor) Sweep(ctx context.Context) error {
 	var errs []error
 	for _, t := range totals {
 		var org models.Organization
-		if err := j.DB.WithContext(ctx).Select("id", "cache_size_limit").First(&org, "id = ?", t.OrganizationID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		limit := int64(0) // an organization that is gone keeps nothing
+		switch err := j.DB.WithContext(ctx).Select("id", "cache_size_limit").First(&org, "id = ?", t.OrganizationID).Error; {
+		case err == nil:
+			limit = settings.EffectiveCacheSizeLimit(&org, j.DefaultLimit).Value
+		case !errors.Is(err, gorm.ErrRecordNotFound):
 			errs = append(errs, err)
 			continue
 		}
-		limit := settings.EffectiveCacheSizeLimit(&org, j.DefaultLimit).Value
 		if t.Total <= limit {
 			continue
 		}

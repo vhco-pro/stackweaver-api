@@ -205,10 +205,13 @@ func TestJobToken_TerminalRefusedOnEveryDataRoute(t *testing.T) {
 				t.Fatal(err)
 			}
 			base := "/api/v2/runner/jobs/" + job.ID.String()
-			for _, call := range []jobDataCall{
-				{method: http.MethodGet, path: base + "/artifacts"},
-				{method: http.MethodPost, path: base + "/complete", body: map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "completed"}},
-			} {
+			calls := []jobDataCall{{method: http.MethodGet, path: base + "/artifacts"}}
+			// A canceled job's own executor may still report its completion
+			// (TestJobToken_CanceledAnsibleJobAcceptsTheFinalReport); every other terminal job refuses it.
+			if status != models.AnsibleJobStatusCanceled {
+				calls = append(calls, jobDataCall{method: http.MethodPost, path: base + "/complete", body: map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "completed"}})
+			}
+			for _, call := range calls {
 				code, ecode, body := f.doJobData(t, r, name, call)
 				if code != http.StatusForbidden || ecode != runnercontract.ErrorCodeJobTerminal {
 					t.Errorf("%s %s after the job turned %s: status %d code %q, want 403 %s (%s)", call.method, call.path, status, code, ecode, runnercontract.ErrorCodeJobTerminal, body)

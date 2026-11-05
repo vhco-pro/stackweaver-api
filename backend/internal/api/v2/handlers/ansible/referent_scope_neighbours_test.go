@@ -33,6 +33,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
@@ -172,6 +173,7 @@ func setupNeighbourScope(t *testing.T) *neighbourScopeFixture {
 	)
 	templates.SetCredentialRepo(credentialRepo)
 	templates.SetAgentPoolRepo(repository.NewAgentPoolRepository(db))
+	templates.SetLevelRefs(levelrefs.New(db))
 	sources := NewInventorySourceHandler(
 		ansiblesvc.NewInventorySourceService(repository.NewAnsibleInventorySourceRepository(db), inventoryRepo, credentialRepo, nil),
 		ansiblesvc.NewInventoryService(inventoryRepo, orgRepo), authService, rbacService, nil,

@@ -475,7 +475,7 @@ func init() {
 			// config key, which it returns with the template from then on.
 			route: "PATCH /api/v2/ansible/job-templates/:id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/ansible/job-templates/:id"), ansibleRelatedMany(
+				doc := ansibleRelatedMany(
 					document("ansible-job-templates", map[string]any{
 						"description":         "Updated by the golden write harness",
 						"extra-vars":          map[string]any{"compliance_profile": "cis-level-1"},
@@ -487,7 +487,12 @@ func init() {
 						"allow-simultaneous":  true,
 						"allow-callbacks":     true,
 					}),
-					"credentials", "ansible-credentials", w.id("credentials")))
+					"credentials", "ansible-credentials", w.id("credentials"))
+				// The template runs on the pool that offers the binding it selects (#933, D8).
+				doc["data"].(map[string]any)["relationships"].(map[string]any)["agent-pool"] = map[string]any{
+					"data": map[string]any{"type": "agent-pools", "id": goldenBindingPool(t, w)},
+				}
+				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/ansible/job-templates/:id"), doc)
 			},
 			responseSecrets: []string{"data.attributes.host-config-key"},
 		},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
 )
 
@@ -62,8 +63,8 @@ func (c *Checker) RunImage(org uuid.UUID, kind string, raw *string) (*uuid.UUID,
 	return id, true, nil
 }
 
-// IdentityBinding checks that raw names an identity binding of org. Whether the job's pool offers
-// it is checked when the job is created (#933, D8).
+// IdentityBinding checks that raw names an identity binding of org. Whether the object's pool
+// offers it is checked by Offered once the object's effective pool is known (#933, D8).
 func (c *Checker) IdentityBinding(org uuid.UUID, raw *string) (*uuid.UUID, bool, error) {
 	id, set, err := parse(raw)
 	if err != nil || id == nil {
@@ -80,6 +81,18 @@ func (c *Checker) IdentityBinding(org uuid.UUID, raw *string) (*uuid.UUID, bool,
 		return nil, true, fmt.Errorf("%w: the identity binding belongs to another organization", ErrInvalid)
 	}
 	return id, true, nil
+}
+
+// Offered checks that the pool an object runs on offers the identity binding it resolves (#933, D8):
+// a save is refused with the same reason a job of it would be (repository.ErrBindingNotOffered),
+// so a binding of another pool never reaches a run. A nil binding is the platform identity, which
+// every pool offers; a nil pool is the organization's hosted capacity.
+func (c *Checker) Offered(binding, pool *uuid.UUID) error {
+	if binding == nil {
+		return nil
+	}
+	_, err := repository.NewIdentityBindingRepository(c.db).Offered(binding, pool)
+	return err
 }
 
 // UUIDString is a level's selection on the wire: its id, or null.
