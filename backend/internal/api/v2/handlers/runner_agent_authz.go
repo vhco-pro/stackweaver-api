@@ -77,6 +77,20 @@ func (h *RunnerAgentHandler) ansibleJobOrgAndPool(job *models.AnsibleJob) (orgID
 // the atomic claim carry the guarantee. Returns true iff the caller is authorized;
 // otherwise it has already written the error response.
 func (h *RunnerAgentHandler) authorizeRunnerForRun(c *gin.Context, run *models.Run, requireAssigned bool) bool {
+	return h.authorizeRunnerForRunAs(c, run, requireAssigned, runFinished(run))
+}
+
+// authorizeRunnerForRunReport authorizes the final report of a run's job: its output, the state it
+// saved and its completion. It is authorizeRunnerForRun(c, run, true), except that a canceled run
+// still takes the report of the attempt that was running: cancelling interrupts OpenTofu, which
+// saves the state of what it already changed, and that state must reach the workspace, as TFE keeps
+// the state of an interrupted apply. The job token still has to be the run's, for its runner and
+// its current attempt, and the completion revokes it, so the report is accepted once.
+func (h *RunnerAgentHandler) authorizeRunnerForRunReport(c *gin.Context, run *models.Run) bool {
+	return h.authorizeRunnerForRunAs(c, run, true, runFinished(run) && run.Status != models.RunStatusCancelled)
+}
+
+func (h *RunnerAgentHandler) authorizeRunnerForRunAs(c *gin.Context, run *models.Run, requireAssigned, finished bool) bool {
 	runner, ok := callingRunner(c)
 	if !ok {
 		writeRunnerForbidden(c, "runner identity required")
@@ -101,7 +115,7 @@ func (h *RunnerAgentHandler) authorizeRunnerForRun(c *gin.Context, run *models.R
 		return false
 	}
 	if p, ok := callingJob(c); ok {
-		return authorizeJobPrincipal(c, p, models.JobTypeTofuRun, run.ID, run.RunnerID, run.Attempt, runFinished(run))
+		return authorizeJobPrincipal(c, p, models.JobTypeTofuRun, run.ID, run.RunnerID, run.Attempt, finished)
 	}
 	return true
 }
@@ -214,6 +228,10 @@ func authorizeJobPrincipal(c *gin.Context, p apikey.JobPrincipal, kind models.Jo
 	}
 	return true
 }
+
+// cancelMarker ends the log of a run canceled while its job ran, after whatever the interrupted
+// engine printed, so the log says how the run ended.
+const cancelMarker = "Stackweaver: the run was canceled."
 
 // finishedRunStatuses are the statuses after which an OpenTofu run has no job left to execute.
 var finishedRunStatuses = []models.RunStatus{

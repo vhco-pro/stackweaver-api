@@ -48,6 +48,8 @@ type agentPrepFixture struct {
 	// keys maps the X-Test-Key header value to the API key the request authenticates
 	// with: one runner-scoped token per runner plus "org", an org-scoped registration key.
 	keys map[string]*models.APIKey
+	// jobDataStore is the object store jobDataRouter's handler writes logs and snapshots to.
+	jobDataStore *snapshotStore
 }
 
 func runnerTokenFor(r *models.Runner) *models.APIKey {
