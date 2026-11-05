@@ -177,3 +177,48 @@ func TestInventoriesExtensions(t *testing.T) {
 		t.Errorf("Inventories() = %v, want %v", got, want)
 	}
 }
+
+func TestCloudInventoryConfigurationFilenameSuffixes(t *testing.T) {
+	for _, suffix := range []string{"aws_ec2", "azure_rm", "gcp_compute"} {
+		for _, prefix := range []string{"", "prod.", "prod-", "prod_", "prod"} {
+			for _, ext := range []string{".yml", ".yaml"} {
+				filename := prefix + suffix + ext
+				t.Run(filename, func(t *testing.T) {
+					paths := []string{filename}
+					if got := Playbooks(paths, ""); len(got) != 0 {
+						t.Errorf("cloud inventory %q offered as a playbook: %v", filename, got)
+					}
+					if got := Inventories(paths, ""); !slices.Equal(got, paths) {
+						t.Errorf("cloud inventory %q missing from inventories: %v", filename, got)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCloudInventorySuffixesRespectDirectoryScope(t *testing.T) {
+	paths := []string{"other/site.yml", "cloud/web.yml", "cloud/prod-aws_ec2.yml", "cloud/prod_azure_rm.yaml"}
+	if got, want := Playbooks(paths, "cloud"), []string{"cloud/web.yml"}; !slices.Equal(got, want) {
+		t.Errorf("scoped playbooks = %v, want %v", got, want)
+	}
+	if got, want := Inventories(paths, "cloud"), []string{"cloud/prod-aws_ec2.yml", "cloud/prod_azure_rm.yaml", "cloud/web.yml"}; !slices.Equal(got, want) {
+		t.Errorf("scoped inventories = %v, want %v", got, want)
+	}
+}
+
+func TestUnrecognizedCloudLikeNamesRemainAmbiguous(t *testing.T) {
+	paths := []string{"prod_aws_ec2_extra.yml", "gcp.yml", "deploy.yml", "aws_ec2_backup.yml"}
+	original := slices.Clone(paths)
+	want := slices.Clone(paths)
+	slices.Sort(want)
+	if got := Playbooks(paths, ""); !slices.Equal(got, want) {
+		t.Errorf("ordinary playbook candidates = %v, want %v", got, want)
+	}
+	if got := Inventories(paths, ""); !slices.Equal(got, want) {
+		t.Errorf("ordinary inventory candidates = %v, want %v", got, want)
+	}
+	if !slices.Equal(paths, original) {
+		t.Errorf("input listing mutated: got %v, want %v", paths, original)
+	}
+}

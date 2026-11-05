@@ -146,11 +146,11 @@ func filter(paths []string, scopePath string, keep func(p, base, stem, ext strin
 	return out
 }
 
-// isInventoryPluginConfig reports whether a file stem names a cloud inventory
-// plugin configuration (`azure_rm` or `<anything>.azure_rm`).
+// isInventoryPluginConfig reports whether a file stem ends with a recognized
+// cloud inventory plugin suffix (for example azure_rm or prod-azure_rm).
 func isInventoryPluginConfig(stem string) bool {
 	for _, suffix := range inventoryPluginSuffixes {
-		if stem == suffix || strings.HasSuffix(stem, "."+suffix) {
+		if strings.HasSuffix(stem, suffix) {
 			return true
 		}
 	}
