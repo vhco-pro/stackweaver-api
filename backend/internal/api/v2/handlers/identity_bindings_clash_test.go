@@ -82,7 +82,9 @@ func TestIdentityBindings_ClashAndHandOver(t *testing.T) {
 	}
 
 	// A create-mode binding of a free name, then the launcher reports Flux took it over.
-	code, body = create(`{"name":"ours","mechanism":"azure-workload-identity","service-account":"sw-ours","annotations":{"azure.workload.identity/client-id":"cid"}}`)
+	// The client id is a real application id's form: a created account needs its mechanism's
+	// annotation in that form (TestValidateBinding).
+	code, body = create(`{"name":"ours","mechanism":"azure-workload-identity","service-account":"sw-ours","annotations":{"azure.workload.identity/client-id":"00000000-0000-0000-0000-000000000000"}}`)
 	if code != http.StatusCreated {
 		t.Fatalf("a create of a free name = %d %s", code, body)
 	}

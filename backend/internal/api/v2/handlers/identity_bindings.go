@@ -149,14 +149,72 @@ func (h *IdentityBindingHandler) binding(c *gin.Context) (*models.IdentityBindin
 // serviceAccountName is a DNS-1123 subdomain, the form a ServiceAccount name takes.
 var serviceAccountName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 
+// bindingName is a binding's own name: letters, digits, '.', '_' and '-', starting with a letter or
+// digit, like the other names of the platform.
+var bindingName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// annotationKeyName is the name part of a Kubernetes annotation key: at most 63 characters,
+// alphanumeric at both ends, with '-', '_' and '.' between.
+var annotationKeyName = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$`)
+
+// Annotation values the launcher puts on a created ServiceAccount, each checked for its form:
+// IRSA's IAM role ARN in any partition, and Entra Workload ID's application client id.
+var (
+	iamRoleARN = regexp.MustCompile(`^arn:aws[a-z-]*:iam::[0-9]+:role/\S+$`)
+	clientUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+)
+
+// requiredAnnotations is the ServiceAccount annotation each mechanism cannot work without (#933,
+// D5): the role IRSA assumes and the application Entra Workload ID federates with. EKS Pod
+// Identity binds the role outside the ServiceAccount, and GKE Workload Identity Federation can
+// grant the Kubernetes ServiceAccount directly, so neither requires one.
+var requiredAnnotations = map[string]struct {
+	key, form string
+	valid     *regexp.Regexp
+}{
+	models.IdentityMechanismAWSIRSA:               {"eks.amazonaws.com/role-arn", "an IAM role ARN (arn:aws:iam::<account>:role/<name>)", iamRoleARN},
+	models.IdentityMechanismAzureWorkloadIdentity: {"azure.workload.identity/client-id", "the application's client id (a UUID)", clientUUID},
+}
+
+// validAnnotationKey reports whether k is a Kubernetes annotation key: an optional DNS subdomain
+// prefix and '/', then a name.
+func validAnnotationKey(k string) bool {
+	name := k
+	if prefix, rest, hasPrefix := strings.Cut(k, "/"); hasPrefix {
+		if prefix == "" || len(prefix) > 253 || !serviceAccountName.MatchString(prefix) {
+			return false
+		}
+		name = rest
+	}
+	return len(name) <= 63 && annotationKeyName.MatchString(name)
+}
+
 func validateBinding(b *models.IdentityBinding) string {
 	switch {
-	case strings.TrimSpace(b.Name) == "" || len(b.Name) > 100:
-		return "name must be 1 to 100 characters"
+	case b.Name == "" || len(b.Name) > 100 || !bindingName.MatchString(b.Name):
+		return "name must be 1 to 100 letters, digits, '.', '_' or '-', starting with a letter or digit"
 	case !slices.Contains(models.IdentityMechanisms, b.Mechanism):
 		return "mechanism must be one of " + strings.Join(models.IdentityMechanisms, ", ")
 	case len(b.ServiceAccount) > 253 || !serviceAccountName.MatchString(b.ServiceAccount):
 		return "service-account must be a Kubernetes ServiceAccount name (lowercase letters, digits, '-' and '.')"
+	}
+	keys := make([]string, 0, len(b.Annotations))
+	for k := range b.Annotations {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if !validAnnotationKey(k) {
+			return fmt.Sprintf("annotation key %q is not a Kubernetes annotation key (an optional DNS prefix and '/', then up to 63 letters, digits, '-', '_' or '.')", k)
+		}
+	}
+	// The launcher writes the annotations on an account it creates, a per-job clone included; a
+	// referenced account carries its own where it is declared.
+	if req, ok := requiredAnnotations[b.Mechanism]; ok && (!b.Reference || b.PerJobSA) {
+		v, _ := b.Annotations[req.key].(string)
+		if !req.valid.MatchString(strings.TrimSpace(v)) {
+			return fmt.Sprintf("a %s binding whose ServiceAccount Stackweaver creates needs the annotation %s, set to %s", b.Mechanism, req.key, req.form)
+		}
 	}
 	return ""
 }

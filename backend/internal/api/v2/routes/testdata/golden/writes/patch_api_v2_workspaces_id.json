@@ -6,10 +6,12 @@
     "body": {
       "data": {
         "attributes": {
+          "agent-pool-id": "\u003cuuid\u003e",
           "allow-destroy-plan": false,
           "assessments-enabled": true,
           "auto-apply": true,
           "description": "Updated by the golden write harness",
+          "execution-mode": "agent",
           "file-triggers-enabled": true,
           "global-remote-state": true,
           "identity-binding-id": "\u003cuuid\u003e",
@@ -224,7 +226,7 @@
         "actions": {
           "is-destroyable": true
         },
-        "agent-pool-id": null,
+        "agent-pool-id": "\u003cuuid\u003e",
         "allow-destroy-plan": false,
         "assessments-enabled": true,
         "auto-apply": true,
@@ -233,7 +235,7 @@
         "created-at": "\u003ctimestamp\u003e",
         "description": "Updated by the golden write harness",
         "environment": "default",
-        "execution-mode": "remote",
+        "execution-mode": "agent",
         "file-triggers-enabled": true,
         "force-delete": false,
         "global-remote-state": true,
@@ -259,8 +261,8 @@
         "resource-count": 0,
         "run-image-id": "\u003cuuid\u003e",
         "setting-overwrites": {
-          "agent-pool": false,
-          "execution-mode": false
+          "agent-pool": true,
+          "execution-mode": true
         },
         "source": "tfe-api",
         "speculative-enabled": true,
@@ -278,7 +280,10 @@
       "id": "\u003cid\u003e",
       "relationships": {
         "agent-pool": {
-          "data": null
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
         },
         "organization": {
           "data": {

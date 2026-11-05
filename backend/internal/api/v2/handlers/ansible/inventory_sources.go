@@ -16,6 +16,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/services/ansible"
+	"github.com/michielvha/stackweaver/core/settings"
 )
 
 // InventorySourceHandler handles inventory source API requests
@@ -237,6 +238,12 @@ func (h *InventorySourceHandler) Create(c *gin.Context) {
 	if attrs.InstanceFilters != "" {
 		syncOpts.InstanceFilters = &attrs.InstanceFilters
 	}
+	if attrs.SyncTimeout != nil {
+		if detail := settings.CheckRunTimeout("sync-timeout", *attrs.SyncTimeout); detail != "" {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+			return
+		}
+	}
 	if !h.levelRefOptions(c, inventoryID, &syncOpts, attrs.RunImageID, attrs.IdentityBindingID) {
 		return
 	}
@@ -362,6 +369,12 @@ func (h *InventorySourceHandler) Update(c *gin.Context) {
 		TimeoutSeconds:     attrs.SyncTimeout,
 	}
 
+	if attrs.SyncTimeout != nil {
+		if detail := settings.CheckRunTimeout("sync-timeout", *attrs.SyncTimeout); detail != "" {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+			return
+		}
+	}
 	if !h.levelRefOptions(c, source.InventoryID, &opts, attrs.RunImageID, attrs.IdentityBindingID) {
 		return
 	}

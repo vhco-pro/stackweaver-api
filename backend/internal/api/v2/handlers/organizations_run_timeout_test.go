@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/settings"
 )
 
 // TestApplyOrgRunTimeout covers the organization's level of the run timeout (#933, D0): zero
 // inherits the deployment default, an absent attribute changes nothing, a negative number is refused,
-// and the response carries the stored value.
+// a timeout above settings.MaxRunTimeoutSeconds is refused, and the response carries the stored value.
 func TestApplyOrgRunTimeout(t *testing.T) {
 	intPtr := func(i int) *int { return &i }
 
@@ -26,6 +27,12 @@ func TestApplyOrgRunTimeout(t *testing.T) {
 	}
 	if _, ok := applyOrgRunTimeout(org, intPtr(-3)); ok {
 		t.Fatal("negative timeout accepted")
+	}
+	if _, ok := applyOrgRunTimeout(org, intPtr(settings.MaxRunTimeoutSeconds+1)); ok {
+		t.Fatal("a timeout above the bound accepted")
+	}
+	if _, ok := applyOrgRunTimeout(org, intPtr(settings.MaxRunTimeoutSeconds)); !ok || org.RunTimeout != settings.MaxRunTimeoutSeconds {
+		t.Fatalf("the bound itself: got %d", org.RunTimeout)
 	}
 	if got := buildTFEOrganizationResponse(&models.Organization{Name: "acme", RunTimeout: 1800}, nil).Attributes.RunTimeout; got != 1800 {
 		t.Fatalf("response run-timeout = %d", got)

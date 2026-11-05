@@ -19,6 +19,12 @@
           "timeout-seconds": 1800
         },
         "relationships": {
+          "agent-pool": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "agent-pools"
+            }
+          },
           "credentials": {
             "data": [
               {
@@ -248,6 +254,12 @@
       },
       "id": "\u003cuuid\u003e",
       "relationships": {
+        "agent-pool": {
+          "data": {
+            "id": "\u003cuuid\u003e",
+            "type": "agent-pools"
+          }
+        },
         "credentials": {
           "data": [
             {

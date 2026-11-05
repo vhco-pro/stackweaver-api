@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -269,6 +271,12 @@ func (h *AgentPoolHandlerV2) Create(c *gin.Context) {
 		OrganizationScoped: orgScoped,
 	}
 	if err := h.poolRepo.Create(pool); err != nil {
+		// The name lookup above skips the organization's hidden hosted pool, whose name the unique
+		// index still holds.
+		if repository.IsUniqueViolation(err) {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Agent pool with this name already exists")
+			return
+		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create agent pool")
 		return
 	}
@@ -426,6 +434,10 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 			return
 		}
 		if err := h.poolRepo.Update(pool); err != nil {
+			if repository.IsUniqueViolation(err) {
+				jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Agent pool with this name already exists")
+				return
+			}
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update agent pool")
 			return
 		}
@@ -765,6 +777,71 @@ func (h *AgentPoolHandlerV2) jitOwner(c *gin.Context) (uuid.UUID, bool) {
 	return uuid.Nil, false
 }
 
+// A pool's limits are written in the forms both drivers read (#933, D4, AC24): the container
+// driver's parser in backend/internal/launcher/driver/container.go and a Kubernetes quantity.
+// CPU is cores (0.5, 2) or whole millicores (500m); memory is whole bytes or a number with a
+// binary or decimal suffix up to T.
+var (
+	cpuLimitPattern    = regexp.MustCompile(`^(?:[0-9]+m|[0-9]+(?:\.[0-9]+)?)$`)
+	memoryLimitPattern = regexp.MustCompile(`^(?:[0-9]+|[0-9]+(?:\.[0-9]+)?(?:Ki|Mi|Gi|Ti|K|M|G|T))$`)
+)
+
+// minNanoCPUs and minMemoryBytes are the smallest limits Docker accepts (0.01 CPU, 6 MiB); a
+// smaller one would fail every job at launch.
+const (
+	minNanoCPUs    = 10_000_000
+	minMemoryBytes = 6 << 20
+)
+
+// checkCPULimit names what is wrong with a cpu-limit, or returns "" for a valid one or empty.
+func checkCPULimit(v string) string {
+	if v == "" {
+		return ""
+	}
+	const detail = "cpu-limit must be a number of cores (0.5, 2) or millicores (500m), at least 0.01 (10m)"
+	if !cpuLimitPattern.MatchString(v) {
+		return detail
+	}
+	n, err := strconv.ParseFloat(strings.TrimSuffix(v, "m"), 64)
+	if err != nil {
+		return detail
+	}
+	if strings.HasSuffix(v, "m") {
+		n /= 1000
+	}
+	if n*1e9 < minNanoCPUs {
+		return detail
+	}
+	return ""
+}
+
+// checkMemoryLimit names what is wrong with a memory-limit, or returns "" for a valid one or empty.
+func checkMemoryLimit(v string) string {
+	if v == "" {
+		return ""
+	}
+	const detail = "memory-limit must be bytes or a number with Ki, Mi, Gi, Ti, K, M, G or T (512Mi, 2Gi), at least 6Mi"
+	if !memoryLimitPattern.MatchString(v) {
+		return detail
+	}
+	mult := 1.0
+	num := v
+	for _, u := range []struct {
+		suffix string
+		mult   float64
+	}{{"Ki", 1 << 10}, {"Mi", 1 << 20}, {"Gi", 1 << 30}, {"Ti", 1 << 40}, {"K", 1e3}, {"M", 1e6}, {"G", 1e9}, {"T", 1e12}} {
+		if n, ok := strings.CutSuffix(v, u.suffix); ok {
+			num, mult = n, u.mult
+			break
+		}
+	}
+	n, err := strconv.ParseFloat(num, 64)
+	if err != nil || n*mult < minMemoryBytes {
+		return detail
+	}
+	return ""
+}
+
 // applyPoolSettings applies the native pool settings of a request, or names the one it refuses.
 func applyPoolSettings(pool *models.AgentPool, keep *int, cpu, mem *string, required, readthrough *bool) string {
 	if keep != nil {
@@ -774,10 +851,18 @@ func applyPoolSettings(pool *models.AgentPool, keep *int, cpu, mem *string, requ
 		pool.KeepFailedJobsFor = *keep
 	}
 	if cpu != nil {
-		pool.CPULimit = strings.TrimSpace(*cpu)
+		v := strings.TrimSpace(*cpu)
+		if detail := checkCPULimit(v); detail != "" {
+			return detail
+		}
+		pool.CPULimit = v
 	}
 	if mem != nil {
-		pool.MemoryLimit = strings.TrimSpace(*mem)
+		v := strings.TrimSpace(*mem)
+		if detail := checkMemoryLimit(v); detail != "" {
+			return detail
+		}
+		pool.MemoryLimit = v
 	}
 	if required != nil {
 		pool.LimitsRequired = *required

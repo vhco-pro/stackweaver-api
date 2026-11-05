@@ -672,3 +672,15 @@ func goldenRunImage(t *testing.T, w *writeRun, kind string) string {
 	}
 	return img.ID.String()
 }
+
+// goldenBindingPool is the agent pool that offers the seeded identity binding: a workspace or job
+// template that selects the binding runs on it, because a save that leaves an object a binding its
+// pool does not offer is refused (#933, D8).
+func goldenBindingPool(t *testing.T, w *writeRun) string {
+	t.Helper()
+	var b models.IdentityBinding
+	if err := w.db.First(&b, "id = ?", w.id("identity-bindings")).Error; err != nil {
+		t.Fatalf("no seeded identity binding: %v", err)
+	}
+	return b.AgentPoolID.String()
+}

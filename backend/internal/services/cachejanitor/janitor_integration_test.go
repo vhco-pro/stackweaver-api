@@ -136,3 +136,26 @@ func TestSweep_RemovesOldPromotions(t *testing.T) {
 		t.Error("a fresh promotion was removed")
 	}
 }
+
+// TestSweep_RemovesTheCacheOfADeletedOrganization: entries whose organization is gone, left by a
+// delete before it removed them, are swept with their objects whatever the limit.
+func TestSweep_RemovesTheCacheOfADeletedOrganization(t *testing.T) {
+	db := testDB(t)
+	store := storagetest.NewMemory()
+	org := seedOrg(t, db, 0)
+	orphan := seedEntry(t, db, store, org, "orphan", 100, time.Now())
+	if err := db.Where("id = ?", org).Delete(&models.Organization{}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	j := &Janitor{DB: db, Store: store, DefaultLimit: 1 << 30}
+	if err := j.Sweep(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := remaining(t, db, org); len(got) != 0 {
+		t.Errorf("a deleted organization keeps cache entries %v", got)
+	}
+	if _, err := store.Get(t.Context(), models.CacheObjectKey(org, orphan.Kind, orphan.SHA256)); err == nil {
+		t.Error("the deleted organization's cache object is still stored")
+	}
+}

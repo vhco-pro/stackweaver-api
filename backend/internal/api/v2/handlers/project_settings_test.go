@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/settings"
 )
 
 func strPtr(s string) *string { return &s }
@@ -112,6 +113,13 @@ func TestApplyProjectRunDefaults(t *testing.T) {
 		p := &models.Project{}
 		if _, ok := h.applyProjectSettings(p, projectSettingsAttrs{RunTimeout: intPtr(-1)}); ok {
 			t.Fatal("negative timeout accepted")
+		}
+	})
+
+	t.Run("a timeout above the bound is rejected", func(t *testing.T) {
+		p := &models.Project{}
+		if _, ok := h.applyProjectSettings(p, projectSettingsAttrs{RunTimeout: intPtr(settings.MaxRunTimeoutSeconds + 1)}); ok {
+			t.Fatal("a timeout above settings.MaxRunTimeoutSeconds accepted")
 		}
 	})
 

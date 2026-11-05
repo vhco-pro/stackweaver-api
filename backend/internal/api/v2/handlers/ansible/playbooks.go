@@ -22,6 +22,7 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	vcs "github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/settings"
 	"gorm.io/gorm"
 )
 
@@ -1119,6 +1120,10 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 		agentPoolID = &apid
 	}
 
+	if detail := settings.CheckRunTimeout("timeout-seconds", req.Data.Attributes.TimeoutSeconds); detail != "" {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+		return
+	}
 	if !h.templateReferentsAccepted(c, projectID, &playbookID, &inventoryID, credentialIDs, "Failed to create job template") {
 		return
 	}
@@ -1153,6 +1158,9 @@ func (h *PlaybookHandler) CreateTemplateByOrganization(c *gin.Context) {
 		template.Forks = 5
 	}
 	if !h.applyTemplateLevelRefs(c, template, org.ID, req.Data.Attributes.RunImageID, req.Data.Attributes.IdentityBindingID) {
+		return
+	}
+	if !h.checkTemplateIdentityOffered(c, template, nil, nil) {
 		return
 	}
 
@@ -1200,6 +1208,40 @@ func (h *PlaybookHandler) applyTemplateLevelRefs(c *gin.Context, t *models.Ansib
 	return true
 }
 
+// checkTemplateIdentityOffered refuses a save that leaves the template an identity binding the pool
+// its jobs run on does not offer (#933, D8, AC44), with the 422 a job of it would get: a binding of
+// another pool, set here or inherited from the project or organization, or a move to a pool that
+// does not offer it. An update that changes neither the binding nor the pool (beforeBinding,
+// beforePool, captured when the template was loaded) is not checked, so an unrelated edit is never
+// refused; a create passes nil for both and is always checked. It writes the response and returns
+// false on a refusal.
+func (h *PlaybookHandler) checkTemplateIdentityOffered(c *gin.Context, t *models.AnsibleJobTemplate, beforeBinding, beforePool **uuid.UUID) bool {
+	if beforeBinding != nil && sameUUID(*beforeBinding, t.IdentityBindingID) && sameUUID(*beforePool, t.AgentPoolID) {
+		return true
+	}
+	if h.levelRefs == nil {
+		return true
+	}
+	project, err := h.projectRepo.GetByID(t.ProjectID)
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return false
+	}
+	binding := settings.EffectiveTemplateIdentity(t, project, &project.Organization).Value
+	pool := settings.EffectiveJobPool(t, project).Value
+	if err := h.levelRefs.Offered(binding, pool); err != nil {
+		if errors.Is(err, repository.ErrBindingNotOffered) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return false
+	}
+	return true
+}
+
+func sameUUID(a, b *uuid.UUID) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+
 // UpdateTemplate updates a job template
 // PATCH /api/v2/ansible/job-templates/:id
 func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
@@ -1215,6 +1257,7 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Job template not found")
 		return
 	}
+	beforeBinding, beforePool := template.IdentityBindingID, template.AgentPoolID
 
 	// RBAC: check resource-level write permission
 	user, err := h.authService.GetUserFromContext(c)
@@ -1295,6 +1338,10 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 		template.Disabled = !*req.Data.Attributes.Enabled
 	}
 	if req.Data.Attributes.TimeoutSeconds != nil {
+		if detail := settings.CheckRunTimeout("timeout-seconds", *req.Data.Attributes.TimeoutSeconds); detail != "" {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+			return
+		}
 		template.TimeoutSeconds = *req.Data.Attributes.TimeoutSeconds
 	}
 	if req.Data.Attributes.RunImageID != nil || req.Data.Attributes.IdentityBindingID != nil {
@@ -1400,6 +1447,9 @@ func (h *PlaybookHandler) UpdateTemplate(c *gin.Context) {
 	// What the update changes the template to name is held to the template's organization
 	// before anything is written. A relationship the request left out is not checked.
 	if !h.templateReferentsAccepted(c, template.ProjectID, newPlaybookID, newInventoryID, credentialIDs, "Failed to update job template") {
+		return
+	}
+	if !h.checkTemplateIdentityOffered(c, template, &beforeBinding, &beforePool) {
 		return
 	}
 

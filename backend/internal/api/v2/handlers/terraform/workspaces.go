@@ -26,6 +26,7 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/settings"
 	"gorm.io/gorm"
 )
 
@@ -158,6 +159,49 @@ func (h *WorkspaceHandlerV2) applyLevelRefs(c *gin.Context, workspace *models.Wo
 	}
 	if err != nil {
 		if errors.Is(err, levelrefs.ErrInvalid) {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return false
+	}
+	return true
+}
+
+// workspaceTarget is what a workspace's identity binding is checked against: its own binding, pool
+// and execution mode, captured before a save so only a save that changes one of them is checked.
+type workspaceTarget struct {
+	binding, pool *uuid.UUID
+	mode          string
+}
+
+func targetOf(ws *models.Workspace) workspaceTarget {
+	return workspaceTarget{binding: ws.IdentityBindingID, pool: ws.AgentPoolID, mode: ws.ExecutionMode}
+}
+
+func sameUUID(a, b *uuid.UUID) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+
+// checkIdentityBindingOffered refuses a save that leaves the workspace an identity binding its
+// pool does not offer (#933, D8, AC44), with the 422 a run of it would get: a binding of another
+// pool, or a move to a pool that does not offer the binding, set here or inherited. A save that
+// changes none of the binding, the pool and the execution mode (before) is not checked, so an
+// unrelated edit is never refused. It writes the response and returns false on a refusal.
+func (h *WorkspaceHandlerV2) checkIdentityBindingOffered(c *gin.Context, workspace *models.Workspace, before *workspaceTarget) bool {
+	after := targetOf(workspace)
+	if before != nil && sameUUID(before.binding, after.binding) && sameUUID(before.pool, after.pool) && before.mode == after.mode {
+		return true
+	}
+	resolved := *workspace
+	if resolved.Project.ID == uuid.Nil {
+		if err := h.db.Preload("Organization").First(&resolved.Project, "id = ?", workspace.ProjectID).Error; err != nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return false
+		}
+	}
+	binding := settings.EffectiveWorkspaceIdentity(&resolved).Value
+	pool := settings.EffectiveExecution(&resolved).Value.PoolID
+	if err := levelrefs.New(h.db).Offered(binding, pool); err != nil {
+		if errors.Is(err, repository.ErrBindingNotOffered) {
 			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
@@ -1322,8 +1366,13 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 	}
 
 	// Set run timeout if provided (custom extension, not in TFE spec). Zero defers to the project,
-	// the organization and the deployment default (core/settings.EffectiveRunTimeout).
-	if attrs.RunTimeout != nil && *attrs.RunTimeout >= 0 {
+	// the organization and the deployment default (core/settings.EffectiveRunTimeout); a negative
+	// value or one above settings.MaxRunTimeoutSeconds is refused.
+	if attrs.RunTimeout != nil {
+		if detail := settings.CheckRunTimeout("run-timeout", *attrs.RunTimeout); detail != "" {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+			return
+		}
 		workspace.RunTimeout = *attrs.RunTimeout
 	}
 	if !h.applyLevelRefs(c, workspace, org.ID, attrs.RunImageID, attrs.IdentityBindingID) {
@@ -1342,6 +1391,9 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		}
 	}
 
+	if !h.checkIdentityBindingOffered(c, workspace, nil) {
+		return
+	}
 	if err := h.workspaceRepo.Create(workspace); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create workspace")
 		return
@@ -1388,6 +1440,7 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
+	before := targetOf(workspace)
 
 	var req UpdateWorkspaceRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1601,7 +1654,11 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 	}
 
 	// Update run timeout if provided (custom extension, not in TFE spec). Zero resets it to inherit.
-	if attrs.RunTimeout != nil && *attrs.RunTimeout >= 0 {
+	if attrs.RunTimeout != nil {
+		if detail := settings.CheckRunTimeout("run-timeout", *attrs.RunTimeout); detail != "" {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+			return
+		}
 		if workspace.RunTimeout != *attrs.RunTimeout {
 			changes["run_timeout"] = *attrs.RunTimeout
 		}
@@ -1706,6 +1763,9 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		}
 	}
 
+	if !h.checkIdentityBindingOffered(c, workspace, &before) {
+		return
+	}
 	if err := h.workspaceRepo.Update(workspace); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update workspace")
 		return
@@ -2211,6 +2271,7 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
+	before := targetOf(workspace)
 
 	if !h.authorizeWorkspaceWriteByID(c, workspace) {
 		return
@@ -2312,7 +2373,11 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 	}
 
 	// Update run timeout; zero resets it to inherit.
-	if attrs.RunTimeout != nil && *attrs.RunTimeout >= 0 {
+	if attrs.RunTimeout != nil {
+		if detail := settings.CheckRunTimeout("run-timeout", *attrs.RunTimeout); detail != "" {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", detail)
+			return
+		}
 		workspace.RunTimeout = *attrs.RunTimeout
 	}
 	if project != nil && !h.applyLevelRefs(c, workspace, project.OrganizationID, attrs.RunImageID, attrs.IdentityBindingID) {
@@ -2408,6 +2473,9 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		}
 	}
 
+	if !h.checkIdentityBindingOffered(c, workspace, &before) {
+		return
+	}
 	if err := h.workspaceRepo.Update(workspace); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update workspace")
 		return

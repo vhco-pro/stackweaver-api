@@ -139,6 +139,63 @@ func TestJobToken_CanceledRunOpensOnlyTheFinalReport(t *testing.T) {
 	}
 }
 
+// An Ansible job cancelled while it runs takes its executor's last output and completion for that
+// attempt, as a run does (both engines behave the same): the job stays canceled, whatever its
+// executor reports, its events keep the interrupt output and end with the cancel marker, and the
+// job's artifacts stay closed.
+func TestJobToken_CanceledAnsibleJobAcceptsTheFinalReport(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	r, svc := f.jobDataRouter(t)
+
+	job := f.seedJob(t, nil, f.runnerA1)
+	if err := f.db.Create(&models.RunnerJobExecution{RunnerID: f.runnerA1.ID, JobType: models.JobTypeAnsibleJob, JobID: job.ID, Status: models.JobExecutionStatusRunning}).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Where("job_id = ?", job.ID).Delete(&models.RunnerJobExecution{}) })
+	if code, _ := f.mintJobToken(t, r, svc, "a1", job.ID.String(), "ansible"); code != http.StatusOK {
+		t.Fatalf("mint: %d", code)
+	}
+	// The job is canceled the way the cancel API leaves it.
+	if err := f.db.Model(&models.AnsibleJob{}).Where("id = ?", job.ID).Update("status", models.AnsibleJobStatusCanceled).Error; err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/v2/runner/jobs/" + job.ID.String()
+	for _, call := range []jobDataCall{
+		{method: http.MethodPost, path: base + "/output", body: map[string]any{"runner_id": f.runnerA1.ID.String(), "output": "[ERROR]: User interrupted execution", "stream": "stderr"}},
+		{method: http.MethodPost, path: base + "/complete", body: map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "failed", "error_message": "exit status 99"}},
+	} {
+		if code, ecode, body := f.doJobData(t, r, "ansible", call); code != http.StatusOK {
+			t.Errorf("%s %s after the job was canceled: status %d code %q, want 200 (%s)", call.method, call.path, code, ecode, body)
+		}
+	}
+
+	var reloaded models.AnsibleJob
+	if err := f.db.First(&reloaded, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Status != models.AnsibleJobStatusCanceled {
+		t.Errorf("status after the final report = %s, want %s", reloaded.Status, models.AnsibleJobStatusCanceled)
+	}
+	var events []models.AnsibleJobEvent
+	if err := f.db.Where("job_id = ?", job.ID).Order("counter").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	var interrupted, marked bool
+	for _, e := range events {
+		interrupted = interrupted || strings.Contains(e.Stderr, "User interrupted execution")
+		marked = marked || strings.Contains(e.Stdout, jobCancelMarker)
+	}
+	if !interrupted || !marked {
+		t.Errorf("events after the final report: interrupt kept %v, cancel marker %v (%d events)", interrupted, marked, len(events))
+	}
+	if n := f.jobTokenRows(t, models.JobTypeAnsibleJob, job.ID.String()); n != 0 {
+		t.Errorf("live job tokens after the completion of the canceled job = %d, want 0", n)
+	}
+	if code, ecode, body := f.doJobData(t, r, "ansible", jobDataCall{method: http.MethodGet, path: base + "/artifacts"}); code != http.StatusForbidden {
+		t.Errorf("GET artifacts of a canceled job: status %d code %q, want 403 (%s)", code, ecode, body)
+	}
+}
+
 // storedText reads an object of the test store as text.
 func storedText(t *testing.T, store *snapshotStore, key string) string {
 	t.Helper()

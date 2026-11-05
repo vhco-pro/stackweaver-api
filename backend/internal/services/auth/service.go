@@ -37,6 +37,25 @@ func shortTokenID(token string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// rejectedTokenLog is the log line of a refused API token: its short id, never the token, with the
+// route, the client address and the User-Agent, so a client retrying with a revoked token can be
+// traced to where it runs. The User-Agent is the caller's, so it is quoted and cut, which keeps it
+// from forging a line or flooding the log.
+func rejectedTokenLog(c *gin.Context, token string) string {
+	method, path, client, agent := "", "", "", ""
+	if c != nil && c.Request != nil {
+		method, path, client, agent = c.Request.Method, c.Request.URL.Path, c.ClientIP(), c.Request.UserAgent()
+	}
+	if len(agent) > 120 {
+		agent = agent[:120] + "..."
+	}
+	if len(path) > 120 {
+		path = path[:120] + "..."
+	}
+	return fmt.Sprintf("auth: api token rejected: unknown or revoked (id: %s) on %s %s from %s, user agent %q",
+		shortTokenID(token), method, path, client, agent)
+}
+
 // APIKeyVerifier interface for API key verification
 type APIKeyVerifier interface {
 	VerifyAPIKey(key string) (*models.APIKey, error)
@@ -247,7 +266,7 @@ func (s *Service) authenticateAPIKey(c *gin.Context, tokenString string) error {
 			logger.Infof("auth: revoked job token presented (id: %s)", shortTokenID(tokenString))
 			return errJobTokenRevoked
 		}
-		logger.Warnf("auth: api token rejected: unknown or revoked (id: %s)", shortTokenID(tokenString))
+		logger.Warnf("%s", rejectedTokenLog(c, tokenString))
 		return rejected
 	}
 	return s.establishAPIKey(c, apiKey)

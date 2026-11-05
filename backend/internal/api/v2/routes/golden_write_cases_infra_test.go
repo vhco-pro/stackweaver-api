@@ -458,7 +458,7 @@ func init() {
 			route: "DELETE /api/v2/identity-bindings/:id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				created := w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/agent-pools/:id/identity-bindings"),
-					document("identity-bindings", map[string]any{"name": "golden-write-doomed", "mechanism": "aws-irsa", "service-account": "sw-golden-doomed"})))
+					document("identity-bindings", map[string]any{"name": "golden-write-doomed", "mechanism": "aws-irsa", "service-account": "sw-golden-doomed", "reference": true})))
 				return w.jsonRequest(t, http.MethodDelete, "/api/v2/identity-bindings/"+dataID(t, created), nil)
 			},
 		},
