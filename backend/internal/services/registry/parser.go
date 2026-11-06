@@ -490,6 +490,10 @@ func (p *ModuleParser) parseResources(dir string) ([]ResourceType, error) {
 			return filepath.SkipDir
 		}
 
+		if d.IsDir() && path != dir {
+			return filepath.SkipDir
+		}
+
 		// Only parse .tf files
 		if !d.IsDir() && strings.HasSuffix(path, ".tf") {
 			file, diags := p.parser.ParseHCLFile(path)
