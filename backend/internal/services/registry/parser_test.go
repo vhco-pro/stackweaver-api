@@ -144,3 +144,92 @@ func TestModuleParserEmptyTypedCollections(t *testing.T) {
 		})
 	}
 }
+
+func TestModuleParserSubmodules(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     map[string]string
+		wantPaths []string
+	}{
+		{
+			name: "directory suffix only",
+			files: map[string]string{
+				filepath.Join("modules", "data", "assets.tf", "README.md"): "# Supporting assets\n",
+			},
+		},
+		{
+			name: "real source file",
+			files: map[string]string{
+				filepath.Join("modules", "real", "real.tf"): "output \"example\" { value = \"real\" }\n",
+			},
+			wantPaths: []string{filepath.Join("modules", "real")},
+		},
+		{
+			name: "nested source inside suffix directory",
+			files: map[string]string{
+				filepath.Join("modules", "group", "assets.tf", "main.tf"): "output \"example\" { value = \"nested\" }\n",
+			},
+			wantPaths: []string{filepath.Join("modules", "group", "assets.tf")},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.files["main.tf"] = "output \"root\" { value = \"root\" }\n"
+			for name, source := range tt.files {
+				path := filepath.Join(dir, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if filepath.Ext(path) == ".tf" {
+					if _, diags := hclparse.NewParser().ParseHCLFile(path); diags.HasErrors() {
+						t.Fatal(diags.Error())
+					}
+				}
+			}
+
+			metadata, err := NewModuleParser().ParseModule(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(metadata.Submodules) != len(tt.wantPaths) {
+				t.Errorf("submodules = %#v, want paths %v", metadata.Submodules, tt.wantPaths)
+			} else {
+				for i, submodule := range metadata.Submodules {
+					if submodule.Path != tt.wantPaths[i] || submodule.Empty {
+						t.Errorf("submodule %d = %#v, want path %q with empty false", i, submodule, tt.wantPaths[i])
+					}
+				}
+			}
+
+			encoded, err := json.Marshal(metadata.ConvertToJSONB())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stored struct {
+				Submodules json.RawMessage `json:"submodules"`
+			}
+			if err := json.Unmarshal(encoded, &stored); err != nil {
+				t.Fatal(err)
+			}
+			if len(tt.wantPaths) == 0 && string(stored.Submodules) != "[]" {
+				t.Errorf("stored submodules = %s, want []", stored.Submodules)
+			}
+			var submodules []map[string]any
+			if err := json.Unmarshal(stored.Submodules, &submodules); err != nil {
+				t.Fatal(err)
+			}
+			if len(submodules) != len(tt.wantPaths) {
+				t.Fatalf("stored submodules = %s, want paths %v", stored.Submodules, tt.wantPaths)
+			}
+			for i, submodule := range submodules {
+				if len(submodule) != 3 || submodule["path"] != tt.wantPaths[i] || submodule["empty"] != false || submodule["readme"] != "" {
+					t.Errorf("stored submodule %d = %#v, want only path %q, empty false and empty readme", i, submodule, tt.wantPaths[i])
+				}
+			}
+		})
+	}
+}

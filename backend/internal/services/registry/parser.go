@@ -548,7 +548,7 @@ func (p *ModuleParser) detectSubmodules(dir string) ([]SubmoduleInfo, error) {
 		}
 
 		for _, entry := range entries {
-			if strings.HasSuffix(entry.Name(), ".tf") {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".tf") {
 				hasTerraformFiles = true
 				break
 			}
