@@ -173,7 +173,8 @@ func setupRequestContract(t *testing.T) *requestContractFixture {
 	jobService := ansiblesvc.NewJobService(jobRepo, playbookRepo, inventoryRepo, templateRepo, projectRepo, q)
 	jobService.SetOrganizationRepo(orgRepo)
 	schedulerService := ansiblesvc.NewSchedulerService(scheduleRepo, jobRepo, templateRepo, playbookRepo, sourceService, jobService, orgRepo)
-	engine := ansiblesvc.NewWorkflowEngineService(workflowRepo, jobRepo, jobService, sourceService)
+	schedulerService.SetWorkItems(ansiblesvc.NewWorkItemService(db, nil))
+	engine := ansiblesvc.NewWorkflowEngineService(workflowRepo, jobRepo, jobService, sourceService, ansiblesvc.NewWorkItemService(db, nil))
 	schedulerService.SetWorkflowEngine(engine)
 
 	schedule, err := schedulerService.CreateSchedule(

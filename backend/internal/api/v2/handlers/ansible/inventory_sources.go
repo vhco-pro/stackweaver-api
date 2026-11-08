@@ -8,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/apierror"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
@@ -434,7 +433,7 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 		return
 	}
 
-	// Verify source exists, authorize the caller, and mark as syncing
+	// Verify the source exists and authorize the caller.
 	source, ok := h.authorizeSource(c, id, true)
 	if !ok {
 		return
@@ -444,28 +443,25 @@ func (h *InventorySourceHandler) Sync(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Inventory source is disabled")
 		return
 	}
-
-	// Mark as syncing
-	if markErr := h.sourceService.MarkSyncing(id); markErr != nil {
-		logger.Warnf("Failed to mark source as syncing: %v", markErr)
-	}
-	// Reflect the syncing status in the response
-	source.Status = models.InventorySourceStatusSyncing
-
-	// Request the sync work item; a launcher of the source's pool runs it (#933, D2).
-	if h.workItems != nil {
-		if _, err := h.workItems.RequestSourceSync(c.Request.Context(), source, "manual"); err != nil {
-			// Revert status
-			if markErr := h.sourceService.MarkSyncFailed(id, "Failed to request the sync: "+err.Error()); markErr != nil {
-				logger.Warnf("Failed to update source after the sync request error: %v", markErr)
-			}
-			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
-			return
-		}
-	} else {
+	if h.workItems == nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Syncs are not available")
 		return
 	}
+
+	// Request the sync work item; a launcher of the source's pool runs it (#933, D2). The request
+	// marks the source syncing, keeping its last host count, and puts it back to failed with the
+	// reason when it fails (#885).
+	_, err = h.workItems.RequestSourceSync(c.Request.Context(), source, "manual")
+	if errors.Is(err, ansible.ErrInventorySourceDisabled) {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Inventory source is disabled")
+		return
+	}
+	if err != nil {
+		apierror.Internal(c, "Failed to request the sync", err)
+		return
+	}
+	// Reflect the syncing status in the response.
+	source.Status = models.InventorySourceStatusSyncing
 
 	jsonapi.WriteDocument(c, http.StatusAccepted, formatInventorySourceResponse(source))
 }

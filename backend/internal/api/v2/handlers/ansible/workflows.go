@@ -138,6 +138,12 @@ type CreateNodeRequest struct {
 					ID string `json:"id"`
 				} `json:"data"`
 			} `json:"credential"`
+			// InventorySource is the source an inventory_sync node syncs (#1057).
+			InventorySource struct {
+				Data *struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"inventory-source"`
 		} `json:"relationships"`
 	} `json:"data"`
 }
@@ -158,8 +164,23 @@ type UpdateNodeRequest struct {
 			Verbosity              *int     `json:"verbosity"`
 			AllParentsMustConverge *bool    `json:"all-parents-must-converge"`
 		} `json:"attributes"`
+		Relationships struct {
+			// InventorySource replaces the source of an inventory_sync node. Left out, the source
+			// stays; with null data it is refused, since such a node needs one (#1057).
+			InventorySource *struct {
+				Data *struct {
+					ID string `json:"id"`
+				} `json:"data"`
+			} `json:"inventory-source"`
+		} `json:"relationships"`
 	} `json:"data"`
 }
+
+// Sentences of the inventory-source rules of a node (#1057).
+const (
+	errNodeSourceRequired   = "inventory-source is required for inventory_sync nodes"
+	errNodeSourceNotAllowed = "inventory-source applies only to inventory_sync nodes"
+)
 
 // errExtraVarsNotObject is the answer to an `extra-vars` attribute that is not a JSON object. Its
 // text is the detail of the 400 the caller reads.
@@ -687,6 +708,24 @@ func (h *WorkflowHandler) CreateNode(c *gin.Context) {
 		node.CredentialID = &credentialID
 	}
 
+	// An inventory sync node syncs the source it names, and only such a node names one (#1057).
+	if req.Data.Relationships.InventorySource.Data != nil {
+		sourceID, err := uuid.Parse(req.Data.Relationships.InventorySource.Data.ID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid inventory source ID")
+			return
+		}
+		node.InventorySourceID = &sourceID
+	}
+	switch {
+	case nodeType == models.WorkflowNodeTypeInventorySync && node.InventorySourceID == nil:
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, errNodeSourceRequired)
+		return
+	case nodeType != models.WorkflowNodeTypeInventorySync && node.InventorySourceID != nil:
+		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, errNodeSourceNotAllowed)
+		return
+	}
+
 	// The permission check above is about the workflow. What the node names must belong to the
 	// workflow's organization as well, or a launch would run another organization's job
 	// template on that organization's hosts.
@@ -806,8 +845,29 @@ func (h *WorkflowHandler) UpdateNode(c *gin.Context) {
 		return
 	}
 
-	// The one attribute that can be refused is checked before anything is assigned, so a refused
-	// document leaves the row exactly as it was.
+	// What can be refused is checked before anything is assigned, so a refused document leaves
+	// the row exactly as it was.
+	if rel := req.Data.Relationships.InventorySource; rel != nil {
+		switch {
+		case node.NodeType != models.WorkflowNodeTypeInventorySync:
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, errNodeSourceNotAllowed)
+			return
+		case rel.Data == nil:
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, errNodeSourceRequired)
+			return
+		}
+		sourceID, err := uuid.Parse(rel.Data.ID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, "Invalid inventory source ID")
+			return
+		}
+		candidate := *node
+		candidate.InventorySourceID = &sourceID
+		if !referentsAccepted(c, h.engine.CheckNodeReferents(c.Request.Context(), workflow.OrganizationID, &candidate), "Failed to update node") {
+			return
+		}
+		node.InventorySourceID = &sourceID
+	}
 	attrs := req.Data.Attributes
 	if attrs.ExtraVars != nil {
 		extraVars, err := extraVarsColumn(*attrs.ExtraVars)
@@ -1167,6 +1227,10 @@ func formatNodeResponse(n *models.AnsibleWorkflowNode) jsonapi.Resource[Workflow
 	if n.CredentialID != nil {
 		r := jsonapi.ToOne(n.CredentialID.String(), "ansible-credentials")
 		rels.Credential = &r
+	}
+	if n.InventorySourceID != nil {
+		r := jsonapi.ToOne(n.InventorySourceID.String(), "inventory-sources")
+		rels.InventorySource = &r
 	}
 	return jsonapi.Resource[WorkflowNodeAttributes]{
 		ID:            n.ID.String(),

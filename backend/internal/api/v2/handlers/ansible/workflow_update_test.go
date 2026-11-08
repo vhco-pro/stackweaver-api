@@ -106,7 +106,7 @@ func setupWorkflowUpdate(t *testing.T) *workflowUpdateFixture {
 		auth.NewService(repository.NewUserRepository(db)),
 		rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), projectRepo),
 		// The engine checks what a create names; nothing here launches, so it needs no services.
-		ansiblesvc.NewWorkflowEngineService(workflowRepo, nil, nil, nil),
+		ansiblesvc.NewWorkflowEngineService(workflowRepo, nil, nil, nil, nil),
 	)
 	router := storedAsSentRouter()
 	router.POST("/api/v2/organizations/:name/ansible/workflows", h.Create)

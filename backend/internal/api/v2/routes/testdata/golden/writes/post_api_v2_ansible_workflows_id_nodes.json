@@ -111,6 +111,20 @@
                     }
                   }
                 },
+                "inventory-source": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
                 "job-template": {
                   "type": "object",
                   "properties": {

@@ -37,6 +37,44 @@
         "attributes": {
           "config": {},
           "created-at": "\u003ctimestamp\u003e",
+          "cron-expression": "0 3 * * *",
+          "description": "Demo schedule syncing the AWS source.",
+          "last-run-at": "\u003ctimestamp\u003e",
+          "last-run-status": "successful",
+          "name": "nightly-source-refresh",
+          "run-count": 1,
+          "schedule-type": "inventory_source",
+          "status": "disabled",
+          "timezone": "UTC",
+          "updated-at": "\u003ctimestamp\u003e"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "inventory-source": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-inventory-sources"
+            }
+          },
+          "last-work-item": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "work-items"
+            }
+          },
+          "organization": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "organizations"
+            }
+          }
+        },
+        "type": "schedules"
+      },
+      {
+        "attributes": {
+          "config": {},
+          "created-at": "\u003ctimestamp\u003e",
           "cron-expression": "0 5 * * 1",
           "description": "Runs the compliance playbook every Monday morning.",
           "name": "weekly-compliance-sweep",
@@ -69,7 +107,7 @@
         "next-page": null,
         "page-size": 20,
         "prev-page": null,
-        "total-count": 2,
+        "total-count": 3,
         "total-pages": 1
       }
     }

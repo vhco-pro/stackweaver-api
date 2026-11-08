@@ -80,6 +80,10 @@ func formatWorkflowNodeJob(nodeJob *models.AnsibleWorkflowNodeJob) jsonapi.Resou
 		r := jsonapi.ToOne(nodeJob.Node.JobTemplateID.String(), "ansible-job-templates")
 		rels.JobTemplate = &r
 	}
+	if nodeJob.WorkItemID != nil {
+		r := jsonapi.ToOne(*nodeJob.WorkItemID, "work-items")
+		rels.WorkItem = &r
+	}
 	return jsonapi.Resource[WorkflowNodeJobAttributes]{
 		ID:   nodeJob.ID.String(),
 		Type: "ansible-workflow-node-jobs",

@@ -3390,7 +3390,95 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "denied": {
+                      "type": "boolean"
+                    },
+                    "finished-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "node-type": {
+                      "type": "string"
+                    },
+                    "started-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "job-template": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "node": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "work-item": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
             }
           }
         }
@@ -3458,6 +3546,23 @@
                 "relationships": {
                   "type": "object",
                   "properties": {
+                    "inventory-source": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
                     "job-template": {
                       "type": "object",
                       "properties": {
@@ -3923,6 +4028,23 @@
                             "relationships": {
                               "type": "object",
                               "properties": {
+                                "inventory-source": {
+                                  "type": "object",
+                                  "properties": {
+                                    "data": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string",
+                                          "format": "uuid"
+                                        },
+                                        "type": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
                                 "job-template": {
                                   "type": "object",
                                   "properties": {
@@ -10020,6 +10142,26 @@
                   }
                 }
               },
+              "relationships": {
+                "type": "object",
+                "properties": {
+                  "inventory-source": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
               "type": {
                 "type": "string"
               }
@@ -14749,6 +14891,20 @@
                     }
                   },
                   "inventory": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "inventory-source": {
                     "type": "object",
                     "properties": {
                       "data": {
@@ -22442,8 +22598,18 @@
                     "description": {
                       "type": "string"
                     },
+                    "last-run-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "last-run-status": {
+                      "type": "string"
+                    },
                     "name": {
                       "type": "string"
+                    },
+                    "run-count": {
+                      "type": "integer"
                     },
                     "schedule-type": {
                       "type": "string"
@@ -22467,6 +22633,23 @@
                 "relationships": {
                   "type": "object",
                   "properties": {
+                    "inventory-source": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
                     "job-template": {
                       "type": "object",
                       "properties": {
@@ -22476,6 +22659,22 @@
                             "id": {
                               "type": "string",
                               "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "last-work-item": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
                             },
                             "type": {
                               "type": "string"

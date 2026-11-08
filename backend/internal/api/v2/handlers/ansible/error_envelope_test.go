@@ -45,6 +45,10 @@ import (
 type errorEnvelopeFixture struct {
 	router *gin.Engine
 	owner  *models.User
+	db     *gorm.DB
+	// itemsRouter mounts the manual source sync with a work item service, which router's
+	// handler deliberately lacks; it serves the same path.
+	itemsRouter *gin.Engine
 
 	orgName         string
 	inventoryID     string
@@ -57,6 +61,7 @@ type errorEnvelopeFixture struct {
 	disabledTemplateSchedule string
 	orphanSchedule           string // its job template was deleted after the schedule was created
 	disabledSourceSchedule   string
+	enabledSourceSchedule    string // inventory_source schedule of the enabled source
 	brokenCronSchedule       string // cron_expression corrupted in the row
 
 	// One of everything a schedule can name, owned by the second organization. The owner
@@ -134,9 +139,12 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	jobService := ansiblesvc.NewJobService(jobRepo, playbookRepo, inventoryRepo, templateRepo, projectRepo, nil)
 	jobService.SetOrganizationRepo(orgRepo)
 	schedulerService := ansiblesvc.NewSchedulerService(scheduleRepo, jobRepo, templateRepo, playbookRepo, sourceService, jobService, orgRepo)
+	// An inventory source schedule requests its sync as a work item; no launcher takes it here.
+	workItems := ansiblesvc.NewWorkItemService(db, nil)
+	schedulerService.SetWorkItems(workItems)
 	// A workflow schedule is refused outright without an engine, before its workflow is looked up.
 	schedulerService.SetWorkflowEngine(ansiblesvc.NewWorkflowEngineService(
-		repository.NewAnsibleWorkflowRepository(db), jobRepo, jobService, sourceService,
+		repository.NewAnsibleWorkflowRepository(db), jobRepo, jobService, sourceService, workItems,
 	))
 
 	inventory, err := inventoryService.CreateInventory(
@@ -178,6 +186,10 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 
 	t.Cleanup(func() {
 		// Children before parents (foreign-key order), every statement scoped to this run's ids.
+		// A requested sync leaves a work item, and requesting one creates the organization's
+		// hosted pool when it has none.
+		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.WorkItem{})
+		db.Where("organization_id IN ? AND kind = ?", []uuid.UUID{orgA.ID, orgB.ID}, models.AgentPoolKindHosted).Delete(&models.AgentPool{})
 		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.AnsibleSchedule{})
 		db.Where("id = ?", otherWorkflow.ID).Delete(&models.AnsibleWorkflow{})
 		db.Where("project_id = ?", projA.ID).Delete(&models.AnsibleJob{})
@@ -211,6 +223,7 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	disabledTemplateSchedule := newSchedule("errenv-sched-off", models.ScheduleTypeJobTemplate, &disabledTemplate.ID, nil)
 	orphanSchedule := newSchedule("errenv-sched-orphan", models.ScheduleTypeJobTemplate, &doomedTemplate.ID, nil)
 	disabledSourceSchedule := newSchedule("errenv-sched-src", models.ScheduleTypeInventorySource, nil, &disabledSource.ID)
+	enabledSourceSchedule := newSchedule("errenv-sched-src-on", models.ScheduleTypeInventorySource, nil, &source.ID)
 	brokenCronSchedule := newSchedule("errenv-sched-cron", models.ScheduleTypeJobTemplate, &template.ID, nil)
 
 	// The schedule's foreign key is ON DELETE SET NULL (models.ReconcileFKDeleteRules, applied
@@ -232,15 +245,20 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	syncHandler := NewInventorySyncHandler(syncRepo, inventoryRepo, authService, rbacService)
 
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
+	testUser := func(c *gin.Context) {
 		if v := c.GetHeader("X-Test-User"); v != "" {
 			if id, err := uuid.Parse(v); err == nil {
 				c.Set("user_id", id)
 			}
 		}
 		c.Next()
-	})
+	}
+	router := gin.New()
+	router.Use(testUser)
+	itemsRouter := gin.New()
+	itemsRouter.Use(testUser)
+	itemsRouter.POST("/ansible/inventory-sources/:source_id/actions/sync",
+		NewInventorySourceHandler(sourceService, inventoryService, authService, rbacService, workItems).Sync)
 	// The paths and parameter names of ansible_routes.go.
 	router.GET("/organizations/:name/ansible/schedules", scheduleHandler.ListByOrganization)
 	router.POST("/organizations/:name/ansible/schedules", scheduleHandler.Create)
@@ -264,6 +282,8 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	return &errorEnvelopeFixture{
 		router:                   router,
 		owner:                    owner,
+		db:                       db,
+		itemsRouter:              itemsRouter,
 		orgName:                  orgA.Name,
 		inventoryID:              inventory.ID.String(),
 		otherProjectID:           projB.ID.String(),
@@ -274,6 +294,7 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 		disabledTemplateSchedule: disabledTemplateSchedule.ID.String(),
 		orphanSchedule:           orphanSchedule.ID.String(),
 		disabledSourceSchedule:   disabledSourceSchedule.ID.String(),
+		enabledSourceSchedule:    enabledSourceSchedule.ID.String(),
 		brokenCronSchedule:       brokenCronSchedule.ID.String(),
 		otherTemplateID:          otherTemplate.ID.String(),
 		otherPlaybookID:          otherPlaybook.ID.String(),
@@ -417,9 +438,12 @@ func TestAnsibleErrorEnvelope(t *testing.T) {
 			"schedule: run-now after its job template was deleted", http.MethodPost, "/ansible/schedules/" + f.orphanSchedule + "/actions/run-now", "",
 			500, internal, "Failed to run schedule now",
 		},
+		// A disabled source is refused before any work item exists, and like a disabled job
+		// template it is a run-now failure the caller can act on: 409 with the reason. It was a
+		// 500 while the scheduler ran the sync itself and wrapped every failure alike (#885).
 		{
 			"schedule: run-now with a disabled inventory source", http.MethodPost, "/ansible/schedules/" + f.disabledSourceSchedule + "/actions/run-now", "",
-			500, internal, "Failed to run schedule now",
+			409, conflict, "Inventory source is disabled",
 		},
 		{
 			"schedule: enable with a stored cron expression that no longer parses", http.MethodPost, "/ansible/schedules/" + f.brokenCronSchedule + "/actions/enable", "",
@@ -638,5 +662,39 @@ func TestScheduleEnable_DisabledTemplateIsNotALaunch(t *testing.T) {
 	}
 	if attrs["status"] != "enabled" {
 		t.Errorf("status after the refused launch = %v, want enabled (the schedule stays on)", attrs["status"])
+	}
+}
+
+// TestInventorySourceSync_KeepsTheHostCount pins what a manual sync does to the source while it
+// runs (#885, AC7): it is marked syncing by the work item request, like every other trigger, and
+// keeps the host count of its last sync instead of showing zero until the launcher reports.
+func TestInventorySourceSync_KeepsTheHostCount(t *testing.T) {
+	f := setupErrorEnvelope(t)
+	if err := f.db.Model(&models.AnsibleInventorySource{}).Where("id = ?", f.sourceID).
+		Updates(map[string]any{"status": models.InventorySourceStatusSuccessful, "hosts_count": 5}).Error; err != nil {
+		t.Fatalf("giving the source an earlier sync: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/ansible/inventory-sources/"+f.sourceID+"/actions/sync", nil)
+	req.Header.Set("X-Test-User", f.owner.ID.String())
+	rec := httptest.NewRecorder()
+	f.itemsRouter.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("sync = %d, want 202; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var source models.AnsibleInventorySource
+	if err := f.db.First(&source, "id = ?", f.sourceID).Error; err != nil {
+		t.Fatalf("reloading the source: %v", err)
+	}
+	if source.Status != models.InventorySourceStatusSyncing || source.HostsCount != 5 {
+		t.Errorf("while the sync runs the source is %q with %d hosts, want syncing with the earlier 5", source.Status, source.HostsCount)
+	}
+	var items int64
+	if err := f.db.Model(&models.WorkItem{}).Where("inventory_source_id = ? AND triggered_by = ?", f.sourceID, "manual").Count(&items).Error; err != nil {
+		t.Fatalf("counting work items: %v", err)
+	}
+	if items != 1 {
+		t.Errorf("%d manual work items for the source, want 1", items)
 	}
 }

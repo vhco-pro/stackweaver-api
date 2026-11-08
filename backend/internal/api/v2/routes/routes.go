@@ -70,13 +70,15 @@ func WithProfileService(s *profile.Service) Option {
 	return func(c *setupConfig) { c.profileService = s }
 }
 
+// SetupV2Routes registers the /api/v2 routes on r and returns the Ansible services they built,
+// whose scheduler the API starts.
 func SetupV2Routes(
 	r *gin.Engine,
 	db *gorm.DB,
 	authService *auth.Service,
 	githubAppManager *vcs.GitHubAppManager,
 	opts ...Option,
-) {
+) *AnsibleRouteServices {
 	var cfg setupConfig
 	for _, o := range opts {
 		o(&cfg)
@@ -1587,6 +1589,7 @@ func SetupV2Routes(
 		// Reads sso_groups metadata and appends as custom claim in access token
 		zitadelActions.POST("/complement-token", zitadelWebhookHandler.HandleComplementToken)
 	}
+	return ansibleServices
 }
 
 // ansibleEncryptionKeyBytes derives the 32-byte AES key from

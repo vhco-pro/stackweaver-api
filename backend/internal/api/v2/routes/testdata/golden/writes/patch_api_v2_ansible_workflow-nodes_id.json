@@ -59,6 +59,26 @@
                 }
               }
             },
+            "relationships": {
+              "type": "object",
+              "properties": {
+                "inventory-source": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "type": {
               "type": "string"
             }

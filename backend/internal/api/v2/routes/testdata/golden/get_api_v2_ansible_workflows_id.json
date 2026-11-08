@@ -57,6 +57,39 @@
                 }
               },
               "type": "ansible-workflow-nodes"
+            },
+            {
+              "attributes": {
+                "all-parents-must-converge": false,
+                "approval-message": "",
+                "approval-timeout": 0,
+                "created-at": "\u003ctimestamp\u003e",
+                "extra-vars": "{}",
+                "identifier": "refresh-inventory",
+                "limit": "",
+                "node-type": "inventory_sync",
+                "position-x": 0,
+                "position-y": 0,
+                "skip-tags": "",
+                "tags": "",
+                "verbosity": 0
+              },
+              "id": "\u003cuuid\u003e",
+              "relationships": {
+                "inventory-source": {
+                  "data": {
+                    "id": "\u003cuuid\u003e",
+                    "type": "inventory-sources"
+                  }
+                },
+                "workflow": {
+                  "data": {
+                    "id": "\u003cuuid\u003e",
+                    "type": "ansible-workflows"
+                  }
+                }
+              },
+              "type": "ansible-workflow-nodes"
             }
           ]
         },

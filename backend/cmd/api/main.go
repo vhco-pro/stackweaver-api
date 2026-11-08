@@ -33,15 +33,10 @@ import (
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/envfile"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/repository"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/encryptionkey"
-	"github.com/michielvha/stackweaver/core/services/oidc"
 	statesvc "github.com/michielvha/stackweaver/core/services/state"
-	"github.com/michielvha/stackweaver/core/services/variable"
 	"github.com/michielvha/stackweaver/core/services/vcs"
-	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/tofu"
 	"gopkg.in/yaml.v3"
 )
@@ -673,166 +668,10 @@ func main() {
 		logger.Info("GitHub App Manager not configured (set GITHUB_APP_ID, GITHUB_APP_NAME, and GITHUB_APP_PRIVATE_KEY to enable)")
 	}
 
-	// Initialize Scheduler Service for scheduled Ansible jobs
-	var schedulerService *ansible.SchedulerService
+	// ANSIBLE_SCHEDULER_ENABLED=false stops schedules firing on their cron. The scheduler itself is
+	// the one the routes build, started below in both modes: held jobs, workflows, schedule outcomes
+	// and notifications advance whatever the flag says (#924).
 	schedulerEnabled := os.Getenv("ANSIBLE_SCHEDULER_ENABLED") != "false" // Enabled by default
-
-	if schedulerEnabled {
-		// Initialize repositories needed for scheduler
-		scheduleRepo := repository.NewAnsibleScheduleRepository(db)
-		ansibleJobRepo := repository.NewAnsibleJobRepository(db)
-		ansibleTemplateRepo := repository.NewAnsibleJobTemplateRepository(db)
-		ansiblePlaybookRepo := repository.NewAnsiblePlaybookRepository(db)
-		ansibleInventoryRepo := repository.NewAnsibleInventoryRepository(db)
-		ansibleCredentialRepo := repository.NewAnsibleCredentialRepository(db)
-		inventorySourceRepo := repository.NewAnsibleInventorySourceRepository(db)
-
-		// Get encryption key for credentials. Fails loud on a missing/insecure key
-		// (AUD-013); DEV_INSECURE_KEY=1 is the local-dev escape hatch.
-		encryptionKey := os.Getenv("ANSIBLE_ENCRYPTION_KEY")
-		if encryptionKey == "" {
-			encryptionKey = os.Getenv("ENCRYPTION_KEY")
-		}
-		encryptionKeyBytes := encryptionkey.Resolve(encryptionKey)
-
-		// Initialize crypto service
-		cryptoService, err := crypto.NewCryptoService(encryptionKeyBytes)
-		if err != nil {
-			logger.Warnf("Failed to initialize crypto service for scheduler: %v", err)
-		}
-
-		// Initialize inventory source service
-		inventorySourceService := ansible.NewInventorySourceService(
-			inventorySourceRepo,
-			ansibleInventoryRepo,
-			ansibleCredentialRepo,
-			cryptoService,
-		)
-		// Record scheduler/workflow-triggered sync runs in the history table
-		inventorySourceService.SetSyncRepo(repository.NewAnsibleInventorySyncRepository(db))
-
-		// Wire OIDC workload identity support for Azure inventory sync
-		azureOIDCRepo := repository.NewAzureOIDCConfigurationRepository(db)
-		oidcSigningKey, oidcErr := oidc.NewSigningKey()
-		if oidcErr != nil {
-			logger.Warnf("Failed to initialize OIDC signing key for inventory sync: %v (OIDC auth will be disabled)", oidcErr)
-		} else {
-			issuerURL := os.Getenv("OIDC_ISSUER_URL")
-			if issuerURL == "" {
-				issuerURL = os.Getenv("API_URL")
-			}
-			if issuerURL == "" {
-				issuerURL = "http://localhost:8022"
-			}
-			oidcTokenService := oidc.NewTokenService(oidcSigningKey, issuerURL)
-			inventorySourceService.SetOIDCServices(azureOIDCRepo, oidcTokenService)
-			logger.Info("OIDC workload identity enabled for Azure inventory sync")
-		}
-
-		// Initialize variable service for Ansible (with variable sets, workspace, and template variable support)
-		workspaceRepoForAnsible := repository.NewWorkspaceRepository(db)
-		variableRepoForAnsible := repository.NewVariableRepository(db)
-		variableSetRepoForAnsible := repository.NewVariableSetRepository(db)
-		templateVariableRepoForAnsible := repository.NewAnsibleJobTemplateVariableRepository(db)
-		variableServiceForAnsible := variable.NewServiceWithTemplateVariables(variableRepoForAnsible, variableSetRepoForAnsible, workspaceRepoForAnsible, templateVariableRepoForAnsible, encryptionKeyBytes)
-
-		// Redis queue so scheduled launches and released held jobs actually
-		// dispatch to platform runners (a nil queue here used to leave scheduled
-		// jobs pending forever).
-		//
-		// Assign through an interface var so a connection failure leaves a true
-		// nil queue (a nil *RedisQueue assigned to a queue.Queue is a typed-nil
-		// that defeats the `== nil` dispatch guards and panics on Enqueue).
-		var schedulerQueue queue.Queue
-		if q, qErr := queue.NewRedisQueueFromEnv(); qErr != nil {
-			logger.Warnf("Failed to initialize Redis queue for the Ansible scheduler: %v (scheduled platform jobs will not dispatch)", qErr)
-		} else {
-			schedulerQueue = q
-		}
-
-		// Initialize job service with variable set support
-		jobService := ansible.NewJobServiceWithVariables(
-			ansibleJobRepo,
-			ansiblePlaybookRepo,
-			ansibleInventoryRepo,
-			ansibleTemplateRepo,
-			projectRepo,
-			variableServiceForAnsible,
-			schedulerQueue,
-		)
-		// Honor update_on_launch on scheduled/held launches: stale dynamic
-		// sources sync first and the job is held until they settle.
-		jobService.SetInventorySourceRepo(inventorySourceRepo)
-		jobService.SetOrganizationRepo(repository.NewOrganizationRepository(db))
-		jobService.SetDeploymentRunTimeout(settings.DeploymentRunTimeout(os.Getenv))
-
-		// Create scheduler service
-		schedulerService = ansible.NewSchedulerService(
-			scheduleRepo,
-			ansibleJobRepo,
-			ansibleTemplateRepo,
-			ansiblePlaybookRepo,
-			inventorySourceService,
-			jobService,
-			repository.NewOrganizationRepository(db),
-		)
-
-		// Workflow execution engine advanced by the scheduler tick.
-		schedulerService.SetWorkflowEngine(ansible.NewWorkflowEngineService(
-			repository.NewAnsibleWorkflowRepository(db),
-			ansibleJobRepo,
-			jobService,
-			inventorySourceService,
-		))
-
-		// Notification delivery advanced by the scheduler tick.
-		if cryptoSvc, cryptoErr := crypto.NewCryptoService(encryptionKeyBytes); cryptoErr == nil {
-			schedulerService.SetNotificationService(ansible.NewNotificationService(
-				repository.NewAnsibleNotificationRepository(db),
-				ansibleJobRepo,
-				cryptoSvc,
-			))
-		} else {
-			logger.Warnf("Notification service disabled: %v", cryptoErr)
-		}
-
-		// Start the scheduler
-		schedulerService.Start()
-		logger.Info("Ansible Scheduler Service started")
-	} else {
-		logger.Info(`Ansible Scheduler Service disabled (ANSIBLE_SCHEDULER_ENABLED="false"; unset it or set any other value to re-enable)`)
-
-		// The held-job gates (template concurrency, update-on-launch syncs,
-		// constructed rebuilds) apply to every launch regardless of this flag,
-		// and the scheduler tick is their only release path - so without the
-		// scheduler, held jobs would stay pending forever. Run a minimal
-		// release loop instead.
-		// Interface var, assigned only on success - see the scheduler queue above for why a
-		// typed-nil *RedisQueue here would be worse than no queue at all.
-		var releaseQueue queue.Queue
-		if q, qErr := queue.NewRedisQueueFromEnv(); qErr != nil {
-			logger.Warnf("Held-job release loop: Redis unavailable: %v (released platform jobs will not dispatch)", qErr)
-		} else {
-			releaseQueue = q
-		}
-		releaseJobService := ansible.NewJobService(
-			repository.NewAnsibleJobRepository(db),
-			repository.NewAnsiblePlaybookRepository(db),
-			repository.NewAnsibleInventoryRepository(db),
-			repository.NewAnsibleJobTemplateRepository(db),
-			repository.NewProjectRepository(db),
-			releaseQueue,
-		)
-		releaseJobService.SetInventorySourceRepo(repository.NewAnsibleInventorySourceRepository(db))
-		go func() {
-			ticker := time.NewTicker(15 * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				releaseJobService.ReleaseHeldJobs(context.Background())
-			}
-		}()
-		logger.Info("Held-job release loop started (scheduler disabled)")
-	}
 
 	// Initialize Drift Detection Service for Terraform workspaces
 	var driftDetectionService *terraform.DriftDetectionService
@@ -1017,7 +856,18 @@ func main() {
 	}
 
 	// Setup routes
-	router := routes.SetupRoutes(db, authService, totpService, profileService, sessionsService, apiKeyService, githubAppManager, authProxy, v2routes.WithPlatformAdmin(platformAdmin))
+	router, ansibleServices := routes.SetupRoutes(db, authService, totpService, profileService, sessionsService, apiKeyService, githubAppManager, authProxy, v2routes.WithPlatformAdmin(platformAdmin))
+
+	// One scheduler, the routes' own: run now and the tick share its services. Every replica runs
+	// it; the tick lock lets one at a time do a tick's work.
+	schedulerService := ansibleServices.Scheduler
+	schedulerService.SetCronEnabled(schedulerEnabled)
+	schedulerService.Start()
+	if schedulerEnabled {
+		logger.Info("Ansible scheduler started")
+	} else {
+		logger.Info(`Ansible scheduler started without cron firing (ANSIBLE_SCHEDULER_ENABLED="false"; unset it or set any other value to fire schedules on their cron)`)
+	}
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)
@@ -1055,11 +905,8 @@ func main() {
 	stopSweeper()
 	<-sweeperDone
 
-	// Stop scheduler service if running
-	if schedulerService != nil {
-		schedulerService.Stop()
-		logger.Info("Ansible Scheduler Service stopped")
-	}
+	schedulerService.Stop()
+	logger.Info("Ansible scheduler stopped")
 
 	// Stop drift detection service if running
 	if driftDetectionService != nil {
