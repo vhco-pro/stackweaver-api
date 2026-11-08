@@ -188,6 +188,8 @@ type WorkflowNodeRelationships struct {
 	JobTemplate *jsonapi.Relationship `json:"job-template,omitempty"`
 	Inventory   *jsonapi.Relationship `json:"inventory,omitempty"`
 	Credential  *jsonapi.Relationship `json:"credential,omitempty"`
+	// InventorySource is the source an inventory_sync node syncs (#1057).
+	InventorySource *jsonapi.Relationship `json:"inventory-source,omitempty"`
 }
 
 // WorkflowEdgeAttributes is an edge's condition and creation time.
@@ -297,7 +299,9 @@ type ScheduleRelationships struct {
 	InventorySource *jsonapi.Relationship `json:"inventory-source,omitempty"`
 	Playbook        *jsonapi.Relationship `json:"playbook,omitempty"`
 	LastJob         *jsonapi.Relationship `json:"last-job,omitempty"`
-	CreatedBy       *jsonapi.Relationship `json:"created-by,omitempty"`
+	// LastWorkItem is the sync work item the last run of an inventory_source schedule requested.
+	LastWorkItem *jsonapi.Relationship `json:"last-work-item,omitempty"`
+	CreatedBy    *jsonapi.Relationship `json:"created-by,omitempty"`
 }
 
 // WorkflowJobAttributes: StartedAt/FinishedAt are raw pointers (null until set), as the map
@@ -330,6 +334,8 @@ type WorkflowNodeJobRelationships struct {
 	Node        jsonapi.Relationship  `json:"node"`
 	Job         *jsonapi.Relationship `json:"job,omitempty"`
 	JobTemplate *jsonapi.Relationship `json:"job-template,omitempty"`
+	// WorkItem is the sync work item an inventory_sync node requested.
+	WorkItem *jsonapi.Relationship `json:"work-item,omitempty"`
 }
 
 // TotalCountMeta is the bare {"total-count": N} meta block of the workflow-runs listing.

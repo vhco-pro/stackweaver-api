@@ -566,9 +566,10 @@ func buildHarnessRouterWithGitHub(t *testing.T, db *gorm.DB, authService *auth.S
 	// thing the previous hand-rolled router had to add explicitly. Without it a panicking handler
 	// aborts the binary and discards every fixture recorded so far, instead of producing the 500
 	// a real client sees.
-	return routes.SetupRoutes(
+	router, _ := routes.SetupRoutes(
 		db, authService, totpService, profileService, sessionsService, apiKeyService, githubApp, authProxy,
 	)
+	return router
 }
 
 func setupGoldenHarness(t *testing.T) *goldenHarness {

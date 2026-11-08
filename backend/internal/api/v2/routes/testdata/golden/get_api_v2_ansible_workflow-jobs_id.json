@@ -22,6 +22,59 @@
       },
       "type": "ansible-workflow-jobs"
     },
-    "included": []
+    "included": [
+      {
+        "attributes": {
+          "denied": false,
+          "finished-at": "\u003ctimestamp\u003e",
+          "identifier": "patch",
+          "node-type": "job_template",
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "job-template": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-job-templates"
+            }
+          },
+          "node": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-workflow-nodes"
+            }
+          }
+        },
+        "type": "ansible-workflow-node-jobs"
+      },
+      {
+        "attributes": {
+          "denied": false,
+          "finished-at": "\u003ctimestamp\u003e",
+          "identifier": "refresh-inventory",
+          "node-type": "inventory_sync",
+          "started-at": "\u003ctimestamp\u003e",
+          "status": "successful"
+        },
+        "id": "\u003cuuid\u003e",
+        "relationships": {
+          "node": {
+            "data": {
+              "id": "\u003cuuid\u003e",
+              "type": "ansible-workflow-nodes"
+            }
+          },
+          "work-item": {
+            "data": {
+              "id": "\u003cid\u003e",
+              "type": "work-items"
+            }
+          }
+        },
+        "type": "ansible-workflow-node-jobs"
+      }
+    ]
   }
 }

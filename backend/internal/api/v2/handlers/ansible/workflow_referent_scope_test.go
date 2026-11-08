@@ -48,8 +48,9 @@ import (
 // referentScopeFixture is two organizations that each own one of everything a workflow can
 // name, a workflow with two nodes in each, and two callers.
 type referentScopeFixture struct {
-	router *gin.Engine
-	db     *gorm.DB
+	router  *gin.Engine
+	db      *gorm.DB
+	handler *WorkflowHandler
 
 	admin  uuid.UUID // owner of both organizations
 	member uuid.UUID // owner of the first organization, no part in the second
@@ -183,7 +184,7 @@ func setupReferentScope(t *testing.T) *referentScopeFixture {
 		workflowRepo, orgRepo, projectRepo,
 		auth.NewService(repository.NewUserRepository(db)),
 		rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), projectRepo),
-		ansiblesvc.NewWorkflowEngineService(workflowRepo, jobRepo, jobService, nil),
+		ansiblesvc.NewWorkflowEngineService(workflowRepo, jobRepo, jobService, nil, nil),
 	)
 	router := storedAsSentRouter()
 	router.POST("/api/v2/organizations/:name/ansible/workflows", h.Create)
@@ -194,7 +195,7 @@ func setupReferentScope(t *testing.T) *referentScopeFixture {
 	router.POST("/api/v2/ansible/workflows/:id/launch", h.LaunchWorkflow)
 
 	return &referentScopeFixture{
-		router: router, db: db, admin: admin.ID, member: member.ID,
+		router: router, db: db, handler: h, admin: admin.ID, member: member.ID,
 		orgName: orgA.Name, orgID: orgA.ID, workflow: wfA.ID,
 		nodeA: nodeA.ID.String(), nodeB: nodeB.ID.String(),
 		project: projA.ID.String(), inventory: invA.ID.String(), template: tmplA.ID.String(), credential: credA.ID.String(),
@@ -443,9 +444,11 @@ func TestWorkflowReferents_EdgeAndNodeInputIsValidated(t *testing.T) {
 			t.Errorf("stored condition = %q, want on_success", row.Condition)
 		}
 	})
+	// inventory_sync is accepted too, but only with the source it syncs (#1057): an inventory sync
+	// node without one was stored here once and failed when its workflow reached it.
+	// TestWorkflowNodeSource_CreateReadAndUpdate creates one with its source.
 	for _, nodeType := range []models.WorkflowNodeType{
-		models.WorkflowNodeTypeJobTemplate, models.WorkflowNodeTypeWorkflow,
-		models.WorkflowNodeTypeInventorySync, models.WorkflowNodeTypeApproval,
+		models.WorkflowNodeTypeJobTemplate, models.WorkflowNodeTypeWorkflow, models.WorkflowNodeTypeApproval,
 	} {
 		t.Run("a node of type "+string(nodeType), func(t *testing.T) {
 			code, body := postNode(t, map[string]any{"node-type": string(nodeType), "identifier": "step-" + uuid.NewString()[:8]})

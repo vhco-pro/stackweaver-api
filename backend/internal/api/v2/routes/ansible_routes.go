@@ -24,10 +24,15 @@ import (
 )
 
 // AnsibleRouteServices exposes the ansible services built by SetupAnsibleRoutes
-// that later route groups (workflows, public callbacks) need to share.
+// that later route groups (workflows, public callbacks) need to share, and the
+// scheduler the API starts. They are the API's only instances: cmd/api builds none
+// of its own (#885).
 type AnsibleRouteServices struct {
 	WorkflowEngine *ansible.WorkflowEngineService
 	JobService     *ansible.JobService
+	// Scheduler serves the schedule routes, run now included, and is the one cmd/api
+	// starts: its tick fires schedules on their cron and runs the maintenance pass.
+	Scheduler *ansible.SchedulerService
 	// WorkItems creates the sync work items (#933, D2).
 	WorkItems *ansible.WorkItemService
 	// InventorySources builds a dynamic source's sync command, with its credentials and OIDC
@@ -160,9 +165,6 @@ func SetupAnsibleRoutes(
 
 	// Initialize Inventory Source Service
 	inventorySourceService := ansible.NewInventorySourceService(inventorySourceRepo, inventoryRepo, credentialRepo, cryptoService)
-	// Record sync runs in the history table (Syncs tab)
-	inventorySyncRepo := repository.NewAnsibleInventorySyncRepository(db)
-	inventorySourceService.SetSyncRepo(inventorySyncRepo)
 
 	// Wire OIDC workload identity support for Azure inventory sync (dynamic sources)
 	azureOIDCRepo := repository.NewAzureOIDCConfigurationRepository(db)
@@ -192,25 +194,27 @@ func SetupAnsibleRoutes(
 		jobService,
 		orgRepo,
 	)
+	schedulerService.SetWorkItems(workItems)
 
 	// Workflow execution engine: launches runnable nodes and follows edges.
-	// Returned to the caller so the workflow routes (and the started scheduler
-	// in cmd/api) share one instance.
+	// Returned to the caller so the workflow routes and the scheduler share one
+	// instance.
 	workflowEngine := ansible.NewWorkflowEngineService(
 		repository.NewAnsibleWorkflowRepository(db),
 		jobRepo,
 		jobService,
 		inventorySourceService,
+		workItems,
 	)
-	// The HTTP scheduler instance is CRUD-only (it never ticks - the executing
-	// scheduler lives in cmd/api), but CreateSchedule validates workflow
-	// schedules against the engine, so it must be wired here too or workflow
-	// schedules can never be created.
+	// The scheduler launches workflow schedules and advances running workflows
+	// on its tick, and CreateSchedule validates workflow schedules against it.
 	schedulerService.SetWorkflowEngine(workflowEngine)
 
 	// Notification templates + attachments (webhook / email / Teams).
 	notificationRepo := repository.NewAnsibleNotificationRepository(db)
 	notificationService := ansible.NewNotificationService(notificationRepo, jobRepo, cryptoService)
+	// The scheduler's tick delivers pending notifications.
+	schedulerService.SetNotificationService(notificationService)
 	notificationHandler := ansibleHandlers.NewNotificationHandler(
 		notificationRepo,
 		templateRepo,
@@ -259,7 +263,7 @@ func SetupAnsibleRoutes(
 	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, inventoryService, authService, rbacService, workItems)
 	inventorySourceHandler.SetLevelRefs(levelrefs.New(db))
 	playbookHandler.SetLevelRefs(levelrefs.New(db))
-	inventorySyncHandler := ansibleHandlers.NewInventorySyncHandler(inventorySyncRepo, inventoryRepo, authService, rbacService)
+	inventorySyncHandler := ansibleHandlers.NewInventorySyncHandler(repository.NewAnsibleInventorySyncRepository(db), inventoryRepo, authService, rbacService)
 	scheduleHandler := ansibleHandlers.NewScheduleHandler(schedulerService, orgRepo, authService, rbacService)
 	collectionsHandler := ansibleHandlers.NewCollectionsHandler(jobService, authService, rbacService)
 
@@ -543,5 +547,8 @@ func SetupAnsibleRoutes(
 	// GET /api/v2/ansible/jobs/:id/collections
 	jobs.GET("/:id/collections", collectionsHandler.ListJobCollections)
 
-	return &AnsibleRouteServices{WorkflowEngine: workflowEngine, JobService: jobService, WorkItems: workItems, InventorySources: inventorySourceService}
+	return &AnsibleRouteServices{
+		WorkflowEngine: workflowEngine, JobService: jobService, Scheduler: schedulerService,
+		WorkItems: workItems, InventorySources: inventorySourceService,
+	}
 }

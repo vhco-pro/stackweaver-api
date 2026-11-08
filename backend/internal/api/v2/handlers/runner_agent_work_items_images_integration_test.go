@@ -87,7 +87,11 @@ func (f *workItemImageFixture) projectInventory(t *testing.T, typ models.Invento
 // source stores a dynamic source on inv with the given run image and identity binding (nil defers).
 func (f *workItemImageFixture) source(t *testing.T, inv *models.AnsibleInventory, image, binding *uuid.UUID) *models.AnsibleInventorySource {
 	t.Helper()
-	src := &models.AnsibleInventorySource{ID: uuid.New(), InventoryID: inv.ID, Name: "wi-img-src-" + uuid.NewString()[:8], Type: models.InventorySourceTypeAWS, RunImageID: image, IdentityBindingID: binding}
+	// Enabled: a disabled source is refused before any work item exists (#885).
+	src := &models.AnsibleInventorySource{
+		ID: uuid.New(), InventoryID: inv.ID, Name: "wi-img-src-" + uuid.NewString()[:8], Type: models.InventorySourceTypeAWS,
+		RunImageID: image, IdentityBindingID: binding, Enabled: true,
+	}
 	if err := f.db.Create(src).Error; err != nil {
 		t.Fatal(err)
 	}

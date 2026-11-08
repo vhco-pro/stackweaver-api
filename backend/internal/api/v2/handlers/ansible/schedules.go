@@ -295,6 +295,10 @@ func formatScheduleResponse(schedule *models.AnsibleSchedule) jsonapi.Resource[S
 		r := jsonapi.ToOne(schedule.LastJobID.String(), "ansible-jobs")
 		relationships.LastJob = &r
 	}
+	if schedule.LastWorkItemID != nil {
+		r := jsonapi.ToOne(*schedule.LastWorkItemID, "work-items")
+		relationships.LastWorkItem = &r
+	}
 	if schedule.CreatedBy != nil {
 		r := jsonapi.ToOne(schedule.CreatedBy.String(), "users")
 		relationships.CreatedBy = &r
@@ -583,12 +587,18 @@ func (h *ScheduleHandler) RunNow(c *gin.Context) {
 		return
 	}
 
-	// A disabled job template is the one launch failure the caller can act on, and the sibling
-	// launch handlers answer it with 409 (jobs.go). Every other failure is logged and answered
-	// with an operator-authored message.
+	// A disabled job template is a launch failure the caller can act on, and the sibling launch
+	// handlers answer it with 409 (jobs.go). Every other failure is logged and answered with an
+	// operator-authored message. An inventory source schedule answers once its sync work item is
+	// requested, with the run recorded pending; a launcher runs the sync.
 	err = h.schedulerService.RunScheduleNow(id)
 	if errors.Is(err, ansible.ErrTemplateDisabled) {
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job template is disabled")
+		return
+	}
+	// A disabled inventory source is the same kind of failure for a sync schedule (#885).
+	if errors.Is(err, ansible.ErrInventorySourceDisabled) {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Inventory source is disabled")
 		return
 	}
 	if err != nil {
