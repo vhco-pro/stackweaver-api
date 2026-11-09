@@ -1187,8 +1187,8 @@ func formatWorkflowResponse(w *models.AnsibleWorkflow) *WorkflowResource {
 			ExtraVars:            string(w.ExtraVars),
 			Limit:                w.Limit,
 			SurveyEnabled:        w.SurveyEnabled,
-			CreatedAt:            w.CreatedAt,
-			UpdatedAt:            w.UpdatedAt,
+			CreatedAt:            jsonapi.FormatTime(w.CreatedAt),
+			UpdatedAt:            jsonapi.FormatTime(w.UpdatedAt),
 		},
 		Relationships: rels,
 	}
@@ -1208,7 +1208,7 @@ func formatNodeResponse(n *models.AnsibleWorkflowNode) jsonapi.Resource[Workflow
 		AllParentsMustConverge: n.AllParentsMustConverge,
 		ApprovalTimeout:        n.ApprovalTimeout,
 		ApprovalMessage:        n.ApprovalMessage,
-		CreatedAt:              n.CreatedAt,
+		CreatedAt:              jsonapi.FormatTime(n.CreatedAt),
 	}
 	rels := WorkflowNodeRelationships{
 		Workflow: jsonapi.ToOne(n.WorkflowID.String(), "ansible-workflows"),
@@ -1246,7 +1246,7 @@ func formatEdgeResponse(e *models.AnsibleWorkflowEdge) jsonapi.Resource[Workflow
 		Type: "ansible-workflow-edges",
 		Attributes: WorkflowEdgeAttributes{
 			Condition: string(e.Condition),
-			CreatedAt: e.CreatedAt,
+			CreatedAt: jsonapi.FormatTime(e.CreatedAt),
 		},
 		Relationships: WorkflowEdgeRelationships{
 			Workflow:   jsonapi.ToOne(e.WorkflowID.String(), "ansible-workflows"),

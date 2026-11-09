@@ -874,8 +874,8 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		AllowDestroyPlan:   workspace.AllowDestroyPlan,
 		ExecutionMode:      workspace.ExecutionMode,
 		Locked:             workspace.Locked,
-		CreatedAt:          workspace.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:          workspace.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:          jsonapi.FormatTime(workspace.CreatedAt),
+		UpdatedAt:          jsonapi.FormatTime(workspace.UpdatedAt),
 		Description:        workspace.Description, // go-tfe Description is plain string, always present
 
 		Actions:                    WorkspaceActions{IsDestroyable: true},
@@ -890,7 +890,7 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		SourceURL:                  workspace.SourceURL,
 		Source:                     "tfe-api",
 		StructuredRunOutputEnabled: workspace.StructuredRunOutputEnabled,
-		LatestChangeAt:             workspace.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		LatestChangeAt:             jsonapi.FormatTime(workspace.UpdatedAt),
 		Operations:                 true, // workspace is operational
 		// Every flag but can-force-delete depends on the caller and is set by
 		// workspacePermissionResolver.apply (h.workspaceResponse); they start false so a response
@@ -993,7 +993,7 @@ func formatWorkspaceResponse(workspace *models.Workspace, vcsConnRepo ...*reposi
 		attrs.AgentPoolName = workspace.AgentPool.Name
 	}
 	if workspace.LockedAt != nil {
-		attrs.LockedAt = workspace.LockedAt.Format("2006-01-02T15:04:05Z")
+		attrs.LockedAt = jsonapi.FormatTime(*workspace.LockedAt)
 	}
 
 	rels := &WorkspaceRelationships{}
@@ -1062,13 +1062,13 @@ func formatRunForInclusion(run *repository.LatestRunSummary) jsonapi.Resource[In
 		Operation:   string(run.Operation),
 		IsDestroy:   run.Operation == models.RunOperationDestroy,
 		PlanOnly:    planOnly,
-		CreatedAt:   run.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:   run.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   jsonapi.FormatTime(run.CreatedAt),
+		UpdatedAt:   jsonapi.FormatTime(run.UpdatedAt),
 		HasChanges:  run.PlanIndicatesChanges && runReportsChanges(run.Operation, run.Status),
 		Permissions: IncludedRunPermissions{CanApply: !planOnly && run.Status == models.RunStatusPlanned},
 	}
 	if run.CompletedAt != nil {
-		attrs.CompletedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+		attrs.CompletedAt = jsonapi.FormatTime(*run.CompletedAt)
 	}
 
 	return jsonapi.Resource[IncludedRunAttributes]{

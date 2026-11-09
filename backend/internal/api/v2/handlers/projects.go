@@ -5,7 +5,6 @@ package handlers
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -277,8 +276,8 @@ func formatProjectResponse(project *models.Project, orgName string) jsonapi.Reso
 			TofuRunImageID:    levelrefs.UUIDString(project.TofuRunImageID),
 			AnsibleRunImageID: levelrefs.UUIDString(project.AnsibleRunImageID),
 			IdentityBindingID: levelrefs.UUIDString(project.IdentityBindingID),
-			CreatedAt:         project.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:         project.UpdatedAt.Format(time.RFC3339),
+			CreatedAt:         jsonapi.FormatTime(project.CreatedAt),
+			UpdatedAt:         jsonapi.FormatTime(project.UpdatedAt),
 		},
 		Relationships: relationships,
 		Links: jsonapi.SelfLink{

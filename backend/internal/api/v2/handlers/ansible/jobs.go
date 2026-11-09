@@ -948,8 +948,8 @@ func formatJobResponse(job *models.AnsibleJob) jsonapi.Resource[JobAttributes] {
 		HostsIgnored:     job.HostsIgnored,
 		HasWarnings:      job.HasWarnings,
 		WarningsCount:    job.WarningsCount,
-		CreatedAt:        job.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:        job.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:        jsonapi.FormatTime(job.CreatedAt),
+		UpdatedAt:        jsonapi.FormatTime(job.UpdatedAt),
 
 		InventorySyncWarnings: formatInventorySyncWarnings(job.InventorySyncWarnings),
 		Placement:             placement.FromModel(job.Attempt, job.Placement),
@@ -960,11 +960,11 @@ func formatJobResponse(job *models.AnsibleJob) jsonapi.Resource[JobAttributes] {
 		attributes.ModuleArgs = job.ModuleArgs
 	}
 	if job.StartedAt != nil {
-		v := job.StartedAt.Format("2006-01-02T15:04:05Z")
+		v := jsonapi.FormatTime(*job.StartedAt)
 		attributes.StartedAt = &v
 	}
 	if job.FinishedAt != nil {
-		v := job.FinishedAt.Format("2006-01-02T15:04:05Z")
+		v := jsonapi.FormatTime(*job.FinishedAt)
 		attributes.FinishedAt = &v
 	}
 	// Slice group ties sibling slices of one launch together; runner-id reveals
@@ -1037,11 +1037,11 @@ func formatInventorySyncWarnings(warnings models.InventorySyncWarnings) []JobInv
 		entry := JobInventorySyncWarning{
 			SourceID:   w.SourceID.String(),
 			SourceName: w.SourceName,
-			FailedAt:   w.FailedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FailedAt:   jsonapi.FormatTime(w.FailedAt),
 			Error:      w.Error,
 		}
 		if w.LastSuccessfulSyncAt != nil {
-			v := w.LastSuccessfulSyncAt.UTC().Format("2006-01-02T15:04:05Z")
+			v := jsonapi.FormatTime(*w.LastSuccessfulSyncAt)
 			entry.LastSuccessfulSyncAt = &v
 		}
 		out = append(out, entry)
@@ -1076,8 +1076,8 @@ func formatEventResponse(event *models.AnsibleJobEvent) jsonapi.Resource[EventAt
 			Changed:   event.Changed,
 			Failed:    event.Failed,
 			Skipped:   event.Skipped,
-			Timestamp: event.Timestamp.Format("2006-01-02T15:04:05Z"),
-			CreatedAt: event.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			Timestamp: jsonapi.FormatTime(event.Timestamp),
+			CreatedAt: jsonapi.FormatTime(event.CreatedAt),
 		},
 		Relationships: EventRelationships{Job: jsonapi.ToOne(event.JobID.String(), "ansible-jobs")},
 	}
@@ -1173,8 +1173,8 @@ func formatEventSummaryResponse(event *models.AnsibleJobEvent) jsonapi.Resource[
 			Changed:   event.Changed,
 			Failed:    event.Failed,
 			Skipped:   event.Skipped,
-			Timestamp: event.Timestamp.Format("2006-01-02T15:04:05Z"),
-			CreatedAt: event.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			Timestamp: jsonapi.FormatTime(event.Timestamp),
+			CreatedAt: jsonapi.FormatTime(event.CreatedAt),
 			Summary:   true,
 		},
 		Relationships: EventRelationships{Job: jsonapi.ToOne(event.JobID.String(), "ansible-jobs")},

@@ -129,9 +129,9 @@ func formatInventorySyncResponse(sync *models.AnsibleInventorySync, includeOutpu
 		HostsDiscovered:  sync.HostsDiscovered,
 		GroupsDiscovered: sync.GroupsDiscovered,
 		Error:            sync.Error,
-		StartedAt:        sync.StartedAt,
-		FinishedAt:       sync.FinishedAt,
-		CreatedAt:        sync.CreatedAt,
+		StartedAt:        jsonapi.FormatTimePtr(sync.StartedAt),
+		FinishedAt:       jsonapi.FormatTimePtr(sync.FinishedAt),
+		CreatedAt:        jsonapi.FormatTime(sync.CreatedAt),
 	}
 	if sync.Source != nil {
 		attrs.SourceName = sync.Source.Name

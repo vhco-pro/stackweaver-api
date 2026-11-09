@@ -8,7 +8,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -23,14 +22,14 @@ import (
 
 // RunImageAttributes is a run image on the wire (#933, D6, D15).
 type RunImageAttributes struct {
-	Name                 string    `json:"name"`
-	Kind                 string    `json:"kind"`
-	Image                string    `json:"image"`
-	Digest               string    `json:"digest"`
-	RegistryCredentialID *string   `json:"registry-credential-id"`
-	Description          string    `json:"description"`
-	CreatedAt            time.Time `json:"created-at"`
-	UpdatedAt            time.Time `json:"updated-at"`
+	Name                 string  `json:"name"`
+	Kind                 string  `json:"kind"`
+	Image                string  `json:"image"`
+	Digest               string  `json:"digest"`
+	RegistryCredentialID *string `json:"registry-credential-id"`
+	Description          string  `json:"description"`
+	CreatedAt            string  `json:"created-at"`
+	UpdatedAt            string  `json:"updated-at"`
 }
 
 // RunImageRelationships names the image's organization.
@@ -78,7 +77,7 @@ func runImageResource(r *models.RunImage) jsonapi.Resource[RunImageAttributes] {
 		Type: "run-images",
 		Attributes: RunImageAttributes{
 			Name: r.Name, Kind: r.Kind, Image: r.Image, Digest: r.Digest, RegistryCredentialID: cred,
-			Description: r.Description, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+			Description: r.Description, CreatedAt: jsonapi.FormatTime(r.CreatedAt), UpdatedAt: jsonapi.FormatTime(r.UpdatedAt),
 		},
 		Relationships: RunImageRelationships{Organization: jsonapi.ToOne(r.OrganizationID.String(), "organizations")},
 	}

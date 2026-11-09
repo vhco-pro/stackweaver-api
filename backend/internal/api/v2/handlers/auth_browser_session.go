@@ -61,12 +61,12 @@ func (r *createSessionRequest) PrimaryType() (string, bool) {
 
 // SessionAttributes is what the SPA learns about the signed-in user. It carries no credential.
 type SessionAttributes struct {
-	Email      string    `json:"email"`
-	Name       string    `json:"name"`
-	GivenName  string    `json:"given-name"`
-	FamilyName string    `json:"family-name"`
-	Picture    string    `json:"picture"`
-	ExpiresAt  time.Time `json:"expires-at"`
+	Email      string `json:"email"`
+	Name       string `json:"name"`
+	GivenName  string `json:"given-name"`
+	FamilyName string `json:"family-name"`
+	Picture    string `json:"picture"`
+	ExpiresAt  string `json:"expires-at"`
 }
 
 func sessionResource(s *models.BrowserSession) jsonapi.Resource[SessionAttributes] {
@@ -79,7 +79,7 @@ func sessionResource(s *models.BrowserSession) jsonapi.Resource[SessionAttribute
 			GivenName:  s.GivenName,
 			FamilyName: s.FamilyName,
 			Picture:    s.Picture,
-			ExpiresAt:  s.AbsoluteExpiresAt,
+			ExpiresAt:  jsonapi.FormatTime(s.AbsoluteExpiresAt),
 		},
 	}
 }

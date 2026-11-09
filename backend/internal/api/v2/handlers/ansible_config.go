@@ -62,8 +62,8 @@ func buildAnsibleConfigResponse(config *models.AnsibleConfig) jsonapi.Resource[A
 		Attributes: AnsibleConfigAttributes{
 			Scope:         config.Scope(),
 			ConfigContent: config.ConfigContent,
-			CreatedAt:     config.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:     config.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:     jsonapi.FormatTime(config.CreatedAt),
+			UpdatedAt:     jsonapi.FormatTime(config.UpdatedAt),
 		},
 	}
 	var relationships AnsibleConfigRelationships

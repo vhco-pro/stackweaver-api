@@ -3,8 +3,6 @@
 package terraform
 
 import (
-	"time"
-
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 )
@@ -327,16 +325,16 @@ type ConfigurationVersionAttributes struct {
 // a StateVersion (state-version is the workspace's version number, vcs-commit-sha the commit), plus
 // the committer Stackweaver records beside them.
 type StateVersionAttributes struct {
-	HostedStateDownloadURL string    `json:"hosted-state-download-url"`
-	Serial                 *int      `json:"serial"`
-	Lineage                string    `json:"lineage"`
-	CreatedAt              time.Time `json:"created-at"`
-	Status                 string    `json:"status"`
-	Size                   int64     `json:"size"`
-	ResourcesProcessed     bool      `json:"resources-processed"`
-	StateVersion           int       `json:"state-version"`
-	VCSCommitSHA           string    `json:"vcs-commit-sha"`
-	Committer              string    `json:"committer,omitempty"`
+	HostedStateDownloadURL string `json:"hosted-state-download-url"`
+	Serial                 *int   `json:"serial"`
+	Lineage                string `json:"lineage"`
+	CreatedAt              string `json:"created-at"`
+	Status                 string `json:"status"`
+	Size                   int64  `json:"size"`
+	ResourcesProcessed     bool   `json:"resources-processed"`
+	StateVersion           int    `json:"state-version"`
+	VCSCommitSHA           string `json:"vcs-commit-sha"`
+	Committer              string `json:"committer,omitempty"`
 }
 
 // StateVersionRelationships are the workspace, the run that wrote the version (when one did) and

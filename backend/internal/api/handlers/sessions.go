@@ -4,7 +4,6 @@ package handlers
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
@@ -163,24 +162,24 @@ type SessionWithCurrent struct {
 
 // SessionAttributes describe one of the caller's sessions at the identity provider.
 type SessionAttributes struct {
-	UserAgent      string     `json:"user-agent"`
-	IPAddress      string     `json:"ip-address,omitempty"`
-	CreationDate   time.Time  `json:"creation-date"`
-	ExpirationDate *time.Time `json:"expiration-date,omitempty"`
-	Factors        []string   `json:"factors"`
-	IsCurrent      bool       `json:"is-current"`
+	UserAgent      string   `json:"user-agent"`
+	IPAddress      string   `json:"ip-address,omitempty"`
+	CreationDate   string   `json:"creation-date"`
+	ExpirationDate *string  `json:"expiration-date,omitempty"`
+	Factors        []string `json:"factors"`
+	IsCurrent      bool     `json:"is-current"`
 }
 
 // sessionAttributes describes s. A Zitadel session created without a lifetime has no expiration,
 // which the attribute leaves out rather than reporting Go's zero time.
 func sessionAttributes(s SessionWithCurrent) SessionAttributes {
 	attrs := SessionAttributes{
-		UserAgent: s.UserAgent, IPAddress: s.IPAddress, CreationDate: s.CreationDate,
+		UserAgent: s.UserAgent, IPAddress: s.IPAddress, CreationDate: jsonapi.FormatTime(s.CreationDate),
 		Factors: s.Factors, IsCurrent: s.IsCurrent,
 	}
 	if !s.ExpirationDate.IsZero() {
 		exp := s.ExpirationDate
-		attrs.ExpirationDate = &exp
+		attrs.ExpirationDate = jsonapi.FormatTimePtr(&exp)
 	}
 	return attrs
 }

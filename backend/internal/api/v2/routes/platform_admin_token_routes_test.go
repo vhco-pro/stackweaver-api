@@ -30,7 +30,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -276,13 +275,6 @@ func TestPlatformAdminToken_InstallWideRoutes(t *testing.T) {
 
 // AC14, automated half: go-tfe's Admin.TerraformVersions against the router.
 func TestPlatformAdminToken_GoTFEAdminTerraformVersions(t *testing.T) {
-	// go-tfe parses created-at with the layout "2006-01-02T15:04:05Z", so it reads only UTC
-	// timestamps. The API containers run in UTC; this test process may not, so it formats in UTC
-	// the way a deployment does.
-	previous := time.Local
-	time.Local = time.UTC
-	t.Cleanup(func() { time.Local = previous })
-
 	f := setupPlatformTokenFixture(t)
 	srv := httptest.NewServer(f.router)
 	t.Cleanup(srv.Close)

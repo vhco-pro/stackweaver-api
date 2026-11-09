@@ -3,8 +3,6 @@
 package ansible
 
 import (
-	"time"
-
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/placement"
 	"github.com/michielvha/stackweaver/core/models"
@@ -120,20 +118,20 @@ type EventRelationships struct {
 // workflow's relationships on the show endpoint, so those members are typed as slices of the
 // full resource rather than bare identifiers - preserved from the map-based decoration.
 
-// WorkflowAttributes: timestamps are time.Time here because the map builder emitted the raw
-// values (RFC3339 with nanoseconds), unlike the second-precision strings elsewhere.
+// WorkflowAttributes: the timestamps are written through jsonapi.FormatTime, UTC in whole
+// seconds, like every other API timestamp.
 type WorkflowAttributes struct {
-	Name                 string    `json:"name"`
-	Description          string    `json:"description"`
-	AllowSimultaneous    bool      `json:"allow-simultaneous"`
-	AskVariablesOnLaunch bool      `json:"ask-variables-on-launch"`
-	AskInventoryOnLaunch bool      `json:"ask-inventory-on-launch"`
-	AskLimitOnLaunch     bool      `json:"ask-limit-on-launch"`
-	ExtraVars            string    `json:"extra-vars"`
-	Limit                string    `json:"limit"`
-	SurveyEnabled        bool      `json:"survey-enabled"`
-	CreatedAt            time.Time `json:"created-at"`
-	UpdatedAt            time.Time `json:"updated-at"`
+	Name                 string `json:"name"`
+	Description          string `json:"description"`
+	AllowSimultaneous    bool   `json:"allow-simultaneous"`
+	AskVariablesOnLaunch bool   `json:"ask-variables-on-launch"`
+	AskInventoryOnLaunch bool   `json:"ask-inventory-on-launch"`
+	AskLimitOnLaunch     bool   `json:"ask-limit-on-launch"`
+	ExtraVars            string `json:"extra-vars"`
+	Limit                string `json:"limit"`
+	SurveyEnabled        bool   `json:"survey-enabled"`
+	CreatedAt            string `json:"created-at"`
+	UpdatedAt            string `json:"updated-at"`
 }
 
 // WorkflowNodesRelationship carries full node resources inline.
@@ -166,20 +164,20 @@ type WorkflowResource struct {
 
 // WorkflowNodeAttributes: job-template-name appears only when the template is preloaded.
 type WorkflowNodeAttributes struct {
-	NodeType               string    `json:"node-type"`
-	Identifier             string    `json:"identifier"`
-	PositionX              float64   `json:"position-x"`
-	PositionY              float64   `json:"position-y"`
-	ExtraVars              string    `json:"extra-vars"`
-	Limit                  string    `json:"limit"`
-	Tags                   string    `json:"tags"`
-	SkipTags               string    `json:"skip-tags"`
-	Verbosity              int       `json:"verbosity"`
-	AllParentsMustConverge bool      `json:"all-parents-must-converge"`
-	ApprovalTimeout        int       `json:"approval-timeout"`
-	ApprovalMessage        string    `json:"approval-message"`
-	CreatedAt              time.Time `json:"created-at"`
-	JobTemplateName        string    `json:"job-template-name,omitempty"`
+	NodeType               string  `json:"node-type"`
+	Identifier             string  `json:"identifier"`
+	PositionX              float64 `json:"position-x"`
+	PositionY              float64 `json:"position-y"`
+	ExtraVars              string  `json:"extra-vars"`
+	Limit                  string  `json:"limit"`
+	Tags                   string  `json:"tags"`
+	SkipTags               string  `json:"skip-tags"`
+	Verbosity              int     `json:"verbosity"`
+	AllParentsMustConverge bool    `json:"all-parents-must-converge"`
+	ApprovalTimeout        int     `json:"approval-timeout"`
+	ApprovalMessage        string  `json:"approval-message"`
+	CreatedAt              string  `json:"created-at"`
+	JobTemplateName        string  `json:"job-template-name,omitempty"`
 }
 
 // WorkflowNodeRelationships: workflow always; the rest per the node's wiring.
@@ -194,8 +192,8 @@ type WorkflowNodeRelationships struct {
 
 // WorkflowEdgeAttributes is an edge's condition and creation time.
 type WorkflowEdgeAttributes struct {
-	Condition string    `json:"condition"`
-	CreatedAt time.Time `json:"created-at"`
+	Condition string `json:"condition"`
+	CreatedAt string `json:"created-at"`
 }
 
 // WorkflowEdgeRelationships wires an edge between its nodes.
@@ -307,11 +305,11 @@ type ScheduleRelationships struct {
 // WorkflowJobAttributes: StartedAt/FinishedAt are raw pointers (null until set), as the map
 // emitted them.
 type WorkflowJobAttributes struct {
-	Name       string     `json:"name"`
-	Status     string     `json:"status"`
-	StartedAt  *time.Time `json:"started-at"`
-	FinishedAt *time.Time `json:"finished-at"`
-	CreatedAt  string     `json:"created-at"`
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`
+	StartedAt  *string `json:"started-at"`
+	FinishedAt *string `json:"finished-at"`
+	CreatedAt  string  `json:"created-at"`
 }
 
 // WorkflowJobOnlyRelationships is the single workflow relationship of a workflow run.
@@ -324,8 +322,8 @@ type WorkflowNodeJobAttributes struct {
 	Status     models.WorkflowNodeJobStatus `json:"status"`
 	NodeType   models.WorkflowNodeType      `json:"node-type"`
 	Identifier string                       `json:"identifier"`
-	StartedAt  *time.Time                   `json:"started-at"`
-	FinishedAt *time.Time                   `json:"finished-at"`
+	StartedAt  *string                      `json:"started-at"`
+	FinishedAt *string                      `json:"finished-at"`
 	Denied     bool                         `json:"denied"`
 }
 
@@ -368,7 +366,7 @@ type NotificationTemplateAttributes struct {
 	NotificationType models.NotificationType `json:"notification-type"`
 	Config           map[string]interface{}  `json:"config"`
 	HasSecret        bool                    `json:"has-secret"`
-	CreatedAt        time.Time               `json:"created-at"`
+	CreatedAt        string                  `json:"created-at"`
 }
 
 // NotificationAttachmentAttributes: the template name rides along only when the relation
@@ -403,7 +401,7 @@ type InventoryAttributes struct {
 	InventoryType           models.InventoryType      `json:"inventory-type"`
 	Source                  string                    `json:"source"`
 	Variables               models.InventoryVariables `json:"variables"`
-	LastSyncAt              *time.Time                `json:"last-sync-at"`
+	LastSyncAt              *string                   `json:"last-sync-at"`
 	LastSyncStatus          string                    `json:"last-sync-status"`
 	LastSyncError           string                    `json:"last-sync-error"`
 	LastSyncHostsDiscovered int                       `json:"last-sync-hosts-discovered"`
@@ -460,24 +458,24 @@ type InventorySourceAttributes struct {
 	Verbosity          int                          `json:"verbosity"`
 	// SyncTimeout is the source's sync time limit in seconds; 0 defers to the project, the
 	// organization and the deployment (#933, D0).
-	SyncTimeout             int        `json:"sync-timeout"`
-	RunImageID              *string    `json:"run-image-id"`
-	IdentityBindingID       *string    `json:"identity-binding-id"`
-	GroupByInstanceID       bool       `json:"group-by-instance-id"`
-	GroupByRegion           bool       `json:"group-by-region"`
-	GroupByAvailabilityZone bool       `json:"group-by-availability-zone"`
-	GroupByTag              string     `json:"group-by-tag"`
-	HostnameVar             string     `json:"hostname-var"`
-	InstanceFilters         string     `json:"instance-filters"`
-	SyncSchedule            string     `json:"sync-schedule"`
-	Status                  string     `json:"status"`
-	LastSyncAt              *time.Time `json:"last-sync-at"`
-	LastSyncError           string     `json:"last-sync-error"`
-	LastSyncLog             string     `json:"last-sync-log"`
-	HostsCount              int        `json:"hosts-count"`
-	Enabled                 bool       `json:"enabled"`
-	CreatedAt               string     `json:"created-at"`
-	UpdatedAt               string     `json:"updated-at"`
+	SyncTimeout             int     `json:"sync-timeout"`
+	RunImageID              *string `json:"run-image-id"`
+	IdentityBindingID       *string `json:"identity-binding-id"`
+	GroupByInstanceID       bool    `json:"group-by-instance-id"`
+	GroupByRegion           bool    `json:"group-by-region"`
+	GroupByAvailabilityZone bool    `json:"group-by-availability-zone"`
+	GroupByTag              string  `json:"group-by-tag"`
+	HostnameVar             string  `json:"hostname-var"`
+	InstanceFilters         string  `json:"instance-filters"`
+	SyncSchedule            string  `json:"sync-schedule"`
+	Status                  string  `json:"status"`
+	LastSyncAt              *string `json:"last-sync-at"`
+	LastSyncError           string  `json:"last-sync-error"`
+	LastSyncLog             string  `json:"last-sync-log"`
+	HostsCount              int     `json:"hosts-count"`
+	Enabled                 bool    `json:"enabled"`
+	CreatedAt               string  `json:"created-at"`
+	UpdatedAt               string  `json:"updated-at"`
 }
 
 // InventorySourceRelationships: the inventory always, the cloud credential when bound.
@@ -489,15 +487,15 @@ type InventorySourceRelationships struct {
 // InventorySyncAttributes: source-name rides along when the relation was preloaded, and
 // output only on detail fetches - both omitempty, matching the conditional map members.
 type InventorySyncAttributes struct {
-	Status           string     `json:"status"`
-	TriggeredBy      string     `json:"triggered-by"`
-	HostsDiscovered  int        `json:"hosts-discovered"`
-	GroupsDiscovered int        `json:"groups-discovered"`
-	Error            string     `json:"error"`
-	StartedAt        *time.Time `json:"started-at"`
-	FinishedAt       *time.Time `json:"finished-at"`
-	CreatedAt        time.Time  `json:"created-at"`
-	SourceName       string     `json:"source-name,omitempty"`
+	Status           string  `json:"status"`
+	TriggeredBy      string  `json:"triggered-by"`
+	HostsDiscovered  int     `json:"hosts-discovered"`
+	GroupsDiscovered int     `json:"groups-discovered"`
+	Error            string  `json:"error"`
+	StartedAt        *string `json:"started-at"`
+	FinishedAt       *string `json:"finished-at"`
+	CreatedAt        string  `json:"created-at"`
+	SourceName       string  `json:"source-name,omitempty"`
 	// Output is a pointer so the detail route emits the member even when the run produced
 	// no log, while listings omit it entirely.
 	Output *string `json:"output,omitempty"`

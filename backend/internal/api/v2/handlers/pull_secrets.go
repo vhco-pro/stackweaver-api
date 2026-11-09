@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,16 +23,16 @@ import (
 // external-manager, object-present and reported-at are what the pool's launcher last reported,
 // read-only.
 type PullSecretAttributes struct {
-	Name                 string     `json:"name"`
-	SecretName           string     `json:"secret-name"`
-	Registry             string     `json:"registry"`
-	RegistryCredentialID *string    `json:"registry-credential-id"`
-	Reference            bool       `json:"reference"`
-	DeclaredExternally   bool       `json:"declared-externally"`
-	ExternalManager      string     `json:"external-manager"`
-	ObjectPresent        *bool      `json:"object-present"`
-	ReportedAt           *time.Time `json:"reported-at"`
-	CreatedAt            time.Time  `json:"created-at"`
+	Name                 string  `json:"name"`
+	SecretName           string  `json:"secret-name"`
+	Registry             string  `json:"registry"`
+	RegistryCredentialID *string `json:"registry-credential-id"`
+	Reference            bool    `json:"reference"`
+	DeclaredExternally   bool    `json:"declared-externally"`
+	ExternalManager      string  `json:"external-manager"`
+	ObjectPresent        *bool   `json:"object-present"`
+	ReportedAt           *string `json:"reported-at"`
+	CreatedAt            string  `json:"created-at"`
 }
 
 // PullSecretRelationships names the pull Secret's pool.
@@ -81,7 +80,7 @@ func pullSecretResource(p *models.PullSecret) jsonapi.Resource[PullSecretAttribu
 		Attributes: PullSecretAttributes{
 			Name: p.Name, SecretName: p.SecretName, Registry: p.Registry, RegistryCredentialID: cred, Reference: p.Reference,
 			DeclaredExternally: p.DeclaredExternally, ExternalManager: p.ExternalManager, ObjectPresent: p.ObjectPresent,
-			ReportedAt: p.ReportedAt, CreatedAt: p.CreatedAt,
+			ReportedAt: jsonapi.FormatTimePtr(p.ReportedAt), CreatedAt: jsonapi.FormatTime(p.CreatedAt),
 		},
 		Relationships: PullSecretRelationships{AgentPool: jsonapi.ToOne(p.AgentPoolID.String(), "agent-pools")},
 	}

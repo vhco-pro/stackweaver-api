@@ -94,9 +94,9 @@ func (h *AgentTokenHandlerV2) resolvePool(c *gin.Context) (*models.AgentPool, bo
 // only on create (empty on read). The description is stored as the key name.
 func agentTokenResource(key *models.APIKey, token string) jsonapi.Resource[AgentTokenAttributes] {
 	attrs := AgentTokenAttributes{
-		CreatedAt:   key.CreatedAt,
-		LastUsedAt:  key.LastUsedAt,
-		ExpiredAt:   key.ExpiresAt,
+		CreatedAt:   jsonapi.FormatTime(key.CreatedAt),
+		LastUsedAt:  jsonapi.FormatTimePtr(key.LastUsedAt),
+		ExpiredAt:   jsonapi.FormatTimePtr(key.ExpiresAt),
 		Description: key.Name,
 	}
 	if token != "" {
@@ -236,8 +236,8 @@ func rotateGrace(c *gin.Context) (time.Duration, error) {
 
 // agentTokenRotateMeta names the token a rotation retired and when it stops working.
 type agentTokenRotateMeta struct {
-	RotatedFrom          string     `json:"rotated-from"`
-	RotatedFromExpiredAt *time.Time `json:"rotated-from-expired-at"`
+	RotatedFrom          string  `json:"rotated-from"`
+	RotatedFromExpiredAt *string `json:"rotated-from-expired-at"`
 }
 
 // Rotate replaces an agent token: it mints a new token for the same pool and description, returns
@@ -279,7 +279,7 @@ func (h *AgentTokenHandlerV2) Rotate(c *gin.Context) {
 	}
 	jsonapi.WriteDocumentMeta(c, http.StatusCreated, agentTokenResource(key, token), agentTokenRotateMeta{
 		RotatedFrom:          retired.ID.String(),
-		RotatedFromExpiredAt: retired.ExpiresAt,
+		RotatedFromExpiredAt: jsonapi.FormatTimePtr(retired.ExpiresAt),
 	})
 }
 

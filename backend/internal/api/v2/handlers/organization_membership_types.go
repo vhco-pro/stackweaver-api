@@ -3,8 +3,6 @@
 package handlers
 
 import (
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
@@ -164,10 +162,10 @@ type AgentPoolRelationships struct {
 
 // AgentAttributes is the TFE agents shape: id, name, ip-address, status, last-ping-at.
 type AgentAttributes struct {
-	Name       string     `json:"name"`
-	IPAddress  string     `json:"ip-address"`
-	Status     string     `json:"status"`
-	LastPingAt *time.Time `json:"last-ping-at"`
+	Name       string  `json:"name"`
+	IPAddress  string  `json:"ip-address"`
+	Status     string  `json:"status"`
+	LastPingAt *string `json:"last-ping-at"`
 	// Driver and NetworkMode are what the agent's launcher reported at registration (#933, D4,
 	// D5, AC22): read-only, since a launcher's network mode is its installer's setting and no
 	// route changes it.
@@ -225,9 +223,9 @@ type VCSConnectionAttributes struct {
 	Provider       models.VCSProvider `json:"provider"`
 	AccountName    string             `json:"account_name"`
 	AccountType    string             `json:"account_type"`
-	TokenExpiresAt *time.Time         `json:"token_expires_at"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	TokenExpiresAt *string            `json:"token_expires_at"`
+	CreatedAt      string             `json:"created_at"`
+	UpdatedAt      string             `json:"updated_at"`
 }
 
 // vcsConnectionResource builds the shared shape.
@@ -239,9 +237,9 @@ func vcsConnectionResource(conn *models.VCSConnection, orgID uuid.UUID) jsonapi.
 			Provider:       conn.Provider,
 			AccountName:    conn.AccountName,
 			AccountType:    conn.AccountType,
-			TokenExpiresAt: conn.TokenExpiresAt,
-			CreatedAt:      conn.CreatedAt,
-			UpdatedAt:      conn.UpdatedAt,
+			TokenExpiresAt: jsonapi.FormatTimePtr(conn.TokenExpiresAt),
+			CreatedAt:      jsonapi.FormatTime(conn.CreatedAt),
+			UpdatedAt:      jsonapi.FormatTime(conn.UpdatedAt),
 		},
 		Relationships: WorkspaceOnlyRelationshipsNamed{Organization: jsonapi.ToOne(orgID.String(), "organizations")},
 	}
@@ -393,8 +391,8 @@ type RunnerRecentJob struct {
 	WorkspaceID   string                    `json:"workspace_id"`
 	WorkspaceName string                    `json:"workspace_name"`
 	Status        models.JobExecutionStatus `json:"status"`
-	StartedAt     *time.Time                `json:"started_at"`
-	FinishedAt    *time.Time                `json:"finished_at"`
+	StartedAt     *string                   `json:"started_at"`
+	FinishedAt    *string                   `json:"finished_at"`
 	DurationMS    int64                     `json:"duration_ms"`
 }
 
@@ -707,31 +705,31 @@ type AnsibleConfigRelationships struct {
 // TeamTokenAttributes: description is a pointer without omitempty because legacy team tokens
 // carry none and the member is emitted as null, which is what a client reads as "unnamed".
 type TeamTokenAttributes struct {
-	CreatedAt   time.Time  `json:"created-at"`
-	LastUsedAt  *time.Time `json:"last-used-at"`
-	ExpiredAt   *time.Time `json:"expired-at"`
-	Description *string    `json:"description"`
+	CreatedAt   string  `json:"created-at"`
+	LastUsedAt  *string `json:"last-used-at"`
+	ExpiredAt   *string `json:"expired-at"`
+	Description *string `json:"description"`
 	// Token is the plaintext, present only on create.
 	Token string `json:"token,omitempty"`
 }
 
 // OrgTokenAttributes has no description member at all.
 type OrgTokenAttributes struct {
-	CreatedAt  time.Time  `json:"created-at"`
-	LastUsedAt *time.Time `json:"last-used-at"`
-	ExpiredAt  *time.Time `json:"expired-at"`
-	Token      string     `json:"token,omitempty"`
+	CreatedAt  string  `json:"created-at"`
+	LastUsedAt *string `json:"last-used-at"`
+	ExpiredAt  *string `json:"expired-at"`
+	Token      string  `json:"token,omitempty"`
 }
 
 // AgentTokenAttributes stores its description as the key name. TFE agent tokens have no expiry;
 // ExpiredAt is a Stackweaver extension set only on a token retired by rotation, and is omitted
 // otherwise so a never-rotated token keeps the exact TFE shape.
 type AgentTokenAttributes struct {
-	CreatedAt   time.Time  `json:"created-at"`
-	LastUsedAt  *time.Time `json:"last-used-at"`
-	ExpiredAt   *time.Time `json:"expired-at,omitempty"`
-	Description string     `json:"description"`
-	Token       string     `json:"token,omitempty"`
+	CreatedAt   string  `json:"created-at"`
+	LastUsedAt  *string `json:"last-used-at"`
+	ExpiredAt   *string `json:"expired-at,omitempty"`
+	Description string  `json:"description"`
+	Token       string  `json:"token,omitempty"`
 }
 
 // The user-bound /api/v2/tokens surface uses snake_case members rather than the kebab-case
@@ -741,19 +739,19 @@ type AgentTokenAttributes struct {
 // (null when the token has never been used) and no plaintext. One struct with omitempty
 // would silently drop a null last_used_at from every listing.
 type UserTokenCreateAttributes struct {
-	Token       string     `json:"token"`
-	Description string     `json:"description"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	Token       string  `json:"token"`
+	Description string  `json:"description"`
+	ExpiresAt   *string `json:"expires_at"`
+	CreatedAt   string  `json:"created_at"`
 	// PlatformAdminToken is true for a platform admin token (the platform:admin scope, #132).
 	PlatformAdminToken bool `json:"platform_admin"`
 }
 
 type UserTokenListAttributes struct {
-	Description string     `json:"description"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	Description string  `json:"description"`
+	LastUsedAt  *string `json:"last_used_at"`
+	ExpiresAt   *string `json:"expires_at"`
+	CreatedAt   string  `json:"created_at"`
 	// PlatformAdminToken is true for a platform admin token (the platform:admin scope, #132).
 	PlatformAdminToken bool `json:"platform_admin"`
 }
@@ -761,16 +759,16 @@ type UserTokenListAttributes struct {
 // WebhookEventAttributes is the attribute block of a webhook-events resource: one delivery
 // received from a VCS provider.
 type WebhookEventAttributes struct {
-	EventType    string     `json:"event-type"`
-	Provider     string     `json:"provider"`
-	Repository   string     `json:"repository"`
-	Branch       string     `json:"branch"`
-	Commit       string     `json:"commit"`
-	Status       string     `json:"status"`
-	ResponseCode int        `json:"response-code"`
-	Message      string     `json:"message"`
-	DeliveredAt  time.Time  `json:"delivered-at"`
-	ProcessedAt  *time.Time `json:"processed-at"`
+	EventType    string  `json:"event-type"`
+	Provider     string  `json:"provider"`
+	Repository   string  `json:"repository"`
+	Branch       string  `json:"branch"`
+	Commit       string  `json:"commit"`
+	Status       string  `json:"status"`
+	ResponseCode int     `json:"response-code"`
+	Message      string  `json:"message"`
+	DeliveredAt  string  `json:"delivered-at"`
+	ProcessedAt  *string `json:"processed-at"`
 }
 
 // TofuVersionAttributes is the terraform-versions attribute block. deprecated-reason is a
@@ -792,18 +790,18 @@ type TofuVersionAttributes struct {
 
 // AccountAttributes is the TFE account (current user) attribute block.
 type AccountAttributes struct {
-	Username         string    `json:"username"`
-	Email            string    `json:"email"`
-	UnconfirmedEmail string    `json:"unconfirmed-email,omitempty"`
-	IsServiceAccount bool      `json:"is-service-account"`
-	AvatarURL        string    `json:"avatar-url"`
-	V2Only           bool      `json:"v2-only"`
-	Name             string    `json:"name"`
-	Bio              string    `json:"bio"`
-	Company          string    `json:"company"`
-	Location         string    `json:"location"`
-	CreatedAt        time.Time `json:"created-at"`
-	UpdatedAt        time.Time `json:"updated-at"`
+	Username         string `json:"username"`
+	Email            string `json:"email"`
+	UnconfirmedEmail string `json:"unconfirmed-email,omitempty"`
+	IsServiceAccount bool   `json:"is-service-account"`
+	AvatarURL        string `json:"avatar-url"`
+	V2Only           bool   `json:"v2-only"`
+	Name             string `json:"name"`
+	Bio              string `json:"bio"`
+	Company          string `json:"company"`
+	Location         string `json:"location"`
+	CreatedAt        string `json:"created-at"`
+	UpdatedAt        string `json:"updated-at"`
 	// IsSiteAdmin is TFE's site administrator flag: the caller is a platform administrator.
 	IsSiteAdmin bool `json:"is-site-admin"`
 	// DeclaredByDeployment is a Stackweaver extension: the deployment declared the caller a

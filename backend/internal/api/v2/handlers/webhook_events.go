@@ -61,8 +61,8 @@ func (h *WebhookEventHandlerV2) List(c *gin.Context) {
 				Status:       event.Status,
 				ResponseCode: event.ResponseCode,
 				Message:      event.Message,
-				DeliveredAt:  event.DeliveredAt,
-				ProcessedAt:  event.ProcessedAt,
+				DeliveredAt:  jsonapi.FormatTime(event.DeliveredAt),
+				ProcessedAt:  jsonapi.FormatTimePtr(event.ProcessedAt),
 			},
 		}
 	}

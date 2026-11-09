@@ -4,7 +4,6 @@ package terraform
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -76,15 +75,15 @@ func formatChangeRequest(cr *models.ChangeRequest) jsonapi.Resource[ChangeReques
 		Subject:   cr.Subject,
 		Message:   cr.Message,
 		CreatedBy: cr.CreatedBy.String(),
-		CreatedAt: cr.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: cr.UpdatedAt.Format(time.RFC3339),
+		CreatedAt: jsonapi.FormatTime(cr.CreatedAt),
+		UpdatedAt: jsonapi.FormatTime(cr.UpdatedAt),
 	}
 	if cr.ArchivedBy != nil {
 		v := cr.ArchivedBy.String()
 		attrs.ArchivedBy = &v
 	}
 	if cr.ArchivedAt != nil {
-		v := cr.ArchivedAt.Format(time.RFC3339)
+		v := jsonapi.FormatTime(*cr.ArchivedAt)
 		attrs.ArchivedAt = &v
 	}
 	if cr.Workspace != nil {

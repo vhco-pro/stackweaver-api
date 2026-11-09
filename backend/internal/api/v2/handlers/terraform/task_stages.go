@@ -25,7 +25,7 @@ func phaseTimestamps(runningAt, passedAt, failedAt, erroredAt, canceledAt *time.
 		if t == nil {
 			return ""
 		}
-		return t.Format(time.RFC3339)
+		return jsonapi.FormatTime(*t)
 	}
 	return TaskPhaseTimestamps{
 		RunningAt:  fmtT(runningAt),
@@ -51,8 +51,8 @@ func formatTaskStage(ts *models.TaskStage, canOverride bool) jsonapi.Resource[Ta
 			Stage:            ts.Stage,
 			Status:           ts.Status,
 			StatusTimestamps: phaseTimestamps(ts.RunningAt, ts.PassedAt, ts.FailedAt, ts.ErroredAt, ts.CanceledAt),
-			CreatedAt:        ts.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:        ts.UpdatedAt.Format(time.RFC3339),
+			CreatedAt:        jsonapi.FormatTime(ts.CreatedAt),
+			UpdatedAt:        jsonapi.FormatTime(ts.UpdatedAt),
 			Permissions: TaskStagePermissions{
 				CanOverrideTasks: canOverride,
 				CanOverride:      canOverride,
@@ -94,8 +94,8 @@ func formatTaskResult(tr *models.TaskResult) jsonapi.Resource[TaskResultAttribut
 			TaskURL:                       tr.TaskURL,
 			WorkspaceTaskID:               wstaskID,
 			WorkspaceTaskEnforcementLevel: tr.EnforcementLevel,
-			CreatedAt:                     tr.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:                     tr.UpdatedAt.Format(time.RFC3339),
+			CreatedAt:                     jsonapi.FormatTime(tr.CreatedAt),
+			UpdatedAt:                     jsonapi.FormatTime(tr.UpdatedAt),
 		},
 		Relationships: TaskResultRelationships{
 			TaskStageUnderscore: stageRel,
@@ -115,8 +115,8 @@ func formatTaskResultOutcome(o *models.TaskResultOutcome) jsonapi.Resource[TaskR
 			Body:        o.Body,
 			URL:         o.URL,
 			Tags:        o.Tags,
-			CreatedAt:   o.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:   o.UpdatedAt.Format(time.RFC3339),
+			CreatedAt:   jsonapi.FormatTime(o.CreatedAt),
+			UpdatedAt:   jsonapi.FormatTime(o.UpdatedAt),
 		},
 		Relationships: TaskResultOutcomeRelationships{TaskResult: jsonapi.ToOne(o.TaskResultID, "task-results")},
 	}

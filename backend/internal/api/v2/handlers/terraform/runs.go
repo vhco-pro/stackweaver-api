@@ -251,35 +251,35 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		// Plan-and-apply runs: planning → planned → applying → applied
 		// planning-at: when plan started
 		if run.StartedAt != nil {
-			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 		// planned-at: when plan phase completed
 		// Include even when status is 'failed' if PlanCompletedAt is set (plan completed before apply failed)
 		if run.PlanCompletedAt != nil {
-			statusTimestamps.PlannedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
 		}
 		// applying-at: when apply phase started
 		// Include even when status is 'failed' if ApplyStartedAt is set (apply started before it failed)
 		if run.ApplyStartedAt != nil {
-			statusTimestamps.ApplyingAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.ApplyingAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 		// applied-at: when apply phase completed (status is 'applied')
 		if run.Status == models.RunStatusApplied && run.CompletedAt != nil {
-			statusTimestamps.AppliedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.AppliedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 
 	case models.RunOperationPlanOnly:
 		// Plan-only runs: planning → planned
 		// planning-at: when plan started
 		if run.StartedAt != nil {
-			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 		// planned-at: when plan completed (status is 'planned' or 'completed')
 		if run.Status == models.RunStatusPlanned || run.Status == models.RunStatusCompleted {
 			if run.PlanCompletedAt != nil {
-				statusTimestamps.PlannedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
 			} else if run.CompletedAt != nil {
-				statusTimestamps.PlannedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.CompletedAt)
 			}
 		}
 
@@ -287,19 +287,19 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		// TFE-compatible: Destroy runs follow the same two-phase flow as plan-and-apply
 		// planning-at: when destroy plan started
 		if run.StartedAt != nil {
-			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 		// planned-at: when destroy plan completed
 		if run.PlanCompletedAt != nil {
-			statusTimestamps.PlannedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
 		}
 		// applying-at: when destroy execution started (apply phase)
 		if run.ApplyStartedAt != nil {
-			statusTimestamps.ApplyingAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.ApplyingAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 		// applied-at: when destroy execution completed
 		if run.Status == models.RunStatusApplied && run.CompletedAt != nil {
-			statusTimestamps.AppliedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.AppliedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 	}
 
@@ -310,14 +310,14 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 			// For plan-and-apply, check if we're past the plan phase
 			if len(run.PlanOutput) > 0 {
 				// Plan completed, so this must be applying
-				statusTimestamps.ApplyingAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.ApplyingAt = jsonapi.FormatTime(*run.StartedAt)
 			} else {
 				// Plan phase
-				statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
 			}
 		} else {
 			// Plan-only or legacy plan
-			statusTimestamps.PlanningAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 	}
 	if (run.Status == models.RunStatusCompleted || run.Status == models.RunStatusPlanned) && run.CompletedAt != nil {
@@ -327,17 +327,17 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 			// If plan output exists but status is completed, it might be apply completion
 			// For now, assume it's plan completion if status is "planned"
 			if run.Status == models.RunStatusPlanned {
-				statusTimestamps.PlannedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+				statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.CompletedAt)
 			}
 		} else {
 			// Plan-only or legacy: set planned-at
-			statusTimestamps.PlannedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 	}
 
 	// Set plan-queued-at when run is pending (queued for planning)
 	if run.Status == models.RunStatusPending {
-		statusTimestamps.PlanQueuedAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		statusTimestamps.PlanQueuedAt = jsonapi.FormatTime(run.CreatedAt)
 	}
 
 	// TFE-compatible: Determine run source based on TFE spec
@@ -423,8 +423,8 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		IsDestroy: run.Operation == models.RunOperationDestroy,
 		PlanOnly:  planOnly,
 		Source:    runSource, // "tfe-api", "tfe-ui", "tfe-configuration-version" - TFE's only three
-		CreatedAt: run.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: run.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt: jsonapi.FormatTime(run.CreatedAt),
+		UpdatedAt: jsonapi.FormatTime(run.UpdatedAt),
 		// TFE requires status-timestamps for the Terraform CLI to recognise completion.
 		StatusTimestamps: statusTimestamps,
 		HasChanges:       hasChanges(run),
@@ -455,10 +455,10 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 	}
 
 	if run.StartedAt != nil {
-		attributes.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+		attributes.StartedAt = jsonapi.FormatTime(*run.StartedAt)
 	}
 	if run.CompletedAt != nil {
-		attributes.CompletedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+		attributes.CompletedAt = jsonapi.FormatTime(*run.CompletedAt)
 	}
 	attributes.ErrorMessage = run.ErrorMessage
 
@@ -1047,7 +1047,7 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	case models.RunStatusPlanning:
 		planStatus = "running"
 		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 	case models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted:
 		planStatus = "pending" // pre_plan run tasks execute before the plan starts
@@ -1059,23 +1059,23 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 		// execute after it. go-tfe/terraform wait on the plan document reaching "finished".
 		planStatus = "finished" // TFE uses "finished" for completed plans
 		if run.PlanCompletedAt != nil {
-			planStatusTimestamps.FinishedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
 		}
 		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 	case models.RunStatusApplying:
 		planStatus = "running" // Apply phase is still running
 		if run.ApplyStartedAt != nil {
-			planStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 	case models.RunStatusApplied:
 		planStatus = "finished"
 		if run.CompletedAt != nil {
-			planStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 		if run.ApplyStartedAt != nil {
-			planStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 	case models.RunStatusFailed:
 		planStatus = "errored"
@@ -1084,26 +1084,26 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	case models.RunStatusRunning:
 		planStatus = "running"
 		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 	case models.RunStatusCompleted:
 		planStatus = "finished" // TFE uses "finished" for completed plans, not "completed" or "planned"
 		if run.CompletedAt != nil {
-			planStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 	}
 
 	// Set queued-at and pending-at timestamps
 	if run.Status == models.RunStatusPending {
-		planStatusTimestamps.PendingAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
-		planStatusTimestamps.QueuedAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		planStatusTimestamps.PendingAt = jsonapi.FormatTime(run.CreatedAt)
+		planStatusTimestamps.QueuedAt = jsonapi.FormatTime(run.CreatedAt)
 	} else if run.StartedAt != nil {
 		// If run has started, set queued-at to created-at (when it was queued)
-		planStatusTimestamps.QueuedAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
-		planStatusTimestamps.PendingAt = run.CreatedAt.Format("2006-01-02T15:04:05Z")
+		planStatusTimestamps.QueuedAt = jsonapi.FormatTime(run.CreatedAt)
+		planStatusTimestamps.PendingAt = jsonapi.FormatTime(run.CreatedAt)
 	}
 
 	// Determine has-changes based on resource and output counts
@@ -1271,45 +1271,45 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		// The apply itself finished; only informational post-apply tasks are still running.
 		applyStatus = "finished"
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 	case models.RunStatusRunning:
 		applyStatus = "running"
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		} else if run.StartedAt != nil {
-			applyStatusTimestamps.StartedAt = run.StartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
 		}
 	case models.RunStatusCompleted:
 		applyStatus = "finished"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 	case models.RunStatusFailed:
 		applyStatus = "errored"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 	case models.RunStatusCancelled:
 		applyStatus = "canceled"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 	case models.RunStatusApplying:
 		applyStatus = "running"
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 	case models.RunStatusApplied:
 		applyStatus = "finished"
 		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = run.CompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
 		}
 		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 	}
 
@@ -1318,10 +1318,10 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		// queued-at is when apply was queued (before started-at)
 		// For plan-and-apply runs, this is when plan completed
 		if run.PlanCompletedAt != nil {
-			applyStatusTimestamps.QueuedAt = run.PlanCompletedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.QueuedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
 		} else if run.ApplyStartedAt != nil {
 			// Fallback to apply started time if plan completed time not available
-			applyStatusTimestamps.QueuedAt = run.ApplyStartedAt.Format("2006-01-02T15:04:05Z")
+			applyStatusTimestamps.QueuedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
 		}
 	}
 
@@ -1348,7 +1348,7 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 				Details:      res.Details,
 			}
 			if res.CreatedAt != nil {
-				out[i].CreatedAt = res.CreatedAt.Format("2006-01-02T15:04:05Z")
+				out[i].CreatedAt = jsonapi.FormatTime(*res.CreatedAt)
 			}
 		}
 		attributes.ApplyResources = out

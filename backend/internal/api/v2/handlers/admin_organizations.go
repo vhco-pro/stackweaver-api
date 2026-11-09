@@ -5,7 +5,6 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -35,13 +34,13 @@ func NewAdminOrganizationsHandlerV2(orgs *repository.OrganizationRepository, adm
 // AdminOrganizationAttributes is TFE's admin organization resource as far as Stackweaver has it,
 // with member-count and workspace-count as Stackweaver extensions.
 type AdminOrganizationAttributes struct {
-	Name              string    `json:"name"`
-	ExternalID        string    `json:"external-id"`
-	NotificationEmail string    `json:"notification-email"`
-	IsDisabled        bool      `json:"is-disabled"`
-	CreatedAt         time.Time `json:"created-at"`
-	MemberCount       int64     `json:"member-count"`
-	WorkspaceCount    int64     `json:"workspace-count"`
+	Name              string `json:"name"`
+	ExternalID        string `json:"external-id"`
+	NotificationEmail string `json:"notification-email"`
+	IsDisabled        bool   `json:"is-disabled"`
+	CreatedAt         string `json:"created-at"`
+	MemberCount       int64  `json:"member-count"`
+	WorkspaceCount    int64  `json:"workspace-count"`
 }
 
 const adminOrgNotFound = "Organization not found, or client is not an administrator."
@@ -66,7 +65,7 @@ func (h *AdminOrganizationsHandlerV2) resources(c *gin.Context, orgs []models.Or
 				Name:              o.Name,
 				ExternalID:        o.ID.String(),
 				NotificationEmail: o.Email,
-				CreatedAt:         o.CreatedAt,
+				CreatedAt:         jsonapi.FormatTime(o.CreatedAt),
 				MemberCount:       members[o.ID],
 				WorkspaceCount:    workspaces[o.ID],
 			},

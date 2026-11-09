@@ -4,7 +4,6 @@ package terraform
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -79,8 +78,8 @@ func formatWorkspaceTask(wt *models.WorkspaceTask) jsonapi.Resource[WorkspaceTas
 			EnforcementLevel: wt.EnforcementLevel,
 			Stage:            stages[0],
 			Stages:           stages,
-			CreatedAt:        wt.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:        wt.UpdatedAt.Format(time.RFC3339),
+			CreatedAt:        jsonapi.FormatTime(wt.CreatedAt),
+			UpdatedAt:        jsonapi.FormatTime(wt.UpdatedAt),
 		},
 		Relationships: WorkspaceTaskRelationships{
 			Task:      jsonapi.ToOne(wt.TaskID, "tasks"),

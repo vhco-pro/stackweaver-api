@@ -375,8 +375,8 @@ func buildTFEOrganizationResponse(org *models.Organization, defaultProjectID *uu
 		Attributes: OrganizationResponseAttributes{
 			Name:                             org.Name,
 			ExternalID:                       org.ID.String(),
-			CreatedAt:                        org.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:                        org.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:                        jsonapi.FormatTime(org.CreatedAt),
+			UpdatedAt:                        jsonapi.FormatTime(org.UpdatedAt),
 			Email:                            org.Email,
 			CollaboratorAuthPolicy:           collaboratorAuthPolicy,
 			CostEstimationEnabled:            org.CostEstimationEnabled,

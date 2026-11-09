@@ -53,13 +53,13 @@ func (r *CreateAPIKeyRequest) PrimaryType() (string, bool) {
 // APIKeyAttributes describe one of the caller's API keys. Key is the plaintext key, present only
 // in the answer to the create, the one time it is shown.
 type APIKeyAttributes struct {
-	Name       string     `json:"name"`
-	Key        string     `json:"key,omitempty"`
-	KeyPrefix  string     `json:"key-prefix"`
-	Scopes     []string   `json:"scopes"`
-	ExpiresAt  *time.Time `json:"expires-at"`
-	LastUsedAt *time.Time `json:"last-used-at"`
-	CreatedAt  time.Time  `json:"created-at"`
+	Name       string   `json:"name"`
+	Key        string   `json:"key,omitempty"`
+	KeyPrefix  string   `json:"key-prefix"`
+	Scopes     []string `json:"scopes"`
+	ExpiresAt  *string  `json:"expires-at"`
+	LastUsedAt *string  `json:"last-used-at"`
+	CreatedAt  string   `json:"created-at"`
 }
 
 // APIKeyRelationships name the organization or project a scoped key is limited to.
@@ -75,7 +75,7 @@ func apiKeyResource(key *models.APIKey, plainKey string) jsonapi.Resource[APIKey
 		Type: "api-keys",
 		Attributes: APIKeyAttributes{
 			Name: key.Name, Key: plainKey, KeyPrefix: key.KeyPrefix, Scopes: []string(key.Scopes),
-			ExpiresAt: key.ExpiresAt, LastUsedAt: key.LastUsedAt, CreatedAt: key.CreatedAt,
+			ExpiresAt: jsonapi.FormatTimePtr(key.ExpiresAt), LastUsedAt: jsonapi.FormatTimePtr(key.LastUsedAt), CreatedAt: jsonapi.FormatTime(key.CreatedAt),
 		},
 	}
 	if res.Attributes.Scopes == nil {

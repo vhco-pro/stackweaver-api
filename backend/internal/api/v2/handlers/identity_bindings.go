@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -34,8 +33,8 @@ type IdentityBindingAttributes struct {
 	DeclaredExternally bool              `json:"declared-externally"`
 	ExternalManager    string            `json:"external-manager"`
 	ObjectPresent      *bool             `json:"object-present"`
-	ReportedAt         *time.Time        `json:"reported-at"`
-	CreatedAt          time.Time         `json:"created-at"`
+	ReportedAt         *string           `json:"reported-at"`
+	CreatedAt          string            `json:"created-at"`
 }
 
 // IdentityBindingRelationships names the binding's pool.
@@ -83,7 +82,7 @@ func identityBindingResource(b *models.IdentityBinding) jsonapi.Resource[Identit
 		Attributes: IdentityBindingAttributes{
 			Name: b.Name, Mechanism: b.Mechanism, ServiceAccount: b.ServiceAccount, Annotations: ann,
 			PerJobSA: b.PerJobSA, Reference: b.Reference, DeclaredExternally: b.DeclaredExternally,
-			ExternalManager: b.ExternalManager, ObjectPresent: b.ObjectPresent, ReportedAt: b.ReportedAt, CreatedAt: b.CreatedAt,
+			ExternalManager: b.ExternalManager, ObjectPresent: b.ObjectPresent, ReportedAt: jsonapi.FormatTimePtr(b.ReportedAt), CreatedAt: jsonapi.FormatTime(b.CreatedAt),
 		},
 		Relationships: IdentityBindingRelationships{AgentPool: jsonapi.ToOne(b.AgentPoolID.String(), "agent-pools")},
 	}
