@@ -506,12 +506,34 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 	}
 }
 
+// runStatusesAfterPlan are the statuses a run can hold once its plan has finished. A run's
+// has-changes is its plan's, as in TFE, so it keeps answering through confirmation, the task
+// stages and the apply, and after the run is applied, failed or canceled. Before the plan
+// finishes there is no plan to answer from.
+var runStatusesAfterPlan = map[models.RunStatus]bool{
+	models.RunStatusPlanned:            true,
+	models.RunStatusCompleted:          true,
+	models.RunStatusPostPlanRunning:    true,
+	models.RunStatusPostPlanCompleted:  true,
+	models.RunStatusPreApplyRunning:    true,
+	models.RunStatusPreApplyCompleted:  true,
+	models.RunStatusApplying:           true,
+	models.RunStatusPostApplyRunning:   true,
+	models.RunStatusPostApplyCompleted: true,
+	models.RunStatusApplied:            true,
+	models.RunStatusFailed:             true,
+	models.RunStatusCancelled:          true,
+}
+
 // runReportsChanges reports whether a run's operation and status are ones for which a
-// has-changes answer is meaningful at all. Destroy runs are included - a destroy plan has
-// real changes (resources to destroy), and go-tfe clients (tfe_workspace_run) gate on
-// has-changes to decide whether to confirm the apply; excluding destroy made every destroy
-// run report has-changes=false and hang the provider waiting for a "planned and finished"
-// no-op status.
+// has-changes answer is meaningful at all: a plan-producing operation whose plan has finished.
+//
+// go-tfe clients (tfe_workspace_run) read has-changes once, at the plan's terminal status, to
+// decide whether to confirm the apply: false makes the provider wait for planned_and_finished,
+// so a run with changes that reads false hangs it. That is why destroy runs are included, and
+// why post_plan_completed is: it is the plan's terminal status when a post-plan task stage
+// exists. A run whose plan has no changes reads false in every status, because the plan
+// document decides the answer.
 //
 // Shared by hasChanges, which reads the plan document in Go, and by the workspace list,
 // which gets the document half evaluated in PostgreSQL (#808). One definition so the two
@@ -520,7 +542,7 @@ func runReportsChanges(op models.RunOperation, status models.RunStatus) bool {
 	if op != models.RunOperationPlanOnly && op != models.RunOperationPlanAndApply && op != models.RunOperationDestroy {
 		return false
 	}
-	return status == models.RunStatusPlanned || status == models.RunStatusCompleted
+	return runStatusesAfterPlan[status]
 }
 
 // hasChanges determines if the run has changes based on plan output
