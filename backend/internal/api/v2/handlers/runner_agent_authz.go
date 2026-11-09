@@ -93,7 +93,7 @@ func (h *RunnerAgentHandler) authorizeRunnerForRunReport(c *gin.Context, run *mo
 func (h *RunnerAgentHandler) authorizeRunnerForRunAs(c *gin.Context, run *models.Run, requireAssigned, finished bool) bool {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return false
 	}
 	orgID, poolID, err := h.runOrgAndPool(run)
@@ -107,11 +107,11 @@ func (h *RunnerAgentHandler) authorizeRunnerForRunAs(c *gin.Context, run *models
 		return false
 	}
 	if run.RunnerID != nil && *run.RunnerID != runner.ID {
-		writeRunnerForbidden(c, "run is assigned to a different runner")
+		writeRunnerForbidden(c, "run is assigned to a different launcher")
 		return false
 	}
 	if requireAssigned && (run.RunnerID == nil || *run.RunnerID != runner.ID) {
-		writeRunnerForbidden(c, "run is not assigned to this runner")
+		writeRunnerForbidden(c, "run is not assigned to this launcher")
 		return false
 	}
 	if p, ok := callingJob(c); ok {
@@ -137,7 +137,7 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJobReport(c *gin.Context, 
 func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJobAs(c *gin.Context, job *models.AnsibleJob, requireAssigned, finished bool) bool {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return false
 	}
 	orgID, poolID, err := h.ansibleJobOrgAndPool(job)
@@ -151,11 +151,11 @@ func (h *RunnerAgentHandler) authorizeRunnerForAnsibleJobAs(c *gin.Context, job 
 		return false
 	}
 	if job.RunnerID != nil && *job.RunnerID != runner.ID {
-		writeRunnerForbidden(c, "job is reserved by a different runner")
+		writeRunnerForbidden(c, "job is reserved by a different launcher")
 		return false
 	}
 	if requireAssigned && (job.RunnerID == nil || *job.RunnerID != runner.ID) {
-		writeRunnerForbidden(c, "job is not reserved by this runner")
+		writeRunnerForbidden(c, "job is not reserved by this launcher")
 		return false
 	}
 	if p, ok := callingJob(c); ok {
@@ -187,11 +187,11 @@ func (h *RunnerAgentHandler) authorizePool(c *gin.Context, runner *models.Runner
 	}
 	var pool models.AgentPool
 	if err := h.db.Select("id", "kind", "organization_id").First(&pool, "id = ?", *poolID).Error; err != nil || !pool.IsHosted() || pool.OrganizationID != orgID {
-		writeRunnerForbidden(c, what+" is not on a hosted pool")
+		writeRunnerForbidden(c, what+" is not on hosted capacity")
 		return false
 	}
 	if assignee == nil || *assignee != runner.ID {
-		writeRunnerForbidden(c, what+" is not reserved for this hosted runner")
+		writeRunnerForbidden(c, what+" is not reserved for this hosted launcher")
 		return false
 	}
 	if _, isJob := callingJob(c); isJob {

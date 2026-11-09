@@ -387,7 +387,7 @@ func (r *dbOrgResolver) ByRunnerID(id string) (uuid.UUID, error) {
 	}
 	if runner.OrganizationID == nil {
 		// A hosted runner belongs to no organization; no organization route reaches it.
-		return uuid.Nil, errors.New("the runner is a hosted runner of no organization")
+		return uuid.Nil, errors.New("the launcher is a hosted launcher of no organization")
 	}
 	return *runner.OrganizationID, nil
 }

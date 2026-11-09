@@ -125,7 +125,7 @@ type DropCachePromotionRequest struct {
 func (h *RunnerAgentHandler) DropCachePromotion(c *gin.Context) {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	id, err := uuid.Parse(c.Param("id"))
@@ -151,7 +151,7 @@ func (h *RunnerAgentHandler) DropCachePromotion(c *gin.Context) {
 		return
 	}
 	if p.RunnerID != runner.ID {
-		writeRunnerForbidden(c, "the promotion belongs to another runner")
+		writeRunnerForbidden(c, "the promotion belongs to another launcher")
 		return
 	}
 	if p.Status != models.CachePromotionPending {

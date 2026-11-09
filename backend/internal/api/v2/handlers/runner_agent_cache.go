@@ -160,14 +160,14 @@ func (h *RunnerAgentHandler) serveCacheEntry(c *gin.Context, entry *models.Cache
 func (h *RunnerAgentHandler) cacheOrganization(c *gin.Context, promotion string) (uuid.UUID, bool) {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return uuid.Nil, false
 	}
 	raw := strings.TrimSpace(c.Query("organization"))
 	if !runner.IsHosted() {
 		own := runner.OrgID()
 		if raw != "" && raw != own.String() {
-			writeRunnerForbidden(c, "a customer launcher reaches its own organization's cache only")
+			writeRunnerForbidden(c, "a launcher of an agent pool reaches its own organization's cache only")
 			return uuid.Nil, false
 		}
 		return own, true

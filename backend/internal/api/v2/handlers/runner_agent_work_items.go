@@ -57,18 +57,18 @@ func (h *RunnerAgentHandler) loadWorkItem(c *gin.Context, id string) (*models.Wo
 func (h *RunnerAgentHandler) authorizeRunnerForWorkItem(c *gin.Context, item *models.WorkItem, requireAssigned bool) bool {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return false
 	}
 	if !h.authorizePool(c, runner, item.OrganizationID, item.AgentPoolID, item.RunnerID, "work item") {
 		return false
 	}
 	if item.RunnerID != nil && *item.RunnerID != runner.ID {
-		writeRunnerForbidden(c, "work item is reserved by a different runner")
+		writeRunnerForbidden(c, "work item is reserved by a different launcher")
 		return false
 	}
 	if requireAssigned && (item.RunnerID == nil || *item.RunnerID != runner.ID) {
-		writeRunnerForbidden(c, "work item is not reserved by this runner")
+		writeRunnerForbidden(c, "work item is not reserved by this launcher")
 		return false
 	}
 	if p, ok := callingJob(c); ok {
@@ -92,7 +92,7 @@ func (h *RunnerAgentHandler) offersWorkItems(runner *models.Runner) bool {
 func (h *RunnerAgentHandler) jobStartWorkItem(c *gin.Context, id string, placement *runnercontract.Placement) {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	item, ok := h.loadWorkItem(c, id)
@@ -105,7 +105,7 @@ func (h *RunnerAgentHandler) jobStartWorkItem(c *gin.Context, id string, placeme
 		return
 	}
 	if !claimed {
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Work item already claimed by another runner")
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Work item already claimed by another launcher")
 		return
 	}
 	h.revokeJobTokens(models.JobTypeWorkItem, id)

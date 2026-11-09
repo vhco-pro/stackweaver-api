@@ -192,7 +192,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 	}
 	totalRunners, offlineRunners, err := repo.RunnerHealth(runnerOrgs)
 	if err != nil {
-		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to count runners")
+		dashboardError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to count launchers")
 		return
 	}
 

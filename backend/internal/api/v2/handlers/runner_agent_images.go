@@ -117,7 +117,7 @@ func (h *RunnerAgentHandler) jobImage(kind models.JobType, jobID string, pool *u
 func (h *RunnerAgentHandler) GetPullCredential(c *gin.Context) {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	id, err := uuid.Parse(c.Param("id"))

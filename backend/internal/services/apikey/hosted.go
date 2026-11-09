@@ -71,7 +71,7 @@ func IsHostedRegistrationKey(key *models.APIKey) bool {
 func (s *Service) CreateHostedRunnerToken(runnerID uuid.UUID, name string) (*models.APIKey, string, error) {
 	key, err := GenerateAPIKey()
 	if err != nil {
-		return nil, "", fmt.Errorf("generating the hosted runner token: %w", err)
+		return nil, "", fmt.Errorf("generating the hosted launcher token: %w", err)
 	}
 	hash, err := HashKey(key)
 	if err != nil {
@@ -84,7 +84,7 @@ func (s *Service) CreateHostedRunnerToken(runnerID uuid.UUID, name string) (*mod
 		ExpiresAt: &expiresAt,
 	}
 	if err := s.apiKeyRepo.Create(apiKey); err != nil {
-		return nil, "", fmt.Errorf("storing the hosted runner token: %w", err)
+		return nil, "", fmt.Errorf("storing the hosted launcher token: %w", err)
 	}
 	return apiKey, key, nil
 }

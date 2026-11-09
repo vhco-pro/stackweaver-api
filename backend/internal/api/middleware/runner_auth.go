@@ -44,7 +44,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Only API-key identities may act as runners. Block JWT/browser sessions.
 		if method, _ := c.Get("auth_method"); method != "api_key" {
-			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "runner control plane requires a runner API key")
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "the launcher control plane requires a launcher API key")
 			c.Abort()
 			return
 		}
@@ -68,7 +68,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 			}
 			runner, err := runnerRepo.GetByID(principal.RunnerID)
 			if err != nil || runner == nil {
-				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "runner not found")
+				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "launcher not found")
 				c.Abort()
 				return
 			}
@@ -76,7 +76,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 			// organization only; a hosted runner serves every organization's hosted pool, and the
 			// handlers hold the token to its job's organization (#933, D9).
 			if apiKey.OrganizationID == nil || (!runner.IsHosted() && (runner.OrganizationID == nil || *apiKey.OrganizationID != *runner.OrganizationID)) {
-				jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "runner/token organization mismatch")
+				jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "launcher and token organizations do not match")
 				c.Abort()
 				return
 			}
@@ -109,7 +109,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 			distinct[id] = struct{}{}
 		}
 		if len(distinct) != 1 {
-			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this API key is not a runner token")
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this API key is not a launcher token")
 			c.Abort()
 			return
 		}
@@ -122,7 +122,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 		if err != nil || runner == nil {
 			// The runner the token names no longer exists - treat as unauthorized.
 			logger.Debugf("RunnerAuth: token references unknown runner %s: %v", runnerID, err)
-			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "runner not found")
+			jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "launcher not found")
 			c.Abort()
 			return
 		}
@@ -131,7 +131,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 		// organization; a hosted runner's is an ownerless hosted key bound to none (#933, D9). Any
 		// other pairing, a NULL on one side with the other kind included, is refused.
 		if !runnerTokenMatches(apiKey, runner) {
-			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "runner/token organization mismatch")
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "launcher and token organizations do not match")
 			c.Abort()
 			return
 		}
@@ -178,7 +178,7 @@ func JobData() gin.HandlerFunc {
 		}
 		v, _ := c.Get(CallingRunnerKey)
 		if runner, ok := v.(*models.Runner); ok && runner.HasCapability(runnercontract.CapabilityJobToken) {
-			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this runner reaches job data with a job token")
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this launcher reaches job data with a job token")
 			c.Abort()
 			return
 		}

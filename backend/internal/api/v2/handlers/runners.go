@@ -52,7 +52,7 @@ func (h *RunnerHandlerV2) requireManageAgentPools(c *gin.Context, orgID uuid.UUI
 	uid := userID.(uuid.UUID)
 	ok, err := h.rbacService.CheckOrgManageAgentPools(c.Request.Context(), uid, orgID)
 	if err != nil || !ok {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage agent pools/runners for this organization")
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage agent pools and launchers for this organization")
 		return false
 	}
 	return true
@@ -91,6 +91,8 @@ func (h *RunnerHandlerV2) List(c *gin.Context) {
 	if status := c.Query("filter[status]"); status != "" {
 		opts.Status = status
 	}
+	// filter[runner_type] matches what a launcher can run: tofu and ansible each also return the
+	// combined launchers that serve both engines (one-launcher spec, OD23).
 	if runnerType := c.Query("filter[runner_type]"); runnerType != "" {
 		opts.RunnerType = runnerType
 	}
@@ -132,14 +134,14 @@ func (h *RunnerHandlerV2) GetByID(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid runner ID")
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid launcher ID")
 		return
 	}
 
 	runner, err := h.runnerRepo.GetByID(id)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
@@ -183,14 +185,14 @@ func (h *RunnerHandlerV2) Update(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid runner ID")
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid launcher ID")
 		return
 	}
 
 	runner, err := h.runnerRepo.GetByID(id)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
@@ -238,20 +240,20 @@ func (h *RunnerHandlerV2) Update(c *gin.Context) {
 func (h *RunnerHandlerV2) Drain(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid runner ID")
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid launcher ID")
 		return
 	}
 	runner, err := h.runnerRepo.GetByID(id)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return
 	}
 	if runner.IsHosted() {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
 		return
 	}
 	if !h.requireManageAgentPools(c, runner.OrgID()) {
@@ -274,14 +276,14 @@ func (h *RunnerHandlerV2) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid runner ID")
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid launcher ID")
 		return
 	}
 
 	runner, err := h.runnerRepo.GetByID(id)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}

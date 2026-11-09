@@ -311,14 +311,14 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	// A hosted pool is served by the hosted launchers alone (#933, D9): no organization key
 	// registers a runner into it.
 	if pool.IsHosted() {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "the hosted pool is served by the platform's hosted launchers; register into one of the organization's own pools")
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "hosted capacity is served by the platform's hosted launchers; register into one of the organization's agent pools")
 		return
 	}
 
 	// Get the API key from context (set by auth middleware)
 	apiKeyID, exists := c.Get("api_key_id")
 	if !exists {
-		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "API key required for runner registration")
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "API key required for launcher registration")
 		return
 	}
 
@@ -326,7 +326,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	// key carrying runner:register (#933, AC65). A user token, a job token or any other kind is
 	// refused before its scopes are read, whatever they name.
 	if kind, _ := c.Get("token_kind"); kind != models.APIKeyKindOrg {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "only an agent token or an organization key carrying runner:register may register a runner")
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "only an agent token or an organization key carrying runner:register may register a launcher")
 		return
 	}
 
@@ -346,7 +346,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 
 	// Check for runner:register permission on the organization
 	if !grantsRunnerRegister(scopeChecker, pool.OrganizationID) {
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have runner:register scope for this organization")
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have the launcher registration scope (runner:register) for this organization")
 		return
 	}
 
@@ -411,17 +411,17 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
 		existing.RegisteredWithAPIKeyID = &apiKeyUUID
 		if err := h.runnerRepo.Update(existing); err != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to re-register runner")
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to re-register launcher")
 			return
 		}
-		logger.Infof("Runner re-registered: %s (ID: %s, pool: %s)", existing.Name, existing.ID, poolID)
+		logger.Infof("Launcher re-registered: %s (ID: %s, pool: %s)", existing.Name, existing.ID, poolID)
 
 		// Mint a fresh runner-scoped token on every registration (AUD-001): the
 		// runner authenticates the control plane with it, not the org registration
 		// key. Old tokens for this runner id are revoked inside generateRunnerAPIKey.
 		reRegKey, keyErr := h.generateRunnerAPIKey(existing, registeringUserUUID)
 		if keyErr != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to mint runner token")
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to mint launcher token")
 			return
 		}
 
@@ -484,7 +484,7 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	applyLauncherSettings(runner, req)
 
 	if err := h.runnerRepo.Create(runner); err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create runner")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create launcher")
 		return
 	}
 
@@ -495,9 +495,9 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		// The runner-scoped credential is mandatory now (AUD-001): without it the
 		// runner cannot authenticate the control plane. Fail registration so the
 		// agent retries rather than silently falling back to the org key.
-		logger.Errorf("Runner registration: failed to mint runner token for %s: %v", runner.ID, err)
+		logger.Errorf("Launcher registration: failed to mint launcher token for %s: %v", runner.ID, err)
 		_ = h.runnerRepo.Delete(runner.ID)
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to mint runner token")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to mint launcher token")
 		return
 	}
 
@@ -559,16 +559,16 @@ func (h *RunnerAgentHandler) registerHosted(c *gin.Context, req RegisterRequest)
 		err = h.runnerRepo.Update(runner)
 	}
 	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to register the hosted runner")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to register the hosted launcher")
 		return
 	}
 	_ = h.apiKeyService.DeleteAPIKeysForRunner(runner.ID)
 	_, token, err := h.apiKeyService.CreateHostedRunnerToken(runner.ID, "runner-"+runner.Name)
 	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to mint the hosted runner token")
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to mint the hosted launcher token")
 		return
 	}
-	logger.Infof("Hosted runner registered: %s (ID: %s, group: %s)", runner.Name, runner.ID, group)
+	logger.Infof("Hosted launcher registered: %s (ID: %s, group: %s)", runner.Name, runner.ID, group)
 	c.JSON(status, RunnerRegisterResponse{RunnerID: runner.ID.String(), RunnerAPIKey: token, PollIntervalSeconds: 10, Capabilities: runnercontract.APICapabilities})
 }
 
@@ -580,7 +580,7 @@ func (h *RunnerAgentHandler) registerHosted(c *gin.Context, req RegisterRequest)
 // never has more than one live credential.
 func (h *RunnerAgentHandler) generateRunnerAPIKey(runner *models.Runner, userID uuid.UUID) (string, error) {
 	if h.apiKeyService == nil {
-		return "", fmt.Errorf("api key service not configured for runner token minting")
+		return "", fmt.Errorf("api key service not configured for launcher token minting")
 	}
 	_ = h.apiKeyService.DeleteAPIKeysForRunner(runner.ID)
 	_, rawKey, err := h.apiKeyService.CreateRunnerToken(userID, runner.ID, runner.OrgID(), "runner-"+runner.Name)
@@ -614,12 +614,12 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 	// offers/reservations.
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	runnerID := runner.ID
 	if req.RunnerID != "" && req.RunnerID != runner.ID.String() {
-		writeRunnerForbidden(c, "runner_id does not match authenticated runner")
+		writeRunnerForbidden(c, "runner_id does not match the authenticated launcher")
 		return
 	}
 
@@ -741,11 +741,11 @@ func (h *RunnerAgentHandler) Drain(c *gin.Context) {
 	}
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	if req.RunnerID != runner.ID.String() {
-		writeRunnerForbidden(c, "a runner drains itself only")
+		writeRunnerForbidden(c, "a launcher drains itself only")
 		return
 	}
 	if err := h.runnerRepo.RequestDrain(runner.ID); err != nil {
@@ -812,7 +812,7 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 	// AUD-001: the runner is the authenticated identity, never the body runner_id.
 	runnerCaller, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	runnerID := runnerCaller.ID
@@ -842,7 +842,7 @@ func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
 			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 			return
 		}
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job already claimed by another runner")
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job already claimed by another launcher")
 		return
 	}
 
@@ -896,7 +896,7 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 	// the run to the authenticated runner, not the body runner_id.
 	runnerCaller, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	if !h.authorizeRunnerForRun(c, &run, false) {
@@ -915,7 +915,7 @@ func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) 
 		return
 	}
 	if !claimed {
-		jsonapi.WriteErrorNoDetail(c, http.StatusConflict, "Run already claimed by another runner or no longer dispatchable")
+		jsonapi.WriteErrorNoDetail(c, http.StatusConflict, "Run already claimed by another launcher or no longer dispatchable")
 		return
 	}
 
@@ -1223,7 +1223,7 @@ func (h *RunnerAgentHandler) JobEvents(c *gin.Context) {
 
 	if !slices.Contains(runnerJobEvents, req.Event) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request",
-			fmt.Sprintf("event %q cannot be recorded by a runner; allowed: %s", req.Event, strings.Join(runnerJobEvents, ", ")))
+			fmt.Sprintf("event %q cannot be recorded by a launcher; allowed: %s", req.Event, strings.Join(runnerJobEvents, ", ")))
 		return
 	}
 
@@ -1337,7 +1337,7 @@ func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
 		wasCanceled = completeJob.Status == models.AnsibleJobStatusCanceled
 	} else if runner, rok := callingRunner(c); !rok || exec.RunnerID != runner.ID {
 		// Job row gone but the exec record must still belong to the caller.
-		writeRunnerForbidden(c, "job is not owned by this runner")
+		writeRunnerForbidden(c, "job is not owned by this launcher")
 		return
 	}
 
@@ -1872,11 +1872,11 @@ func (h *RunnerAgentHandler) Deregister(c *gin.Context) {
 	// credential cannot outlive the runner.
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	if req.RunnerID != "" && req.RunnerID != runner.ID.String() {
-		writeRunnerForbidden(c, "runner_id does not match authenticated runner")
+		writeRunnerForbidden(c, "runner_id does not match the authenticated launcher")
 		return
 	}
 	runnerID := runner.ID
@@ -1886,7 +1886,7 @@ func (h *RunnerAgentHandler) Deregister(c *gin.Context) {
 	// Admins can delete through the management API
 	if err := h.runnerRepo.UpdateStatus(runnerID, models.RunnerStatusOffline); err != nil {
 		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Runner not found")
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}

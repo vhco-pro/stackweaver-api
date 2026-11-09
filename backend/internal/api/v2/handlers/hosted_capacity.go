@@ -65,7 +65,7 @@ func (h *HostedCapacityHandler) Get(c *gin.Context) {
 	pool, err := h.poolRepo.GetHosted(org.ID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the organization has no hosted pool")
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the organization has no hosted capacity")
 			return
 		}
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
