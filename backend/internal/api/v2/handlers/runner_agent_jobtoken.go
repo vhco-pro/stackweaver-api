@@ -31,7 +31,7 @@ import (
 func (h *RunnerAgentHandler) JobToken(c *gin.Context) {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	if h.apiKeyService == nil {

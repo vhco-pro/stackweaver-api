@@ -463,8 +463,8 @@ func TestRunnerPlaybookSnapshot_Refusals(t *testing.T) {
 	}{
 		{"runner in another organization", "b1", offered, http.StatusForbidden, "different organization"},
 		{"runner in another pool of the same organization", "a3", offered, http.StatusForbidden, "different agent pool"},
-		{"job claimed by another runner", "a2", claimedByA1, http.StatusForbidden, "different runner"},
-		{"API key that is not a runner token", "org", offered, http.StatusForbidden, "not a runner token"},
+		{"job claimed by another runner", "a2", claimedByA1, http.StatusForbidden, "different launcher"},
+		{"API key that is not a runner token", "org", offered, http.StatusForbidden, "not a launcher token"},
 		{"no API key", "", offered, http.StatusUnauthorized, ""},
 		{"playbook never synced", "a1", f.seedJob(t, &neverSynced.ID, nil), http.StatusNotFound, "no snapshot yet"},
 		{"snapshot object missing from storage", "a1", f.seedJob(t, &objectGone.ID, nil), http.StatusNotFound, "no snapshot yet"},

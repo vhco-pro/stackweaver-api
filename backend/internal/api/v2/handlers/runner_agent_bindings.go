@@ -173,11 +173,11 @@ func (h *RunnerAgentHandler) hostedDepth(runner *models.Runner) *runnercontract.
 func (h *RunnerAgentHandler) HostedQueueDepth(c *gin.Context) {
 	runner, ok := callingRunner(c)
 	if !ok {
-		writeRunnerForbidden(c, "runner identity required")
+		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
 	if !runner.IsHosted() {
-		writeRunnerForbidden(c, "the hosted queue depth is read by a hosted launcher; a customer pool's depth is GET /agent-pools/:id/queue-depth")
+		writeRunnerForbidden(c, "the hosted queue depth is read by a hosted launcher; an agent pool's depth is GET /agent-pools/:id/queue-depth")
 		return
 	}
 	depth := h.hostedDepth(runner)

@@ -381,7 +381,7 @@ func init() {
 			route: "POST /api/v2/agent-pools/:id/authentication-tokens",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				return w.jsonRequest(t, http.MethodPost, w.path("/api/v2/agent-pools/:id/authentication-tokens"),
-					document("authentication-tokens", map[string]any{"description": "Runners in the eu-west-1 build cluster"}))
+					document("authentication-tokens", map[string]any{"description": "Launchers in the eu-west-1 build cluster"}))
 			},
 			responseSecrets: []string{"data.attributes.token"},
 		},

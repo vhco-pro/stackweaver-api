@@ -6,7 +6,7 @@
     "body": {
       "data": {
         "attributes": {
-          "description": "Runners in the eu-west-1 build cluster"
+          "description": "Launchers in the eu-west-1 build cluster"
         },
         "type": "authentication-tokens"
       }
@@ -40,7 +40,7 @@
     "data": {
       "attributes": {
         "created-at": "\u003ctimestamp\u003e",
-        "description": "Runners in the eu-west-1 build cluster",
+        "description": "Launchers in the eu-west-1 build cluster",
         "last-used-at": null,
         "token": "\u003csecret\u003e"
       },

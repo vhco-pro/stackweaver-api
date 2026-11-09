@@ -299,12 +299,12 @@ func (s *Service) CreateUserTokenWithScopes(userID uuid.UUID, name string, expir
 func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name string) (*models.APIKey, string, error) {
 	key, err := GenerateAPIKey()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to generate runner token: %w", err)
+		return nil, "", fmt.Errorf("generating the launcher token: %w", err)
 	}
 
 	keyHash, err := HashKey(key)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to hash runner token: %w", err)
+		return nil, "", fmt.Errorf("hashing the launcher token: %w", err)
 	}
 
 	// Explicit per-permission runner scopes (no wildcards - those are rejected by
@@ -328,7 +328,7 @@ func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name stri
 	}
 
 	if err := s.apiKeyRepo.Create(apiKey); err != nil {
-		return nil, "", fmt.Errorf("failed to create runner token: %w", err)
+		return nil, "", fmt.Errorf("creating the launcher token: %w", err)
 	}
 
 	return apiKey, key, nil
@@ -349,7 +349,7 @@ func (s *Service) RenewRunnerToken(key *models.APIKey) error {
 		return nil
 	}
 	if err := s.apiKeyRepo.SetExpiresAt(key.ID, time.Now().Add(RunnerTokenTTL)); err != nil {
-		return fmt.Errorf("renewing runner token %s: %w", key.ID, err)
+		return fmt.Errorf("renewing launcher token %s: %w", key.ID, err)
 	}
 	return nil
 }

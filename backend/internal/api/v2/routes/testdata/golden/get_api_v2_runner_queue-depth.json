@@ -5,7 +5,7 @@
   "body": {
     "errors": [
       {
-        "detail": "this API key is not a runner token",
+        "detail": "this API key is not a launcher token",
         "status": "403",
         "title": "Forbidden"
       }

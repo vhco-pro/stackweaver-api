@@ -26531,7 +26531,7 @@
     }
   },
   "info": {
-    "description": "The Stackweaver REST API. Terraform-related endpoints are wire-compatible with the Terraform Enterprise API so that terraform-provider-tfe and go-tfe work unmodified; the Ansible, registry, runner and settings surfaces are Stackweaver's own.",
+    "description": "The Stackweaver REST API. Terraform-related endpoints are wire-compatible with the Terraform Enterprise API so that terraform-provider-tfe and go-tfe work unmodified; the Ansible, registry, launcher and settings surfaces are Stackweaver's own.",
     "license": {
       "name": "BUSL-1.1"
     },
@@ -27747,7 +27747,7 @@
               "example": {
                 "data": {
                   "attributes": {
-                    "description": "Runners in the eu-west-1 build cluster"
+                    "description": "Launchers in the eu-west-1 build cluster"
                   },
                   "type": "authentication-tokens"
                 }
@@ -36525,6 +36525,7 @@
             }
           },
           {
+            "description": "Keeps the launchers that can run the named engine: tofu returns the OpenTofu launchers and the combined launchers that serve both engines, ansible the Ansible launchers and the combined ones, and combined only the combined ones.",
             "in": "query",
             "name": "filter[runner_type]",
             "required": false,

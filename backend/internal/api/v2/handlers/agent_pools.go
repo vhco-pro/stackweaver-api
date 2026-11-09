@@ -391,7 +391,7 @@ func (h *AgentPoolHandlerV2) Update(c *gin.Context) {
 		return
 	}
 	if a := req.Data.Attributes; a != nil && (a.MaxConcurrentJobs != nil || a.PlacementGroup != nil) {
-		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "max-concurrent-jobs and placement-group exist on hosted pools only")
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "max-concurrent-jobs and placement-group exist on hosted capacity only")
 		return
 	}
 
@@ -664,7 +664,7 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 			// happened to hold manage-agent-pools on B - a token-scope escalation.
 			// Confirmed live before the fix: a main-scoped key returned 200 for an
 			// acme-corp pool.
-			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have runner:register scope for this organization")
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have the launcher registration scope (runner:register) for this organization")
 			return false
 		}
 		// Pool-binding enforcement, matching runner registration: an agent token
@@ -895,12 +895,12 @@ func (h *AgentPoolHandlerV2) updateHosted(c *gin.Context, pool *models.AgentPool
 		admin, reason = h.platformAdmin.Check(c)
 	}
 	if admin == nil {
-		logger.Warnf("hosted pool %s: refused a cap or group write: %s", pool.ID, reason)
-		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "max-concurrent-jobs and placement-group of a hosted pool are set by a platform administrator only")
+		logger.Warnf("hosted capacity %s: refused a cap or group write: %s", pool.ID, reason)
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "max-concurrent-jobs and placement-group of hosted capacity are set by a platform administrator only")
 		return
 	}
 	if other {
-		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "a hosted pool's only writable settings are max-concurrent-jobs and placement-group")
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "the only writable settings of hosted capacity are max-concurrent-jobs and placement-group")
 		return
 	}
 	if a.MaxConcurrentJobs != nil {
@@ -922,7 +922,7 @@ func (h *AgentPoolHandlerV2) updateHosted(c *gin.Context, pool *models.AgentPool
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update agent pool")
 		return
 	}
-	logger.Infof("Platform administrator %s set hosted pool %s to cap %v, group %s", admin.ID, pool.ID, pool.MaxConcurrentJobs, pool.PlacementGroup)
+	logger.Infof("Platform administrator %s set hosted capacity %s to cap %v, group %s", admin.ID, pool.ID, pool.MaxConcurrentJobs, pool.PlacementGroup)
 	orgName := ""
 	if org, _ := h.orgRepo.GetByID(pool.OrganizationID); org != nil {
 		orgName = org.Name
