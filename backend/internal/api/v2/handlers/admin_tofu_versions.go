@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
@@ -507,7 +506,7 @@ func formatTerraformVersion(v *models.TofuVersion) jsonapi.Resource[TofuVersionA
 		Enabled:    v.Enabled,
 		Beta:       v.Beta,
 		Usage:      v.Usage,
-		CreatedAt:  v.CreatedAt.Format(time.RFC3339),
+		CreatedAt:  jsonapi.FormatTime(v.CreatedAt),
 		Archs:      archs,
 	}
 	// Only include deprecated-reason when non-nil AND non-empty.

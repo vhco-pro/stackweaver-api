@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -96,8 +95,8 @@ func formatRegistryProviderResponse(p *models.Provider) jsonapi.Resource[Registr
 			Name:         p.Name,
 			Namespace:    p.Namespace,
 			RegistryName: p.RegistryName,
-			CreatedAt:    p.CreatedAt.UTC().Format(time.RFC3339),
-			UpdatedAt:    p.UpdatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:    jsonapi.FormatTime(p.CreatedAt),
+			UpdatedAt:    jsonapi.FormatTime(p.UpdatedAt),
 			Permissions:  RegistryProviderPermissions{CanDelete: true},
 		},
 		Relationships: WorkspaceOnlyRelationshipsNamed{

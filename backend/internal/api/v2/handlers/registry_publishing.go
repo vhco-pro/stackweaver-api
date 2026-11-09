@@ -364,7 +364,7 @@ func (h *RegistryPublishingHandler) ListModules(c *gin.Context) {
 			downloads = versions[0].Downloads
 		}
 
-		published := publishedAt.Format("2006-01-02T15:04:05Z")
+		published := jsonapi.FormatTime(publishedAt)
 		listAttrs := PublishedModuleAttributes{
 			Name:            m.Name,
 			Provider:        m.Provider,
@@ -483,7 +483,7 @@ func (h *RegistryPublishingHandler) ListModuleVersions(c *gin.Context) {
 				Version:      v.Version,
 				Source:       v.Source,
 				Readme:       v.Readme, // Return raw markdown for frontend Shiki rendering
-				PublishedAt:  v.PublishedAt.Format("2006-01-02T15:04:05Z"),
+				PublishedAt:  jsonapi.FormatTime(v.PublishedAt),
 				Downloads:    v.Downloads,
 				Inputs:       inputs,
 				Outputs:      outputs,
@@ -569,7 +569,7 @@ func (h *RegistryPublishingHandler) PublishVersion(c *gin.Context) {
 		Type: "registry-module-versions",
 		Attributes: PublishedModuleVersionAckAttributes{
 			Version:     moduleVersion.Version,
-			PublishedAt: moduleVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
+			PublishedAt: jsonapi.FormatTime(moduleVersion.PublishedAt),
 		},
 	})
 }

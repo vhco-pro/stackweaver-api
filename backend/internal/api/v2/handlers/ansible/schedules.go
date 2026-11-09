@@ -257,23 +257,23 @@ func formatScheduleResponse(schedule *models.AnsibleSchedule) jsonapi.Resource[S
 		CronExpression: schedule.CronExpression,
 		Timezone:       schedule.Timezone,
 		Config:         config,
-		CreatedAt:      schedule.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:      schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:      jsonapi.FormatTime(schedule.CreatedAt),
+		UpdatedAt:      jsonapi.FormatTime(schedule.UpdatedAt),
 		LastRunStatus:  schedule.LastRunStatus,
 		RunCount:       schedule.RunCount,
 	}
 
 	if schedule.StartDateTime != nil {
-		attributes.StartDateTime = schedule.StartDateTime.Format(time.RFC3339)
+		attributes.StartDateTime = jsonapi.FormatTime(*schedule.StartDateTime)
 	}
 	if schedule.EndDateTime != nil {
-		attributes.EndDateTime = schedule.EndDateTime.Format(time.RFC3339)
+		attributes.EndDateTime = jsonapi.FormatTime(*schedule.EndDateTime)
 	}
 	if schedule.NextRunAt != nil {
-		attributes.NextRunAt = schedule.NextRunAt.Format(time.RFC3339)
+		attributes.NextRunAt = jsonapi.FormatTime(*schedule.NextRunAt)
 	}
 	if schedule.LastRunAt != nil {
-		attributes.LastRunAt = schedule.LastRunAt.Format(time.RFC3339)
+		attributes.LastRunAt = jsonapi.FormatTime(*schedule.LastRunAt)
 	}
 
 	relationships := ScheduleRelationships{

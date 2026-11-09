@@ -99,9 +99,9 @@ func (h *OrganizationTokenHandlerV2) resolveOrgOwner(c *gin.Context) (*models.Or
 // on create (empty on read).
 func orgTokenResource(key *models.APIKey, token string) jsonapi.Document {
 	attrs := OrgTokenAttributes{
-		CreatedAt:  key.CreatedAt,
-		LastUsedAt: key.LastUsedAt,
-		ExpiredAt:  key.ExpiresAt,
+		CreatedAt:  jsonapi.FormatTime(key.CreatedAt),
+		LastUsedAt: jsonapi.FormatTimePtr(key.LastUsedAt),
+		ExpiredAt:  jsonapi.FormatTimePtr(key.ExpiresAt),
 	}
 	if token != "" {
 		attrs.Token = token

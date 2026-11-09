@@ -4,7 +4,6 @@ package terraform
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -85,7 +84,7 @@ func formatRunTriggerResponse(rt *models.RunTrigger) jsonapi.Resource[RunTrigger
 		Attributes: RunTriggerAttributes{
 			WorkspaceName:  rt.Workspace.Name,
 			SourceableName: rt.Sourceable.Name,
-			CreatedAt:      rt.CreatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:      jsonapi.FormatTime(rt.CreatedAt),
 		},
 		Relationships: RunTriggerRelationships{
 			Workspace:  jsonapi.ToOne(rt.WorkspaceID, "workspaces"),

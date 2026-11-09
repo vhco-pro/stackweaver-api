@@ -145,7 +145,7 @@ func formatAgentPoolResponse(p *models.AgentPool, orgName string, agentCount int
 // agentPoolAttributes renders a pool's attributes, with the cap and group on a hosted pool only.
 func agentPoolAttributes(p *models.AgentPool, agentCount int) AgentPoolAttributes {
 	a := AgentPoolAttributes{
-		Name: p.Name, AgentCount: agentCount, OrganizationScoped: p.OrganizationScoped, CreatedAt: p.CreatedAt.Format(time.RFC3339),
+		Name: p.Name, AgentCount: agentCount, OrganizationScoped: p.OrganizationScoped, CreatedAt: jsonapi.FormatTime(p.CreatedAt),
 		Kind: p.Kind, KeepFailedJobsFor: p.KeepFailedJobsFor, CPULimit: p.CPULimit, MemoryLimit: p.MemoryLimit,
 		LimitsRequired: p.LimitsRequired, LocalReadthrough: !p.LocalReadthroughDisabled,
 	}
@@ -525,7 +525,7 @@ func (h *AgentPoolHandlerV2) ListAgents(c *gin.Context) {
 				Name:                       r.Name,
 				IPAddress:                  r.IPAddress,
 				Status:                     string(r.Status),
-				LastPingAt:                 r.LastHeartbeatAt,
+				LastPingAt:                 jsonapi.FormatTimePtr(r.LastHeartbeatAt),
 				Driver:                     r.Driver,
 				NetworkMode:                r.NetworkMode,
 				LauncherSettingsAttributes: launcherSettings(&r),
@@ -701,8 +701,8 @@ type JITTokenRequest struct {
 
 // JITTokenAttributes is a just-in-time registration token, its plaintext shown once.
 type JITTokenAttributes struct {
-	Token     string    `json:"token"` //nolint:gosec // G117: the token is the response, shown once
-	ExpiresAt time.Time `json:"expires-at"`
+	Token     string `json:"token"` //nolint:gosec // G117: the token is the response, shown once
+	ExpiresAt string `json:"expires-at"`
 }
 
 // JITToken mints a just-in-time registration token for the pool (#933, D11): a one-time,
@@ -758,7 +758,7 @@ func (h *AgentPoolHandlerV2) JITToken(c *gin.Context) {
 	}
 	jsonapi.WriteDocument(c, http.StatusCreated, jsonapi.Resource[JITTokenAttributes]{
 		ID: key.ID.String(), Type: "agent-jit-tokens",
-		Attributes: JITTokenAttributes{Token: token, ExpiresAt: *key.ExpiresAt},
+		Attributes: JITTokenAttributes{Token: token, ExpiresAt: jsonapi.FormatTime(*key.ExpiresAt)},
 	})
 }
 

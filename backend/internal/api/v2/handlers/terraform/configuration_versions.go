@@ -141,7 +141,7 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 		Source:        configVersion.Source,
 		AutoQueueRuns: configVersion.AutoQueueRuns,
 		Speculative:   configVersion.Speculative,
-		CreatedAt:     configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:     jsonapi.FormatTime(configVersion.CreatedAt),
 	}, workspace.ID, uploadURL))
 }
 
@@ -198,8 +198,8 @@ func (h *ConfigurationVersionHandlerV2) Get(c *gin.Context) {
 		Source:        configVersion.Source,
 		AutoQueueRuns: configVersion.AutoQueueRuns,
 		Speculative:   configVersion.Speculative,
-		CreatedAt:     configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:     configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:     jsonapi.FormatTime(configVersion.CreatedAt),
+		UpdatedAt:     jsonapi.FormatTime(configVersion.UpdatedAt),
 	}, configVersion.WorkspaceID, uploadURL))
 }
 
@@ -303,8 +303,8 @@ func (h *ConfigurationVersionHandlerV2) Upload(c *gin.Context) {
 		Source:        configVersion.Source,
 		AutoQueueRuns: configVersion.AutoQueueRuns,
 		Speculative:   configVersion.Speculative,
-		CreatedAt:     configVersion.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:     configVersion.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:     jsonapi.FormatTime(configVersion.CreatedAt),
+		UpdatedAt:     jsonapi.FormatTime(configVersion.UpdatedAt),
 	}, configVersion.WorkspaceID, uploadURL))
 }
 
@@ -335,8 +335,8 @@ func (h *ConfigurationVersionHandlerV2) ListByWorkspace(c *gin.Context) {
 			Source:        cv.Source,
 			AutoQueueRuns: cv.AutoQueueRuns,
 			Speculative:   cv.Speculative,
-			CreatedAt:     cv.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:     cv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:     jsonapi.FormatTime(cv.CreatedAt),
+			UpdatedAt:     jsonapi.FormatTime(cv.UpdatedAt),
 		}, cv.WorkspaceID, uploadURL)
 	}
 

@@ -313,8 +313,8 @@ func formatGroupResponse(group *models.AnsibleInventoryGroup) jsonapi.Resource[G
 			Name:        group.Name,
 			Description: group.Description,
 			Variables:   group.Variables,
-			CreatedAt:   group.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:   group.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:   jsonapi.FormatTime(group.CreatedAt),
+			UpdatedAt:   jsonapi.FormatTime(group.UpdatedAt),
 		},
 		Relationships: relationships,
 	}

@@ -148,7 +148,7 @@ func (h *StateVersionHandlerV2) stateVersionResource(c *gin.Context, v *models.S
 			HostedStateDownloadURL: h.hostedStateDownloadURL(c, v),
 			Serial:                 v.Serial,
 			Lineage:                v.Lineage,
-			CreatedAt:              v.CreatedAt,
+			CreatedAt:              jsonapi.FormatTime(v.CreatedAt),
 			Status:                 status,
 			Size:                   v.Size,
 			ResourcesProcessed:     v.ResourcesProcessed == nil || *v.ResourcesProcessed,

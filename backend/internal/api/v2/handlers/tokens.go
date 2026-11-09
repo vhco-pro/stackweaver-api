@@ -110,8 +110,8 @@ func (h *TokenHandlerV2) Create(c *gin.Context) {
 		Attributes: UserTokenCreateAttributes{
 			Token:              tokenString, // Plaintext token (only shown once)
 			Description:        apiKey.Name,
-			ExpiresAt:          apiKey.ExpiresAt,
-			CreatedAt:          apiKey.CreatedAt,
+			ExpiresAt:          jsonapi.FormatTimePtr(apiKey.ExpiresAt),
+			CreatedAt:          jsonapi.FormatTime(apiKey.CreatedAt),
 			PlatformAdminToken: carriesPlatformAdmin(apiKey.Scopes),
 		},
 	})
@@ -140,9 +140,9 @@ func (h *TokenHandlerV2) List(c *gin.Context) {
 			Type: "tokens",
 			Attributes: UserTokenListAttributes{
 				Description:        token.Name,
-				LastUsedAt:         token.LastUsedAt,
-				ExpiresAt:          token.ExpiresAt,
-				CreatedAt:          token.CreatedAt,
+				LastUsedAt:         jsonapi.FormatTimePtr(token.LastUsedAt),
+				ExpiresAt:          jsonapi.FormatTimePtr(token.ExpiresAt),
+				CreatedAt:          jsonapi.FormatTime(token.CreatedAt),
 				PlatformAdminToken: carriesPlatformAdmin(token.Scopes),
 			},
 		})

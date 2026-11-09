@@ -4,7 +4,6 @@ package ansible
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -58,9 +57,9 @@ func formatWorkflowJob(job *models.AnsibleWorkflowJob) jsonapi.Resource[Workflow
 		Attributes: WorkflowJobAttributes{
 			Name:       job.Name,
 			Status:     job.Status,
-			StartedAt:  job.StartedAt,
-			FinishedAt: job.FinishedAt,
-			CreatedAt:  job.CreatedAt.Format(time.RFC3339),
+			StartedAt:  jsonapi.FormatTimePtr(job.StartedAt),
+			FinishedAt: jsonapi.FormatTimePtr(job.FinishedAt),
+			CreatedAt:  jsonapi.FormatTime(job.CreatedAt),
 		},
 		Relationships: WorkflowJobOnlyRelationships{
 			Workflow: jsonapi.ToOne(job.WorkflowID.String(), "ansible-workflows"),
@@ -91,8 +90,8 @@ func formatWorkflowNodeJob(nodeJob *models.AnsibleWorkflowNodeJob) jsonapi.Resou
 			Status:     nodeJob.Status,
 			NodeType:   nodeJob.Node.NodeType,
 			Identifier: nodeJob.Node.Identifier,
-			StartedAt:  nodeJob.StartedAt,
-			FinishedAt: nodeJob.FinishedAt,
+			StartedAt:  jsonapi.FormatTimePtr(nodeJob.StartedAt),
+			FinishedAt: jsonapi.FormatTimePtr(nodeJob.FinishedAt),
 			Denied:     nodeJob.Denied,
 		},
 		Relationships: rels,

@@ -61,7 +61,7 @@ func varsetVarEmbedded(v *models.VariableSetVariable) jsonapi.Resource[VarsetVar
 func varsetVarResource(v *models.VariableSetVariable, setID string, withCreatedAt bool) jsonapi.Resource[VarsetVarAttributes] {
 	res := varsetVarEmbedded(v)
 	if withCreatedAt {
-		created := v.CreatedAt.Format("2006-01-02T15:04:05Z")
+		created := jsonapi.FormatTime(v.CreatedAt)
 		res.Attributes.CreatedAt = &created
 	}
 	rel := jsonapi.ToOne(setID, "varsets")
@@ -106,7 +106,7 @@ func varsetAttributes(vs *models.VariableSet, varCount, workspaceCount, projectC
 		Description:    vs.Description,
 		Global:         vs.Global, // AUD-150: global is its own field, independent of ownership
 		Priority:       vs.Priority,
-		UpdatedAt:      vs.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:      jsonapi.FormatTime(vs.UpdatedAt),
 		VarCount:       varCount,
 		WorkspaceCount: workspaceCount,
 		ProjectCount:   projectCount,

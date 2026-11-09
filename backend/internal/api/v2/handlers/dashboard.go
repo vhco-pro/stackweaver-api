@@ -310,7 +310,7 @@ func (h *DashboardHandler) GetOperations(c *gin.Context) {
 			Name:             execution.Name,
 			Detail:           execution.Detail,
 			Status:           execution.Status,
-			StartedAt:        execution.StartedAt.UTC().Format(time.RFC3339),
+			StartedAt:        jsonapi.FormatTime(execution.StartedAt),
 		})
 	}
 

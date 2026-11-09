@@ -93,9 +93,9 @@ func (h *TeamTokenHandlerV2) resolveTeamOwner(c *gin.Context) (*models.Team, boo
 // only on create (empty on read). Legacy team tokens carry no description, so it is always null.
 func teamTokenResource(key *models.APIKey, token string) jsonapi.Document {
 	attrs := TeamTokenAttributes{
-		CreatedAt:  key.CreatedAt,
-		LastUsedAt: key.LastUsedAt,
-		ExpiredAt:  key.ExpiresAt,
+		CreatedAt:  jsonapi.FormatTime(key.CreatedAt),
+		LastUsedAt: jsonapi.FormatTimePtr(key.LastUsedAt),
+		ExpiredAt:  jsonapi.FormatTimePtr(key.ExpiresAt),
 	}
 	if token != "" {
 		attrs.Token = token

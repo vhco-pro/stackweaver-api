@@ -5,7 +5,6 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -169,8 +168,8 @@ func (h *RunnerHandlerV2) GetByID(c *gin.Context) {
 			WorkspaceID:   j.WorkspaceID,
 			WorkspaceName: j.WorkspaceName,
 			Status:        j.Status,
-			StartedAt:     j.StartedAt,
-			FinishedAt:    j.FinishedAt,
+			StartedAt:     jsonapi.FormatTimePtr(j.StartedAt),
+			FinishedAt:    jsonapi.FormatTimePtr(j.FinishedAt),
 			DurationMS:    j.Duration().Milliseconds(),
 		})
 	}
@@ -340,7 +339,7 @@ func (h *RunnerHandlerV2) GetStats(c *gin.Context) {
 func buildRunnerResponse(r *models.Runner) jsonapi.Resource[RunnerAttributes] {
 	var lastHeartbeat *string
 	if r.LastHeartbeatAt != nil {
-		formatted := r.LastHeartbeatAt.Format("2006-01-02T15:04:05Z")
+		formatted := jsonapi.FormatTime(*r.LastHeartbeatAt)
 		lastHeartbeat = &formatted
 	}
 
@@ -362,13 +361,13 @@ func buildRunnerResponse(r *models.Runner) jsonapi.Resource[RunnerAttributes] {
 		MaxConcurrentJobs:          r.MaxConcurrentJobs,
 		CurrentJobs:                r.CurrentJobs,
 		LastHeartbeatAt:            lastHeartbeat,
-		RegisteredAt:               r.RegisteredAt.Format("2006-01-02T15:04:05Z"),
+		RegisteredAt:               jsonapi.FormatTime(r.RegisteredAt),
 		Driver:                     r.Driver,
 		NetworkMode:                r.NetworkMode,
 		LauncherSettingsAttributes: launcherSettings(r),
 	}
 	if r.DrainRequestedAt != nil {
-		at := r.DrainRequestedAt.UTC().Format(time.RFC3339)
+		at := jsonapi.FormatTime(*r.DrainRequestedAt)
 		attrs.DrainRequestedAt = &at
 	}
 

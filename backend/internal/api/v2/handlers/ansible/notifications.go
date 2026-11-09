@@ -96,7 +96,7 @@ func formatNotificationTemplate(t *models.AnsibleNotificationTemplate) jsonapi.R
 			NotificationType: t.Type,
 			Config:           config,
 			HasSecret:        t.Secret != "",
-			CreatedAt:        t.CreatedAt,
+			CreatedAt:        jsonapi.FormatTime(t.CreatedAt),
 		},
 	}
 }

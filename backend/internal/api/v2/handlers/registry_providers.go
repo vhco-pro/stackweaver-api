@@ -556,7 +556,7 @@ func formatProviders(providers []models.Provider) []RegistryProviderSummary {
 				Namespace:   p.Organization.Name,
 				Name:        p.Name,
 				Version:     latestVersion.Version,
-				PublishedAt: latestVersion.PublishedAt.Format("2006-01-02T15:04:05Z"),
+				PublishedAt: jsonapi.FormatTime(latestVersion.PublishedAt),
 				Downloads:   latestVersion.Downloads,
 				Verified:    p.Verified,
 			})
@@ -588,7 +588,7 @@ func formatProviderDetail(provider *models.Provider, version *models.ProviderVer
 			Namespace:   provider.Organization.Name,
 			Name:        provider.Name,
 			Version:     version.Version,
-			PublishedAt: version.PublishedAt.Format("2006-01-02T15:04:05Z"),
+			PublishedAt: jsonapi.FormatTime(version.PublishedAt),
 			Downloads:   version.Downloads,
 			Verified:    provider.Verified,
 		},

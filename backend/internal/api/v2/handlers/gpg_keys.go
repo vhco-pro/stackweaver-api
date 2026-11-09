@@ -5,7 +5,6 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -94,8 +93,8 @@ func formatGPGKeyResponse(key *models.GPGKey, namespace string) jsonapi.Resource
 		Type: gpgKeyType,
 		Attributes: GPGKeyAttributes{
 			ASCIIArmor: key.ASCIIArmor,
-			CreatedAt:  key.CreatedAt.UTC().Format(time.RFC3339),
-			UpdatedAt:  key.UpdatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:  jsonapi.FormatTime(key.CreatedAt),
+			UpdatedAt:  jsonapi.FormatTime(key.UpdatedAt),
 			KeyID:      key.KeyID,
 			Namespace:  namespace,
 		},

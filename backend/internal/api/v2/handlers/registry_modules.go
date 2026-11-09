@@ -410,7 +410,7 @@ func formatModules(modules []models.Module) []RegistryModuleSummary {
 			Provider:    m.Provider,
 			Description: m.Description,
 			Source:      m.Source,
-			PublishedAt: publishedAt.Format("2006-01-02T15:04:05Z"),
+			PublishedAt: jsonapi.FormatTime(publishedAt),
 			Downloads:   downloads,
 			Verified:    m.Verified,
 		})
@@ -501,7 +501,7 @@ func formatModuleDetail(module *models.Module, version *models.ModuleVersion) Re
 			Provider:    module.Provider,
 			Description: module.Description,
 			Source:      module.Source,
-			PublishedAt: version.PublishedAt.Format("2006-01-02T15:04:05Z"),
+			PublishedAt: jsonapi.FormatTime(version.PublishedAt),
 			Downloads:   version.Downloads,
 			Verified:    module.Verified,
 		},

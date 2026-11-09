@@ -112,8 +112,8 @@ func formatNotificationConfig(nc *models.NotificationConfiguration) jsonapi.Reso
 			Enabled:         nc.Enabled,
 			Triggers:        triggers,
 			EmailAddresses:  emails,
-			CreatedAt:       nc.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:       nc.UpdatedAt.Format(time.RFC3339),
+			CreatedAt:       jsonapi.FormatTime(nc.CreatedAt),
+			UpdatedAt:       jsonapi.FormatTime(nc.UpdatedAt),
 		},
 		Relationships: NotificationConfigRelationships{Subscribable: subscribable},
 	}

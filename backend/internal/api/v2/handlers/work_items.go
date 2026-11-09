@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -32,10 +31,10 @@ type WorkItemAttributes struct {
 	Commit         string               `json:"commit"`
 	ErrorMessage   string               `json:"error-message"`
 	Output         string               `json:"output,omitempty"`
-	QueuedAt       *time.Time           `json:"queued-at"`
-	StartedAt      *time.Time           `json:"started-at"`
-	FinishedAt     *time.Time           `json:"finished-at"`
-	CreatedAt      time.Time            `json:"created-at"`
+	QueuedAt       *string              `json:"queued-at"`
+	StartedAt      *string              `json:"started-at"`
+	FinishedAt     *string              `json:"finished-at"`
+	CreatedAt      string               `json:"created-at"`
 	Placement      placement.Attributes `json:"placement"`
 }
 
@@ -136,7 +135,7 @@ func workItemResource(item *models.WorkItem, withOutput bool) jsonapi.Resource[W
 	attrs := WorkItemAttributes{
 		Kind: item.Kind, Status: item.Status, TriggeredBy: item.TriggeredBy, Image: item.Image, ImageLevel: item.ImageLevel,
 		TimeoutSeconds: item.TimeoutSeconds, Commit: item.Commit, ErrorMessage: item.ErrorMessage,
-		QueuedAt: item.QueuedAt, StartedAt: item.StartedAt, FinishedAt: item.FinishedAt, CreatedAt: item.CreatedAt,
+		QueuedAt: jsonapi.FormatTimePtr(item.QueuedAt), StartedAt: jsonapi.FormatTimePtr(item.StartedAt), FinishedAt: jsonapi.FormatTimePtr(item.FinishedAt), CreatedAt: jsonapi.FormatTime(item.CreatedAt),
 		Placement: placement.FromModel(item.Attempt, item.Placement),
 	}
 	if withOutput {

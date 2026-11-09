@@ -5,7 +5,6 @@ package terraform
 import (
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
@@ -106,8 +105,8 @@ func formatRunTask(t *models.RunTask, orgName string, workspaceTasks []models.Wo
 				Stages:           stages,
 				EnforcementLevel: t.GlobalEnforcementLevel,
 			},
-			CreatedAt: t.CreatedAt.Format(time.RFC3339),
-			UpdatedAt: t.UpdatedAt.Format(time.RFC3339),
+			CreatedAt: jsonapi.FormatTime(t.CreatedAt),
+			UpdatedAt: jsonapi.FormatTime(t.UpdatedAt),
 		},
 		Relationships: RunTaskRelationships{
 			Organization:   jsonapi.ToOne(orgName, "organizations"),

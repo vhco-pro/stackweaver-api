@@ -167,8 +167,8 @@ func (h *AccountHandlerV2) accountResource(c *gin.Context, user *models.User) js
 		Bio:       user.Bio,
 		Company:   user.Company,
 		Location:  user.Location,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
+		CreatedAt: jsonapi.FormatTime(user.CreatedAt),
+		UpdatedAt: jsonapi.FormatTime(user.UpdatedAt),
 		V2Only:    true,
 	}
 	if h.profiles != nil {

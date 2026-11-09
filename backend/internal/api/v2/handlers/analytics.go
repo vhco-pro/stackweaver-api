@@ -244,8 +244,8 @@ func (h *AnalyticsHandler) GetOrganizationAnalytics(c *gin.Context) {
 		Type: "analytics",
 		Attributes: AnalyticsAttributes{
 			Window: AnalyticsWindowBlock{
-				Since: window.Since.UTC().Format(time.RFC3339),
-				Until: window.Until.UTC().Format(time.RFC3339),
+				Since: jsonapi.FormatTime(window.Since),
+				Until: jsonapi.FormatTime(window.Until),
 				Days:  int(window.Until.Sub(window.Since).Hours()/24 + 0.5),
 			},
 			Runs:           outcomePayload(runTotals, runDurations, runTotalsPrev, runDurationsPrev),
@@ -362,7 +362,7 @@ func (h *AnalyticsHandler) GetOrganizationExecutions(c *gin.Context) {
 			Detail:        row.Detail,
 			Status:        row.Status,
 			Outcome:       row.Outcome,
-			CreatedAt:     row.CreatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:     jsonapi.FormatTime(row.CreatedAt),
 			WorkspaceName: row.WorkspaceName,
 		}
 		if row.DurationSeconds != nil {
@@ -380,8 +380,8 @@ func (h *AnalyticsHandler) GetOrganizationExecutions(c *gin.Context) {
 			Count:      len(data),
 			Truncated:  truncated,
 			Window: AnalyticsExecutionsWindow{
-				Since: window.Since.UTC().Format(time.RFC3339),
-				Until: window.Until.UTC().Format(time.RFC3339),
+				Since: jsonapi.FormatTime(window.Since),
+				Until: jsonapi.FormatTime(window.Until),
 			},
 		},
 	})
@@ -602,7 +602,7 @@ func failurePayload(runs, jobs []repository.RecentFailure, limit int) []Analytic
 			Detail:        f.Detail,
 			WorkspaceName: f.WorkspaceName,
 			ErrorMessage:  f.ErrorMessage,
-			FailedAt:      f.FailedAt.UTC().Format(time.RFC3339),
+			FailedAt:      jsonapi.FormatTime(f.FailedAt),
 		})
 	}
 	return out

@@ -669,7 +669,7 @@ func formatOrganizationMembershipResponse(member *models.OrganizationMember, org
 		Attributes: OrgMembershipAttributes{
 			Email:     email,
 			Status:    status,
-			CreatedAt: member.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			CreatedAt: jsonapi.FormatTime(member.CreatedAt),
 			Username:  username,
 			Name:      name,
 		},

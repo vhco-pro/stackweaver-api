@@ -212,7 +212,7 @@ func (h *ActivityHandlerV2) ListActivities(c *gin.Context) {
 			Action:       act.Action,
 			ResourceType: act.ResourceType,
 			Details:      act.Details,
-			CreatedAt:    act.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:    jsonapi.FormatTime(act.CreatedAt),
 		}
 
 		// Convert UUID pointers to strings (or omit if nil)
@@ -278,7 +278,7 @@ func (h *ActivityHandlerV2) GetRecentActivities(c *gin.Context) {
 			Action:       act.Action,
 			ResourceType: act.ResourceType,
 			Details:      act.Details,
-			CreatedAt:    act.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:    jsonapi.FormatTime(act.CreatedAt),
 		}
 
 		// Convert UUID pointers to strings (or omit if nil)

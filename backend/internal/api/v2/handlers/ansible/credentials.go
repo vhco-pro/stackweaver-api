@@ -494,8 +494,8 @@ func formatCredentialResponse(cred *models.AnsibleCredential) jsonapi.Resource[C
 			HasPassword:       cred.HasPassword,
 			HasVaultPassword:  cred.HasVaultPassword,
 			HasBecomePassword: cred.HasBecomePassword,
-			CreatedAt:         cred.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:         cred.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:         jsonapi.FormatTime(cred.CreatedAt),
+			UpdatedAt:         jsonapi.FormatTime(cred.UpdatedAt),
 		},
 		Relationships: CredentialRelationships{
 			Organization: jsonapi.ToOne(cred.OrganizationID.String(), "organizations"),

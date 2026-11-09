@@ -1576,15 +1576,15 @@ func formatPlaybookResponse(playbook *models.AnsiblePlaybook, conn *models.VCSCo
 		LastSyncError:   playbook.LastSyncError,
 		CachedCommit:    playbook.CachedCommit,
 		CachedSizeBytes: playbook.CachedSizeBytes,
-		CreatedAt:       playbook.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:       playbook.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:       jsonapi.FormatTime(playbook.CreatedAt),
+		UpdatedAt:       jsonapi.FormatTime(playbook.UpdatedAt),
 	}
 	if playbook.LastSyncAt != nil {
-		v := playbook.LastSyncAt.Format("2006-01-02T15:04:05Z")
+		v := jsonapi.FormatTime(*playbook.LastSyncAt)
 		attributes.LastSyncAt = &v
 	}
 	if playbook.CachedAt != nil {
-		v := playbook.CachedAt.Format("2006-01-02T15:04:05Z")
+		v := jsonapi.FormatTime(*playbook.CachedAt)
 		attributes.CachedAt = &v
 	}
 
@@ -1703,8 +1703,8 @@ func formatJobTemplateResponse(template *models.AnsibleJobTemplate) jsonapi.Reso
 			AllowCallbacks:    template.AllowCallbacks,
 			LaunchOnWebhook:   template.LaunchOnWebhook,
 			HostConfigKey:     template.HostConfigKey,
-			CreatedAt:         template.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:         template.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:         jsonapi.FormatTime(template.CreatedAt),
+			UpdatedAt:         jsonapi.FormatTime(template.UpdatedAt),
 		},
 		Relationships: relationships,
 	}

@@ -375,8 +375,8 @@ func formatHostResponse(host *models.AnsibleInventoryHost) jsonapi.Resource[Host
 			Port:        host.Port,
 			Variables:   host.Variables,
 			Enabled:     host.Enabled,
-			CreatedAt:   host.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:   host.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:   jsonapi.FormatTime(host.CreatedAt),
+			UpdatedAt:   jsonapi.FormatTime(host.UpdatedAt),
 		},
 		Relationships: HostRelationships{
 			Inventory: jsonapi.ToOne(host.InventoryID.String(), "ansible-inventories"),

@@ -910,7 +910,7 @@ func formatInventoryResponse(inv *models.AnsibleInventory) *jsonapi.Resource[Inv
 		InventoryType:           inv.Type,
 		Source:                  inv.Source,
 		Variables:               inv.Variables,
-		LastSyncAt:              inv.LastSyncAt,
+		LastSyncAt:              jsonapi.FormatTimePtr(inv.LastSyncAt),
 		LastSyncStatus:          inv.LastSyncStatus,
 		LastSyncError:           inv.LastSyncError,
 		LastSyncHostsDiscovered: inv.LastSyncHostsDiscovered,
@@ -918,8 +918,8 @@ func formatInventoryResponse(inv *models.AnsibleInventory) *jsonapi.Resource[Inv
 		SourceVars:              inv.SourceVars,
 		ConstructedLimit:        inv.ConstructedLimit,
 		ConstructedCacheTimeout: inv.ConstructedCacheTimeout,
-		CreatedAt:               inv.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:               inv.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:               jsonapi.FormatTime(inv.CreatedAt),
+		UpdatedAt:               jsonapi.FormatTime(inv.UpdatedAt),
 	}
 
 	// Add VCS fields if present
