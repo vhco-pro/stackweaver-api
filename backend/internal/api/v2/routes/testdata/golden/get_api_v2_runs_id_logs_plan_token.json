@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/v2/runs/:id/logs/plan/:token",
+  "status": 401,
+  "body": {
+    "errors": [
+      {
+        "detail": "invalid or revoked log token",
+        "status": "401",
+        "title": "Unauthorized"
+      }
+    ]
+  }
+}

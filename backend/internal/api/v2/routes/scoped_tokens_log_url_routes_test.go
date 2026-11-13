@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -55,10 +56,14 @@ func logReadURLPath(t *testing.T, f *scopedTokensFixture, token, runID string) s
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatalf("plan body is not JSON: %v", err)
 	}
+	// The log token is in the path (/logs/plan/<token>), the one part of the URL go-tfe's log
+	// reader keeps (#1072).
 	u, err := url.Parse(doc.Data.Attributes.LogReadURL)
-	if err != nil || u.Query().Get("token") == "" {
+	if err != nil || !strings.HasPrefix(u.Path, "/api/v2/runs/"+runID+"/logs/plan/") || strings.HasSuffix(u.Path, "/logs/plan/") {
 		t.Fatalf("log-read-url %q carries no log token", doc.Data.Attributes.LogReadURL)
 	}
+	// go-tfe replaces the query with its own limit and offset.
+	u.RawQuery = "limit=65536&offset=0"
 	return u.RequestURI()
 }
 

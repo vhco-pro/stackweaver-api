@@ -298,6 +298,15 @@ func main() {
 		}
 	}
 
+	// Runs stored with a status Stackweaver no longer writes (failed, the legacy completed and
+	// running, and a finished plan resting at planned) take the TFE status the API reports. It
+	// selects only such rows, so after the first start it changes nothing.
+	if n, err := repository.NewRunRepository(db).MigrateRunStatuses(); err != nil {
+		logger.Warnf("Failed to migrate run statuses: %v", err)
+	} else if n > 0 {
+		logger.Infof("Migrated %d runs to their TFE run status", n)
+	}
+
 	// One-time backfill: jobs created before queued_at existed were all
 	// dispatched at creation time, so mark them released.
 	if !hasQueuedAt {

@@ -640,10 +640,15 @@ func SetupV2Routes(
 		tfRuns.GET("/:id/placement", runHandler.GetPlacement)
 		tfRuns.GET("/:id/plan", runHandler.GetPlan)
 		tfRuns.GET("/:id/outputs", runHandler.GetOutputs)
-		tfRuns.GET("/:id/logs", runHandler.GetLogs)               // Generic endpoint (backward compatible)
-		tfRuns.GET("/:id/logs/plan", runHandler.GetPlanLogs)      // Explicit plan logs endpoint
-		tfRuns.GET("/:id/logs/apply", runHandler.GetApplyLogs)    // Explicit apply logs endpoint
+		tfRuns.GET("/:id/logs", runHandler.GetLogs)            // Generic endpoint (backward compatible)
+		tfRuns.GET("/:id/logs/plan", runHandler.GetPlanLogs)   // Explicit plan logs endpoint
+		tfRuns.GET("/:id/logs/apply", runHandler.GetApplyLogs) // Explicit apply logs endpoint
+		// The log-read-url of a plan or apply: the same logs, authorized by the run-bound log token
+		// in the path (buildLogReadURL), which go-tfe's log reader keeps when it rewrites the query.
+		tfRuns.GET("/:id/logs/plan/:token", runHandler.GetPlanLogs)
+		tfRuns.GET("/:id/logs/apply/:token", runHandler.GetApplyLogs)
 		tfRuns.GET("/:id/task-stages", runHandler.ListTaskStages) // real stages from taskStageRepo since #556
+		tfRuns.GET("/:id/run-events", runHandler.ListRunEvents)   // read by the CLI's cloud block before each plan
 		tfRuns.POST("/:id/actions/apply", runHandler.Apply)
 		tfRuns.POST("/:id/actions/cancel", runHandler.Cancel)
 		tfRuns.POST("/:id/actions/discard", runHandler.Discard)

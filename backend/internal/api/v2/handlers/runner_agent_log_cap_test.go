@@ -109,8 +109,11 @@ func TestLogCap_OpenTofuRunCompletesWithTheTruncationRecorded(t *testing.T) {
 	if err := f.db.First(&done, "id = ?", run.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if done.Status != models.RunStatusPlanned {
-		t.Errorf("run status after completion = %s, want planned", done.Status)
+	// The completion reports no plan changes, so the plan phase ends at planned_and_finished
+	// (TFE's status for a plan with nothing to apply, #1072); what matters here is that the run
+	// completed despite its truncated output.
+	if done.Status != models.RunStatusPlannedAndFinished {
+		t.Errorf("run status after completion = %s, want planned_and_finished", done.Status)
 	}
 
 	logData, err := store.Get(t.Context(), "runs/"+run.ID+"/logs/plan.log")

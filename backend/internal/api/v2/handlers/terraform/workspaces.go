@@ -1058,14 +1058,14 @@ func formatRunForInclusion(run *repository.LatestRunSummary) jsonapi.Resource[In
 	planOnly := run.Operation == models.RunOperationPlanOnly
 
 	attrs := IncludedRunAttributes{
-		Status:      string(run.Status),
-		Operation:   string(run.Operation),
-		IsDestroy:   run.Operation == models.RunOperationDestroy,
-		PlanOnly:    planOnly,
-		CreatedAt:   jsonapi.FormatTime(run.CreatedAt),
-		UpdatedAt:   jsonapi.FormatTime(run.UpdatedAt),
-		HasChanges:  run.PlanIndicatesChanges && runReportsChanges(run.Operation, run.Status),
-		Permissions: IncludedRunPermissions{CanApply: !planOnly && run.Status == models.RunStatusPlanned},
+		Status:     string(run.Status),
+		Operation:  string(run.Operation),
+		IsDestroy:  run.Operation == models.RunOperationDestroy,
+		PlanOnly:   planOnly,
+		CreatedAt:  jsonapi.FormatTime(run.CreatedAt),
+		UpdatedAt:  jsonapi.FormatTime(run.UpdatedAt),
+		HasChanges: run.PlanIndicatesChanges && runReportsChanges(run.Operation, run.Status),
+		Actions:    IncludedRunActions{IsConfirmable: runIsConfirmable(&models.Run{Operation: run.Operation, Status: run.Status})},
 	}
 	if run.CompletedAt != nil {
 		attrs.CompletedAt = jsonapi.FormatTime(*run.CompletedAt)

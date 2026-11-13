@@ -434,6 +434,22 @@ func isRunLogPath(path string) bool {
 	return strings.HasSuffix(path, "/logs") || strings.HasSuffix(path, "/logs/plan") || strings.HasSuffix(path, "/logs/apply")
 }
 
+// logTokenFromPath returns the run-bound log token of a log-read-url that carries it in its path,
+// /api/v2/runs/:id/logs/{plan,apply}/:token, or "" for any other path. go-tfe's log reader replaces
+// the query string of a log-read-url with its own limit and offset and sends no Authorization
+// header, so a token in the query never reaches the API from the Terraform CLI.
+func logTokenFromPath(path string) string {
+	rest, ok := strings.CutPrefix(path, "/api/v2/runs/")
+	if !ok {
+		return ""
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 4 || parts[0] == "" || parts[1] != "logs" || (parts[2] != "plan" && parts[2] != "apply") {
+		return ""
+	}
+	return parts[3]
+}
+
 func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip authentication for OPTIONS requests (CORS preflight)
@@ -447,6 +463,22 @@ func (s *Service) AuthenticateMiddleware() gin.HandlerFunc {
 		// a header credential is, so the org wall and every permission check judge them the same
 		// way; a log token re-establishes the credential it was minted for, as that credential
 		// stands now.
+		// The log-read-url's own form carries the log token in its path. Only a log token is
+		// accepted there, never a credential itself.
+		if pathToken := logTokenFromPath(c.Request.URL.Path); pathToken != "" {
+			err := error(&AuthError{Status: http.StatusUnauthorized, Title: "Unauthorized", Detail: "invalid or revoked log token"})
+			if cred, ok := logtoken.Verify(pathToken, runIDFromLogPath(c.Request.URL.Path)); ok {
+				err = s.authenticateLogToken(c, cred)
+			}
+			if err != nil {
+				writeAuthError(c, err)
+				c.Abort()
+				return
+			}
+			c.Next()
+			return
+		}
+
 		if isRunLogPath(c.Request.URL.Path) && c.Query("token") != "" {
 			tokenFromQuery := c.Query("token")
 			err := s.Authenticate(c, tokenFromQuery)

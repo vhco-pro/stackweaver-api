@@ -61,8 +61,8 @@ func TestFormatRunResponse_TimestampsAreUTC(t *testing.T) {
 	}
 
 	pending := &models.Run{ID: "run-zone-pending", WorkspaceID: "ws-zone-test", Status: models.RunStatusPending, CreatedAt: *created, UpdatedAt: *created}
-	if got := formatRunResponse(pending, c, nil, nil).Attributes.StatusTimestamps.PlanQueuedAt; got != wantCreated {
-		t.Errorf("plan-queued-at = %q, want %q", got, wantCreated)
+	if got := formatRunResponse(pending, c, nil, nil).Attributes.StatusTimestamps.PlanQueueableAt; got != wantCreated {
+		t.Errorf("plan-queueable-at = %q, want %q", got, wantCreated)
 	}
 }
 

@@ -10,15 +10,17 @@
         },
         "generated-configuration": false,
         "has-changes": false,
-        "log-read-url": "http://example.com/api/v2/runs/\u003cid\u003e/logs?token=\u003csigned\u003e",
+        "log-read-url": "http://example.com/api/v2/runs/\u003cid\u003e/logs/plan/\u003csigned\u003e",
         "resource-additions": 0,
         "resource-changes": 0,
         "resource-destructions": 0,
         "resource-imports": 0,
         "status": "canceled",
         "status-timestamps": {
+          "canceled-at": "\u003ctimestamp\u003e",
           "pending-at": "\u003ctimestamp\u003e",
-          "queued-at": "\u003ctimestamp\u003e"
+          "queued-at": "\u003ctimestamp\u003e",
+          "started-at": "\u003ctimestamp\u003e"
         }
       },
       "id": "\u003cid\u003e",

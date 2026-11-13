@@ -2190,8 +2190,28 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/runs/:id/logs/apply/:token",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetApplyLogs-fm",
+      "query": [
+        "limit",
+        "offset"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/runs/:id/logs/plan",
       "excluded": "same log backend as /logs; recovers to a 500 with an empty body",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetPlanLogs-fm",
+      "query": [
+        "limit",
+        "offset"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/logs/plan/:token",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetPlanLogs-fm",
       "query": [
@@ -2216,6 +2236,12 @@
       "path": "/api/v2/runs/:id/plan",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).GetPlan-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runs/:id/run-events",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/terraform.(*RunHandlerV2).ListRunEvents-fm"
     },
     {
       "method": "GET",

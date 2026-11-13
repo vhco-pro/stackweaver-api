@@ -41,7 +41,7 @@ func noopPlan() models.PlanOutput {
 // is post_plan_completed when a post-plan task stage exists, and an applied run keeps its answer.
 var statusesAfterPlan = []models.RunStatus{
 	models.RunStatusPlanned,
-	models.RunStatusCompleted,
+	models.RunStatusPlannedAndFinished,
 	models.RunStatusPostPlanRunning,
 	models.RunStatusPostPlanCompleted,
 	models.RunStatusPreApplyRunning,
@@ -50,8 +50,10 @@ var statusesAfterPlan = []models.RunStatus{
 	models.RunStatusPostApplyRunning,
 	models.RunStatusPostApplyCompleted,
 	models.RunStatusApplied,
-	models.RunStatusFailed,
+	models.RunStatusErrored,
 	models.RunStatusCancelled,
+	models.RunStatusForceCanceled,
+	models.RunStatusDiscarded,
 }
 
 // Statuses before the plan has finished: there is no plan to answer from yet.
@@ -60,7 +62,6 @@ var statusesBeforePlan = []models.RunStatus{
 	models.RunStatusPrePlanRunning,
 	models.RunStatusPrePlanCompleted,
 	models.RunStatusPlanning,
-	models.RunStatusRunning,
 }
 
 var planOperations = []models.RunOperation{
