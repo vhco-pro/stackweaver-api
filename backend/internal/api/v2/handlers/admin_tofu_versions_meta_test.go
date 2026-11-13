@@ -4,7 +4,9 @@
 // the TFE terraform-versions resource is unchanged (#1069, D4, AC12). The listings order with
 // Postgres functions, so this runs against the database.
 //
-// Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. It reads only. Run with:
+// Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. It adds one enabled catalogue
+// row of its own, so it holds on a database whose API never booted to seed the catalogue, and
+// deletes only that row. Run with:
 //
 //	go test -tags integration ./internal/api/v2/handlers/ -run TestTofuVersionListings_Meta
 
@@ -14,10 +16,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"slices"
 	"testing"
 
+	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/tofu"
 )
@@ -31,6 +36,13 @@ var tfeTerraformVersionAttributes = []string{
 func TestTofuVersionListings_MetaNamesTheInstallationDefault(t *testing.T) {
 	db, admin, routes := installationDefaultRefusalFixture(t)
 	router := routes(db)
+	// Both listings must list something to check its attributes; a fresh database has no catalogue
+	// until the API's boot seeds it.
+	row := &models.TofuVersion{Version: fmt.Sprintf("0.2.%d", 100000+rand.IntN(800000)), Enabled: true, Beta: true}
+	if err := db.Create(row).Error; err != nil {
+		t.Fatalf("seed catalogue row: %v", err)
+	}
+	t.Cleanup(func() { db.Where("id = ?", row.ID).Delete(&models.TofuVersion{}) })
 
 	for _, tc := range []struct {
 		name, value, want string
