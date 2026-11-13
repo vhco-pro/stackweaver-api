@@ -438,39 +438,57 @@ type UpdateWorkspaceRequestV2 struct {
 	Data struct {
 		Type       string `json:"type"`
 		Attributes struct {
-			Name                       string          `json:"name,omitempty"`
-			Description                string          `json:"description,omitempty"`
-			VCSConnectionID            *uuid.UUID      `json:"vcs-connection-id,omitempty"`
-			VCSProvider                string          `json:"vcs-provider,omitempty"`
-			VCSRepository              string          `json:"vcs-repository,omitempty"`
-			VCSBranch                  string          `json:"vcs-branch,omitempty"`
-			VCSRepo                    *VCSRepoRequest `json:"vcs-repo,omitempty"`
-			TerraformVersion           string          `json:"terraform-version,omitempty"`
-			WorkingDirectory           string          `json:"working-directory,omitempty"`
-			AutoQueueRuns              *bool           `json:"auto-queue-runs,omitempty"`
-			AutoApply                  *bool           `json:"auto-apply,omitempty"`
-			AutoApplyRunTrigger        *bool           `json:"auto-apply-run-trigger,omitempty"`
-			AllowDestroyPlan           *bool           `json:"allow-destroy-plan,omitempty"`
-			ExecutionMode              string          `json:"execution-mode,omitempty"`
-			AgentPoolID                *string         `json:"agent-pool-id,omitempty"`
-			QueueAllRuns               *bool           `json:"queue-all-runs,omitempty"`
-			SpeculativeEnabled         *bool           `json:"speculative-enabled,omitempty"`
-			FileTriggersEnabled        *bool           `json:"file-triggers-enabled,omitempty"`
-			TriggerPrefixes            *[]string       `json:"trigger-prefixes,omitempty"`
-			TriggerPatterns            *[]string       `json:"trigger-patterns,omitempty"`
-			GlobalRemoteState          *bool           `json:"global-remote-state,omitempty"`
-			StructuredRunOutputEnabled *bool           `json:"structured-run-output-enabled,omitempty"`
-			AssessmentsEnabled         *bool           `json:"assessments-enabled,omitempty"`
-			TagNames                   []string        `json:"tag-names,omitempty"`
-			RunTimeout                 *int            `json:"run-timeout,omitempty"`
-			RunImageID                 *string         `json:"run-image-id,omitempty"`
-			IdentityBindingID          *string         `json:"identity-binding-id,omitempty"`
-			ForceDelete                *bool           `json:"force-delete,omitempty"`
+			Name            string          `json:"name,omitempty"`
+			Description     string          `json:"description,omitempty"`
+			VCSConnectionID *uuid.UUID      `json:"vcs-connection-id,omitempty"`
+			VCSProvider     string          `json:"vcs-provider,omitempty"`
+			VCSRepository   string          `json:"vcs-repository,omitempty"`
+			VCSBranch       string          `json:"vcs-branch,omitempty"`
+			VCSRepo         *VCSRepoRequest `json:"vcs-repo,omitempty"`
+			// TerraformVersion: null clears the stored version back to inheriting; absent or "" keeps it
+			// (#1069, Q4). go-tfe never sends null, so the provider cannot clear a pin by accident.
+			TerraformVersion           jsonapi.Nullable[string] `json:"terraform-version,omitempty"`
+			WorkingDirectory           string                   `json:"working-directory,omitempty"`
+			AutoQueueRuns              *bool                    `json:"auto-queue-runs,omitempty"`
+			AutoApply                  *bool                    `json:"auto-apply,omitempty"`
+			AutoApplyRunTrigger        *bool                    `json:"auto-apply-run-trigger,omitempty"`
+			AllowDestroyPlan           *bool                    `json:"allow-destroy-plan,omitempty"`
+			ExecutionMode              string                   `json:"execution-mode,omitempty"`
+			AgentPoolID                *string                  `json:"agent-pool-id,omitempty"`
+			QueueAllRuns               *bool                    `json:"queue-all-runs,omitempty"`
+			SpeculativeEnabled         *bool                    `json:"speculative-enabled,omitempty"`
+			FileTriggersEnabled        *bool                    `json:"file-triggers-enabled,omitempty"`
+			TriggerPrefixes            *[]string                `json:"trigger-prefixes,omitempty"`
+			TriggerPatterns            *[]string                `json:"trigger-patterns,omitempty"`
+			GlobalRemoteState          *bool                    `json:"global-remote-state,omitempty"`
+			StructuredRunOutputEnabled *bool                    `json:"structured-run-output-enabled,omitempty"`
+			AssessmentsEnabled         *bool                    `json:"assessments-enabled,omitempty"`
+			TagNames                   []string                 `json:"tag-names,omitempty"`
+			RunTimeout                 *int                     `json:"run-timeout,omitempty"`
+			RunImageID                 *string                  `json:"run-image-id,omitempty"`
+			IdentityBindingID          *string                  `json:"identity-binding-id,omitempty"`
+			ForceDelete                *bool                    `json:"force-delete,omitempty"`
 		} `json:"attributes"`
 		Relationships *struct {
 			TagBindings *wsTagBindingsRel `json:"tag-bindings,omitempty"`
 		} `json:"relationships,omitempty"`
 	} `json:"data"`
+}
+
+// versionWrite is what a PATCH does to a stored OpenTofu version (#1069, Q4): a version stores it
+// and null clears it ("", inherit), reported with ok; an absent attribute or "" leaves it, which
+// is every value go-tfe can send apart from a version.
+func versionWrite(v jsonapi.Nullable[string]) (string, bool) {
+	switch {
+	case !v.Present:
+		return "", false
+	case v.Null:
+		return "", true
+	case v.Value == "":
+		return "", false
+	default:
+		return v.Value, true
+	}
 }
 
 // wsTagsPresent reports whether an update request manages tag bindings.
@@ -825,8 +843,10 @@ func (h *WorkspaceHandlerV2) ListByOrganization(c *gin.Context) {
 
 	var included []any
 	permissions := h.permissionResolver(c).withOrganization(org.ID, workspaces)
+	versions := h.versionRenderer()
 	for i := range workspaces {
 		wsData := formatWorkspaceResponse(&workspaces[i], h.vcsConnectionRepo)
+		wsData.Attributes.TerraformVersion = versions.version(&workspaces[i])
 		permissions.apply(wsData, &workspaces[i])
 
 		// Add current-run relationship if a run exists
@@ -1271,10 +1291,8 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Resolve terraform version: workspace setting -> org default
-	if terraformVersion == "" {
-		terraformVersion = org.DefaultTofuVersion
-	}
+	// A workspace created without terraform-version stores none and inherits: its project's, its
+	// organization's, else the installation default, rendered on every read (#1069, D2).
 
 	// Validate terraform version exists and is enabled (like TFE)
 	if terraformVersion != "" && h.db != nil {
@@ -1582,12 +1600,13 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		workspace.VCSBranch = attrs.VCSBranch
 	}
 
-	// Update the engine version (TFE wire attribute name is retained)
-	if attrs.TerraformVersion != "" {
-		if workspace.TofuVersion != attrs.TerraformVersion {
-			changes["terraform_version"] = attrs.TerraformVersion
+	// Update the engine version (TFE wire attribute name is retained): a version stores it, null
+	// clears it back to inheriting, absent or "" keeps it.
+	if version, ok := versionWrite(attrs.TerraformVersion); ok {
+		if workspace.TofuVersion != version {
+			changes["terraform_version"] = version
 		}
-		workspace.TofuVersion = attrs.TerraformVersion
+		workspace.TofuVersion = version
 	}
 
 	// Update working directory (allow empty string to clear)
@@ -2362,9 +2381,10 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		workspace.Name = attrs.Name
 	}
 
-	// Update the engine version (TFE wire attribute name is retained)
-	if attrs.TerraformVersion != "" {
-		workspace.TofuVersion = attrs.TerraformVersion
+	// Update the engine version (TFE wire attribute name is retained): a version stores it, null
+	// clears it back to inheriting, absent or "" keeps it.
+	if version, ok := versionWrite(attrs.TerraformVersion); ok {
+		workspace.TofuVersion = version
 	}
 
 	// Update working directory

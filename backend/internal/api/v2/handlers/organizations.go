@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +23,6 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/settings"
-	"github.com/michielvha/stackweaver/core/tofu"
 	"gorm.io/gorm"
 )
 
@@ -61,12 +59,14 @@ func NewOrganizationHandlerV2(orgRepo *repository.OrganizationRepository, teamRe
 
 // OrganizationAttributes contains TFE-compatible organization attributes
 type OrganizationAttributes struct {
-	Name                    string  `json:"name"`
-	Email                   string  `json:"email"`
-	Description             string  `json:"description"`
-	CollaboratorAuthPolicy  string  `json:"collaborator-auth-policy"`  // password or two_factor_mandatory
-	CostEstimationEnabled   *bool   `json:"cost-estimation-enabled"`   // pointer to distinguish unset from false
-	DefaultTerraformVersion *string `json:"default-terraform-version"` // org-wide default terraform version
+	Name                   string `json:"name"`
+	Email                  string `json:"email"`
+	Description            string `json:"description"`
+	CollaboratorAuthPolicy string `json:"collaborator-auth-policy"` // password or two_factor_mandatory
+	CostEstimationEnabled  *bool  `json:"cost-estimation-enabled"`  // pointer to distinguish unset from false
+	// DefaultTerraformVersion is the organization's default OpenTofu version: on PATCH null clears it
+	// back to the installation default, absent or "" keeps it (#1069, Q4).
+	DefaultTerraformVersion jsonapi.Nullable[string] `json:"default-terraform-version"`
 	// Org-wide retention for finished Ansible jobs (0 = keep forever).
 	AnsibleJobRetentionDays *int    `json:"ansible-job-retention-days"`
 	AnsibleAdHocModules     *string `json:"ansible-adhoc-modules"`
@@ -740,23 +740,8 @@ func (h *OrganizationHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// Set the latest stable Terraform version as org default
-	if org.DefaultTofuVersion == "" && h.db != nil {
-		var versions []models.TofuVersion
-		if err := h.db.Where("enabled = ? AND beta = ? AND deprecated = ?", true, false, false).
-			Find(&versions).Error; err == nil && len(versions) > 0 {
-			// Sort by semver descending to find the latest
-			sort.Slice(versions, func(i, j int) bool {
-				return tofu.CompareVersions(versions[i].Version, versions[j].Version) > 0
-			})
-			org.DefaultTofuVersion = versions[0].Version
-			if err := h.orgRepo.Update(org); err != nil {
-				logger.Warnf("Failed to set default opentofu version for org %s: %v", org.Name, err)
-			} else {
-				logger.Infof("Set default opentofu version for org %s to %s", org.Name, versions[0].Version)
-			}
-		}
-	}
+	// No default OpenTofu version is stored: an organization that sets none follows the
+	// installation default (#1069, D2).
 
 	// Log activity
 	if h.activityService != nil {
@@ -852,8 +837,12 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	if newCostEstimationEnabled != nil {
 		org.CostEstimationEnabled = *newCostEstimationEnabled
 	}
-	if newDefaultTerraformVersion != nil {
-		org.DefaultTofuVersion = *newDefaultTerraformVersion
+	// null clears the default back to the installation default; absent or "" keeps it (#1069, Q4).
+	switch v := newDefaultTerraformVersion; {
+	case v.Null:
+		org.DefaultTofuVersion = ""
+	case v.Present && v.Value != "":
+		org.DefaultTofuVersion = v.Value
 	}
 	applyAnsibleJobRetentionDays(org, attrs.AnsibleJobRetentionDays)
 	if detail, ok := applyOrgRunTimeout(org, attrs.RunTimeout); !ok {

@@ -39,6 +39,8 @@ import (
 	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/settings"
+	"github.com/michielvha/stackweaver/core/tofu"
 	"gorm.io/gorm"
 )
 
@@ -185,4 +187,123 @@ func TestAdminTofuVersionCreate_EnabledIsStoredAsSent(t *testing.T) {
 			assertStoredBool(t, "read back", read, "enabled", tc.want)
 		})
 	}
+}
+
+// installationDefaultRefusalFixture is a platform administrator and the admin routes over db.
+func installationDefaultRefusalFixture(t *testing.T) (*gorm.DB, *models.User, func(db *gorm.DB) http.Handler) {
+	t.Helper()
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set - skipping integration test")
+	}
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
+	if err != nil {
+		t.Fatalf("connect test db: %v", err)
+	}
+	sfx := uuid.NewString()[:8]
+	admin := &models.User{ID: uuid.New(), ZitadelSubject: "tvdefault-" + sfx, Email: "tvdefault-" + sfx + "@test.local"}
+	if err := db.Create(admin).Error; err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+	userRepo := repository.NewUserRepository(db)
+	if _, err := userRepo.SetPlatformAdmin(admin.ID, true, false); err != nil {
+		t.Fatalf("flag admin: %v", err)
+	}
+	t.Cleanup(func() { db.Where("id = ?", admin.ID).Delete(&models.User{}) })
+	admins := platformadmin.NewService(userRepo, auth.NewService(userRepo), nil, platformadmin.Config{})
+	routes := func(handlerDB *gorm.DB) http.Handler {
+		h := NewAdminTofuVersionsHandler(handlerDB, admins)
+		router := storedAsSentRouter()
+		router.PATCH("/api/v2/admin/terraform-versions/:id", h.Update)
+		router.DELETE("/api/v2/admin/terraform-versions/:id", h.Delete)
+		router.GET("/api/v2/admin/terraform-versions", h.List)
+		router.GET("/api/v2/terraform-versions", h.ListEnabled)
+		return router
+	}
+	return db, admin, routes
+}
+
+// assertRefused checks a 409 whose detail names TOFU_DEFAULT_VERSION.
+func assertRefused(t *testing.T, what string, code int, body []byte) {
+	t.Helper()
+	if code != http.StatusConflict || !strings.Contains(string(body), "TOFU_DEFAULT_VERSION") {
+		t.Errorf("%s = %d %s, want 409 naming TOFU_DEFAULT_VERSION", what, code, body)
+	}
+}
+
+// The installation default cannot be disabled or deleted, so a workspace that inherits it always
+// finds it in the catalogue; deprecating it is allowed (#1069, D3, AC11).
+func TestAdminTofuVersion_InstallationDefaultRefusals(t *testing.T) {
+	db, admin, routes := installationDefaultRefusalFixture(t)
+	router := routes(db)
+
+	t.Run("an exact TOFU_DEFAULT_VERSION", func(t *testing.T) {
+		row := &models.TofuVersion{Version: fmt.Sprintf("0.0.%d", 100000+rand.IntN(800000)), Enabled: true, Beta: true}
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Where("id = ?", row.ID).Delete(&models.TofuVersion{}) })
+		t.Setenv(settings.EnvTofuDefaultVersion, row.Version)
+		path := "/api/v2/admin/terraform-versions/" + row.ID
+
+		code, body := storedAsSentCall(t, router, http.MethodPatch, path, admin.ID, storedAsSentDocument(t, "terraform-versions", map[string]any{"enabled": false}))
+		assertRefused(t, "disabling it", code, body)
+		code, body = storedAsSentCall(t, router, http.MethodDelete, path, admin.ID, "")
+		assertRefused(t, "deleting it", code, body)
+		if r, ok := catalogueRow(t, db, row.Version); !ok || !r.Enabled {
+			t.Errorf("after the refusals the row is present %t, enabled %t", ok, r.Enabled)
+		}
+		code, body = storedAsSentCall(t, router, http.MethodPatch, path, admin.ID, storedAsSentDocument(t, "terraform-versions", map[string]any{"deprecated": true}))
+		if code != http.StatusOK {
+			t.Errorf("deprecating it = %d %s, want 200", code, body)
+		}
+	})
+
+	t.Run("the bundled version, TOFU_DEFAULT_VERSION unset", func(t *testing.T) {
+		t.Setenv(settings.EnvTofuDefaultVersion, "")
+		row, ok := catalogueRow(t, db, tofu.BundledVersion)
+		if !ok {
+			t.Skipf("the catalogue holds no %s; the API seeds it at start", tofu.BundledVersion)
+		}
+		path := "/api/v2/admin/terraform-versions/" + row.ID
+		code, body := storedAsSentCall(t, router, http.MethodPatch, path, admin.ID, storedAsSentDocument(t, "terraform-versions", map[string]any{"enabled": false}))
+		assertRefused(t, "disabling it", code, body)
+		code, body = storedAsSentCall(t, router, http.MethodDelete, path, admin.ID, "")
+		assertRefused(t, "deleting it", code, body)
+		if r, ok := catalogueRow(t, db, tofu.BundledVersion); !ok || r.Enabled != row.Enabled {
+			t.Errorf("after the refusals the bundled row is present %t, enabled %t", ok, r.Enabled)
+		}
+	})
+
+	t.Run("latest: the last enabled stable version", func(t *testing.T) {
+		t.Setenv(settings.EnvTofuDefaultVersion, settings.TofuDefaultLatest)
+		// Everything runs in a transaction that is rolled back, so the catalogue is never changed
+		// for anyone else while one enabled stable version is left.
+		tx := db.Begin()
+		t.Cleanup(func() { tx.Rollback() })
+		last := &models.TofuVersion{Version: fmt.Sprintf("0.1.%d", 100000+rand.IntN(800000)), Enabled: true}
+		if err := tx.Create(last).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Model(&models.TofuVersion{}).Where("id <> ? AND enabled = ? AND beta = ? AND deprecated = ?", last.ID, true, false, false).
+			Update("enabled", false).Error; err != nil {
+			t.Fatal(err)
+		}
+		router := routes(tx)
+		path := "/api/v2/admin/terraform-versions/" + last.ID
+		code, body := storedAsSentCall(t, router, http.MethodPatch, path, admin.ID, storedAsSentDocument(t, "terraform-versions", map[string]any{"enabled": false}))
+		assertRefused(t, "disabling the last enabled stable version", code, body)
+		code, body = storedAsSentCall(t, router, http.MethodDelete, path, admin.ID, "")
+		assertRefused(t, "deleting the last enabled stable version", code, body)
+
+		// With a second enabled stable version, either may go.
+		second := &models.TofuVersion{Version: fmt.Sprintf("0.2.%d", 100000+rand.IntN(800000)), Enabled: true}
+		if err := tx.Create(second).Error; err != nil {
+			t.Fatal(err)
+		}
+		code, body = storedAsSentCall(t, router, http.MethodPatch, path, admin.ID, storedAsSentDocument(t, "terraform-versions", map[string]any{"enabled": false}))
+		if code != http.StatusOK {
+			t.Errorf("disabling one of two enabled stable versions = %d %s, want 200", code, body)
+		}
+	})
 }

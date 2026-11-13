@@ -2583,10 +2583,9 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	}
 
 	// The OpenTofu version resolves by the shared level rule: workspace, project, organization,
-	// else the newest release the organization caches; empty, the executor takes the newest
-	// upstream release.
-	tofuVersion, _ := settings.EffectiveTofuVersion(&run.Workspace)
-	tfVersion := h.runTofuVersion(run.Workspace.Project.OrganizationID, tofuVersion.Value)
+	// then the installation default (#1069, D2). It is fixed here, when the executor fetches the
+	// run's artifacts.
+	tfVersion := settings.EffectiveTofuVersion(&run.Workspace, repository.InstallationTofuVersion(h.db)).Value
 
 	response := AgentJobArtifacts{
 		JobID:            run.ID,

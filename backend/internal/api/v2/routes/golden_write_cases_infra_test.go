@@ -327,9 +327,12 @@ func init() {
 			},
 		},
 		writeCase{
+			// A version of the case's own: the seeded version the path would name can be the
+			// installation default, which the API refuses to disable (#1069, D3).
 			route: "PATCH /api/v2/admin/terraform-versions/:id",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
-				return w.jsonRequest(t, http.MethodPatch, w.path("/api/v2/admin/terraform-versions/:id"),
+				created := w.mustSend(t, w.jsonRequest(t, http.MethodPost, "/api/v2/admin/terraform-versions", infraCustomTofuVersion()))
+				return w.jsonRequest(t, http.MethodPatch, "/api/v2/admin/terraform-versions/"+dataID(t, created),
 					document("terraform-versions", map[string]any{
 						"deprecated":        true,
 						"deprecated-reason": "Superseded by a patched release; move workspaces off this version.",

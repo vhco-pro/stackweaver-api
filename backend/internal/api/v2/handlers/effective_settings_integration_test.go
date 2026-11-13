@@ -24,7 +24,63 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/settings"
+	"github.com/michielvha/stackweaver/core/tofu"
 )
+
+// A workspace whose workspace, project and organization set no OpenTofu version runs the
+// installation default, the version the job image bakes when TOFU_DEFAULT_VERSION is unset, and
+// the read says it comes from the deployment level (#1069, D2, AC5).
+func TestEffectiveSettings_WorkspaceTofuVersionFromTheInstallation(t *testing.T) {
+	t.Setenv(settings.EnvTofuDefaultVersion, "")
+	f := setupPlatformAdminFixture(t)
+	db := f.db
+
+	project := &models.Project{ID: uuid.New(), OrganizationID: f.orgA.ID, Name: "efftofu-" + f.sfx}
+	if err := db.Create(project).Error; err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	ws := &models.Workspace{ProjectID: project.ID, Name: "efftofu-" + f.sfx}
+	if err := db.Create(ws).Error; err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Where("id = ?", ws.ID).Delete(&models.Workspace{})
+		db.Where("id = ?", project.ID).Delete(&models.Project{})
+	})
+
+	orgs := repository.NewOrganizationRepository(db)
+	projects := repository.NewProjectRepository(db)
+	h := NewEffectiveSettingsHandlerV2(
+		repository.NewWorkspaceRepository(db), repository.NewAnsibleJobTemplateRepository(db),
+		repository.NewAnsibleInventorySourceRepository(db), repository.NewAnsibleInventoryRepository(db),
+		projects, orgs, f.authSvc, rbac.NewServiceWithTeams(orgs, repository.NewTeamRepository(db), projects),
+	)
+	r := platformAdminRouter()
+	r.GET("/api/v2/workspaces/:id/effective-settings", h.GetWorkspace)
+
+	rec := platformAdminCall(t, r, http.MethodGet, "/api/v2/workspaces/"+ws.ID+"/effective-settings", browserAs(f.owner), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("effective settings = %d %s", rec.Code, rec.Body.String())
+	}
+	var doc struct {
+		Data struct {
+			Attributes struct {
+				TofuVersion EffectiveSetting[string] `json:"tofu-version"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	got := doc.Data.Attributes.TofuVersion
+	if got.Value != tofu.BundledVersion || got.Level == nil || *got.Level != "deployment" {
+		level := "<nil>"
+		if got.Level != nil {
+			level = *got.Level
+		}
+		t.Errorf("tofu-version = {%q, %s}, want {%q, deployment}", got.Value, level, tofu.BundledVersion)
+	}
+}
 
 func TestEffectiveSettings_InventorySourceSyncTimeout(t *testing.T) {
 	t.Setenv(settings.EnvSyncTimeout, "1500")

@@ -51,6 +51,7 @@ var workspaceBooleanAttrs = []string{
 
 type workspaceBooleansFixture struct {
 	router    *gin.Engine
+	h         *WorkspaceHandlerV2
 	db        *gorm.DB
 	orgName   string
 	projectID uuid.UUID
@@ -113,8 +114,8 @@ func setupWorkspaceBooleans(t *testing.T) *workspaceBooleansFixture {
 		orgRepo,
 		repository.NewVCSConnectionRepository(db),
 		teamRepo,
-		nil, // poolRepo - only reached for execution-mode "agent"
-		nil, // runRepo - unused on these paths
+		nil,                             // poolRepo - only reached for execution-mode "agent"
+		repository.NewRunRepository(db), // the list reads each workspace's latest run
 		auth.NewService(repository.NewUserRepository(db)),
 		nil, // activityService - logging is skipped when nil
 		rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo),
@@ -134,7 +135,7 @@ func setupWorkspaceBooleans(t *testing.T) *workspaceBooleansFixture {
 	router.GET("/api/v2/workspaces/:id", h.GetByID)
 	router.PATCH("/api/v2/workspaces/:id", h.UpdateByID)
 
-	return &workspaceBooleansFixture{router: router, db: db, orgName: org.Name, projectID: project.ID}
+	return &workspaceBooleansFixture{router: router, h: h, db: db, orgName: org.Name, projectID: project.ID}
 }
 
 // do sends one JSON:API request and returns the status with the response's data.id and

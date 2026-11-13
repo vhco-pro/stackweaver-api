@@ -10918,7 +10918,8 @@
                     }
                   },
                   "terraform-version": {
-                    "type": "string"
+                    "type": "string",
+                    "nullable": true
                   },
                   "trigger-patterns": {
                     "type": "array",
@@ -12417,7 +12418,8 @@
                     }
                   },
                   "terraform-version": {
-                    "type": "string"
+                    "type": "string",
+                    "nullable": true
                   },
                   "trigger-patterns": {
                     "type": "array",
@@ -24543,6 +24545,9 @@
           "meta": {
             "type": "object",
             "properties": {
+              "installation-default-version": {
+                "type": "string"
+              },
               "pagination": {
                 "type": "object",
                 "properties": {

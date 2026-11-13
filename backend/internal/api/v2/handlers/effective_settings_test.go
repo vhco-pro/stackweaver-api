@@ -32,7 +32,7 @@ func TestWorkspaceEffectiveSettings(t *testing.T) {
 			Organization: models.Organization{DefaultTofuVersion: "1.8.0", RunTimeout: 1800},
 		},
 	}
-	got := workspaceEffectiveSettings(ws, 7200)
+	got := workspaceEffectiveSettings(ws, 7200, "1.13.1")
 
 	if got.ExecutionMode == nil || got.ExecutionMode.Value != "agent" || level(got, func(s EffectiveSettingsAttributes) *string { return s.ExecutionMode.Level }) != "project" {
 		t.Fatalf("execution-mode = %+v", got.ExecutionMode)
@@ -48,10 +48,12 @@ func TestWorkspaceEffectiveSettings(t *testing.T) {
 	}
 }
 
-func TestWorkspaceEffectiveSettingsUnresolvedVersion(t *testing.T) {
-	got := workspaceEffectiveSettings(&models.Workspace{}, 7200)
-	if got.TofuVersion == nil || got.TofuVersion.Value != "" || got.TofuVersion.Level != nil {
-		t.Fatalf("an unset version must read as empty with a null level, got %+v", got.TofuVersion)
+// A workspace whose levels set no version reads the installation default at the deployment level.
+// It used to read empty with a null level; #1069 (D2) gave the version a deployment level.
+func TestWorkspaceEffectiveSettingsInstallationVersion(t *testing.T) {
+	got := workspaceEffectiveSettings(&models.Workspace{}, 7200, "1.13.1")
+	if got.TofuVersion == nil || got.TofuVersion.Value != "1.13.1" || got.TofuVersion.Level == nil || *got.TofuVersion.Level != "deployment" {
+		t.Fatalf("an unset version must read as the installation default from deployment, got %+v", got.TofuVersion)
 	}
 	if got.RunTimeout.Value != 7200 || *got.RunTimeout.Level != "deployment" {
 		t.Fatalf("run-timeout = %+v", got.RunTimeout)
@@ -102,7 +104,7 @@ func TestEffectiveSettingsDeploymentDefaults(t *testing.T) {
 	t.Setenv(settings.EnvRunTimeoutDefault, "5000")
 	t.Setenv(settings.EnvSyncTimeout, "1500")
 	h := NewEffectiveSettingsHandlerV2(nil, nil, nil, nil, nil, nil, nil, nil)
-	if got := workspaceEffectiveSettings(&models.Workspace{}, h.deploymentTimeout).RunTimeout; got.Value != 5000 || *got.Level != "deployment" {
+	if got := workspaceEffectiveSettings(&models.Workspace{}, h.deploymentTimeout, "1.13.1").RunTimeout; got.Value != 5000 || *got.Level != "deployment" {
 		t.Errorf("workspace run-timeout = %+v, want 5000 from deployment", got)
 	}
 	project := &models.Project{}
@@ -116,7 +118,7 @@ func TestEffectiveSettingsDeploymentDefaults(t *testing.T) {
 
 // TestEffectiveSettingsWireShape pins the JSON:API attribute names the UI and the provider read.
 func TestEffectiveSettingsWireShape(t *testing.T) {
-	b, err := json.Marshal(effectiveSettingsResource("ws-abc", workspaceEffectiveSettings(&models.Workspace{}, 7200)))
+	b, err := json.Marshal(effectiveSettingsResource("ws-abc", workspaceEffectiveSettings(&models.Workspace{}, 7200, "1.13.1")))
 	if err != nil {
 		t.Fatal(err)
 	}
