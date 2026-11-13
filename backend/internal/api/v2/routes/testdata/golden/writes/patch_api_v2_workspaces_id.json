@@ -121,7 +121,8 @@
                   }
                 },
                 "terraform-version": {
-                  "type": "string"
+                  "type": "string",
+                  "nullable": true
                 },
                 "trigger-patterns": {
                   "type": "array",

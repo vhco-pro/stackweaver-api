@@ -326,6 +326,7 @@
       }
     ],
     "meta": {
+      "installation-default-version": "1.13.1",
       "pagination": {
         "current-page": 1,
         "next-page": 2,

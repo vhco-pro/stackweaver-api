@@ -133,7 +133,7 @@
         "cost-estimation-enabled": true,
         "created-at": "\u003ctimestamp\u003e",
         "default-execution-mode": "remote",
-        "default-terraform-version": "1.13.1",
+        "default-terraform-version": "",
         "email": "platform-team@example.com",
         "enforce-hyok": false,
         "external-id": "\u003cuuid\u003e",

@@ -90,17 +90,24 @@
   "response": {
     "data": {
       "attributes": {
-        "archs": [],
-        "beta": false,
+        "archs": [
+          {
+            "arch": "amd64",
+            "os": "linux",
+            "sha": "5f2b1c0a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+            "url": "https://mirror.example.com/opentofu/1.6.0-rc1/tofu_1.6.0-rc1_linux_amd64.zip"
+          }
+        ],
+        "beta": true,
         "created-at": "\u003ctimestamp\u003e",
         "deprecated": true,
         "deprecated-reason": "Superseded by a patched release; move workspaces off this version.",
         "enabled": false,
-        "official": true,
-        "sha": "",
-        "url": "",
+        "official": false,
+        "sha": "5f2b1c0a9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a",
+        "url": "https://mirror.example.com/opentofu/1.6.0-rc1/tofu_1.6.0-rc1_linux_amd64.zip",
         "usage": 0,
-        "version": "1.13.1"
+        "version": "1.6.0-rc1"
       },
       "id": "\u003cid\u003e",
       "type": "terraform-versions"

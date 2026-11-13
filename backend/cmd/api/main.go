@@ -37,6 +37,7 @@ import (
 	"github.com/michielvha/stackweaver/core/services/encryptionkey"
 	statesvc "github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/vcs"
+	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/tofu"
 	"gopkg.in/yaml.v3"
 )
@@ -540,7 +541,12 @@ func main() {
 	if err := tofu.ValidateSources(); err != nil {
 		logger.Warnf("%v", err)
 	}
-	handlers.SeedOfficialVersions(db)
+	// The installation default OpenTofu version (#1069, D2): a value that is neither empty, latest
+	// nor an exact version is treated as unset, and said so here.
+	if err := settings.CheckInstallationTofuVersion(os.Getenv); err != nil {
+		logger.Warnf("%v", err)
+	}
+	handlers.SeedOfficialVersions(db, os.Getenv)
 	logger.Info("Terraform versions seeded")
 
 	// Initialize repositories

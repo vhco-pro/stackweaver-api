@@ -5,8 +5,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 
@@ -15,6 +17,8 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/services/platformadmin"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/tofu"
 	"gorm.io/gorm"
 )
@@ -127,7 +131,7 @@ func (h *AdminTofuVersionsHandler) List(c *gin.Context) {
 		data = append(data, formatTerraformVersion(&v))
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewPaginationMeta(page, pageSize, totalCount))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, h.listMeta(jsonapi.NewPaginationMeta(page, pageSize, totalCount)))
 }
 
 // Read a single terraform version by ID.
@@ -293,6 +297,13 @@ func (h *AdminTofuVersionsHandler) Update(c *gin.Context) {
 		return
 	}
 
+	if enabled := req.Data.Attributes.Enabled; enabled != nil && !*enabled {
+		if detail, refused := h.installationDefaultGuard(&version); refused {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", detail)
+			return
+		}
+	}
+
 	if req.Data.Attributes.Version != nil {
 		version.Version = *req.Data.Attributes.Version
 	}
@@ -365,6 +376,11 @@ func (h *AdminTofuVersionsHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	if detail, refused := h.installationDefaultGuard(&version); refused {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", detail)
+		return
+	}
+
 	// Don't allow deleting official versions (like TFE)
 	if version.Official {
 		jsonapi.WriteErrorNoDetail(c, http.StatusUnprocessableEntity, "Cannot delete official OpenTofu version")
@@ -390,15 +406,20 @@ func (h *AdminTofuVersionsHandler) Delete(c *gin.Context) {
 // SeedOfficialVersions seeds the database with official OpenTofu versions.
 // First attempts the live version index (see core/tofu.VersionIndexURL, overridable via
 // TOFU_VERSION_INDEX_URL for air-gapped mirrors), falling back to the built-in list when that is
-// unreachable. Called during platform startup.
-func SeedOfficialVersions(db *gorm.DB) {
+// unreachable. Then it makes sure the catalogue holds the installation default enabled (#1069,
+// D3): the bundled or exact TOFU_DEFAULT_VERSION read through getenv is inserted when missing and
+// enabled when disabled; under latest the default is whatever is newest after seeding, so nothing
+// is inserted. Called during platform startup.
+func SeedOfficialVersions(db *gorm.DB, getenv func(string) string) {
+	indexURL := tofu.VersionIndexURL()
 	versions, err := tofu.FetchStableVersions(context.Background())
 	if err != nil || len(versions) == 0 {
-		logger.Warnf("Could not fetch the OpenTofu version index (%v), using fallback list (%d versions)", err, len(models.OfficialTofuVersions))
+		logger.Warnf("Could not fetch the OpenTofu version index at %s (%v), seeding the catalogue from the fallback list (%d versions)", indexURL, err, len(models.OfficialTofuVersions))
 		versions = models.OfficialTofuVersions
 	} else {
-		logger.Infof("Fetched %d stable OpenTofu versions from the version index", len(versions))
+		logger.Infof("Seeding the OpenTofu catalogue from the version index at %s (%d stable versions)", indexURL, len(versions))
 	}
+	defer ensureInstallationDefault(db, getenv)
 
 	seedCount := 0
 	for _, ver := range versions {
@@ -427,6 +448,68 @@ func SeedOfficialVersions(db *gorm.DB) {
 	}
 }
 
+// installationDefaultGuard says why v may not be disabled or deleted, and whether that applies:
+// it is the bundled or exact installation default, or, under TOFU_DEFAULT_VERSION=latest, the last
+// enabled, non-beta, non-deprecated version, so latest always resolves (#1069, D3). Deprecating
+// is never refused: a deprecated version still runs.
+func (h *AdminTofuVersionsHandler) installationDefaultGuard(v *models.TofuVersion) (string, bool) {
+	if strings.TrimSpace(os.Getenv(settings.EnvTofuDefaultVersion)) == settings.TofuDefaultLatest {
+		if !v.Enabled || v.Beta || v.Deprecated {
+			return "", false
+		}
+		var others int64
+		if err := h.db.Model(&models.TofuVersion{}).Where("id <> ? AND enabled = ? AND beta = ? AND deprecated = ?", v.ID, true, false, false).
+			Count(&others).Error; err != nil || others > 0 {
+			return "", false
+		}
+		return fmt.Sprintf("Version %s is the last enabled, non-beta, non-deprecated version, which TOFU_DEFAULT_VERSION=latest resolves to. Enable another version first.", v.Version), true
+	}
+	if v.Version != settings.InstallationTofuVersion(os.Getenv, func() string { return "" }) {
+		return "", false
+	}
+	return fmt.Sprintf("Version %s is the installation default (TOFU_DEFAULT_VERSION). Set TOFU_DEFAULT_VERSION to another version before disabling or deleting it.", v.Version), true
+}
+
+// ensureInstallationDefault inserts the bundled or exact installation default into the catalogue,
+// enabled, or enables its row; under latest it does nothing.
+func ensureInstallationDefault(db *gorm.DB, getenv func(string) string) {
+	if strings.TrimSpace(getenv(settings.EnvTofuDefaultVersion)) == settings.TofuDefaultLatest {
+		return
+	}
+	version := settings.InstallationTofuVersion(getenv, func() string { return "" })
+	var existing models.TofuVersion
+	switch err := db.Where("version = ?", version).First(&existing).Error; {
+	case err == nil:
+		if !existing.Enabled {
+			if err := db.Model(&existing).Update("enabled", true).Error; err != nil {
+				logger.Warnf("Failed to enable the installation default OpenTofu version %s: %v", version, err)
+				return
+			}
+			logger.Infof("Enabled the installation default OpenTofu version %s", version)
+		}
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		row := &models.TofuVersion{Version: version, URL: tofu.DownloadURL(version, "linux", "amd64"), Official: true, Enabled: true}
+		if err := db.Create(row).Error; err != nil {
+			logger.Warnf("Failed to add the installation default OpenTofu version %s: %v", version, err)
+			return
+		}
+		logger.Infof("Added the installation default OpenTofu version %s to the catalogue", version)
+	default:
+		logger.Warnf("Reading the installation default OpenTofu version %s: %v", version, err)
+	}
+}
+
+// tofuVersionsMeta is the meta of both catalogue listings: TFE's pagination and the installation
+// default OpenTofu version (#1069, D4), which TFE's terraform-versions resource has no attribute for.
+type tofuVersionsMeta struct {
+	jsonapi.PaginationMeta
+	InstallationDefaultVersion string `json:"installation-default-version"`
+}
+
+func (h *AdminTofuVersionsHandler) listMeta(page jsonapi.PaginationMeta) tofuVersionsMeta {
+	return tofuVersionsMeta{PaginationMeta: page, InstallationDefaultVersion: repository.InstallationTofuVersion(h.db)}
+}
+
 // ListEnabled returns all enabled, non-deprecated terraform versions.
 // This endpoint does NOT require admin access - any authenticated user can call it.
 // Used by workspace create/edit dialogs to show available versions.
@@ -448,7 +531,7 @@ func (h *AdminTofuVersionsHandler) ListEnabled(c *gin.Context) {
 		data = append(data, formatTerraformVersion(&v))
 	}
 
-	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, jsonapi.NewFullPageMeta(len(data)))
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, data, h.listMeta(jsonapi.NewFullPageMeta(len(data))))
 }
 
 // filterValidArchs returns only archs with non-empty URLs.

@@ -8,6 +8,8 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/settings"
 )
 
 // workspacePermissionResolver answers the caller-dependent flags of a workspace response's
@@ -35,11 +37,49 @@ type workspacePermissionResolver struct {
 	projectOrg map[uuid.UUID]uuid.UUID             // project -> organization
 }
 
-// workspaceResponse is formatWorkspaceResponse with the permissions block answered for the caller.
+// workspaceResponse is formatWorkspaceResponse with the permissions block answered for the caller
+// and terraform-version rendered as the workspace's effective version.
 func (h *WorkspaceHandlerV2) workspaceResponse(c *gin.Context, ws *models.Workspace) *WorkspaceResource {
 	res := formatWorkspaceResponse(ws, h.vcsConnectionRepo)
+	res.Attributes.TerraformVersion = h.versionRenderer().version(ws)
 	h.permissionResolver(c).apply(res, ws)
 	return res
+}
+
+// workspaceVersionRenderer renders terraform-version on the wire as the workspace's effective
+// OpenTofu version (#1069, D2): its own, else its project's, else its organization's, else the
+// installation default. TFE clients therefore always read a concrete version, and the forked
+// provider's Optional+Computed terraform_version reads back what a configuration that omits it
+// runs. The store keeps "" for a workspace that inherits; that is what a PATCH with null writes.
+type workspaceVersionRenderer struct {
+	h            *WorkspaceHandlerV2
+	installation string
+	projects     map[uuid.UUID]*models.Project
+}
+
+func (h *WorkspaceHandlerV2) versionRenderer() *workspaceVersionRenderer {
+	return &workspaceVersionRenderer{h: h, installation: repository.InstallationTofuVersion(h.db), projects: map[uuid.UUID]*models.Project{}}
+}
+
+// version is ws's effective OpenTofu version. A workspace loaded without its project and the
+// project's organization has them read once per project, into a copy, so the caller's model is
+// never changed (a later Save would otherwise write the associations).
+func (r *workspaceVersionRenderer) version(ws *models.Workspace) string {
+	w := *ws
+	if w.Project.ID != w.ProjectID || w.Project.Organization.ID != w.Project.OrganizationID || w.Project.OrganizationID == uuid.Nil {
+		p, ok := r.projects[w.ProjectID]
+		if !ok {
+			p = &models.Project{}
+			if r.h.db == nil || r.h.db.Preload("Organization").First(p, "id = ?", w.ProjectID).Error != nil {
+				p = nil
+			}
+			r.projects[w.ProjectID] = p
+		}
+		if p != nil {
+			w.Project = *p
+		}
+	}
+	return settings.EffectiveTofuVersion(&w, r.installation).Value
 }
 
 func (h *WorkspaceHandlerV2) permissionResolver(c *gin.Context) *workspacePermissionResolver {

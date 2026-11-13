@@ -14,10 +14,10 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/executor/cachedesc"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/settings"
-	"github.com/michielvha/stackweaver/core/tofu"
 )
 
 // The cache descriptor (#933, D7): the entries of a job's organization's cache that the job's
@@ -100,37 +100,14 @@ func (h *RunnerAgentHandler) runCacheDescriptor(org uuid.UUID, run *models.Run, 
 // runCacheDescriptorFor reads a run's version and configuration and resolves its descriptor, for
 // the job token, which has neither at hand.
 func (h *RunnerAgentHandler) runCacheDescriptorFor(ctx context.Context, run *models.Run) *runnercontract.CacheDescriptor {
-	version, _ := settings.EffectiveTofuVersion(&run.Workspace)
+	version := settings.EffectiveTofuVersion(&run.Workspace, repository.InstallationTofuVersion(h.db))
 	var tarball []byte
 	if run.ConfigurationVersionID != nil && h.storageClient != nil {
 		if data, err := h.configTarball(ctx, run); err == nil {
 			tarball = data
 		}
 	}
-	org := run.Workspace.Project.OrganizationID
-	return h.runCacheDescriptor(org, run, h.runTofuVersion(org, version.Value), tarball)
-}
-
-// runTofuVersion is the OpenTofu version a run installs: the one its workspace, project or
-// organization pins, else the newest stable release the organization caches (D7), so an unpinned
-// run takes its engine from the cache. "" (the newest upstream release) when neither exists.
-func (h *RunnerAgentHandler) runTofuVersion(org uuid.UUID, configured string) string {
-	if configured != "" {
-		return configured
-	}
-	var versions []string
-	if err := h.db.Model(&models.CacheEntry{}).Where("organization_id = ? AND kind = ? AND name = ?", org, runnercontract.CacheKindTofu, "tofu").
-		Distinct().Pluck("version", &versions).Error; err != nil {
-		logger.Warnf("Reading the cached tofu releases of organization %s: %v", org, err)
-		return ""
-	}
-	newest := ""
-	for _, v := range versions {
-		if tofu.IsStableVersion(v) && (newest == "" || tofu.CompareVersions(v, newest) > 0) {
-			newest = v
-		}
-	}
-	return newest
+	return h.runCacheDescriptor(run.Workspace.Project.OrganizationID, run, version.Value, tarball)
 }
 
 // ansibleCacheDescriptor resolves an Ansible job's entries from the Galaxy requirements of its

@@ -25,6 +25,8 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/runnercontract"
 	"github.com/michielvha/stackweaver/core/services/ansible"
+	"github.com/michielvha/stackweaver/core/settings"
+	"github.com/michielvha/stackweaver/core/tofu"
 )
 
 func gzTar(t *testing.T, files map[string]string) []byte {
@@ -117,17 +119,19 @@ func TestCacheDescriptor_RunResolvesItsVersionAndLockFile(t *testing.T) {
 	}
 }
 
-// A run whose workspace, project and organization pin no OpenTofu version runs the newest stable
-// release its organization caches, and its artifacts say so, so the executor installs that release
-// from the cache rather than the newest upstream one (#933, D7, AC33).
-func TestCacheDescriptor_UnpinnedRunTakesTheNewestCachedRelease(t *testing.T) {
+// A run whose workspace, project and organization pin no OpenTofu version runs the installation
+// default (the version the job image bakes when TOFU_DEFAULT_VERSION is unset), and its artifacts
+// and descriptor name that version, whatever newer releases the organization caches (#1069, D2).
+// Before #1069 such a run took the newest stable release the organization cached (#933, D7); that
+// fallback is gone, because the deployment level always resolves.
+func TestCacheDescriptor_UnpinnedRunTakesTheInstallationDefault(t *testing.T) {
+	t.Setenv(settings.EnvTofuDefaultVersion, "")
 	f := setupAgentPrepFixture(t)
 	store := newSnapshotStore()
 	r, svc := f.cacheRouter(store)
 	now := time.Now()
-	newest := f.seedNamedCacheEntry(t, store, f.orgA, "tofu", "tofu", "1.10.6", "linux_amd64", []byte("tofu 1.10.6, newest"), now.Add(-time.Hour))
-	f.seedNamedCacheEntry(t, store, f.orgA, "tofu", "tofu", "1.9.0", "linux_amd64", []byte("tofu 1.9.0, newer row"), now)
-	f.seedNamedCacheEntry(t, store, f.orgA, "tofu", "tofu", "1.11.0-beta1", "linux_amd64", []byte("tofu beta"), now)
+	f.seedNamedCacheEntry(t, store, f.orgA, "tofu", "tofu", "1.99.6", "linux_amd64", []byte("tofu 1.99.6, newest"), now.Add(-time.Hour))
+	bundled := f.seedNamedCacheEntry(t, store, f.orgA, "tofu", "tofu", tofu.BundledVersion, "linux_amd64", []byte("tofu bundled"), now)
 
 	run := f.seedRunWithConfig(t, store, gzTar(t, map[string]string{"main.tf": ""}))
 	if err := f.db.Model(&models.Workspace{}).Where("id = ?", run.WorkspaceID).Update("tofu_version", "").Error; err != nil {
@@ -137,14 +141,14 @@ func TestCacheDescriptor_UnpinnedRunTakesTheNewestCachedRelease(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("mint: %d", code)
 	}
-	if got := descriptorShas(tok.Cache); !slices.Equal(got, []string{newest.SHA256}) {
-		t.Fatalf("the job token's cache descriptor = %v, want the 1.10.6 release alone", got)
+	if got := descriptorShas(tok.Cache); !slices.Equal(got, []string{bundled.SHA256}) {
+		t.Fatalf("the job token's cache descriptor = %v, want the bundled release alone", got)
 	}
 	rec := cacheDo(t, r, "job", http.MethodGet, "/api/v2/runner/jobs/"+run.ID+"/artifacts", nil)
 	var arts runnercontract.TofuArtifacts
 	_ = json.Unmarshal(rec.Body.Bytes(), &arts)
-	if arts.TofuVersion != "1.10.6" || !slices.Equal(descriptorShas(arts.Cache), []string{newest.SHA256}) {
-		t.Errorf("artifacts = version %q, cache %v; want 1.10.6 and its entry", arts.TofuVersion, descriptorShas(arts.Cache))
+	if arts.TofuVersion != tofu.BundledVersion || !slices.Equal(descriptorShas(arts.Cache), []string{bundled.SHA256}) {
+		t.Errorf("artifacts = version %q, cache %v; want %s and its entry", arts.TofuVersion, descriptorShas(arts.Cache), tofu.BundledVersion)
 	}
 }
 

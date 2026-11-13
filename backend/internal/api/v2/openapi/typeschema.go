@@ -64,6 +64,13 @@ func schemaFor(t reflect.Type, inProgress map[reflect.Type]bool) *Schema {
 		return s
 	}
 
+	if elem, ok := nullableElem(t); ok {
+		// A null-aware attribute (jsonapi.Nullable): its value's schema, nullable.
+		s := schemaFor(elem, inProgress)
+		s.Nullable = true
+		return s
+	}
+
 	switch {
 	case t == timeType:
 		return &Schema{Type: "string", Format: "date-time"}
@@ -111,6 +118,22 @@ func schemaFor(t reflect.Type, inProgress map[reflect.Type]bool) *Schema {
 	default:
 		return &Schema{Opaque: true}
 	}
+}
+
+// nullableType is a type that decodes a value of another type or a JSON null, and names that type:
+// jsonapi.Nullable. The interface is spelled here so this package does not import jsonapi.
+var nullableType = reflect.TypeFor[interface{ NullableElem() reflect.Type }]()
+
+// nullableElem reports the type a null-aware attribute carries.
+func nullableElem(t reflect.Type) (reflect.Type, bool) {
+	if t.Kind() != reflect.Struct || !t.Implements(nullableType) {
+		return nil, false
+	}
+	elem, ok := reflect.Zero(t).Interface().(interface{ NullableElem() reflect.Type })
+	if !ok {
+		return nil, false
+	}
+	return elem.NullableElem(), true
 }
 
 // decodesItself reports whether values of t are decoded by a method of their own.

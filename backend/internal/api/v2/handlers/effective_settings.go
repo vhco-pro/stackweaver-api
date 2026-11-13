@@ -20,8 +20,8 @@ import (
 const effectiveSettingsType = "effective-settings"
 
 // EffectiveSetting is one resolved setting: its value and the level it came from (workspace,
-// job-template, inventory-source, project, organization or deployment). Level is null when no level
-// sets the value and there is no deployment default (an OpenTofu version nobody configured).
+// job-template, inventory-source, project, organization or deployment). Every setting resolves; the
+// OpenTofu version's deployment level is the installation default (#1069, D2).
 type EffectiveSetting[T any] struct {
 	Value T       `json:"value"`
 	Level *string `json:"level"`
@@ -58,14 +58,13 @@ func poolString(id *uuid.UUID) *string {
 	return &s
 }
 
-// workspaceEffectiveSettings resolves a workspace's settings. The workspace must be loaded with its
-// Project and the Project's Organization.
-func workspaceEffectiveSettings(ws *models.Workspace, deploymentTimeout int) EffectiveSettingsAttributes {
+// workspaceEffectiveSettings resolves a workspace's settings; installation is the installation
+// default OpenTofu version (repository.InstallationTofuVersion). The workspace must be loaded with
+// its Project and the Project's Organization.
+func workspaceEffectiveSettings(ws *models.Workspace, deploymentTimeout int, installation string) EffectiveSettingsAttributes {
 	exec := settings.EffectiveExecution(ws)
-	version := &EffectiveSetting[string]{}
-	if v, ok := settings.EffectiveTofuVersion(ws); ok {
-		version = &EffectiveSetting[string]{Value: v.Value, Level: levelOf(v.Level)}
-	}
+	v := settings.EffectiveTofuVersion(ws, installation)
+	version := &EffectiveSetting[string]{Value: v.Value, Level: levelOf(v.Level)}
 	timeout := settings.EffectiveWorkspaceRunTimeout(ws, deploymentTimeout)
 	return EffectiveSettingsAttributes{
 		ExecutionMode:     &EffectiveSetting[string]{Value: exec.Value.Mode, Level: levelOf(exec.Level)},
@@ -180,7 +179,7 @@ func (h *EffectiveSettingsHandlerV2) GetWorkspace(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to read this workspace")
 		return
 	}
-	jsonapi.WriteDocument(c, http.StatusOK, effectiveSettingsResource(ws.ID, workspaceEffectiveSettings(ws, h.deploymentTimeout)))
+	jsonapi.WriteDocument(c, http.StatusOK, effectiveSettingsResource(ws.ID, workspaceEffectiveSettings(ws, h.deploymentTimeout, repository.InstallationTofuVersion(h.workspaceRepo.DB()))))
 }
 
 // GetJobTemplate - GET /ansible/job-templates/:id/effective-settings
