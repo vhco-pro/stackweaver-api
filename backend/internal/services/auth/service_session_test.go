@@ -382,3 +382,50 @@ func TestLogToken_BoundToTheBrowserSession(t *testing.T) {
 		}
 	})
 }
+
+// go-tfe's log reader replaces the query string of a log-read-url with its own limit and offset and
+// sends no Authorization header, so the log-read-url carries its run-bound token in the path. A
+// token there authenticates the read as the credential that minted it, only for its own run, and a
+// credential that is not a log token is not accepted in the path.
+func TestLogToken_InThePath(t *testing.T) {
+	logtoken.SetSecret([]byte("test-secret-key-32-bytes-long!!!"))
+	t.Cleanup(func() { logtoken.SetSecret(nil) })
+
+	read := func(r *sessionRig, target string) (int, seen) {
+		var got seen
+		router := gin.New()
+		router.Use(r.svc.AuthenticateMiddleware())
+		handler := func(c *gin.Context) {
+			got.reached = true
+			got.userID, _ = c.Get("user_id")
+			got.authMethod, _ = c.Get("auth_method")
+			c.Status(http.StatusOK)
+		}
+		router.GET("/api/v2/runs/:id/logs/plan/:token", handler)
+		router.GET("/api/v2/runs/:id/logs/apply/:token", handler)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Code, got
+	}
+
+	r := newSessionRig(t)
+	s, err := r.sessions.Lookup(r.raw)
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	token := logtoken.Mint("run-1", logtoken.Credential{BrowserSessionID: s.ID})
+
+	for _, phase := range []string{"plan", "apply"} {
+		code, got := read(r, "/api/v2/runs/run-1/logs/"+phase+"/"+token+"?limit=65536&offset=0")
+		if code != http.StatusOK || got.userID != r.user.ID || got.authMethod != "log_token" {
+			t.Errorf("%s log with the token in the path: status %d, user %v, method %v; want 200 as the session's user", phase, code, got.userID, got.authMethod)
+		}
+	}
+	if code, got := read(r, "/api/v2/runs/run-2/logs/plan/"+token+"?limit=65536&offset=0"); code != http.StatusUnauthorized || got.reached {
+		t.Errorf("another run's log with this run's token: status %d, reached %v; want 401", code, got.reached)
+	}
+	if code, got := read(r, "/api/v2/runs/run-1/logs/plan/not-a-token"); code != http.StatusUnauthorized || got.reached {
+		t.Errorf("a path segment that is not a log token: status %d, reached %v; want 401", code, got.reached)
+	}
+}

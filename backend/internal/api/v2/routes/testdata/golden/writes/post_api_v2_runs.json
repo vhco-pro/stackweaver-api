@@ -109,28 +109,40 @@
         },
         "agent-pool-id": "\u003cuuid\u003e",
         "agent-pool-name": "hosted",
+        "allow-empty-apply": false,
+        "auto-apply": false,
+        "canceled-at": null,
         "created-at": "\u003ctimestamp\u003e",
         "has-changes": false,
         "is-destroy": false,
-        "message": "",
+        "message": "Recorded by the golden write harness",
         "operation": "plan-only",
         "permissions": {
-          "can-apply": false,
+          "can-apply": true,
           "can-cancel": true,
           "can-discard": true,
-          "can-force-cancel": false,
-          "can-force-execute": false
+          "can-force-cancel": true,
+          "can-force-execute": true
         },
         "plan-only": true,
+        "position-in-queue": 0,
+        "refresh": true,
+        "refresh-only": false,
         "source": "tfe-api",
         "status": "pending",
         "status-timestamps": {
-          "plan-queued-at": "\u003ctimestamp\u003e"
+          "plan-queueable-at": "\u003ctimestamp\u003e"
         },
         "updated-at": "\u003ctimestamp\u003e"
       },
       "id": "\u003cid\u003e",
       "relationships": {
+        "apply": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "applies"
+          }
+        },
         "plan": {
           "data": {
             "id": "\u003cid\u003e",

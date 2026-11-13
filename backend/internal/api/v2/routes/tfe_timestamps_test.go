@@ -82,18 +82,15 @@ func TestTFETimestamps_GoTFEReadsStoredInstants(t *testing.T) {
 		}
 		created := stored(t, "runs", "created_at", run.ID)
 		same(t, "run create created-at", run.CreatedAt, created)
-		if run.Status == tfe.RunPending {
-			same(t, "run create plan-queued-at", run.StatusTimestamps.PlanQueuedAt, created)
-		}
+		// plan-queueable-at is the first status timestamp of every TFE run: its creation (#1072).
+		same(t, "run create plan-queueable-at", run.StatusTimestamps.PlanQueueableAt, created)
 
 		again, err := client.Runs.Read(ctx, run.ID)
 		if err != nil {
 			t.Fatalf("Runs.Read: %v", err)
 		}
 		same(t, "run read created-at", again.CreatedAt, created)
-		if again.Status == tfe.RunPending {
-			same(t, "run read plan-queued-at", again.StatusTimestamps.PlanQueuedAt, created)
-		}
+		same(t, "run read plan-queueable-at", again.StatusTimestamps.PlanQueueableAt, created)
 	})
 
 	t.Run("applied run read", func(t *testing.T) {

@@ -2,7 +2,8 @@
 
 // Usage & Analytics aggregation tests. These drive the real handler against real Postgres, because
 // the whole point of the endpoint is the SQL: the numbers it reports are the ones the page prints,
-// and the definitions they encode (a plan-only run is done at `planned`, an Ansible `error` is a
+// and the definitions they encode (a run that planned with nothing to apply is done at
+// `planned_and_finished`, `planned` waits for a confirmation, an Ansible `error` is a
 // failure, a period with nothing decided has no success rate at all) are exactly the ones the old
 // client-side implementation got wrong.
 //
@@ -179,14 +180,16 @@ func setupAnalyticsFixture(t *testing.T) *analyticsFixture {
 	runs := []*models.Run{
 		mkRun("a000000", models.RunStatusApplied, models.RunOperationPlanAndApply, 10),
 		mkRun("b000000", models.RunStatusApplied, models.RunOperationPlanAndApply, 20),
-		mkRun("c000000", models.RunStatusCompleted, models.RunOperationPlanAndApply, 60),
-		// Terminal for a plan-only run: it has no apply phase to reach, so it is a success.
-		mkRun("d000000", models.RunStatusPlanned, models.RunOperationPlanOnly, 0),
+		// A plan with nothing to apply ends at planned_and_finished: a success (the TFE status that
+		// replaced the legacy `completed`, #1072).
+		mkRun("c000000", models.RunStatusPlannedAndFinished, models.RunOperationPlanAndApply, 60),
+		// A plan-only run ends at planned_and_finished too: it has no apply phase to reach.
+		mkRun("d000000", models.RunStatusPlannedAndFinished, models.RunOperationPlanOnly, 0),
 		// Same status on a plan-and-apply run means "awaiting confirmation" - pending, not success.
 		mkRun("e000000", models.RunStatusPlanned, models.RunOperationPlanAndApply, 0),
-		mkRun("f000000", models.RunStatusFailed, models.RunOperationPlanAndApply, 5),
-		mkRun("g000000", models.RunStatusFailed, models.RunOperationDestroy, 5),
-		mkRun("h000000", models.RunStatusRunning, models.RunOperationPlanAndApply, 0),
+		mkRun("f000000", models.RunStatusErrored, models.RunOperationPlanAndApply, 5),
+		mkRun("g000000", models.RunStatusErrored, models.RunOperationDestroy, 5),
+		mkRun("h000000", models.RunStatusPlanning, models.RunOperationPlanAndApply, 0),
 		mkRun("i000000", models.RunStatusCancelled, models.RunOperationPlanAndApply, 0),
 	}
 

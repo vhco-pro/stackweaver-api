@@ -1640,6 +1640,28 @@ func (h *RunnerAgentHandler) revokeJobTokens(kind models.JobType, jobID string) 
 	}
 }
 
+// planFinishedStatus is the status a run takes when its plan job completes (TFE run states):
+//
+//   - a post_plan task stage runs first, whatever the plan holds; its continuation decides next;
+//   - a plan-only run, and a plan-and-apply or destroy run whose plan has no changes, end at
+//     planned_and_finished: there is nothing to apply, and the run is final;
+//   - a plan with changes applies at once under auto-apply, or rests at planned for confirmation.
+//
+// runtask.ContinueAfterStagePassed makes the same decision for a run resuming after its post_plan
+// stage, so the two cannot disagree on what a finished plan leads to.
+func planFinishedStatus(op models.RunOperation, hasChanges, hasPostPlanStage, autoApply bool) models.RunStatus {
+	switch {
+	case hasPostPlanStage:
+		return models.RunStatusPostPlanRunning
+	case op == models.RunOperationPlanOnly || !hasChanges:
+		return models.RunStatusPlannedAndFinished
+	case autoApply:
+		return models.RunStatusApplying
+	default:
+		return models.RunStatusPlanned
+	}
+}
+
 // jobCompleteTerraformRun handles job completion for Terraform runs
 func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID string, req JobCompleteRequest) {
 	var run models.Run
@@ -1721,8 +1743,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 	case "completed":
 		switch run.Status { //nolint:exhaustive // only planning has special handling
 		case models.RunStatusPlanning:
-			// Plan phase completed (for plan-and-apply and destroy runs)
-			run.Status = models.RunStatusPlanned
+			// Plan phase completed. The status it leads to is planFinishedStatus's.
 			run.PlanCompletedAt = &now
 			// TFE-compatible: Only auto-apply for VCS-triggered runs with workspace.AutoApply enabled
 			// UI-triggered "Plan and Apply" runs must wait for user confirmation via the Apply endpoint.
@@ -1752,22 +1773,24 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			}
 
 			// Run-task gate: a run with a post_plan task stage pauses at post_plan_running; the
-			// continuation applies the planned/completed/applying decision after the stage passes.
-			// Mirrors the platform runner's gate in backend/cmd/runner/main.go - the two finalize
-			// paths must gate identically.
+			// continuation (runtask.ContinueAfterStagePassed) makes the same decision after the stage
+			// passes.
 			hasPostPlanStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostPlan)
 			if tsErr != nil {
 				// Fail closed: skipping the gate on a DB error would let a run bypass a mandatory task.
 				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to check task stages")
 				return
 			}
-			switch {
-			case hasPostPlanStage:
-				run.Status = models.RunStatusPostPlanRunning
+			run.Status = planFinishedStatus(run.Operation, run.PlanOutput.IndicatesChanges(), hasPostPlanStage, shouldAutoApply)
+			switch run.Status { //nolint:exhaustive // planFinishedStatus returns one of these four
+			case models.RunStatusPostPlanRunning:
 				run.AutoApplyResolved = shouldAutoApply
 				logger.Infof("Run %s paused at post_plan task stage (auto-apply resolved: %v)", runID, shouldAutoApply)
-			case shouldAutoApply:
-				run.Status = models.RunStatusApplying
+			case models.RunStatusPlannedAndFinished:
+				// Nothing to apply: a plan-only run, or a plan with no changes. The run is final.
+				run.CompletedAt = &now
+				logger.Infof("Run %s planned and finished (%s, no changes to apply or plan-only)", runID, run.Operation)
+			case models.RunStatusApplying:
 				// Clear the dispatch claim consumed by the PLAN job start, or no agent can ever claim
 				// the apply phase (ClaimForDispatch requires a NULL claim) and the run wedges at
 				// `applying`. The manual-confirm path already clears it; this auto-apply path never
@@ -1785,7 +1808,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			// Run was cancelled (e.g. user cancelled mid-apply); do not overwrite with applied
 			break
 		default:
-			// Apply phase, plan-only, or destroy completed. Only set applied if run is not cancelled
+			// The apply phase completed. Only set applied if run is not cancelled
 			// (atomic update so we never overwrite cancelled, regardless of race with Cancel API).
 			// Run-task gate: with a post_apply task stage the run pauses at post_apply_running (no
 			// completed_at yet); the continuation writes applied after the stage passes. Mirrors the
@@ -1824,7 +1847,7 @@ func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID strin
 			// The engine exited non-zero because it was interrupted: the run stays canceled.
 			break
 		}
-		run.Status = models.RunStatusFailed
+		run.Status = models.RunStatusErrored
 		// Use ErrorMessage if provided, fall back to Output for error context
 		errMsg := req.ErrorMessage
 		if errMsg == "" && req.Output != "" {

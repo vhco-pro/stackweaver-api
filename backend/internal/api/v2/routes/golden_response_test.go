@@ -338,9 +338,11 @@ var (
 	// verbatim, so they differed on every reseed and ten fixtures failed to reproduce.
 	tfeIDRe = regexp.MustCompile(`\b[a-z]{2,8}-[A-Za-z0-9]{16}\b`)
 	tokenRe = regexp.MustCompile(`\btfe-[A-Za-z0-9_\-]{16,}\b`)
-	// Signed log-read URLs carry an HMAC token with an embedded expiry, so the query value is
-	// different on every run and every key rotation.
-	logTokenRe = regexp.MustCompile(`token=[A-Za-z0-9_\-.]+`)
+	// Signed log-read URLs carry an HMAC token with an embedded expiry, so the value is
+	// different on every run and every key rotation: in the query of the older form, and in the
+	// path of a log-read-url (/logs/{plan,apply}/<token>).
+	logTokenRe     = regexp.MustCompile(`token=[A-Za-z0-9_\-.]+`)
+	logPathTokenRe = regexp.MustCompile(`/logs/(plan|apply)/[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+`)
 )
 
 // normalise replaces values that differ between runs with stable placeholders, recursing
@@ -385,6 +387,7 @@ func normalise(v any) any {
 		s := t
 		s = tokenRe.ReplaceAllString(s, "<token>")
 		s = logTokenRe.ReplaceAllString(s, "token=<signed>")
+		s = logPathTokenRe.ReplaceAllString(s, "/logs/$1/<signed>")
 		s = uuidRe.ReplaceAllString(s, "<uuid>")
 		s = timestampRe.ReplaceAllString(s, "<timestamp>")
 		s = tfeIDRe.ReplaceAllString(s, "<id>")

@@ -205,8 +205,7 @@ func (s *DriftDetectionService) executeDriftCheck(ctx context.Context, workspace
 	if err == nil {
 		for _, run := range recentRuns {
 			if (run.Status == models.RunStatusPending ||
-				run.Status == models.RunStatusPlanning ||
-				run.Status == models.RunStatusRunning) &&
+				run.Status == models.RunStatusPlanning) &&
 				(run.Operation == models.RunOperationPlanOnly || run.Operation == models.RunOperationPlanAndApply) {
 				logger.Infof("Workspace %s already has an active plan run, skipping drift check", workspace.ID)
 				return nil

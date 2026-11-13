@@ -207,7 +207,9 @@ func TestMixedVersion_TwentyJobsCompleteAcrossTwoReleases(t *testing.T) {
 	for _, r := range runs {
 		ids = append(ids, r.ID)
 	}
-	if err := f.db.Model(&models.Run{}).Where("id IN ? AND status = ?", ids, models.RunStatusPlanned).Count(&planned).Error; err != nil {
+	// Each job completes its plan reporting no changes, which ends the run at
+	// planned_and_finished (TFE's status for a plan with nothing to apply, #1072).
+	if err := f.db.Model(&models.Run{}).Where("id IN ? AND status = ?", ids, models.RunStatusPlannedAndFinished).Count(&planned).Error; err != nil {
 		t.Fatal(err)
 	}
 	if planned != mixedVersionJobs {

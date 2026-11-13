@@ -94,7 +94,7 @@ func TestLostLauncherOutcome(t *testing.T) {
 	if p.Status != models.RunStatusPending || p.RunnerID != nil || p.DispatchedAt != nil {
 		t.Errorf("the lost plan is %s (runner %v, dispatched %v), want pending and unclaimed", p.Status, p.RunnerID, p.DispatchedAt)
 	}
-	if a.Status != models.RunStatusFailed || a.ErrorMessage != repository.LostDuringApply {
+	if a.Status != models.RunStatusErrored || a.ErrorMessage != repository.LostDuringApply {
 		t.Errorf("the lost apply is %s %q, want failed with the runner-lost reason", a.Status, a.ErrorMessage)
 	}
 	var j models.AnsibleJob

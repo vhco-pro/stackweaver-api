@@ -261,7 +261,7 @@
             "name": "prod-network",
             "outcome": "failed",
             "platform": "terraform",
-            "status": "failed",
+            "status": "errored",
             "workspace_name": "prod-network"
           },
           {
@@ -360,7 +360,7 @@
             "name": "payments-staging",
             "outcome": "failed",
             "platform": "terraform",
-            "status": "failed",
+            "status": "errored",
             "workspace_name": "payments-staging"
           },
           {
@@ -393,7 +393,7 @@
             "name": "prod-cluster",
             "outcome": "succeeded",
             "platform": "terraform",
-            "status": "planned",
+            "status": "planned_and_finished",
             "workspace_name": "prod-cluster"
           },
           {
@@ -404,7 +404,7 @@
             "name": "analytics-warehouse",
             "outcome": "succeeded",
             "platform": "terraform",
-            "status": "planned",
+            "status": "planned_and_finished",
             "workspace_name": "analytics-warehouse"
           },
           {

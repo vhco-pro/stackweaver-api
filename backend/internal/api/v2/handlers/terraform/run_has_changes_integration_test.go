@@ -88,6 +88,15 @@ func TestRunHasChanges_WorkspaceListMatchesTheRunInPostgres(t *testing.T) {
 				if listed != resource {
 					t.Errorf("%s run at %s with a %s plan: workspace list has-changes = %v, run resource = %v", op, status, name, listed, resource)
 				}
+				// The run lists (runCollection) load runs without their plans and answer from
+				// PostgreSQL the same way.
+				flags, err := runRepo.PlanIndicatesChangesByID([]string{runID})
+				if err != nil {
+					t.Fatalf("PlanIndicatesChangesByID: %v", err)
+				}
+				if inList := flags[runID] && runReportsChanges(op, status); inList != resource {
+					t.Errorf("%s run at %s with a %s plan: run list has-changes = %v, run resource = %v", op, status, name, inList, resource)
+				}
 				want := name == "changing" && slices.Contains(statusesAfterPlan, status)
 				if resource != want {
 					t.Errorf("%s run at %s with a %s plan: has-changes = %v, want %v", op, status, name, resource, want)

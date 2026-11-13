@@ -11,6 +11,9 @@
           "is-discardable": false,
           "is-force-cancelable": false
         },
+        "allow-empty-apply": false,
+        "auto-apply": false,
+        "canceled-at": "\u003ctimestamp\u003e",
         "completed-at": "\u003ctimestamp\u003e",
         "created-at": "\u003ctimestamp\u003e",
         "has-changes": false,
@@ -18,23 +21,34 @@
         "message": "",
         "operation": "plan-and-apply",
         "permissions": {
-          "can-apply": false,
+          "can-apply": true,
           "can-cancel": true,
           "can-discard": true,
-          "can-force-cancel": false,
-          "can-force-execute": false
+          "can-force-cancel": true,
+          "can-force-execute": true
         },
         "plan-only": false,
+        "position-in-queue": 0,
+        "refresh": true,
+        "refresh-only": false,
         "source": "tfe-api",
         "started-at": "\u003ctimestamp\u003e",
         "status": "canceled",
         "status-timestamps": {
+          "canceled-at": "\u003ctimestamp\u003e",
+          "plan-queueable-at": "\u003ctimestamp\u003e",
           "planning-at": "\u003ctimestamp\u003e"
         },
         "updated-at": "\u003ctimestamp\u003e"
       },
       "id": "\u003cid\u003e",
       "relationships": {
+        "apply": {
+          "data": {
+            "id": "\u003cid\u003e",
+            "type": "applies"
+          }
+        },
         "plan": {
           "data": {
             "id": "\u003cid\u003e",

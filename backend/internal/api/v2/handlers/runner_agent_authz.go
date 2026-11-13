@@ -250,9 +250,11 @@ const jobCancelMarker = "Stackweaver: the job was canceled."
 // finishedRunStatuses are the statuses after which an OpenTofu run has no job left to execute.
 var finishedRunStatuses = []models.RunStatus{
 	models.RunStatusApplied,
-	models.RunStatusFailed,
+	models.RunStatusErrored,
 	models.RunStatusCancelled,
-	models.RunStatusCompleted,
+	models.RunStatusPlannedAndFinished,
+	models.RunStatusDiscarded,
+	models.RunStatusForceCanceled,
 }
 
 // runFinished reports whether a run has reached a terminal status.

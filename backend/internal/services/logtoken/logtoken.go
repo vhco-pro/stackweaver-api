@@ -8,9 +8,11 @@
 // revoked key, an ended browser session, or a team that has lost access to the run stops reading
 // at once.
 //
-// The lifetime is an hour. Terraform Enterprise's archivist log URLs live longer, and go-tfe's log
-// reader does not rely on either: it authenticates its polls with its Authorization header and
-// replaces the URL's query string, token included, on every request.
+// The token travels in the path of the log-read-url (/api/v2/runs/:id/logs/:phase/:token): go-tfe's
+// log reader, which the Terraform CLI streams logs with, replaces the URL's query string with its
+// own limit and offset on every request and sends no Authorization header, so the path is the only
+// part of the URL that reaches the API. The lifetime is an hour; Terraform Enterprise's archivist
+// log URLs live longer.
 package logtoken
 
 import (

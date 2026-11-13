@@ -131,22 +131,23 @@ type WorkspaceResource struct {
 	Relationships *WorkspaceRelationships `json:"relationships"`
 }
 
-// IncludedRunPermissions is the single-member permission block of a sideloaded run.
-type IncludedRunPermissions struct {
-	CanApply bool `json:"can-apply"`
+// IncludedRunActions is the single-member actions block of a sideloaded run: whether it waits for
+// a confirmation, as the full run resource's actions.is-confirmable reports it.
+type IncludedRunActions struct {
+	IsConfirmable bool `json:"is-confirmable"`
 }
 
 // IncludedRunAttributes is the lightweight run the workspace list sideloads for its cards.
 type IncludedRunAttributes struct {
-	Status      string                 `json:"status"`
-	Operation   string                 `json:"operation"`
-	IsDestroy   bool                   `json:"is-destroy"`
-	PlanOnly    bool                   `json:"plan-only"`
-	CreatedAt   string                 `json:"created-at"`
-	UpdatedAt   string                 `json:"updated-at"`
-	HasChanges  bool                   `json:"has-changes"`
-	Permissions IncludedRunPermissions `json:"permissions"`
-	CompletedAt string                 `json:"completed-at,omitempty"`
+	Status      string             `json:"status"`
+	Operation   string             `json:"operation"`
+	IsDestroy   bool               `json:"is-destroy"`
+	PlanOnly    bool               `json:"plan-only"`
+	CreatedAt   string             `json:"created-at"`
+	UpdatedAt   string             `json:"updated-at"`
+	HasChanges  bool               `json:"has-changes"`
+	Actions     IncludedRunActions `json:"actions"`
+	CompletedAt string             `json:"completed-at,omitempty"`
 }
 
 // IncludedRunRelationships points a sideloaded run at its workspace.
@@ -171,19 +172,23 @@ func tagBindingID(b *models.TagBinding) string {
 
 // Typed run wire shapes (#760).
 
-// RunStatusTimestamps: every member conditional, exactly mirroring the branchy map-based
-// builder - TFE's CLI reads these to recognise phase completion, and an empty struct
-// serialises as {} just as the empty map did.
+// RunStatusTimestamps is the run's status-timestamps block: a member for each status the run has
+// entered, named after it (go-tfe RunStatusTimestamps), built by runStatusTimestamps.
 type RunStatusTimestamps struct {
-	PlanQueuedAt string `json:"plan-queued-at,omitempty"`
-	PlanningAt   string `json:"planning-at,omitempty"`
-	PlannedAt    string `json:"planned-at,omitempty"`
-	ApplyingAt   string `json:"applying-at,omitempty"`
-	AppliedAt    string `json:"applied-at,omitempty"`
+	PlanQueueableAt      string `json:"plan-queueable-at,omitempty"`
+	PlanningAt           string `json:"planning-at,omitempty"`
+	PlannedAt            string `json:"planned-at,omitempty"`
+	PlannedAndFinishedAt string `json:"planned-and-finished-at,omitempty"`
+	ApplyingAt           string `json:"applying-at,omitempty"`
+	AppliedAt            string `json:"applied-at,omitempty"`
+	ErroredAt            string `json:"errored-at,omitempty"`
+	CanceledAt           string `json:"canceled-at,omitempty"`
+	ForceCanceledAt      string `json:"force-canceled-at,omitempty"`
+	DiscardedAt          string `json:"discarded-at,omitempty"`
 }
 
-// RunActions: is-confirmable mirrors permissions.can-apply; it was once hardcoded false,
-// which hung go-tfe clients polling it (tfe_workspace_run).
+// RunActions is the run's actions block: which run actions its status accepts (runActions). The
+// action endpoints check the same status lists.
 type RunActions struct {
 	IsCancelable      bool `json:"is-cancelable"`
 	IsConfirmable     bool `json:"is-confirmable"`
@@ -191,7 +196,8 @@ type RunActions struct {
 	IsForceCancelable bool `json:"is-force-cancelable"`
 }
 
-// RunPermissions is the per-run permission block.
+// RunPermissions is the per-run permission block: what the caller may do to the run, whatever
+// its status (TFE reports `can-force-cancel: true` beside `is-force-cancelable: false`).
 type RunPermissions struct {
 	CanApply        bool `json:"can-apply"`
 	CanCancel       bool `json:"can-cancel"`
@@ -209,6 +215,12 @@ type RunAttributes struct {
 	IsDestroy        bool                `json:"is-destroy"`
 	PlanOnly         bool                `json:"plan-only"`
 	Message          string              `json:"message"`
+	AutoApply        bool                `json:"auto-apply"`
+	AllowEmptyApply  bool                `json:"allow-empty-apply"`
+	Refresh          bool                `json:"refresh"`
+	RefreshOnly      bool                `json:"refresh-only"`
+	PositionInQueue  int                 `json:"position-in-queue"`
+	CanceledAt       *string             `json:"canceled-at"`
 	Source           string              `json:"source"`
 	CreatedAt        string              `json:"created-at"`
 	UpdatedAt        string              `json:"updated-at"`
@@ -245,10 +257,13 @@ type RunRelationships struct {
 // PhaseStatusTimestamps is the shared status-timestamps block of a plan or apply resource;
 // every member conditional per the phase's state machine.
 type PhaseStatusTimestamps struct {
-	PendingAt  string `json:"pending-at,omitempty"`
-	QueuedAt   string `json:"queued-at,omitempty"`
-	StartedAt  string `json:"started-at,omitempty"`
-	FinishedAt string `json:"finished-at,omitempty"`
+	PendingAt       string `json:"pending-at,omitempty"`
+	QueuedAt        string `json:"queued-at,omitempty"`
+	StartedAt       string `json:"started-at,omitempty"`
+	FinishedAt      string `json:"finished-at,omitempty"`
+	ErroredAt       string `json:"errored-at,omitempty"`
+	CanceledAt      string `json:"canceled-at,omitempty"`
+	ForceCanceledAt string `json:"force-canceled-at,omitempty"`
 }
 
 // ExecutionDetails is the single-member execution mode block of a plan or apply.

@@ -6175,6 +6175,46 @@
           }
         }
       },
+      "get-api-v2-runs-id-run-events-005b8e": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "get-api-v2-runs-id-task-stages-c0bd83": {
         "type": "object",
         "properties": {
@@ -12982,11 +13022,19 @@
                   "status-timestamps": {
                     "type": "object",
                     "properties": {
+                      "canceled-at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
                       "pending-at": {
                         "type": "string",
                         "format": "date-time"
                       },
                       "queued-at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "started-at": {
                         "type": "string",
                         "format": "date-time"
                       }
@@ -22249,6 +22297,17 @@
                         }
                       }
                     },
+                    "allow-empty-apply": {
+                      "type": "boolean"
+                    },
+                    "auto-apply": {
+                      "type": "boolean"
+                    },
+                    "canceled-at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
                     "completed-at": {
                       "type": "string",
                       "format": "date-time"
@@ -22292,6 +22351,15 @@
                     "plan-only": {
                       "type": "boolean"
                     },
+                    "position-in-queue": {
+                      "type": "string"
+                    },
+                    "refresh": {
+                      "type": "boolean"
+                    },
+                    "refresh-only": {
+                      "type": "boolean"
+                    },
                     "source": {
                       "type": "string"
                     },
@@ -22306,6 +22374,18 @@
                       "type": "object",
                       "properties": {
                         "applied-at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "canceled-at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "plan-queueable-at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "planned-and-finished-at": {
                           "type": "string",
                           "format": "date-time"
                         },
@@ -22331,6 +22411,22 @@
                 "relationships": {
                   "type": "object",
                   "properties": {
+                    "apply": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    },
                     "plan": {
                       "type": "object",
                       "properties": {
@@ -22434,6 +22530,17 @@
                   "agent-pool-name": {
                     "type": "string"
                   },
+                  "allow-empty-apply": {
+                    "type": "boolean"
+                  },
+                  "auto-apply": {
+                    "type": "boolean"
+                  },
+                  "canceled-at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
                   "completed-at": {
                     "type": "string",
                     "format": "date-time"
@@ -22477,6 +22584,15 @@
                   "plan-only": {
                     "type": "boolean"
                   },
+                  "position-in-queue": {
+                    "type": "integer"
+                  },
+                  "refresh": {
+                    "type": "boolean"
+                  },
+                  "refresh-only": {
+                    "type": "boolean"
+                  },
                   "source": {
                     "type": "string"
                   },
@@ -22494,7 +22610,11 @@
                         "type": "string",
                         "format": "date-time"
                       },
-                      "plan-queued-at": {
+                      "canceled-at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "plan-queueable-at": {
                         "type": "string",
                         "format": "date-time"
                       },
@@ -26169,6 +26289,14 @@
                 "attributes": {
                   "type": "object",
                   "properties": {
+                    "actions": {
+                      "type": "object",
+                      "properties": {
+                        "is-confirmable": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
                     "completed-at": {
                       "type": "string",
                       "format": "date-time"
@@ -26185,14 +26313,6 @@
                     },
                     "operation": {
                       "type": "string"
-                    },
-                    "permissions": {
-                      "type": "object",
-                      "properties": {
-                        "can-apply": {
-                          "type": "boolean"
-                        }
-                      }
                     },
                     "plan-only": {
                       "type": "boolean"
@@ -41684,6 +41804,63 @@
         ]
       }
     },
+    "/api/v2/runs/{id}/logs/apply/{token}": {
+      "get": {
+        "operationId": "get-api-v2-runs-id-logs-apply-token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The most to return in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How far in to start, counted from 0.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /api/v2/runs/:id/logs/apply/:token",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
     "/api/v2/runs/{id}/logs/plan": {
       "get": {
         "description": "Not recorded by the golden harness: same log backend as /logs; recovers to a 500 with an empty body",
@@ -41729,6 +41906,63 @@
           }
         },
         "summary": "GET /api/v2/runs/:id/logs/plan",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v2/runs/{id}/logs/plan/{token}": {
+      "get": {
+        "operationId": "get-api-v2-runs-id-logs-plan-token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The most to return in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How far in to start, counted from 0.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-401"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "GET /api/v2/runs/:id/logs/plan/:token",
         "tags": [
           "runs"
         ]
@@ -41822,6 +42056,37 @@
           }
         },
         "summary": "GET /api/v2/runs/:id/plan",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v2/runs/{id}/run-events": {
+      "get": {
+        "operationId": "get-api-v2-runs-id-run-events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-api-v2-runs-id-run-events-005b8e"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/runs/:id/run-events",
         "tags": [
           "runs"
         ]

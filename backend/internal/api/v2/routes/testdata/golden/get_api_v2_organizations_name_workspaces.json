@@ -488,14 +488,14 @@
     "included": [
       {
         "attributes": {
+          "actions": {
+            "is-confirmable": false
+          },
           "completed-at": "\u003ctimestamp\u003e",
           "created-at": "\u003ctimestamp\u003e",
           "has-changes": false,
           "is-destroy": false,
           "operation": "plan-and-apply",
-          "permissions": {
-            "can-apply": false
-          },
           "plan-only": false,
           "status": "applied",
           "updated-at": "\u003ctimestamp\u003e"
@@ -513,14 +513,14 @@
       },
       {
         "attributes": {
+          "actions": {
+            "is-confirmable": false
+          },
           "completed-at": "\u003ctimestamp\u003e",
           "created-at": "\u003ctimestamp\u003e",
           "has-changes": false,
           "is-destroy": false,
           "operation": "plan-and-apply",
-          "permissions": {
-            "can-apply": false
-          },
           "plan-only": false,
           "status": "applied",
           "updated-at": "\u003ctimestamp\u003e"
@@ -538,14 +538,14 @@
       },
       {
         "attributes": {
+          "actions": {
+            "is-confirmable": false
+          },
           "completed-at": "\u003ctimestamp\u003e",
           "created-at": "\u003ctimestamp\u003e",
           "has-changes": false,
           "is-destroy": false,
           "operation": "plan-and-apply",
-          "permissions": {
-            "can-apply": false
-          },
           "plan-only": false,
           "status": "applied",
           "updated-at": "\u003ctimestamp\u003e"
@@ -563,14 +563,14 @@
       },
       {
         "attributes": {
+          "actions": {
+            "is-confirmable": false
+          },
           "completed-at": "\u003ctimestamp\u003e",
           "created-at": "\u003ctimestamp\u003e",
           "has-changes": false,
           "is-destroy": false,
           "operation": "plan-and-apply",
-          "permissions": {
-            "can-apply": false
-          },
           "plan-only": false,
           "status": "applied",
           "updated-at": "\u003ctimestamp\u003e"
@@ -588,14 +588,14 @@
       },
       {
         "attributes": {
+          "actions": {
+            "is-confirmable": false
+          },
           "completed-at": "\u003ctimestamp\u003e",
           "created-at": "\u003ctimestamp\u003e",
           "has-changes": false,
           "is-destroy": false,
           "operation": "plan-and-apply",
-          "permissions": {
-            "can-apply": false
-          },
           "plan-only": false,
           "status": "canceled",
           "updated-at": "\u003ctimestamp\u003e"
@@ -613,16 +613,16 @@
       },
       {
         "attributes": {
+          "actions": {
+            "is-confirmable": false
+          },
           "completed-at": "\u003ctimestamp\u003e",
           "created-at": "\u003ctimestamp\u003e",
           "has-changes": false,
           "is-destroy": false,
           "operation": "plan-and-apply",
-          "permissions": {
-            "can-apply": false
-          },
           "plan-only": false,
-          "status": "failed",
+          "status": "errored",
           "updated-at": "\u003ctimestamp\u003e"
         },
         "id": "\u003cid\u003e",

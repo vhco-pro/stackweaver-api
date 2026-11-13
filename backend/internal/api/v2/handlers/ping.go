@@ -15,7 +15,8 @@ import (
 // Based on go-tfe library source code analysis (go-tfe/tfe.go):
 // - The go-tfe client calls this endpoint during initialization (getRawAPIMetadata)
 // - It reads version information from response headers:
-//   - TFP-API-Version: API version (e.g., "2.2")
+//   - TFP-API-Version: API version. 2.5 is the lowest the Terraform CLI's `cloud` block accepts;
+//     the CLI gates later features (import blocks at 2.6, minimal refresh) on higher versions.
 //   - X-TFE-Version: TFE monthly version (e.g., "202205-1")
 //   - X-TFE-Current-Version: TFE numeric version (e.g., "1.1.0")
 //   - X-RateLimit-Limit: Rate limit header
@@ -25,7 +26,7 @@ import (
 func Ping(c *gin.Context) {
 	// Set required version headers for TFE compatibility
 	// These headers are read by go-tfe client during initialization
-	c.Header("TFP-API-Version", "2.2")              // API version - required by terraform-provider-tfe
+	c.Header("TFP-API-Version", "2.5")              // API version - read by go-tfe; the cloud block needs 2.5
 	c.Header("X-TFE-Version", "202501-1")           // TFE monthly version (format: YYYYMM-N)
 	c.Header("X-TFE-Current-Version", "1.0.0")      // TFE numeric version
 	c.Header("TFP-AppName", "Terraform Enterprise") // Application name

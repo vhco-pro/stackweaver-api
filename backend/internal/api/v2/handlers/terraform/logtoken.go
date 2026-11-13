@@ -4,7 +4,7 @@ package terraform
 
 import (
 	"fmt"
-	"strings"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -13,22 +13,20 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 )
 
-// buildLogReadURL builds the absolute log-read-url for a run, appending extraQuery (e.g.
-// "phase=apply") and a run-bound log token (AUD-045) minted for the request's credential: its API
-// key, or its browser session. The token re-establishes that credential on every read, so it
-// reads only while the credential may (see package logtoken). When no token can be minted, the URL
-// is returned without one and the client authenticates with its Authorization header.
-func buildLogReadURL(c *gin.Context, scheme, host, runID, extraQuery string) string {
-	base := fmt.Sprintf("%s://%s/api/v2/runs/%s/logs", scheme, host, runID)
-	var params []string
-	if extraQuery != "" {
-		params = append(params, extraQuery)
-	}
+// buildLogReadURL builds the absolute log-read-url of a run's plan or apply phase. It carries a
+// run-bound log token (AUD-045) minted for the request's credential, its API key or its browser
+// session, in its path: /api/v2/runs/:id/logs/:phase/:token. The token re-establishes that
+// credential on every read, so it reads only while the credential may (see package logtoken).
+//
+// The token is in the path because that is the only part of the URL a client keeps: go-tfe's log
+// reader, which the Terraform CLI streams plan and apply logs with, replaces the query string with
+// its own limit and offset and sends no Authorization header. A TFE log-read-url is likewise a
+// pre-authorized URL. When no token can be minted, the URL names the phase's log route and the
+// client authenticates with its Authorization header.
+func buildLogReadURL(c *gin.Context, scheme, host, runID, phase string) string {
+	base := fmt.Sprintf("%s://%s/api/v2/runs/%s/logs/%s", scheme, host, runID, phase)
 	if tok := logtoken.Mint(runID, requestCredential(c)); tok != "" {
-		params = append(params, "token="+tok)
-	}
-	if len(params) > 0 {
-		return base + "?" + strings.Join(params, "&")
+		return base + "/" + url.PathEscape(tok)
 	}
 	return base
 }

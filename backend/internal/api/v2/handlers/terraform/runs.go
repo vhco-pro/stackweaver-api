@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -237,109 +238,104 @@ func resolveRunOperation(attrs *RunCreateAttributes) (operation models.RunOperat
 	}
 }
 
+// mayApplyRuns reports whether the user may confirm runs in the workspace: the granular runs
+// permission and workspace write, both required, as the apply action checks.
+func (h *RunHandlerV2) mayApplyRuns(c *gin.Context, userID uuid.UUID, workspace *models.Workspace) (bool, error) {
+	ctx := c.Request.Context()
+	hasRuns, err := h.rbacService.CheckResourcePermission(ctx, userID, rbac.ResourceTypeTerraformWorkspace, workspace.ID, rbac.PermissionRuns, &workspace.ProjectID)
+	if err != nil || !hasRuns {
+		return false, err
+	}
+	return h.rbacService.CheckResourcePermission(ctx, userID, rbac.ResourceTypeTerraformWorkspace, workspace.ID, rbac.PermissionWorkspaceWrite, &workspace.ProjectID)
+}
+
+// runPermissionsKey is the gin context key of the request's run permissions, by workspace.
+const runPermissionsKey = "run_permissions_by_workspace"
+
+// runPermissions is what the caller may do to runs of the run's workspace: TFE's run
+// `permissions`, which describe the caller's rights whatever the run's status (the run's
+// `actions` say what its status accepts). can-apply is the apply action's own check; cancel,
+// discard, force-cancel and force-execute take the run apply permission authorizeRun checks. The
+// answer is kept for the request, so a list of a workspace's runs asks once.
+func (h *RunHandlerV2) runPermissions(c *gin.Context, run *models.Run) RunPermissions {
+	if c == nil || h.rbacService == nil || h.workspaceRepo == nil {
+		return RunPermissions{}
+	}
+	cache, _ := c.Get(runPermissionsKey)
+	byWorkspace, ok := cache.(map[string]RunPermissions)
+	if !ok {
+		byWorkspace = map[string]RunPermissions{}
+		c.Set(runPermissionsKey, byWorkspace)
+	}
+	if p, ok := byWorkspace[run.WorkspaceID]; ok {
+		return p
+	}
+	var p RunPermissions
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		return p
+	}
+	workspace, err := h.workspaceRepo.GetByID(run.WorkspaceID)
+	if err != nil {
+		return p
+	}
+	if mayApply, err := h.mayApplyRuns(c, user.ID, workspace); err == nil {
+		p.CanApply = mayApply
+	}
+	if mayAct, err := h.rbacService.CheckRunPermission(c.Request.Context(), user.ID, workspace.ID, workspace.ProjectID, "apply"); err == nil && mayAct {
+		p.CanCancel, p.CanDiscard, p.CanForceCancel, p.CanForceExecute = true, true, true, true
+	}
+	byWorkspace[run.WorkspaceID] = p
+	return p
+}
+
+// runCollection is runResource for a list of runs. A list loads its runs without their plan
+// documents, so each run's has-changes comes from PostgreSQL (PlanIndicatesChangesByID) through
+// the same runReportsChanges gate hasChanges applies, as the workspace list does (#808).
+func (h *RunHandlerV2) runCollection(c *gin.Context, runs []models.Run) []jsonapi.Resource[RunAttributes] {
+	ids := make([]string, len(runs))
+	for i := range runs {
+		ids[i] = runs[i].ID
+	}
+	changes, err := h.runRepo.PlanIndicatesChangesByID(ids)
+	if err != nil {
+		logger.Warnf("Run list: %v", err)
+	}
+	out := make([]jsonapi.Resource[RunAttributes], len(runs))
+	for i := range runs {
+		out[i] = h.runResource(c, &runs[i])
+		out[i].Attributes.HasChanges = changes[runs[i].ID] && runReportsChanges(runs[i].Operation, runs[i].Status)
+	}
+	return out
+}
+
+// runResource is the run resource as the caller sees it: formatRunResponse with the caller's
+// permissions.
+func (h *RunHandlerV2) runResource(c *gin.Context, run *models.Run) jsonapi.Resource[RunAttributes] {
+	res := formatRunResponse(run, c, h.configVersionRepo, h.runRepo)
+	res.Attributes.Permissions = h.runPermissions(c, run)
+	return res
+}
+
+// speculativeRunOperation applies TFE's default for `plan-only`, which is "from configuration
+// version": a run of a speculative configuration version (the one `terraform plan` uploads) is a
+// speculative plan-only run unless the caller said otherwise. A destroy keeps its operation; a
+// speculative destroy plan is not supported (see the run lifecycle audit). It returns the
+// operation and whether the run has an apply phase.
+func speculativeRunOperation(op models.RunOperation, attrs *RunCreateAttributes, cv *models.ConfigurationVersion) (models.RunOperation, bool) {
+	if cv != nil && cv.Speculative && attrs.PlanOnly == nil && op == models.RunOperationPlanAndApply {
+		op = models.RunOperationPlanOnly
+	}
+	return op, op != models.RunOperationPlanOnly
+}
+
 // formatRunResponse formats a run in TFE-compatible JSON:API format
 // Based on TFE API spec: https://developer.hashicorp.com/terraform/enterprise/api-docs/run
-// c is optional - if provided, will use auth_method from context to determine source
-// runRepo is optional - if provided, will check for existing apply runs to determine can-apply
-func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repository.ConfigurationVersionRepository, runRepo *repository.RunRepository) jsonapi.Resource[RunAttributes] {
-	// Build status-timestamps (TFE requires these for Terraform CLI to recognize completion)
-	var statusTimestamps RunStatusTimestamps
-
-	// Set status-timestamps based on run operation type and status
-	switch run.Operation {
-	case models.RunOperationPlanAndApply:
-		// Plan-and-apply runs: planning → planned → applying → applied
-		// planning-at: when plan started
-		if run.StartedAt != nil {
-			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-		// planned-at: when plan phase completed
-		// Include even when status is 'failed' if PlanCompletedAt is set (plan completed before apply failed)
-		if run.PlanCompletedAt != nil {
-			statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
-		}
-		// applying-at: when apply phase started
-		// Include even when status is 'failed' if ApplyStartedAt is set (apply started before it failed)
-		if run.ApplyStartedAt != nil {
-			statusTimestamps.ApplyingAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-		// applied-at: when apply phase completed (status is 'applied')
-		if run.Status == models.RunStatusApplied && run.CompletedAt != nil {
-			statusTimestamps.AppliedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-
-	case models.RunOperationPlanOnly:
-		// Plan-only runs: planning → planned
-		// planning-at: when plan started
-		if run.StartedAt != nil {
-			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-		// planned-at: when plan completed (status is 'planned' or 'completed')
-		if run.Status == models.RunStatusPlanned || run.Status == models.RunStatusCompleted {
-			if run.PlanCompletedAt != nil {
-				statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
-			} else if run.CompletedAt != nil {
-				statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.CompletedAt)
-			}
-		}
-
-	case models.RunOperationDestroy:
-		// TFE-compatible: Destroy runs follow the same two-phase flow as plan-and-apply
-		// planning-at: when destroy plan started
-		if run.StartedAt != nil {
-			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-		// planned-at: when destroy plan completed
-		if run.PlanCompletedAt != nil {
-			statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
-		}
-		// applying-at: when destroy execution started (apply phase)
-		if run.ApplyStartedAt != nil {
-			statusTimestamps.ApplyingAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-		// applied-at: when destroy execution completed
-		if run.Status == models.RunStatusApplied && run.CompletedAt != nil {
-			statusTimestamps.AppliedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-	}
-
-	// Legacy: Support old statuses for backward compatibility
-	if run.Status == models.RunStatusRunning && run.StartedAt != nil {
-		// Check operation to determine if it's planning or applying phase
-		if run.Operation == models.RunOperationPlanAndApply {
-			// For plan-and-apply, check if we're past the plan phase
-			if len(run.PlanOutput) > 0 {
-				// Plan completed, so this must be applying
-				statusTimestamps.ApplyingAt = jsonapi.FormatTime(*run.StartedAt)
-			} else {
-				// Plan phase
-				statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
-			}
-		} else {
-			// Plan-only or legacy plan
-			statusTimestamps.PlanningAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-	}
-	if (run.Status == models.RunStatusCompleted || run.Status == models.RunStatusPlanned) && run.CompletedAt != nil {
-		// Check if this is a plan completion or apply completion
-		if run.Operation == models.RunOperationPlanAndApply {
-			// For plan-and-apply, check if we have apply logs (stored separately)
-			// If plan output exists but status is completed, it might be apply completion
-			// For now, assume it's plan completion if status is "planned"
-			if run.Status == models.RunStatusPlanned {
-				statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.CompletedAt)
-			}
-		} else {
-			// Plan-only or legacy: set planned-at
-			statusTimestamps.PlannedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-	}
-
-	// Set plan-queued-at when run is pending (queued for planning)
-	if run.Status == models.RunStatusPending {
-		statusTimestamps.PlanQueuedAt = jsonapi.FormatTime(run.CreatedAt)
-	}
-
+// c is optional - if provided, will use auth_method from context to determine source.
+// The status, actions, status-timestamps and the plan and apply relationships follow the TFE run
+// lifecycle (run_lifecycle.go). permissions is left for the caller, who knows who is asking:
+// RunHandlerV2.runResource fills it.
+func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repository.ConfigurationVersionRepository, _ *repository.RunRepository) jsonapi.Resource[RunAttributes] {
 	// TFE-compatible: Determine run source based on TFE spec
 	// TFE only has 3 sources: tfe-ui, tfe-api, tfe-configuration-version
 	// According to TFE spec: If run is queued from a Configuration Version, source should be "tfe-configuration-version"
@@ -378,69 +374,31 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 		}
 	}
 
-	// TFE-compatible: Determine plan-only based on run operation type
-	// - plan-only runs: Cannot be applied (CLI runs, UI "Plan only" runs)
-	// - plan-and-apply runs: Can be applied after plan phase completes
-	planOnly := false
-	switch run.Operation {
-	case models.RunOperationPlanOnly:
-		// Plan-only runs are always plan-only (cannot be applied)
-		planOnly = true
-	case models.RunOperationPlanAndApply:
-		// Plan-and-apply runs are NOT plan-only (can be applied after plan completes)
-		planOnly = false
-	case models.RunOperationDestroy:
-		// Destroy runs are NOT plan-only (they can be applied)
-		planOnly = false
+	var canceledAt *string
+	if runCanceled(run.Status) && run.CompletedAt != nil {
+		at := jsonapi.FormatTime(*run.CompletedAt)
+		canceledAt = &at
 	}
-
-	// TFE-compatible: can-apply permission logic
-	// For plan-and-apply and destroy runs: can-apply is true when plan phase is completed (status="planned")
-	// For plan-only runs: can-apply is always false
-	// Destroy runs follow the same two-phase flow: plan -destroy → confirm → apply
-	var canApply bool
-	switch run.Operation {
-	case models.RunOperationPlanAndApply, models.RunOperationDestroy:
-		// Plan-and-apply or destroy run: can apply when plan phase is completed. `planned` is the
-		// task-less rest state; `post_plan_completed` is the rest state when a post_plan task stage
-		// exists (tfe_workspace_run treats `planned` as pending in that case) - see run.go statuses.
-		canApply = run.Status == models.RunStatusPlanned || run.Status == models.RunStatusPostPlanCompleted
-	case models.RunOperationPlanOnly:
-		// Plan-only run: cannot be applied
-		canApply = false
-	}
-
-	// TFE-compatible: Status in API response
-	// According to TFE API spec and design doc: "Run status stays as 'completed' (not mapped to 'planned') - Terraform CLI checks plan status, not run status"
-	// Terraform CLI expects "completed" status for completed plan runs
-	// The "planned-at" timestamp in status-timestamps also signals completion
-	// We keep status as-is from database (should be "completed" for completed plan runs, not "planned")
-	apiStatus := string(run.Status)
 
 	attributes := RunAttributes{
-		Status:    apiStatus,
+		Status:    string(run.Status),
 		Operation: string(run.Operation),
 		IsDestroy: run.Operation == models.RunOperationDestroy,
-		PlanOnly:  planOnly,
-		Source:    runSource, // "tfe-api", "tfe-ui", "tfe-configuration-version" - TFE's only three
-		CreatedAt: jsonapi.FormatTime(run.CreatedAt),
-		UpdatedAt: jsonapi.FormatTime(run.UpdatedAt),
-		// TFE requires status-timestamps for the Terraform CLI to recognise completion.
-		StatusTimestamps: statusTimestamps,
+		// A plan-only run is speculative: it cannot be applied.
+		PlanOnly:  run.Operation == models.RunOperationPlanOnly,
+		Message:   run.Message,
+		AutoApply: run.AutoApply,
+		// Every run refreshes the state before it plans; refresh-only runs and empty applies are
+		// not supported, so the run never asks for them.
+		Refresh:    true,
+		CanceledAt: canceledAt,
+		Source:     runSource, // "tfe-api", "tfe-ui", "tfe-configuration-version" - TFE's only three
+		CreatedAt:  jsonapi.FormatTime(run.CreatedAt),
+		UpdatedAt:  jsonapi.FormatTime(run.UpdatedAt),
+		// The Terraform CLI reads the status-timestamps to recognise completion.
+		StatusTimestamps: runStatusTimestamps(run),
 		HasChanges:       hasChanges(run),
-		Actions: RunActions{
-			IsCancelable: run.Status == models.RunStatusRunning || run.Status == models.RunStatusPending || run.Status == models.RunStatusPlanning || run.Status == models.RunStatusApplying ||
-				run.Status == models.RunStatusPrePlanRunning || run.Status == models.RunStatusPostPlanRunning || run.Status == models.RunStatusPreApplyRunning || run.Status == models.RunStatusPostApplyRunning,
-			// A plan-and-apply/destroy run waiting at `planned` is confirmable; mirrors
-			// permissions.can-apply. Was hardcoded false, which hung go-tfe pollers.
-			IsConfirmable: canApply,
-			IsDiscardable: run.Status == models.RunStatusPending,
-		},
-		Permissions: RunPermissions{
-			CanApply:   canApply, // completed plan phase, apply-able operation, not auto-applied
-			CanCancel:  true,
-			CanDiscard: true,
-		},
+		Actions:          runActions(run),
 	}
 
 	// Configuration-version context for the frontend's "Triggered via CLI/UI/VCS" display.
@@ -478,24 +436,19 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 
 	// TFE-compatible: plan output is NOT included here; the frontend fetches /runs/:id/plan.
 
-	// Build relationships
+	// Every TFE run has a plan and an apply, whatever its operation: the apply of a run that will
+	// never apply is reported unreachable. The Terraform CLI reads the apply relationship to stream
+	// a destroy's apply logs. Plan and apply ids equal the run id by design.
+	plan := jsonapi.ToOne(run.ID, "plans")
+	apply := jsonapi.ToOne(run.ID, "applies")
 	relationships := RunRelationships{
 		Workspace: jsonapi.ToOne(run.WorkspaceID, "workspaces"),
+		Plan:      &plan,
+		Apply:     &apply,
 	}
 	if run.ConfigurationVersionID != nil {
 		r := jsonapi.ToOne(*run.ConfigurationVersionID, "configuration-versions")
 		relationships.ConfigurationVersion = &r
-	}
-	// TFE requires a "plan" relationship for every plan-bearing operation (destroy included);
-	// plan id equals run id by design.
-	if run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationPlanOnly || run.Operation == models.RunOperationDestroy {
-		r := jsonapi.ToOne(run.ID, "plans")
-		relationships.Plan = &r
-	}
-	// An "apply" relationship once the apply phase has started; apply id equals run id.
-	if run.Operation == models.RunOperationPlanAndApply && run.ApplyStartedAt != nil {
-		r := jsonapi.ToOne(run.ID, "applies")
-		relationships.Apply = &r
 	}
 
 	return jsonapi.Resource[RunAttributes]{
@@ -508,11 +461,11 @@ func formatRunResponse(run *models.Run, c *gin.Context, configVersionRepo *repos
 
 // runStatusesAfterPlan are the statuses a run can hold once its plan has finished. A run's
 // has-changes is its plan's, as in TFE, so it keeps answering through confirmation, the task
-// stages and the apply, and after the run is applied, failed or canceled. Before the plan
-// finishes there is no plan to answer from.
+// stages and the apply, and after the run is applied, planned and finished, errored, canceled or
+// discarded. Before the plan finishes there is no plan to answer from.
 var runStatusesAfterPlan = map[models.RunStatus]bool{
 	models.RunStatusPlanned:            true,
-	models.RunStatusCompleted:          true,
+	models.RunStatusPlannedAndFinished: true,
 	models.RunStatusPostPlanRunning:    true,
 	models.RunStatusPostPlanCompleted:  true,
 	models.RunStatusPreApplyRunning:    true,
@@ -521,8 +474,10 @@ var runStatusesAfterPlan = map[models.RunStatus]bool{
 	models.RunStatusPostApplyRunning:   true,
 	models.RunStatusPostApplyCompleted: true,
 	models.RunStatusApplied:            true,
-	models.RunStatusFailed:             true,
+	models.RunStatusErrored:            true,
 	models.RunStatusCancelled:          true,
+	models.RunStatusForceCanceled:      true,
+	models.RunStatusDiscarded:          true,
 }
 
 // runReportsChanges reports whether a run's operation and status are ones for which a
@@ -737,7 +692,8 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	// does not have. The 404 follows that documented not-found answer and the one the workspace
 	// relationship of this same document gets; the wording is ours.
 	if configVersionID != nil {
-		if _, err := h.configVersionRepo.GetByIDForWorkspace(*configVersionID, workspaceID); err != nil {
+		cv, err := h.configVersionRepo.GetByIDForWorkspace(*configVersionID, workspaceID)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Configuration version not found")
 				return
@@ -745,6 +701,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 			apierror.Internal(c, "Failed to check the configuration version", err)
 			return
 		}
+		operation, applyable = speculativeRunOperation(operation, &req.Data.Attributes, cv)
 	}
 
 	// TFE-compatible: If no configuration version provided and workspace has VCS configured,
@@ -811,9 +768,9 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 			timeDiff := now.Sub(existingRun.CreatedAt)
 			if timeDiff < 10*time.Second &&
 				existingRun.Operation == operation &&
-				(existingRun.Status == models.RunStatusPending || existingRun.Status == models.RunStatusRunning) {
+				existingRun.Status == models.RunStatusPending {
 				logger.Infof("Detected potential duplicate run creation for workspace %s, operation %s (existing run %s is %s). Returning existing run.", workspaceID, operation, existingRun.ID, existingRun.Status)
-				jsonapi.WriteDocument(c, http.StatusCreated, formatRunResponse(&existingRun, c, h.configVersionRepo, h.runRepo))
+				jsonapi.WriteDocument(c, http.StatusCreated, h.runResource(c, &existingRun))
 				return
 			}
 		}
@@ -846,6 +803,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		CreatedBy:              &user.ID,
 		Status:                 models.RunStatusPending,
 		Operation:              operation,
+		Message:                req.Data.Attributes.Message,
 		AutoApplyAfterPlan:     applyable,            // the "has an apply phase" marker; see above
 		AutoApply:              perRunAutoApply,      // go-tfe `auto-apply`: apply without manual confirmation
 		AgentPoolID:            effectiveAgentPoolID, // workspace pool, or the inherited project default
@@ -858,7 +816,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 			if err2 == nil && len(recentRuns) > 0 {
 				latestRun := recentRuns[0]
 				logger.Infof("Run creation failed due to duplicate, returning existing run %s.", latestRun.ID)
-				jsonapi.WriteDocument(c, http.StatusCreated, formatRunResponse(&latestRun, c, h.configVersionRepo, h.runRepo))
+				jsonapi.WriteDocument(c, http.StatusCreated, h.runResource(c, &latestRun))
 				return
 			}
 		}
@@ -874,7 +832,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	jsonapi.WriteDocument(c, http.StatusCreated, formatRunResponse(run, c, h.configVersionRepo, h.runRepo))
+	jsonapi.WriteDocument(c, http.StatusCreated, h.runResource(c, run))
 }
 
 // authorizeRun loads a run by ID and enforces the caller's run permission at the
@@ -921,7 +879,7 @@ func (h *RunHandlerV2) Get(c *gin.Context) {
 	}
 
 	// TFE-compatible response format
-	jsonapi.WriteDocument(c, http.StatusOK, formatRunResponse(run, c, h.configVersionRepo, h.runRepo))
+	jsonapi.WriteDocument(c, http.StatusOK, h.runResource(c, run))
 }
 
 // GetOutputs returns outputs from the state version created by this run (TFE-aligned).
@@ -1058,75 +1016,10 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 		}
 	}
 
-	// Determine plan status according to TFE Plans API spec
-	// Status values: pending, managed_queued/queued, running, errored, canceled, finished, unreachable
-	planStatus := "pending"
-	var planStatusTimestamps PhaseStatusTimestamps
-
-	switch run.Status {
-	case models.RunStatusPending:
-		planStatus = "pending"
-	case models.RunStatusPlanning:
-		planStatus = "running"
-		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-	case models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted:
-		planStatus = "pending" // pre_plan run tasks execute before the plan starts
-	case models.RunStatusPreApplyCompleted: // wire-completeness const, never persisted
-		planStatus = "finished"
-	case models.RunStatusPlanned, models.RunStatusPostPlanRunning, models.RunStatusPostPlanCompleted,
-		models.RunStatusPreApplyRunning, models.RunStatusPostApplyRunning, models.RunStatusPostApplyCompleted:
-		// The PLAN itself is finished in all of these: post-plan/pre-apply/post-apply run tasks
-		// execute after it. go-tfe/terraform wait on the plan document reaching "finished".
-		planStatus = "finished" // TFE uses "finished" for completed plans
-		if run.PlanCompletedAt != nil {
-			planStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
-		}
-		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-	case models.RunStatusApplying:
-		planStatus = "running" // Apply phase is still running
-		if run.ApplyStartedAt != nil {
-			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-	case models.RunStatusApplied:
-		planStatus = "finished"
-		if run.CompletedAt != nil {
-			planStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-		if run.ApplyStartedAt != nil {
-			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-	case models.RunStatusFailed:
-		planStatus = "errored"
-	case models.RunStatusCancelled:
-		planStatus = "canceled"
-	case models.RunStatusRunning:
-		planStatus = "running"
-		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-	case models.RunStatusCompleted:
-		planStatus = "finished" // TFE uses "finished" for completed plans, not "completed" or "planned"
-		if run.CompletedAt != nil {
-			planStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-		if run.StartedAt != nil {
-			planStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-	}
-
-	// Set queued-at and pending-at timestamps
-	if run.Status == models.RunStatusPending {
-		planStatusTimestamps.PendingAt = jsonapi.FormatTime(run.CreatedAt)
-		planStatusTimestamps.QueuedAt = jsonapi.FormatTime(run.CreatedAt)
-	} else if run.StartedAt != nil {
-		// If run has started, set queued-at to created-at (when it was queued)
-		planStatusTimestamps.QueuedAt = jsonapi.FormatTime(run.CreatedAt)
-		planStatusTimestamps.PendingAt = jsonapi.FormatTime(run.CreatedAt)
-	}
+	// The plan's own status: finished once the plan finished, whatever happened to the run after
+	// (planPhase). go-tfe's plan log reader stops streaming at finished, errored, canceled or
+	// unreachable, so the plan must not read running again while the run applies.
+	planStatus, planStatusTimestamps := planPhase(run)
 
 	// Determine has-changes based on resource and output counts
 	hasChanges := resourceAdditions > 0 || resourceChanges > 0 || resourceDestructions > 0 || outputChangeCount > 0
@@ -1168,7 +1061,7 @@ func (h *RunHandlerV2) GetPlan(c *gin.Context) {
 	// bearer token (which would leak into proxy logs / history). The CLI still prefers its
 	// Authorization header; the query token is the TFE-compatible fallback. If no scoped token can
 	// be minted (no user in context / signing disabled) the URL is emitted without a token.
-	attributes.LogReadURL = buildLogReadURL(c, scheme, host, run.ID, "")
+	attributes.LogReadURL = buildLogReadURL(c, scheme, host, run.ID, "plan")
 
 	// TFE Plans API requires relationships.state-versions and links (self, json-output).
 	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[PlanAttributes]{
@@ -1201,7 +1094,7 @@ func runHasApplyPhase(op models.RunOperation) bool {
 // GetApply returns the apply output for a run (TFE-compatible)
 // GET /api/v2/applies/:id
 // Per TFE API docs: https://developer.hashicorp.com/terraform/enterprise/api-docs/applies
-// Apply ID = Run ID (for plan-and-apply runs)
+// Apply ID = Run ID, for every run
 func (h *RunHandlerV2) GetApply(c *gin.Context) {
 	// Apply ID = Run ID (same pattern as Plan ID = Run ID)
 	run, ok := h.authorizeRun(c, c.Param("id"), "read")
@@ -1209,12 +1102,8 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		return
 	}
 
-	// Plan-and-apply and destroy runs have apply phases (destroy uses same two-phase flow)
-	if !runHasApplyPhase(run.Operation) {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Apply not found (only plan-and-apply and destroy runs have apply phases)")
-		return
-	}
-
+	// Every run has an apply; a plan-only run's is unreachable, as is any apply that will never
+	// run (applyPhase), and it counts no resources.
 	// Calculate resource counts from stored phase state or plan output
 	resourceAdditions := 0
 	resourceChanges := 0
@@ -1224,13 +1113,16 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 
 	// Try to get stored phase state first
 	phaseState, err := h.phaseStateRepo.GetByRunIDAndPhase(run.ID, "apply")
+	if !runHasApplyPhase(run.Operation) {
+		phaseState, err = nil, gorm.ErrRecordNotFound
+	}
 	if err == nil && phaseState != nil {
 		// Use stored state
 		applyResources = phaseState.Resources
 		resourceAdditions = phaseState.Summary.Additions
 		resourceChanges = phaseState.Summary.Changes
 		resourceDestructions = phaseState.Summary.Destructions
-	} else if h.storageClient != nil {
+	} else if h.storageClient != nil && runHasApplyPhase(run.Operation) {
 		// Fallback: parse apply logs from storage (e.g. self-hosted destroy runs) so apply-resources and status update
 		logsKey := models.RunLogKey(run.ID, "apply")
 		if logsBytes, getErr := h.storageClient.Get(c.Request.Context(), logsKey); getErr == nil && len(logsBytes) > 0 {
@@ -1247,7 +1139,7 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 			}
 		}
 	}
-	if len(applyResources) == 0 && run.PlanOutput != nil {
+	if len(applyResources) == 0 && run.PlanOutput != nil && runHasApplyPhase(run.Operation) {
 		// Fallback: counts from plan output only
 		if resourceChangesArray, ok := run.PlanOutput["resource_changes"].([]interface{}); ok {
 			for _, change := range resourceChangesArray {
@@ -1273,79 +1165,8 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 		}
 	}
 
-	// Determine apply status according to TFE Applies API spec
-	// Status values: pending, queued, running, finished, errored, canceled, unreachable
-	applyStatus := "pending"
-	var applyStatusTimestamps PhaseStatusTimestamps
-
-	switch run.Status {
-	case models.RunStatusPending:
-		applyStatus = "pending"
-	case models.RunStatusPlanning:
-		applyStatus = "pending" // Plan phase hasn't started apply yet
-	case models.RunStatusPlanned:
-		applyStatus = "pending" // Plan completed, waiting for apply
-	case models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted,
-		models.RunStatusPostPlanRunning, models.RunStatusPostPlanCompleted,
-		models.RunStatusPreApplyRunning, models.RunStatusPreApplyCompleted:
-		applyStatus = "pending" // run-task stages before the apply phase
-	case models.RunStatusPostApplyRunning, models.RunStatusPostApplyCompleted:
-		// The apply itself finished; only informational post-apply tasks are still running.
-		applyStatus = "finished"
-		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-	case models.RunStatusRunning:
-		applyStatus = "running"
-		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		} else if run.StartedAt != nil {
-			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.StartedAt)
-		}
-	case models.RunStatusCompleted:
-		applyStatus = "finished"
-		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-	case models.RunStatusFailed:
-		applyStatus = "errored"
-		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-	case models.RunStatusCancelled:
-		applyStatus = "canceled"
-		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-	case models.RunStatusApplying:
-		applyStatus = "running"
-		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-	case models.RunStatusApplied:
-		applyStatus = "finished"
-		if run.CompletedAt != nil {
-			applyStatusTimestamps.FinishedAt = jsonapi.FormatTime(*run.CompletedAt)
-		}
-		if run.ApplyStartedAt != nil {
-			applyStatusTimestamps.StartedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-	}
-
-	// Set queued-at timestamp
-	if run.ApplyStartedAt != nil {
-		// queued-at is when apply was queued (before started-at)
-		// For plan-and-apply runs, this is when plan completed
-		if run.PlanCompletedAt != nil {
-			applyStatusTimestamps.QueuedAt = jsonapi.FormatTime(*run.PlanCompletedAt)
-		} else if run.ApplyStartedAt != nil {
-			// Fallback to apply started time if plan completed time not available
-			applyStatusTimestamps.QueuedAt = jsonapi.FormatTime(*run.ApplyStartedAt)
-		}
-	}
+	// The apply's own status (applyPhase): pending until it starts, unreachable when it never will.
+	applyStatus, applyStatusTimestamps := applyPhase(run)
 
 	attributes := ApplyAttributes{
 		ExecutionDetails:     ExecutionDetails{Mode: "remote"},
@@ -1392,7 +1213,7 @@ func (h *RunHandlerV2) GetApply(c *gin.Context) {
 
 	// AUD-045: run-scoped short-TTL log token instead of the caller's bearer token (see the run
 	// response builder above).
-	attributes.LogReadURL = buildLogReadURL(c, scheme, host, run.ID, "phase=apply")
+	attributes.LogReadURL = buildLogReadURL(c, scheme, host, run.ID, "apply")
 
 	// TFE Applies API: relationships.state-versions and a self link.
 	jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[ApplyAttributes]{
@@ -1502,11 +1323,11 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 				return
 			}
 		} else {
-			// For plan-only runs, phase must match operation
-			if phaseParam == string(run.Operation) {
-				phase = phaseParam
+			// A plan-only run has only its plan, whose logs are stored as the plan phase's.
+			if phaseParam == "plan" || phaseParam == string(run.Operation) {
+				phase = "plan"
 			} else {
-				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid phase parameter. Must be '%s' for %s runs", run.Operation, run.Operation))
+				jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid phase parameter. Must be 'plan' for %s runs", run.Operation))
 				return
 			}
 		}
@@ -1514,7 +1335,7 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 		// No phase parameter - use backward compatible behavior (determine by status)
 		// TFE-compatible: destroy runs follow the same two-phase flow as plan-and-apply
 		if run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy {
-			switch run.Status {
+			switch run.Status { //nolint:exhaustive // the final and legacy statuses share the default
 			case models.RunStatusPending, models.RunStatusPlanning, models.RunStatusPlanned,
 				models.RunStatusPrePlanRunning, models.RunStatusPrePlanCompleted,
 				models.RunStatusPostPlanRunning, models.RunStatusPostPlanCompleted,
@@ -1523,13 +1344,17 @@ func (h *RunHandlerV2) GetLogs(c *gin.Context) {
 			case models.RunStatusApplying, models.RunStatusApplied,
 				models.RunStatusPostApplyRunning, models.RunStatusPostApplyCompleted:
 				phase = "apply"
-			case models.RunStatusFailed, models.RunStatusCancelled, models.RunStatusRunning, models.RunStatusCompleted:
-				// For other statuses, default to plan (logs may still be streaming)
+			default:
+				// Every other status ended the run or never reached the apply: the latest logs
+				// are the apply's once it started, else the plan's.
 				phase = "plan"
+				if run.ApplyStartedAt != nil {
+					phase = "apply"
+				}
 			}
 		} else {
-			// For other operations (plan-only), use operation name as phase
-			phase = string(run.Operation)
+			// A plan-only run's logs are its plan's, stored as the plan phase (JobOutput).
+			phase = "plan"
 		}
 	}
 
@@ -1778,35 +1603,13 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 		return
 	}
 
-	// CRITICAL: Check if user has permission to apply runs
-	// Viewers should NOT be able to apply runs - they only have RunRead permission
-	// Applying requires both PermissionRuns (granular) AND PermissionWorkspaceWrite
-	hasRunsPermission, err := h.rbacService.CheckResourcePermission(
-		c.Request.Context(),
-		user.ID,
-		rbac.ResourceTypeTerraformWorkspace,
-		workspace.ID,
-		rbac.PermissionRuns,
-		&workspace.ProjectID,
-	)
+	// Viewers may not apply runs: applying takes the granular runs permission and workspace write.
+	mayApply, err := h.mayApplyRuns(c, user.ID, workspace)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
 		return
 	}
-	hasWorkspaceWrite, err := h.rbacService.CheckResourcePermission(
-		c.Request.Context(),
-		user.ID,
-		rbac.ResourceTypeTerraformWorkspace,
-		workspace.ID,
-		rbac.PermissionWorkspaceWrite,
-		&workspace.ProjectID,
-	)
-	if err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
-		return
-	}
-	// Both permissions required - viewers have neither
-	if !hasRunsPermission || !hasWorkspaceWrite {
+	if !mayApply {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to apply runs in this workspace. Viewers can only view runs, not apply them.")
 		return
 	}
@@ -1817,11 +1620,11 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 		// Plan-and-apply or destroy run: transition to applying phase. Confirmable rest states:
 		// `planned` (no post-plan tasks) and `post_plan_completed` (post-plan task stage passed -
 		// tfe_workspace_run treats `planned` as pending when a post-plan stage exists).
-		confirmable := []models.RunStatus{models.RunStatusPlanned, models.RunStatusPostPlanCompleted}
+		confirmable := confirmableRunStatuses
 		// A run whose apply was lost with its launcher is re-queued here, by a person, and never on
 		// its own (#933, decision 16): it goes back to its apply phase, unclaimed, and its saved plan
 		// is applied as a new attempt. The executor refuses the plan if the state moved meanwhile.
-		if planRun.Status == models.RunStatusFailed && planRun.ErrorMessage == repository.LostDuringApply {
+		if planRun.Status == models.RunStatusErrored && planRun.ErrorMessage == repository.LostDuringApply {
 			ok, err := h.runRepo.RequeueLostApply(planRun.ID)
 			if err != nil {
 				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to re-queue the lost apply")
@@ -1835,11 +1638,13 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve updated run")
 				return
 			}
-			jsonapi.WriteDocument(c, http.StatusAccepted, formatRunResponse(planRun, c, h.configVersionRepo, h.runRepo))
+			jsonapi.WriteDocument(c, http.StatusAccepted, h.runResource(c, planRun))
 			return
 		}
-		if planRun.Status != models.RunStatusPlanned && planRun.Status != models.RunStatusPostPlanCompleted {
-			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Run must be in 'planned' status before applying")
+		if !runIsConfirmable(planRun) {
+			// TFE: 409 "Run was not paused for confirmation; apply not allowed." A plan with no
+			// changes is planned_and_finished and has nothing to apply.
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run was not paused for confirmation; apply not allowed.")
 			return
 		}
 
@@ -1879,7 +1684,7 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 			return
 		}
 		if !ok {
-			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run is no longer in 'planned' status and cannot be applied.")
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run was not paused for confirmation; apply not allowed.")
 			return
 		}
 
@@ -1894,12 +1699,12 @@ func (h *RunHandlerV2) Apply(c *gin.Context) {
 		}
 
 		// TFE returns 202 Accepted with the updated run
-		jsonapi.WriteDocument(c, http.StatusAccepted, formatRunResponse(planRun, c, h.configVersionRepo, h.runRepo))
+		jsonapi.WriteDocument(c, http.StatusAccepted, h.runResource(c, planRun))
 		return
 	}
 
-	// Only plan-and-apply runs can be applied
-	jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Only plan-and-apply runs can be applied. Plan-only runs cannot be applied.")
+	// A plan-only run is never paused for confirmation.
+	jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run was not paused for confirmation; apply not allowed.")
 }
 
 // ListByWorkspace lists runs for a workspace (by workspace ID)
@@ -1944,10 +1749,7 @@ func (h *RunHandlerV2) ListByWorkspace(c *gin.Context) {
 	}
 
 	// Format each run in TFE-compatible JSON:API format
-	formattedRuns := make([]jsonapi.Resource[RunAttributes], len(runs))
-	for i, run := range runs {
-		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
-	}
+	formattedRuns := h.runCollection(c, runs)
 
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, jsonapi.NewPaginationMeta(page, perPage, total))
 }
@@ -1960,29 +1762,12 @@ func (h *RunHandlerV2) Cancel(c *gin.Context) {
 		return
 	}
 
-	// Allow cancellation of pending, running, planning, and applying runs
-	// Planning and applying runs can be cancelled to stop long-running operations
-	// The run-task *_running statuses are cancellable too: the run is waiting on external task
-	// services, and cancelling also cancels its non-terminal task stages/results below.
-	cancellableStatuses := []models.RunStatus{
-		models.RunStatusPending,
-		models.RunStatusRunning,
-		models.RunStatusPlanning,
-		models.RunStatusApplying,
-		models.RunStatusPrePlanRunning,
-		models.RunStatusPostPlanRunning,
-		models.RunStatusPreApplyRunning,
-		models.RunStatusPostApplyRunning,
-	}
-	isCancellable := false
-	for _, status := range cancellableStatuses {
-		if run.Status == status {
-			isCancellable = true
-			break
-		}
-	}
-	if !isCancellable {
-		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Run cannot be cancelled in current state. Only pending, running, planning, or applying runs can be cancelled.")
+	// A queued, planning or applying run is canceled, and so is one waiting on its run tasks
+	// (cancelableRunStatuses, what actions.is-cancelable reports); canceling also cancels its
+	// non-terminal task stages and results below. TFE answers 409 for any other run.
+	cancellableStatuses := cancelableRunStatuses
+	if !slices.Contains(cancellableStatuses, run.Status) {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run was not planning or applying; cancel not allowed.")
 		return
 	}
 
@@ -2025,24 +1810,12 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 		return
 	}
 
-	// Can discard runs in pending state or planned state (plan completed, waiting for apply confirmation)
-	// This allows users to discard unwanted plans before they are applied.
-	// Run-task rest/wait states are discardable the same way: post_plan_completed is `planned` with
-	// a passed post-plan stage, and post_plan_running covers a stage awaiting override that the user
-	// chooses to abandon instead (TFE allows discarding runs whose tasks await override).
-	discardable := []models.RunStatus{
-		models.RunStatusPending, models.RunStatusPlanned,
-		models.RunStatusPostPlanCompleted, models.RunStatusPostPlanRunning,
-	}
-	isDiscardable := false
-	for _, s := range discardable {
-		if run.Status == s {
-			isDiscardable = true
-			break
-		}
-	}
-	if !isDiscardable {
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run cannot be discarded in current state. Only pending or planned runs can be discarded.")
+	// A run is discarded while it waits: queued, or with its plan waiting for a confirmation,
+	// including while its post-plan tasks run or await an override (discardableRunStatuses, what
+	// actions.is-discardable reports). TFE answers 409 for any other run.
+	discardable := discardableRunStatuses
+	if !slices.Contains(discardable, run.Status) {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run was not paused for confirmation or priority; discard not allowed.")
 		return
 	}
 
@@ -2053,7 +1826,7 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 	ok, err := h.runRepo.TransitionStatus(
 		run.ID,
 		discardable,
-		models.RunStatusCancelled,
+		models.RunStatusDiscarded,
 		map[string]any{"completed_at": now},
 	)
 	if err != nil {
@@ -2061,7 +1834,7 @@ func (h *RunHandlerV2) Discard(c *gin.Context) {
 		return
 	}
 	if !ok {
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run can no longer be discarded (state changed).")
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Run was not paused for confirmation or priority; discard not allowed.")
 		return
 	}
 
@@ -2085,14 +1858,14 @@ func (h *RunHandlerV2) ForceCancel(c *gin.Context) {
 	// Force cancel terminates a run that is still in flight. AUD-031: the previous check required
 	// the legacy status "running", which the lifecycle never sets, so this endpoint always 409'd
 	// and was functionally dead. Accept the states a run can actually be in-flight in (pending
-	// before dispatch, planning, applying, or the legacy running). The transition is guarded
+	// before dispatch, planning or applying). The transition is guarded
 	// (AUD-017) so it cannot resurrect a run that has already reached a terminal state.
 	now := time.Now()
 	ok, err := h.runRepo.TransitionStatus(
 		run.ID,
 		[]models.RunStatus{
 			models.RunStatusPending, models.RunStatusPlanning,
-			models.RunStatusApplying, models.RunStatusRunning,
+			models.RunStatusApplying,
 		},
 		models.RunStatusCancelled,
 		map[string]any{"completed_at": now},
@@ -2245,10 +2018,7 @@ func (h *RunHandlerV2) ListByOrganization(c *gin.Context) {
 	}
 
 	// Format each run in TFE-compatible JSON:API format
-	formattedRuns := make([]jsonapi.Resource[RunAttributes], len(runs))
-	for i, run := range runs {
-		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
-	}
+	formattedRuns := h.runCollection(c, runs)
 
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, jsonapi.NewPaginationMeta(page, perPage, total))
 }
@@ -2282,10 +2052,7 @@ func (h *RunHandlerV2) GetQueue(c *gin.Context) {
 	}
 
 	// Format each run in TFE-compatible JSON:API format
-	formattedRuns := make([]jsonapi.Resource[RunAttributes], len(runs))
-	for i, run := range runs {
-		formattedRuns[i] = formatRunResponse(&run, c, h.configVersionRepo, h.runRepo)
-	}
+	formattedRuns := h.runCollection(c, runs)
 
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, jsonapi.NewPaginationMeta(1, limit, total))
 }
@@ -2490,7 +2257,6 @@ func AutoCancelConflictingRuns(runRepo *repository.RunRepository, workspaceID st
 	for _, existingRun := range existingRuns {
 		// Skip if run is not in a cancellable state
 		if existingRun.Status != models.RunStatusPending &&
-			existingRun.Status != models.RunStatusRunning &&
 			existingRun.Status != models.RunStatusPlanned {
 			continue
 		}
@@ -2529,7 +2295,7 @@ func AutoCancelConflictingRuns(runRepo *repository.RunRepository, workspaceID st
 			now := time.Now()
 			if _, err := runRepo.TransitionStatus(
 				existingRun.ID,
-				[]models.RunStatus{models.RunStatusPending, models.RunStatusRunning, models.RunStatusPlanned},
+				[]models.RunStatus{models.RunStatusPending, models.RunStatusPlanned},
 				models.RunStatusCancelled,
 				map[string]any{"completed_at": now},
 			); err != nil {
@@ -2563,7 +2329,6 @@ func AutoCancelSupersededSpeculativeRuns(
 	}
 	for _, existingRun := range existingRuns {
 		if existingRun.Status != models.RunStatusPending &&
-			existingRun.Status != models.RunStatusRunning &&
 			existingRun.Status != models.RunStatusPlanned {
 			continue
 		}
@@ -2584,7 +2349,7 @@ func AutoCancelSupersededSpeculativeRuns(
 		now := time.Now()
 		if _, err := runRepo.TransitionStatus(
 			existingRun.ID,
-			[]models.RunStatus{models.RunStatusPending, models.RunStatusRunning, models.RunStatusPlanned},
+			[]models.RunStatus{models.RunStatusPending, models.RunStatusPlanned},
 			models.RunStatusCancelled,
 			map[string]any{"completed_at": now},
 		); err != nil {
