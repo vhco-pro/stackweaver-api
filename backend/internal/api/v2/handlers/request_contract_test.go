@@ -134,7 +134,9 @@ func setupPlatformContract(t *testing.T) *platformContractFixture {
 	moduleVersionRepo := repository.NewModuleVersionRepository(db)
 
 	tokens := NewTokenHandlerV2(apikey.NewService(repository.NewAPIKeyRepository(db), orgRepo, projectRepo, teamRepo), authService)
-	vcsHandler := NewVCSConnectionHandlerV2(connRepo, orgRepo, authService, nil, rbacService)
+	// A registry without managers or encryption: an Azure DevOps create resolves its provider
+	// through it to prove the token (acceptAzureDevOpsTokens answers for Azure DevOps).
+	vcsHandler := NewVCSConnectionHandlerV2(connRepo, orgRepo, authService, vcs.NewProviderRegistry(nil, nil, nil, nil), rbacService)
 	repos := make([]vcs.Repository, 0, 35)
 	for i := range 35 {
 		repos = append(repos, vcs.Repository{ID: int64(1000 + i), Name: "repo-" + strconv.Itoa(i), FullName: "acme/repo-" + strconv.Itoa(i), DefaultBranch: "main"})
@@ -278,6 +280,9 @@ func TestPlatformRequestContract(t *testing.T) {
 		// Azure DevOps, because the fixture already holds the organization's one GitHub connection
 		// and GitLab is refused until it is implemented (#114).
 		attrs := `"provider":"azure_devops","access_token":"ado-contract","account_name":"contract","account_type":"organization"`
+		// The create proves the token against the Azure DevOps organization; this test is about
+		// the request document, so Azure DevOps accepts every token here.
+		acceptAzureDevOpsTokens(t)
 		f.refused(t, http.MethodPost, path, `{`+attrs+`}`, platformDocRequired("vcs-connections"))
 		// A flat body naming an installation is simply not a document.
 		f.refused(t, http.MethodPost, path, `{`+attrs+`,"installation_id":"42"}`, platformDocRequired("vcs-connections"))

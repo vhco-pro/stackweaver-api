@@ -230,6 +230,19 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		AccountType:    req.AccountType,
 	}
 
+	// An Azure DevOps connection receives the deliveries of the Azure DevOps organization it
+	// names, so the token must prove access to that organization before it is stored, as the
+	// OAuth flow does. Otherwise anyone could claim another tenant's Azure DevOps organization.
+	if provider == models.VCSProviderAzureDevOps {
+		if err := h.validateADOAccount(c.Request.Context(), connection); err != nil {
+			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Azure DevOps Access Error",
+				"The access token could not be verified against the Azure DevOps organization named in account_name")
+			return
+		}
+		verifiedAt := time.Now()
+		connection.AccountVerifiedAt = &verifiedAt
+	}
+
 	// Encrypt tokens at rest (#95) before persisting. No-op when encryption is disabled.
 	if h.vcsRegistry != nil {
 		if err := h.vcsRegistry.EncryptTokens(connection); err != nil {
@@ -244,6 +257,29 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 	}
 
 	jsonapi.WriteDocument(c, http.StatusCreated, vcsConnectionResource(connection, org.ID))
+}
+
+// validateADOAccount proves a new Azure DevOps connection's plaintext access token against the
+// Azure DevOps organization in its account name. It fails closed.
+func (h *VCSConnectionHandlerV2) validateADOAccount(ctx context.Context, conn *models.VCSConnection) error {
+	if conn.AccountName == "" {
+		return errors.New("no Azure DevOps organization named")
+	}
+	if h.vcsRegistry == nil {
+		return errors.New("no VCS provider registry")
+	}
+	c := *conn
+	provider, err := h.vcsRegistry.GetProvider(&c)
+	if err != nil {
+		return fmt.Errorf("getting the provider: %w", err)
+	}
+	validator, ok := provider.(interface {
+		ValidateTokenAndOrg(ctx context.Context, token, org string) error
+	})
+	if !ok {
+		return errors.New("provider cannot validate an Azure DevOps account")
+	}
+	return validator.ValidateTokenAndOrg(ctx, c.AccessToken, c.AccountName)
 }
 
 // Get returns a VCS connection by ID

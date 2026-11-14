@@ -74,11 +74,14 @@ func TestVCSConnectionCreate_ConflictsOnlyWithAnExistingConnection(t *testing.T)
 		return rows
 	}
 
-	// The steps build on each other, so a failed one stops the test.
-	rec := create(t, models.VCSProviderAzureDevOps, "first")
+	// The steps build on each other, so a failed one stops the test. They use GitHub token
+	// connections: an Azure DevOps create must prove its token against the Azure DevOps
+	// organization it names, which a fake token cannot (the last step). This test used Azure
+	// DevOps for the first two steps until that check existed.
+	rec := create(t, models.VCSProviderGitHub, "first")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("the first %s connection of an organization with none = %d, want 201.\nbody: %s",
-			models.VCSProviderAzureDevOps, rec.Code, rec.Body.String())
+			models.VCSProviderGitHub, rec.Code, rec.Body.String())
 	}
 	var doc struct {
 		Data struct {
@@ -89,24 +92,29 @@ func TestVCSConnectionCreate_ConflictsOnlyWithAnExistingConnection(t *testing.T)
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatalf("the 201 body is not JSON: %v\nbody: %s", err, rec.Body.String())
 	}
-	rows := stored(t, models.VCSProviderAzureDevOps)
+	rows := stored(t, models.VCSProviderGitHub)
 	if len(rows) != 1 || rows[0].ID.String() != doc.Data.ID || rows[0].AccountName != "first" {
 		t.Fatalf("after the create the organization holds %d %s connection(s), want the one the response names (%s)",
-			len(rows), models.VCSProviderAzureDevOps, doc.Data.ID)
+			len(rows), models.VCSProviderGitHub, doc.Data.ID)
 	}
 
-	rec = create(t, models.VCSProviderAzureDevOps, "second")
+	rec = create(t, models.VCSProviderGitHub, "second")
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("a second %s connection = %d, want 409.\nbody: %s", models.VCSProviderAzureDevOps, rec.Code, rec.Body.String())
+		t.Fatalf("a second %s connection = %d, want 409.\nbody: %s", models.VCSProviderGitHub, rec.Code, rec.Body.String())
 	}
-	if rows := stored(t, models.VCSProviderAzureDevOps); len(rows) != 1 || rows[0].AccountName != "first" {
-		t.Fatalf("a refused create left %d %s connection(s), want the first one untouched", len(rows), models.VCSProviderAzureDevOps)
+	if rows := stored(t, models.VCSProviderGitHub); len(rows) != 1 || rows[0].AccountName != "first" {
+		t.Fatalf("a refused create left %d %s connection(s), want the first one untouched", len(rows), models.VCSProviderGitHub)
 	}
 
-	// The conflict is per provider, not per organization.
-	rec = create(t, models.VCSProviderGitHub, "third")
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("a %s connection beside a %s one = %d, want 201.\nbody: %s",
-			models.VCSProviderGitHub, models.VCSProviderAzureDevOps, rec.Code, rec.Body.String())
+	// An Azure DevOps connection whose token cannot reach the Azure DevOps organization it names
+	// is refused and not stored, so nobody can claim another tenant's Azure DevOps organization.
+	// The check fails closed, so this holds with or without network access.
+	rec = create(t, models.VCSProviderAzureDevOps, "contoso-"+uuid.NewString()[:8])
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("an %s connection with an unprovable token = %d, want 422.\nbody: %s",
+			models.VCSProviderAzureDevOps, rec.Code, rec.Body.String())
+	}
+	if rows := stored(t, models.VCSProviderAzureDevOps); len(rows) != 0 {
+		t.Fatalf("a refused %s create stored %d connection(s)", models.VCSProviderAzureDevOps, len(rows))
 	}
 }
