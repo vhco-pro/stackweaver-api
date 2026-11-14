@@ -733,6 +733,10 @@ func TestGoldenWrites(t *testing.T) {
 		t.Fatalf("golden write recorder: %v", err)
 	}
 	settings.applyToEnv(t)
+	// Creating an Azure DevOps connection proves its token against the Azure DevOps organization,
+	// and the recorder has no real Azure DevOps; it records the create as a client with a valid
+	// token sees it.
+	acceptAzureDevOpsTokens(t)
 
 	// A marker in the worktree means a slot was claimed, not that it was provisioned. The
 	// storage client fails to construct when its bucket is missing (the dev key may not create

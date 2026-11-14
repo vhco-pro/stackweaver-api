@@ -199,7 +199,11 @@ func TestAzureDevOpsPush_SyncsAnsibleWithoutAWorkspace(t *testing.T) {
 
 	org := f.organization(t)
 	adoOrg := "ado-push-sync-" + uuid.NewString()[:8]
-	conn := &models.VCSConnection{ID: uuid.New(), OrganizationID: org.ID, Provider: models.VCSProviderAzureDevOps, AccountName: adoOrg}
+	// A connection made through the OAuth flow, which proves its token against the Azure DevOps
+	// organization and records that; an unverified one receives no delivery
+	// (TestADODeliveryTrustsOnlyVerifiedConnections).
+	verified := time.Now()
+	conn := &models.VCSConnection{ID: uuid.New(), OrganizationID: org.ID, Provider: models.VCSProviderAzureDevOps, AccountName: adoOrg, AccountVerifiedAt: &verified}
 	repo := "infra/ansible-only-" + uuid.NewString()[:8] // project/repository
 	playbook, inventory := ansibleOnlyRepo(t, f, q, org, conn, repo)
 

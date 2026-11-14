@@ -6,9 +6,12 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/dbtest"
@@ -81,6 +84,7 @@ func TestFilterWorkspacesByInstallation(t *testing.T) {
 // DevOps connection. Every resource below names the same repository and branch in both, which is
 // the collision a delivery must not cross.
 type bindingFixture struct {
+	db                   *gorm.DB
 	h                    *VCSAppInstallationHandlerV2
 	orgA, orgB           *models.Organization
 	projA, projB         *models.Project
@@ -103,6 +107,7 @@ func setupBindingFixture(t *testing.T) *bindingFixture {
 
 	sfx := uuid.New().String()[:8]
 	f := &bindingFixture{
+		db:   db,
 		h:    &VCSAppInstallationHandlerV2{vcsConnectionRepo: repository.NewVCSConnectionRepository(db)},
 		orgA: &models.Organization{ID: uuid.New(), Name: "whb-a-" + sfx},
 		orgB: &models.Organization{ID: uuid.New(), Name: "whb-b-" + sfx},
@@ -112,9 +117,13 @@ func setupBindingFixture(t *testing.T) *bindingFixture {
 	f.ghA = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgA.ID, Provider: models.VCSProviderGitHub, InstallationID: "111-" + sfx, AccountName: "org-a"}
 	f.ghB = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgB.ID, Provider: models.VCSProviderGitHub, InstallationID: "222-" + sfx, AccountName: "org-b"}
 	// Azure DevOps organization names are unique per run, because orgFromADOOrg looks them up
-	// across every organization in the database.
-	f.adoA = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgA.ID, Provider: models.VCSProviderAzureDevOps, AccountName: "contoso-" + sfx}
-	f.adoB = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgB.ID, Provider: models.VCSProviderAzureDevOps, AccountName: "fabrikam-" + sfx}
+	// across every organization in the database. Both connections stand for ones made through the
+	// OAuth flow, which proves the token against the Azure DevOps organization, so they carry the
+	// verification mark: an unverified connection is trusted only after its token proves access
+	// (TestADODeliveryTrustsOnlyVerifiedConnections).
+	verified := time.Now()
+	f.adoA = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgA.ID, Provider: models.VCSProviderAzureDevOps, AccountName: "contoso-" + sfx, AccountVerifiedAt: &verified}
+	f.adoB = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgB.ID, Provider: models.VCSProviderAzureDevOps, AccountName: "fabrikam-" + sfx, AccountVerifiedAt: &verified}
 	for _, m := range []any{f.orgA, f.orgB, f.projA, f.projB, f.ghA, f.ghB, f.adoA, f.adoB} {
 		if err := db.Create(m).Error; err != nil {
 			t.Fatalf("seed: %v", err)
@@ -215,4 +224,83 @@ func workspaceIDs(ws []models.Workspace) []string {
 		ids[i] = ws[i].ID
 	}
 	return ids
+}
+
+// A connection made through the direct-create API names an Azure DevOps organization nobody
+// proved. Such a connection must not receive another organization's deliveries just by claiming
+// its Azure DevOps organization name: a delivery reaches an Azure DevOps connection only once its
+// stored token has proven access to that organization, and the proof is remembered.
+func TestADODeliveryTrustsOnlyVerifiedConnections(t *testing.T) {
+	f := setupBindingFixture(t)
+
+	// Organization B claims organization A's Azure DevOps organization with a connection that was
+	// never verified, created before A's so the oldest-first lookup would reach it first.
+	claim := &models.VCSConnection{
+		ID: uuid.New(), OrganizationID: f.orgB.ID, Provider: models.VCSProviderAzureDevOps,
+		AccountName: f.adoA.AccountName, CreatedAt: time.Now().Add(-time.Hour),
+	}
+	// An unverified connection whose token does reach its Azure DevOps organization, as one made
+	// before verification was recorded would.
+	legacy := &models.VCSConnection{
+		ID: uuid.New(), OrganizationID: f.orgB.ID, Provider: models.VCSProviderAzureDevOps,
+		AccountName: "legacy-" + f.orgB.Name,
+	}
+	for _, c := range []*models.VCSConnection{claim, legacy} {
+		if err := f.db.Create(c).Error; err != nil {
+			t.Fatalf("seed connection: %v", err)
+		}
+	}
+	t.Cleanup(func() { f.db.Exec("DELETE FROM vcs_connections WHERE id IN (?,?)", claim.ID, legacy.ID) })
+
+	calls := map[uuid.UUID]int{}
+	f.h.verifyADOAccount = func(_ context.Context, conn *models.VCSConnection) error {
+		calls[conn.ID]++
+		if conn.ID == legacy.ID {
+			return nil
+		}
+		return errors.New("token cannot reach the Azure DevOps organization")
+	}
+
+	if got := f.h.orgFromADOOrg(f.adoA.AccountName); got == nil || *got != f.orgA.ID {
+		t.Errorf("orgFromADOOrg(%q) = %v, want organization A %v, not the unverified claimant", f.adoA.AccountName, got, f.orgA.ID)
+	}
+
+	wsA := models.Workspace{ID: uuid.New().String(), ProjectID: f.projA.ID, VCSConnectionID: &f.adoA.ID, VCSRepository: "proj/infra", VCSBranch: "main"}
+	wsClaim := models.Workspace{ID: uuid.New().String(), ProjectID: f.projB.ID, VCSConnectionID: &claim.ID, VCSRepository: "proj/infra", VCSBranch: "main"}
+	if kept := f.h.filterWorkspacesByADOOrg([]models.Workspace{wsA, wsClaim}, f.adoA.AccountName); len(kept) != 1 || kept[0].ID != wsA.ID {
+		t.Errorf("workspaces kept %v; want only organization A's %s", workspaceIDs(kept), wsA.ID)
+	}
+
+	pbA := models.AnsiblePlaybook{ID: uuid.New(), ProjectID: f.projA.ID, VCSConnectionID: &f.adoA.ID, VCSRepository: "proj/ansible", VCSBranch: "main"}
+	pbClaim := models.AnsiblePlaybook{ID: uuid.New(), ProjectID: f.projB.ID, VCSConnectionID: &claim.ID, VCSRepository: "proj/ansible", VCSBranch: "main"}
+	if kept := f.h.filterPlaybooksByADOOrg([]models.AnsiblePlaybook{pbA, pbClaim}, f.adoA.AccountName); len(kept) != 1 || kept[0].ID != pbA.ID {
+		t.Errorf("playbooks kept %v; want only organization A's %s", playbookIDs(kept), pbA.ID)
+	}
+
+	invA := models.AnsibleInventory{ID: uuid.New(), OrganizationID: f.orgA.ID, ProjectID: &f.projA.ID, VCSConnectionID: &f.adoA.ID}
+	invClaim := models.AnsibleInventory{ID: uuid.New(), OrganizationID: f.orgB.ID, ProjectID: &f.projB.ID, VCSConnectionID: &claim.ID}
+	if kept := f.h.filterInventoriesByADOOrg([]models.AnsibleInventory{invA, invClaim}, f.adoA.AccountName); len(kept) != 1 || kept[0].ID != invA.ID {
+		t.Errorf("inventories kept %d; want only organization A's %s", len(kept), invA.ID)
+	}
+
+	if calls[f.adoA.ID] != 0 {
+		t.Errorf("a verified connection was verified again %d time(s)", calls[f.adoA.ID])
+	}
+
+	// The legacy connection proves access on its first delivery and keeps the mark.
+	if got := f.h.orgFromADOOrg(legacy.AccountName); got == nil || *got != f.orgB.ID {
+		t.Errorf("orgFromADOOrg(%q) = %v, want organization B %v once its token proves access", legacy.AccountName, got, f.orgB.ID)
+	}
+	var stored models.VCSConnection
+	if err := f.db.First(&stored, "id = ?", legacy.ID).Error; err != nil || stored.AccountVerifiedAt == nil {
+		t.Fatalf("the proven connection was not marked verified: %v", err)
+	}
+	_ = f.h.orgFromADOOrg(legacy.AccountName)
+	if calls[legacy.ID] != 1 {
+		t.Errorf("the proven connection was verified %d times, want once", calls[legacy.ID])
+	}
+	var claimed models.VCSConnection
+	if err := f.db.First(&claimed, "id = ?", claim.ID).Error; err != nil || claimed.AccountVerifiedAt != nil {
+		t.Errorf("the claimant was marked verified after failing: %v", err)
+	}
 }

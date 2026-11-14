@@ -65,6 +65,10 @@ type VCSAppInstallationHandlerV2 struct {
 	storageClient      storage.Client
 	workItems          *coreansible.WorkItemService // inventory and playbook syncs, as work items (#933, D2)
 
+	// verifyADOAccount proves that an Azure DevOps connection's token reaches the Azure DevOps
+	// organization it names. Nil means verifyADOAccountWithToken; a test replaces it.
+	verifyADOAccount func(ctx context.Context, conn *models.VCSConnection) error
+
 	// appURL is the SPA's public origin (STACKWEAVER_APP_URL). GitHub returns a person who
 	// authorized the App to its /vcs/github/authorized page (SetAppURL).
 	appURL string
@@ -269,6 +273,7 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Azure DevOps Access Error", fmt.Sprintf("Token validated but org access failed: %v", validationErr))
 		return
 	}
+	verifiedAt := time.Now()
 
 	var tokenExpiresAt *time.Time
 	if tokenResult.ExpiresIn > 0 {
@@ -291,6 +296,8 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		existing.TokenExpiresAt = tokenExpiresAt
 		if adoOrgName != "" {
 			existing.AccountName = adoOrgName
+			// ValidateTokenAndOrg above proved these tokens against adoOrgName.
+			existing.AccountVerifiedAt = &verifiedAt
 		}
 		// Encrypt tokens at rest (#95, AUD-005) before persisting. No-op when encryption
 		// is disabled. Without this the ADO OAuth callback stored tokens in cleartext,
@@ -321,6 +328,9 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		TokenExpiresAt: tokenExpiresAt,
 		AccountName:    adoOrgName,
 		AccountType:    "organization",
+	}
+	if adoOrgName != "" {
+		connection.AccountVerifiedAt = &verifiedAt
 	}
 	// Encrypt tokens at rest (#95, AUD-005) before persisting - matches the create path
 	// in vcs_connections.go. No-op when encryption is disabled.
@@ -932,19 +942,82 @@ func (h *VCSAppInstallationHandlerV2) orgFromInstallation(installationID string)
 }
 
 // orgFromADOOrg is the Azure DevOps counterpart of orgFromInstallation: the organization of the
-// connection made for the delivery's Azure DevOps organization. That name was proven with the
-// connecting user's own token when the connection was made (ValidateTokenAndOrg), so it is the
-// Azure DevOps equivalent of a validated installation. Returns nil when no connection is for it.
+// oldest connection whose token has proven access to the delivery's Azure DevOps organization
+// (adoConnectionTrusted), the Azure DevOps equivalent of a validated installation. A connection
+// that only names the Azure DevOps organization is skipped. Returns nil when no trusted
+// connection is for it.
 func (h *VCSAppInstallationHandlerV2) orgFromADOOrg(adoOrg string) *uuid.UUID {
 	if h.vcsConnectionRepo == nil || adoOrg == "" {
 		return nil
 	}
-	conn, err := h.vcsConnectionRepo.GetByProviderAndAccountName(models.VCSProviderAzureDevOps, adoOrg)
-	if err != nil || conn.OrganizationID == uuid.Nil {
+	conns, err := h.vcsConnectionRepo.ListByProviderAndAccountName(models.VCSProviderAzureDevOps, adoOrg)
+	if err != nil {
 		return nil
 	}
-	id := conn.OrganizationID
-	return &id
+	for i := range conns {
+		if conns[i].OrganizationID != uuid.Nil && h.adoConnectionTrusted(context.Background(), &conns[i], adoOrg) {
+			id := conns[i].OrganizationID
+			return &id
+		}
+	}
+	return nil
+}
+
+// adoConnectionTrusted reports whether a delivery from the Azure DevOps organization adoOrg may
+// reach conn. The connection must be an Azure DevOps connection for that organization, and its
+// token must have proven access to it. The OAuth flow and the direct-create API prove it when the
+// connection is made. A connection without the mark proves it here, once, with its stored token,
+// and keeps the mark on success. Without the proof, anyone could create a connection naming
+// another tenant's Azure DevOps organization and receive its deliveries. Fails closed.
+func (h *VCSAppInstallationHandlerV2) adoConnectionTrusted(ctx context.Context, conn *models.VCSConnection, adoOrg string) bool {
+	if conn == nil || conn.Provider != models.VCSProviderAzureDevOps || adoOrg == "" || !strings.EqualFold(conn.AccountName, adoOrg) {
+		return false
+	}
+	if conn.AccountVerifiedAt != nil {
+		return true
+	}
+	verify := h.verifyADOAccount
+	if verify == nil {
+		verify = h.verifyADOAccountWithToken
+	}
+	if err := verify(ctx, conn); err != nil {
+		logger.Warnf("webhook: Azure DevOps connection %s has not proven access to %q; skipping: %v", conn.ID, conn.AccountName, err)
+		return false
+	}
+	now := time.Now()
+	if err := h.vcsConnectionRepo.MarkAccountVerified(conn.ID, now); err != nil {
+		logger.Warnf("webhook: recording the verification of Azure DevOps connection %s: %v", conn.ID, err)
+	}
+	conn.AccountVerifiedAt = &now
+	return true
+}
+
+// adoAccountValidator is the Azure DevOps provider's account check, declared where it is used.
+type adoAccountValidator interface {
+	ValidateTokenAndOrg(ctx context.Context, token, org string) error
+}
+
+// verifyADOAccountWithToken proves the connection's stored token against its Azure DevOps
+// organization, refreshing the token first when needed.
+func (h *VCSAppInstallationHandlerV2) verifyADOAccountWithToken(ctx context.Context, conn *models.VCSConnection) error {
+	if h.vcsRegistry == nil {
+		return errors.New("no VCS provider registry")
+	}
+	// GetProvider decrypts the tokens in place, so work on a copy and leave conn as loaded.
+	c := *conn
+	provider, err := h.vcsRegistry.GetProvider(&c)
+	if err != nil {
+		return fmt.Errorf("getting the provider: %w", err)
+	}
+	validator, ok := provider.(adoAccountValidator)
+	if !ok {
+		return errors.New("provider cannot validate an Azure DevOps account")
+	}
+	token, err := provider.GetFreshToken(ctx, &c)
+	if err != nil {
+		return fmt.Errorf("getting a fresh token: %w", err)
+	}
+	return validator.ValidateTokenAndOrg(ctx, token, c.AccountName)
 }
 
 // recordWebhookEvent records a webhook event for debugging and auditing, in the organization
@@ -1094,7 +1167,7 @@ func (h *VCSAppInstallationHandlerV2) filterWorkspacesByADOOrg(workspaces []mode
 			logger.Warnf("webhook: workspace %s VCS connection load failed; skipping", ws.ID)
 			continue
 		}
-		if conn.Provider != models.VCSProviderAzureDevOps || adoOrg == "" || !strings.EqualFold(conn.AccountName, adoOrg) {
+		if !h.adoConnectionTrusted(context.Background(), conn, adoOrg) {
 			logger.Warnf("webhook: workspace %s connection ADO org %q != delivery org %q; skipping cross-org trigger (AUD-102 ADO)", ws.ID, conn.AccountName, adoOrg)
 			continue
 		}
@@ -1111,7 +1184,7 @@ func (h *VCSAppInstallationHandlerV2) filterInventoriesByADOOrg(inventories []mo
 			continue
 		}
 		conn, err := h.inventoryConnection(context.Background(), &inv)
-		if err != nil || conn == nil || conn.Provider != models.VCSProviderAzureDevOps || adoOrg == "" || !strings.EqualFold(conn.AccountName, adoOrg) {
+		if err != nil || !h.adoConnectionTrusted(context.Background(), conn, adoOrg) {
 			logger.Warnf("webhook: inventory %s connection ADO org does not match delivery org %q; skipping (AUD-102 ADO)", inv.ID, adoOrg)
 			continue
 		}
@@ -1158,7 +1231,7 @@ func (h *VCSAppInstallationHandlerV2) filterPlaybooksByADOOrg(playbooks []models
 			continue
 		}
 		conn, err := h.playbookConnection(context.Background(), &pb)
-		if err != nil || conn == nil || conn.Provider != models.VCSProviderAzureDevOps || adoOrg == "" || !strings.EqualFold(conn.AccountName, adoOrg) {
+		if err != nil || !h.adoConnectionTrusted(context.Background(), conn, adoOrg) {
 			logger.Warnf("webhook: playbook %s connection Azure DevOps organization does not match delivery organization %q; skipping", pb.ID, adoOrg)
 			continue
 		}

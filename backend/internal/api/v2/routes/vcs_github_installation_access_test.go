@@ -237,8 +237,11 @@ func TestVCSConnectionCreate_TakesNoInstallation(t *testing.T) {
 		t.Fatalf("refused requests left %d connection(s)", n)
 	}
 
+	// A GitHub token connection: an Azure DevOps create must also prove its token against the
+	// Azure DevOps organization it names, which a fake token cannot, so this step used Azure
+	// DevOps only until that check existed. What it asserts is unchanged.
 	t.Run("an empty installation_id names none", func(t *testing.T) {
-		rec := post(t, `{"data":{"type":"vcs-connections","attributes":{"provider":"azure_devops","installation_id":"","access_token":"not-a-real-token","account_name":"acme","account_type":"organization"}}}`)
+		rec := post(t, `{"data":{"type":"vcs-connections","attributes":{"provider":"github","installation_id":"","access_token":"not-a-real-token","account_name":"acme","account_type":"organization"}}}`)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("got %d, want 201.\nbody: %s", rec.Code, rec.Body.String())
 		}
