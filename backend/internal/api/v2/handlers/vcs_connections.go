@@ -198,11 +198,12 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 		return
 	}
 
-	// One connection per provider. Only "not found" means there is none: any other error leaves
-	// the question unanswered, and answering it either way would be a guess.
-	_, err = h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, provider)
+	// One token connection per account of a provider (#938), compared without case. Only "not
+	// found" means there is none: any other error leaves the question unanswered, and answering
+	// it either way would be a guess. The identity index refuses a concurrent duplicate below.
+	_, err = h.vcsConnectionRepo.GetByOrganizationProviderAndAccount(org.ID, provider, req.AccountName)
 	if err == nil {
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "VCS connection for this provider already exists")
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "A VCS connection for this account already exists")
 		return
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -252,6 +253,10 @@ func (h *VCSConnectionHandlerV2) Create(c *gin.Context) {
 	}
 
 	if err := h.vcsConnectionRepo.Create(connection); err != nil {
+		if repository.IsUniqueViolation(err) {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "A VCS connection for this account already exists")
+			return
+		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create VCS connection")
 		return
 	}

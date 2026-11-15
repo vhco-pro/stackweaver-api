@@ -839,6 +839,26 @@
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*DashboardHandler).GetStats-fm"
     },
     {
+      "method": "GET",
+      "path": "/api/v2/github-app/installation/:id",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*GitHubAppInstallationsHandler).Get-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/github-app/installations",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*GitHubAppInstallationsHandler).List-fm",
+      "query": [
+        "filter[installation_id]",
+        "filter[name]",
+        "page",
+        "page[number]",
+        "page[size]",
+        "per_page"
+      ]
+    },
+    {
       "method": "DELETE",
       "path": "/api/v2/identity-bindings/:id",
       "mutating": true,

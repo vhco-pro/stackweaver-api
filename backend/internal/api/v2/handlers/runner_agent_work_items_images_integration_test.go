@@ -77,8 +77,9 @@ func (f *workItemImageFixture) projectInventory(t *testing.T, typ models.Invento
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		f.db.Where("inventory_id = ?", inv.ID).Delete(&models.AnsibleInventorySource{})
+		// Children first: a sync references its source.
 		f.db.Where("inventory_id = ?", inv.ID).Delete(&models.AnsibleInventorySync{})
+		f.db.Where("inventory_id = ?", inv.ID).Delete(&models.AnsibleInventorySource{})
 		f.db.Where("id = ?", inv.ID).Delete(&models.AnsibleInventory{})
 	})
 	return inv

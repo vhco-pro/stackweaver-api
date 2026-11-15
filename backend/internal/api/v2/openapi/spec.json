@@ -5735,6 +5735,46 @@
           }
         }
       },
+      "get-api-v2-github-app-installations-2216c1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "get-api-v2-organizations-name-ansible-notification-templates-9820ac": {
         "type": "object",
         "properties": {
@@ -25395,6 +25435,9 @@
                     "type": "string",
                     "format": "date-time"
                   },
+                  "installation_id": {
+                    "type": "string"
+                  },
                   "provider": {
                     "type": "string"
                   },
@@ -32220,6 +32263,112 @@
         "summary": "GET /api/v2/dashboard/stats",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/api/v2/github-app/installation/{id}": {
+      "get": {
+        "operationId": "get-api-v2-github-app-installation-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error-404"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "GET /api/v2/github-app/installation/:id",
+        "tags": [
+          "github-app"
+        ]
+      }
+    },
+    "/api/v2/github-app/installations": {
+      "get": {
+        "operationId": "get-api-v2-github-app-installations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter[installation_id]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter[name]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "An older spelling of page[number], read when page[number] is absent.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "An older spelling of page[size], read when page[size] is absent.",
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-api-v2-github-app-installations-2216c1"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/github-app/installations",
+        "tags": [
+          "github-app"
         ]
       }
     },

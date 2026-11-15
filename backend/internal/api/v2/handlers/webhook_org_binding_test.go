@@ -116,7 +116,7 @@ func setupBindingFixture(t *testing.T) *bindingFixture {
 	f.projB = &models.Project{ID: uuid.New(), OrganizationID: f.orgB.ID, Name: "whb-proj-b"}
 	f.ghA = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgA.ID, Provider: models.VCSProviderGitHub, InstallationID: "111-" + sfx, AccountName: "org-a"}
 	f.ghB = &models.VCSConnection{ID: uuid.New(), OrganizationID: f.orgB.ID, Provider: models.VCSProviderGitHub, InstallationID: "222-" + sfx, AccountName: "org-b"}
-	// Azure DevOps organization names are unique per run, because orgFromADOOrg looks them up
+	// Azure DevOps organization names are unique per run, because adoAttribution looks them up
 	// across every organization in the database. Both connections stand for ones made through the
 	// OAuth flow, which proves the token against the Azure DevOps organization, so they carry the
 	// verification mark: an unverified connection is trusted only after its token proves access
@@ -194,20 +194,31 @@ func TestFilterModulesByInstallation(t *testing.T) {
 	}
 }
 
-// orgFromADOOrg names the organization whose connection was made for the delivery's Azure DevOps
-// organization, and no organization for one nobody connected.
+// adoAttribution names the organization whose connection was made for the delivery's
+// Azure DevOps organization, and no organization for one nobody connected. It replaced
+// orgFromADOOrg, which returned one organization, when several organizations became able to
+// connect one Azure DevOps organization (#938); in this fixture each Azure DevOps organization has
+// one connection, so the list holds at most one.
 func TestOrgFromADOOrg(t *testing.T) {
 	f := setupBindingFixture(t)
 
-	if got := f.h.orgFromADOOrg(strings.ToUpper(f.adoB.AccountName)); got == nil || *got != f.orgB.ID {
-		t.Errorf("orgFromADOOrg(%q) = %v, want organization B %v", f.adoB.AccountName, got, f.orgB.ID)
+	if got := onlyOrg(f.h.adoAttribution(strings.ToUpper(f.adoB.AccountName)).orgs); got == nil || *got != f.orgB.ID {
+		t.Errorf("adoAttribution(%q) = %v, want organization B %v", f.adoB.AccountName, got, f.orgB.ID)
 	}
-	if got := f.h.orgFromADOOrg("nobody-connected-" + f.orgA.Name); got != nil {
-		t.Errorf("orgFromADOOrg(unconnected) = %v, want nil", got)
+	if got := onlyOrg(f.h.adoAttribution("nobody-connected-" + f.orgA.Name).orgs); got != nil {
+		t.Errorf("adoAttribution(unconnected) = %v, want nil", got)
 	}
-	if got := f.h.orgFromADOOrg(""); got != nil {
-		t.Errorf("orgFromADOOrg(\"\") = %v, want nil", got)
+	if got := onlyOrg(f.h.adoAttribution("").orgs); got != nil {
+		t.Errorf("adoAttribution(\"\") = %v, want nil", got)
 	}
+}
+
+// onlyOrg is the single organization in ids, or nil when there is none or more than one.
+func onlyOrg(ids []uuid.UUID) *uuid.UUID {
+	if len(ids) != 1 {
+		return nil
+	}
+	return &ids[0]
 }
 
 func playbookIDs(pbs []models.AnsiblePlaybook) []string {
@@ -261,8 +272,8 @@ func TestADODeliveryTrustsOnlyVerifiedConnections(t *testing.T) {
 		return errors.New("token cannot reach the Azure DevOps organization")
 	}
 
-	if got := f.h.orgFromADOOrg(f.adoA.AccountName); got == nil || *got != f.orgA.ID {
-		t.Errorf("orgFromADOOrg(%q) = %v, want organization A %v, not the unverified claimant", f.adoA.AccountName, got, f.orgA.ID)
+	if got := onlyOrg(f.h.adoAttribution(f.adoA.AccountName).orgs); got == nil || *got != f.orgA.ID {
+		t.Errorf("adoAttribution(%q) = %v, want organization A %v, not the unverified claimant", f.adoA.AccountName, got, f.orgA.ID)
 	}
 
 	wsA := models.Workspace{ID: uuid.New().String(), ProjectID: f.projA.ID, VCSConnectionID: &f.adoA.ID, VCSRepository: "proj/infra", VCSBranch: "main"}
@@ -288,14 +299,14 @@ func TestADODeliveryTrustsOnlyVerifiedConnections(t *testing.T) {
 	}
 
 	// The legacy connection proves access on its first delivery and keeps the mark.
-	if got := f.h.orgFromADOOrg(legacy.AccountName); got == nil || *got != f.orgB.ID {
-		t.Errorf("orgFromADOOrg(%q) = %v, want organization B %v once its token proves access", legacy.AccountName, got, f.orgB.ID)
+	if got := onlyOrg(f.h.adoAttribution(legacy.AccountName).orgs); got == nil || *got != f.orgB.ID {
+		t.Errorf("adoAttribution(%q) = %v, want organization B %v once its token proves access", legacy.AccountName, got, f.orgB.ID)
 	}
 	var stored models.VCSConnection
 	if err := f.db.First(&stored, "id = ?", legacy.ID).Error; err != nil || stored.AccountVerifiedAt == nil {
 		t.Fatalf("the proven connection was not marked verified: %v", err)
 	}
-	_ = f.h.orgFromADOOrg(legacy.AccountName)
+	_ = f.h.adoAttribution(legacy.AccountName)
 	if calls[legacy.ID] != 1 {
 		t.Errorf("the proven connection was verified %d times, want once", calls[legacy.ID])
 	}

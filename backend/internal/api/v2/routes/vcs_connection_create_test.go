@@ -6,9 +6,9 @@
 // pointer for nil, and the repository returned a pointer to an empty connection together with
 // its not-found error.
 //
-// This drives the router the server mounts: the first create for a provider is accepted, a
-// second for the same provider is the conflict the check exists for, and another provider is
-// still accepted afterwards.
+// This drives the router the server mounts: the first create for a provider is accepted, another
+// account of that provider is accepted too (#938), and the same account again is the conflict
+// the check exists for.
 
 //go:build integration
 
@@ -98,12 +98,18 @@ func TestVCSConnectionCreate_ConflictsOnlyWithAnExistingConnection(t *testing.T)
 			len(rows), models.VCSProviderGitHub, doc.Data.ID)
 	}
 
+	// One connection per account, not per provider (#938): another account of the same provider
+	// is accepted, and the same account in any case is the conflict.
 	rec = create(t, models.VCSProviderGitHub, "second")
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("a second %s connection = %d, want 409.\nbody: %s", models.VCSProviderGitHub, rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("a %s connection for another account = %d, want 201.\nbody: %s", models.VCSProviderGitHub, rec.Code, rec.Body.String())
 	}
-	if rows := stored(t, models.VCSProviderGitHub); len(rows) != 1 || rows[0].AccountName != "first" {
-		t.Fatalf("a refused create left %d %s connection(s), want the first one untouched", len(rows), models.VCSProviderGitHub)
+	rec = create(t, models.VCSProviderGitHub, "FIRST")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("a second %s connection for the same account in another case = %d, want 409.\nbody: %s", models.VCSProviderGitHub, rec.Code, rec.Body.String())
+	}
+	if rows := stored(t, models.VCSProviderGitHub); len(rows) != 2 {
+		t.Fatalf("after a refused create the organization holds %d %s connection(s), want 2", len(rows), models.VCSProviderGitHub)
 	}
 
 	// An Azure DevOps connection whose token cannot reach the Azure DevOps organization it names
@@ -116,5 +122,48 @@ func TestVCSConnectionCreate_ConflictsOnlyWithAnExistingConnection(t *testing.T)
 	}
 	if rows := stored(t, models.VCSProviderAzureDevOps); len(rows) != 0 {
 		t.Fatalf("a refused %s create stored %d connection(s)", models.VCSProviderAzureDevOps, len(rows))
+	}
+
+	// The resource carries installation_id (#938, AC-13): the installation of an App connection,
+	// empty for a token connection. It is an identifier GitHub shows in the installation's
+	// settings URL, not a secret.
+	app := models.VCSConnection{ID: uuid.New(), OrganizationID: org.ID, Provider: models.VCSProviderGitHub, InstallationID: "424242", AccountName: "app-account", AccountType: "Organization"}
+	if err := h.db.Create(&app).Error; err != nil {
+		t.Fatalf("seed an App connection: %v", err)
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v2/organizations/"+org.Name+"/vcs-connections", nil)
+	req.Header.Set("Authorization", "Bearer "+h.token)
+	rec = httptest.NewRecorder()
+	h.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list connections = %d.\nbody: %s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Data []struct {
+			ID         string         `json:"id"`
+			Attributes map[string]any `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	seen := 0
+	for _, d := range list.Data {
+		got, present := d.Attributes["installation_id"]
+		if !present {
+			t.Errorf("connection %s has no installation_id attribute", d.ID)
+			continue
+		}
+		seen++
+		want := ""
+		if d.ID == app.ID.String() {
+			want = "424242"
+		}
+		if got != want {
+			t.Errorf("connection %s installation_id = %v, want %q", d.ID, got, want)
+		}
+	}
+	if seen < 3 {
+		t.Errorf("checked %d connection(s), want the two token connections and the App connection", seen)
 	}
 }

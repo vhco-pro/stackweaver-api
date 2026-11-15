@@ -53,6 +53,11 @@ func setupAuthzTestDB(t *testing.T) *gorm.DB {
 	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// The foreign-key delete rules the API reconciles at startup (cmd/api), so a fresh database
+	// has the schema a deployed one has, cascades included, and not only a development one.
+	if _, err := models.ReconcileFKDeleteRules(db); err != nil {
+		t.Fatalf("reconcile foreign-key delete rules: %v", err)
+	}
 	return db
 }
 

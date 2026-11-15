@@ -22,6 +22,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
+	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -42,6 +43,12 @@ import (
 // RunnerAgentHandler handles runner agent API endpoints
 // These endpoints are used by the runner agents to register, heartbeat, and report job status.
 type RunnerAgentHandler struct {
+	// snapshotAuthorized and beforeWorkItemFinish are test seams, nil in production: each is called
+	// with the work item's id between a request's authorization check and its effect, so a test can
+	// cancel the capture in that window (#938).
+	snapshotAuthorized   func(workItemID string)
+	beforeWorkItemFinish func(workItemID string)
+
 	runnerRepo        *repository.RunnerRepository
 	jobExecRepo       *repository.RunnerJobExecutionRepository
 	poolRepo          *repository.AgentPoolRepository
@@ -98,7 +105,13 @@ type RunnerAgentHandler struct {
 	longPollMax time.Duration
 	// workItems runs the sync work items (#933, D2; SetWorkItems). Without it none is offered.
 	workItems *ansible.WorkItemRuntime
+	// modulePublisher publishes the version a module_tag_snapshot uploads (#938;
+	// SetModulePublisher).
+	modulePublisher *registry.ModulePublisher
 }
+
+// SetModulePublisher sets the publisher of module versions captured from a tag.
+func (h *RunnerAgentHandler) SetModulePublisher(p *registry.ModulePublisher) { h.modulePublisher = p }
 
 // DefaultLongPollMax caps a heartbeat's wait below the idle timeouts of the proxies between a
 // launcher and the API (ingress-nginx's proxy-read-timeout defaults to 60 seconds; #933, D3).
@@ -2596,6 +2609,18 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		Plan:             h.planDescriptor(c.Request.Context(), &run),
 		Registry:         h.jobRegistryBlock(c, &run),
 		Mirror:           h.mirror,
+	}
+
+	// A run whose configuration is still being captured is refused rather than handed no
+	// configuration (#938). A new replica never offers such a run; an older one during a rolling
+	// deploy might, and the runner then retries or the run ends with the reason.
+	if run.ConfigurationVersionID != nil {
+		var cv models.ConfigurationVersion
+		if err := h.db.Select("id", "status").First(&cv, "id = ?", *run.ConfigurationVersionID).Error; err == nil &&
+			cv.Status != models.ConfigurationVersionStatusUploaded {
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "the run's configuration is not uploaded yet")
+			return
+		}
 	}
 
 	// Get configuration tarball from storage if configuration version exists. The version is

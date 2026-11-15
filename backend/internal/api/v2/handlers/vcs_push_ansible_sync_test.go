@@ -100,6 +100,9 @@ func pushHandler(f *installationWebhookFixture) *syncRecorder {
 	f.handler.playbookRepo = repository.NewAnsiblePlaybookRepository(f.db)
 	f.handler.webhookEventRepo = repository.NewWebhookEventRepository(f.db)
 	f.handler.workItems = coreansible.NewWorkItemService(f.db, nil)
+	// A workspace the delivery reaches gets its run and fetching configuration version at once.
+	f.handler.runRepo = repository.NewRunRepository(f.db)
+	f.handler.configVersionRepo = repository.NewConfigurationVersionRepository(f.db)
 	return q
 }
 

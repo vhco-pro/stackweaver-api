@@ -263,3 +263,35 @@ func TestInstallationDeletedWebhook_RemovesTheConnection(t *testing.T) {
 		t.Errorf("%d connection(s) carry the other installation; want the one that was there", n)
 	}
 }
+
+// Several organizations can connect one installation (#938, AC-06). Uninstalling it removes the
+// connection in every one of them, and an organization's connection on another installation of
+// the same provider stays.
+func TestInstallationDeletedWebhook_RemovesItInEveryOrganization(t *testing.T) {
+	f := setupInstallationWebhook(t)
+	orgA, orgB := f.organization(t), f.organization(t)
+	installation, other := f.installation(t), f.installation(t)
+	seed := func(org *models.Organization, id int64) {
+		if err := f.db.Create(&models.VCSConnection{
+			ID: uuid.New(), OrganizationID: org.ID, Provider: models.VCSProviderGitHub,
+			InstallationID: strconv.FormatInt(id, 10), AccountName: "shared", AccountType: "organization",
+		}).Error; err != nil {
+			t.Fatalf("seed connection for installation %d: %v", id, err)
+		}
+	}
+	seed(orgA, installation)
+	seed(orgB, installation)
+	seed(orgA, other)
+
+	w := f.deliver(t, "deleted", "shared", installation)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("delivery = %d, want 200.\nbody: %s", w.Code, w.Body.String())
+	}
+	if n := f.withInstallation(t, installation); n != 0 {
+		t.Errorf("%d connection(s) still carry the uninstalled installation; want none in either organization", n)
+	}
+	if n := f.withInstallation(t, other); n != 1 {
+		t.Errorf("%d connection(s) carry the other installation; want organization A's one", n)
+	}
+}

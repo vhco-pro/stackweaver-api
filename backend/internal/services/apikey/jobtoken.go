@@ -123,6 +123,15 @@ func (s *Service) RevokeJobTokens(kind models.JobType, jobID string) error {
 	return s.RevokeJobRegistryTokens(kind, jobID)
 }
 
+// RevokeJobAttemptTokens revokes the job tokens of one attempt of a job, leaving a later attempt's
+// tokens valid (#938): a stale request that finishes nothing must not end the current attempt.
+func (s *Service) RevokeJobAttemptTokens(kind models.JobType, jobID string, attempt int) error {
+	if err := s.apiKeyRepo.ExpireByScopes(jobScopePrefix+string(kind)+":"+jobID+":", jobAttemptScopePrefix+strconv.Itoa(attempt), time.Now().UTC()); err != nil {
+		return fmt.Errorf("revoking job tokens of attempt %d: %w", attempt, err)
+	}
+	return nil
+}
+
 // IsRevokedJobToken reports whether key is a job token that no longer verifies: revoked, or past
 // the job's own deadline. Either way its executor's job is over for it. It is false for an unknown
 // token and for every other kind of key.

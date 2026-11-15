@@ -35,6 +35,7 @@ import (
 
 type workItemRunnerFixture struct {
 	*agentPrepFixture
+	h     *RunnerAgentHandler
 	r     *gin.Engine
 	svc   *apikey.Service
 	store *snapshotStore
@@ -72,7 +73,7 @@ func setupWorkItemRunner(t *testing.T) *workItemRunnerFixture {
 		authed.POST("/jobs/:id/snapshot", middleware.JobData(), h.UploadSnapshot)
 		authed.POST("/jobs/:id/complete", middleware.JobData(), h.JobComplete)
 	})
-	return &workItemRunnerFixture{agentPrepFixture: f, r: r, svc: svc, store: store, items: ansible.NewWorkItemService(f.db, nil)}
+	return &workItemRunnerFixture{agentPrepFixture: f, h: h, r: r, svc: svc, store: store, items: ansible.NewWorkItemService(f.db, nil)}
 }
 
 // onPool moves a work item onto organization A's pool A, where runners a1 and a2 are.
@@ -396,7 +397,12 @@ func TestWorkItemRunner_ConfigurationSnapshotGatesTheRun(t *testing.T) {
 	if err != nil || again.ID != item.ID {
 		t.Errorf("a second request made %v (%v), want the same work item %s", again, err, item.ID)
 	}
-	t.Cleanup(func() { f.db.Where("workspace_id = ?", run.WorkspaceID).Delete(&models.ConfigurationVersion{}) })
+	t.Cleanup(func() {
+		// The run references the version, so it goes first.
+		f.db.Where("run_id = ?", run.ID).Delete(&models.WorkItem{})
+		f.db.Where("id = ?", run.ID).Delete(&models.Run{})
+		f.db.Where("workspace_id = ?", run.WorkspaceID).Delete(&models.ConfigurationVersion{})
+	})
 	f.onPool(t, item)
 	if got := offeredRuns(); !slices.Contains(got, item.ID) || slices.Contains(got, run.ID) {
 		t.Fatalf("offered %v, want the configuration snapshot %s and not the run", got, item.ID)

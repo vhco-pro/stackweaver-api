@@ -24,6 +24,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 	"gorm.io/gorm"
 )
@@ -351,24 +352,15 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 		return
 	}
 
-	// Check if connection already exists
-	existing, getErr := h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, models.VCSProviderGitHub)
-	// Only "not found" means there is none. Any other error leaves the question unanswered, and
-	// creating on it could give the organization a second connection for the provider.
-	if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check for an existing VCS connection")
-		return
-	}
-	if getErr == nil && existing != nil && existing.ID != uuid.Nil {
-		// Update existing connection
-		existing.InstallationID = installationID
+	// The installation is the connection's identity (#938): completing it again updates that
+	// connection, and any other installation adds one beside it.
+	update := func(existing *models.VCSConnection) {
 		existing.AccountName = installation.AccountName
 		existing.AccountType = installation.AccountType
 		if err := h.vcsConnectionRepo.Update(existing); err != nil {
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update VCS connection")
 			return
 		}
-
 		jsonapi.WriteDocument(c, http.StatusOK, jsonapi.Resource[VCSConnectionAckWithTypeAttributes]{
 			ID:   existing.ID.String(),
 			Type: "vcs-connections",
@@ -378,10 +370,19 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 				AccountType: existing.AccountType,
 			},
 		})
+	}
+	existing, getErr := h.vcsConnectionRepo.GetByOrganizationAndInstallation(org.ID, installationID)
+	// Only "not found" means there is none. Any other error leaves the question unanswered, and
+	// creating on it would be refused by the identity index anyway.
+	if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check for an existing VCS connection")
+		return
+	}
+	if getErr == nil {
+		update(existing)
 		return
 	}
 
-	// Create new connection
 	connection := &models.VCSConnection{
 		OrganizationID: org.ID,
 		Provider:       models.VCSProviderGitHub,
@@ -389,8 +390,14 @@ func (h *VCSAppInstallationHandlerV2) CreateConnectionFromInstallation(c *gin.Co
 		AccountName:    installation.AccountName,
 		AccountType:    installation.AccountType,
 	}
-
 	if err := h.vcsConnectionRepo.Create(connection); err != nil {
+		// A concurrent completion of the same installation created it first; this one updates it.
+		if repository.IsUniqueViolation(err) {
+			if winner, err := h.vcsConnectionRepo.GetByOrganizationAndInstallation(org.ID, installationID); err == nil {
+				update(winner)
+				return
+			}
+		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create VCS connection")
 		return
 	}

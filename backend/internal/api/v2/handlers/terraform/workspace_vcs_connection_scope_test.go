@@ -205,13 +205,20 @@ func TestWorkspaceVCSConnection_AnotherOrganizationReadsAsNotFound(t *testing.T)
 
 // TestWorkspaceVCSConnection_InstallationOfAnotherOrganization is the third way to name a
 // connection: by the GitHub App installation it was made through. An installation that resolves
-// to no connection has always left the workspace without one, so that is the one answer for an
-// installation only another organization is connected through, and an installation both are
-// connected through resolves to the organization's own row.
+// to no connection in the organization is refused with 400 "VCS connection not found", the same
+// answer for an installation only another organization is connected through as for one nobody
+// is, and nothing about the workspace is created or changed (#938, owner decision Q7). This test
+// used to expect a successful document without a connection: the request was silently ignored,
+// which left a TFE client believing it had attached the workspace. An installation both
+// organizations are connected through resolves to the organization's own row.
 func TestWorkspaceVCSConnection_InstallationOfAnotherOrganization(t *testing.T) {
 	f := setupWorkspaceConnections(t)
+	marker := "must-not-persist-" + uuid.NewString()[:8]
 	naming := func(installation string) map[string]any {
-		return map[string]any{"vcs-repo": map[string]any{"identifier": "acme/infra", "github-app-installation-id": installation}}
+		return map[string]any{
+			"description": marker,
+			"vcs-repo":    map[string]any{"identifier": "acme/infra", "github-app-installation-id": installation},
+		}
 	}
 	workspaceID := func(t *testing.T, rec *httptest.ResponseRecorder) string {
 		t.Helper()
@@ -225,18 +232,31 @@ func TestWorkspaceVCSConnection_InstallationOfAnotherOrganization(t *testing.T) 
 		}
 		return doc.Data.ID
 	}
+	persisted := func(t *testing.T) int64 {
+		t.Helper()
+		var n int64
+		if err := f.db.Model(&models.Workspace{}).Where("project_id = ? AND description = ?", f.projectID, marker).Count(&n).Error; err != nil {
+			t.Fatalf("counting workspaces: %v", err)
+		}
+		return n
+	}
 	for _, write := range workspaceWrites() {
 		t.Run(write.name, func(t *testing.T) {
 			foreign := write.send(t, f, naming(otherVCSInstallation))
 			unknown := write.send(t, f, naming("9169999"))
-			if foreign.Code != unknown.Code {
-				t.Fatalf("an installation of another organization answers %d and an unknown one %d", foreign.Code, unknown.Code)
+			for _, rec := range []*httptest.ResponseRecorder{foreign, unknown} {
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "VCS connection not found") {
+					t.Errorf("got %d %s, want 400 VCS connection not found", rec.Code, rec.Body.String())
+				}
 			}
-			if got := f.connectionOf(t, workspaceID(t, foreign)); got != "" {
-				t.Errorf("naming another organization's installation stored connection %q, want none, as for an unknown installation", got)
+			if foreign.Body.String() != unknown.Body.String() {
+				t.Errorf("an installation of another organization and an unknown one are answered differently:\n  %s\n  %s", foreign.Body.String(), unknown.Body.String())
 			}
 			if strings.Contains(foreign.Body.String(), otherVCSAccount) {
 				t.Errorf("the answer carries the other organization's account name")
+			}
+			if n := persisted(t); n != 0 {
+				t.Errorf("%d workspace(s) were created or changed by a refused request", n)
 			}
 
 			own := write.send(t, f, naming(ownVCSInstallation))
@@ -247,11 +267,73 @@ func TestWorkspaceVCSConnection_InstallationOfAnotherOrganization(t *testing.T) 
 			if got := f.connectionOf(t, workspaceID(t, shared)); got != f.ownShared.ID.String() {
 				t.Errorf("naming an installation both organizations use stored %q, want the organization's own row %q", got, f.ownShared.ID)
 			}
+			f.db.Model(&models.Workspace{}).Where("project_id = ? AND description = ?", f.projectID, marker).Update("description", "")
 		})
 	}
 	if got := f.namingOther(t); got != 0 {
 		t.Errorf("%d workspace(s) name the other organization's connection", got)
 	}
+}
+
+// TestWorkspaceVCSRepo_DefaultConnection: a `vcs-repo` that names neither
+// `github-app-installation-id` nor `oauth-token-id` uses the organization's connection only when
+// it has exactly one (#938, AC-08). With several, any choice could be the wrong account, so the
+// write is refused with 422 naming both fields, and nothing is created or changed.
+func TestWorkspaceVCSRepo_DefaultConnection(t *testing.T) {
+	t.Run("several connections are ambiguous", func(t *testing.T) {
+		f := setupWorkspaceConnections(t)
+		marker := "must-not-persist-" + uuid.NewString()[:8]
+		for _, write := range workspaceWrites() {
+			t.Run(write.name, func(t *testing.T) {
+				rec := write.send(t, f, map[string]any{"description": marker, "vcs-repo": map[string]any{"identifier": "acme/infra"}})
+				body := rec.Body.String()
+				if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, "github-app-installation-id") || !strings.Contains(body, "oauth-token-id") {
+					t.Errorf("got %d %s, want 422 naming github-app-installation-id and oauth-token-id", rec.Code, body)
+				}
+				var n int64
+				f.db.Model(&models.Workspace{}).Where("project_id = ? AND description = ?", f.projectID, marker).Count(&n)
+				if n != 0 {
+					t.Errorf("%d workspace(s) were created or changed by a refused request", n)
+				}
+			})
+		}
+	})
+
+	t.Run("one connection is the default", func(t *testing.T) {
+		base := setupWorkspaceBooleans(t)
+		if err := base.db.AutoMigrate(&models.VCSConnection{}); err != nil {
+			t.Fatalf("migrating VCS connections: %v", err)
+		}
+		var project models.Project
+		if err := base.db.First(&project, "id = ?", base.projectID).Error; err != nil {
+			t.Fatalf("reading the fixture's project: %v", err)
+		}
+		only := &models.VCSConnection{ID: uuid.New(), OrganizationID: project.OrganizationID, Provider: models.VCSProviderGitLab, AccountName: "wsconn-only-" + uuid.NewString()[:8]}
+		if err := base.db.Create(only).Error; err != nil {
+			t.Fatalf("seeding the connection: %v", err)
+		}
+		t.Cleanup(func() {
+			base.db.Where("project_id = ? AND vcs_connection_id = ?", base.projectID, only.ID).Delete(&models.Workspace{})
+			base.db.Where("id = ?", only.ID).Delete(&models.VCSConnection{})
+		})
+		f := &workspaceConnectionFixture{workspaceBooleansFixture: base}
+		for _, write := range workspaceWrites() {
+			t.Run(write.name, func(t *testing.T) {
+				rec := write.send(t, f, map[string]any{"vcs-repo": map[string]any{"identifier": "acme/infra"}})
+				var doc struct {
+					Data struct {
+						ID string `json:"id"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || doc.Data.ID == "" {
+					t.Fatalf("decoding the workspace: %v (%d %s)", err, rec.Code, rec.Body.String())
+				}
+				if got := f.connectionOf(t, doc.Data.ID); got != only.ID.String() {
+					t.Errorf("the default stored %q, want the organization's only connection %q", got, only.ID)
+				}
+			})
+		}
+	})
 }
 
 func TestWorkspaceVCSConnection_OwnOrganizationIsAccepted(t *testing.T) {

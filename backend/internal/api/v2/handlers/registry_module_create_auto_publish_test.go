@@ -20,15 +20,24 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
+	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/storage/storagetest"
 )
 
@@ -140,5 +149,97 @@ func TestRegistryModuleCreate_AutoPublishTagsIsStoredAsSent(t *testing.T) {
 				t.Errorf("FindByVCSRepository(%s) returned %d modules, want none: tag publishing is off", repo, len(found))
 			}
 		})
+	}
+}
+
+// A VCS module created with tag publishing on queues a capture of its repository's latest tag
+// (#938, AC-21): a module_tag_snapshot work item on the organization's hosted pool, created
+// before the response, with no clone in the API. The version is published once the capture's
+// snapshot is uploaded.
+func TestRegistryModuleCreate_AutoPublishQueuesACaptureOfTheLatestTag(t *testing.T) {
+	db := setupTestDB(t)
+	org := setupTestOrg(t, db)
+	owner := createRegistryTestUser(t, db)
+	if err := db.Create(&models.OrganizationMember{ID: uuid.New(), OrganizationID: org.ID, UserID: owner.ID}).Error; err != nil {
+		t.Fatalf("seed organization member: %v", err)
+	}
+	makeUserOrgOwner(t, db, org, owner)
+	hosted := models.NewHostedPool(org.ID)
+	if err := db.Create(hosted).Error; err != nil {
+		t.Fatalf("seed hosted pool: %v", err)
+	}
+	vcsConn := &models.VCSConnection{
+		ID: uuid.New(), OrganizationID: org.ID, Provider: models.VCSProviderGitHub, AccountName: "autotag-" + uuid.NewString()[:8], InstallationID: "7788",
+	}
+	if err := db.Create(vcsConn).Error; err != nil {
+		t.Fatalf("seed VCS connection: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM work_items WHERE module_id IN (SELECT id FROM modules WHERE organization_id = ?)", org.ID)
+		db.Exec("DELETE FROM module_versions WHERE module_id IN (SELECT id FROM modules WHERE organization_id = ?)", org.ID)
+		db.Where("organization_id = ?", org.ID).Delete(&models.Module{})
+		db.Where("id = ?", vcsConn.ID).Delete(&models.VCSConnection{})
+		db.Where("id = ?", hosted.ID).Delete(&models.AgentPool{})
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /app/installations/{id}/access_tokens", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"token":"ghs-of-%s","expires_at":"%s"}`, r.PathValue("id"), time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+	})
+	mux.HandleFunc("GET /repos/{owner}/{repo}/tags", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `[{"name":"v0.4.0","commit":{"sha":"abcdefabcdefabcdefabcdefabcdefabcdefabcd"}}]`)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		t.Logf("unexpected GitHub call %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	})
+	api := httptest.NewServer(mux)
+	t.Cleanup(api.Close)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_APP_ID", "1")
+	t.Setenv("GITHUB_APP_NAME", "stackweaver-autotag-test")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})))
+	t.Setenv("GITHUB_APP_PRIVATE_KEY_PATH", "")
+	manager, err := vcs.NewGitHubAppManager()
+	if err != nil || !manager.IsEnabled() {
+		t.Fatalf("configure the GitHub App: %v", err)
+	}
+	manager.SetEndpoints(api.URL, api.URL)
+
+	moduleRepo := repository.NewModuleRepository(db)
+	versions := repository.NewModuleVersionRepository(db)
+	orgRepo := repository.NewOrganizationRepository(db)
+	conns := repository.NewVCSConnectionRepository(db)
+	h := NewRegistryPublishingHandler(moduleRepo, versions, orgRepo, conns, auth.NewService(repository.NewUserRepository(db)),
+		newProviderRBAC(db), manager, registry.NewModulePublisher(moduleRepo, versions, orgRepo, conns, storagetest.NewMemory()))
+	h.SetWorkItems(coreansible.NewWorkItemService(db, nil))
+	router := storedAsSentRouter()
+	router.POST("/api/v2/organizations/:name/registry/modules", h.CreateModule)
+
+	name := "autotag-" + uuid.NewString()[:8]
+	raw, _ := json.Marshal(map[string]any{"data": map[string]any{"type": "registry-modules", "attributes": map[string]any{
+		"name": name, "provider": "aws", "vcs_connection_id": vcsConn.ID.String(), "vcs_repository": "acme/" + name, "auto_publish_tags": true,
+	}}})
+	code, body := storedAsSentCall(t, router, http.MethodPost, "/api/v2/organizations/"+org.Name+"/registry/modules", owner.ID, string(raw))
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201 (%s)", code, body)
+	}
+	var module models.Module
+	if err := db.First(&module, "organization_id = ? AND name = ?", org.ID, name).Error; err != nil {
+		t.Fatal(err)
+	}
+	var items []models.WorkItem
+	db.Where("module_id = ? AND kind = ?", module.ID, models.WorkItemModuleTagSnapshot).Find(&items)
+	if len(items) != 1 || items[0].RequestedRef != "v0.4.0" || items[0].AgentPoolID == nil || *items[0].AgentPoolID != hosted.ID {
+		t.Fatalf("captures after creating the module = %+v, want one of v0.4.0 on the hosted pool", items)
+	}
+	if versions.Exists(module.ID, "0.4.0") {
+		t.Error("the version was published before its capture")
 	}
 }
