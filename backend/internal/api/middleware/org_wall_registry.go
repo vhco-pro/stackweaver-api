@@ -76,6 +76,11 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/admin/terraform-versions":     agnostic(),
 	"/api/v2/admin/terraform-versions/:id": agnostic(),
 	"/api/v2/terraform-versions":           agnostic(),
+	// TFE GitHub App installations (#938). No organization in the path: the handler answers only
+	// with installations connected in the caller's organizations, an organization token's own
+	// organization alone, and never consults the token owner's memberships for such a token.
+	"/api/v2/github-app/installations":    agnostic(),
+	"/api/v2/github-app/installation/:id": agnostic(),
 	// Platform administration (#132): install-wide, no organization to resolve. The admin
 	// handlers call platformadmin.Service.Require, which is the whole check and never consults
 	// the key owner's memberships; the settings read answers every authenticated identity.

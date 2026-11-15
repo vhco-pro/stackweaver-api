@@ -3,17 +3,10 @@
 package terraform
 
 import (
-	"archive/tar"
-	"compress/gzip"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -704,43 +697,34 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		operation, applyable = speculativeRunOperation(operation, &req.Data.Attributes, cv)
 	}
 
-	// TFE-compatible: If no configuration version provided and workspace has VCS configured,
-	// automatically create a configuration version by cloning from VCS
-	// This allows UI runs to work without requiring manual configuration version creation
-	// For agent-mode workspaces, skip platform-side VCS clone - the self-hosted runner
-	// will clone the repository itself using the VCS info from the job artifacts
-	if configVersionID == nil && workspace.VCSConnectionID != nil && workspace.VCSRepository != "" && workspace.VCSBranch != "" && workspace.ExecutionMode != "agent" {
-		logger.Infof("Run creation: No configuration version provided, but workspace has VCS configured. Creating configuration version from VCS.")
-
-		// Get the VCS connection, within the workspace's organization. A workspace row stored
-		// before a write checked its connection may name one of another organization; that one
-		// is not found here, exactly like one that no longer exists, and nothing is cloned.
+	// A run of a VCS-backed workspace created without a configuration version clones nothing here
+	// (#938): it gets a configuration version in status fetching, which an executor fills with the
+	// branch head through the configuration_snapshot work item the orchestrator requests. The run is
+	// offered only once that version is uploaded. This holds in agent mode too, where the old
+	// fallback below planned whatever configuration the workspace held last.
+	vcsBacked := workspace.VCSConnectionID != nil && workspace.VCSRepository != ""
+	var fetching *models.ConfigurationVersion
+	if configVersionID == nil && vcsBacked {
+		// The connection must be one of the workspace's own organization. A workspace row stored
+		// before a write checked its connection may name one of another organization; that one is
+		// not found here, exactly like one that no longer exists, and no run is created.
 		scope := h.vcsConnectionRepo.OrganizationScope().WithContext(c.Request.Context())
-		vcsConn, err := scope.VCSConnectionForProject(*workspace.VCSConnectionID, workspace.ProjectID)
-		if err != nil {
-			logger.Infof("Run creation: Failed to get VCS connection: %v", err)
+		if _, err := scope.VCSConnectionForProject(*workspace.VCSConnectionID, workspace.ProjectID); err != nil {
 			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Failed to get VCS connection for workspace")
 			return
 		}
-
-		// Create configuration version from VCS
-		createdConfigVersionID, err := h.createConfigurationVersionFromVCS(c.Request.Context(), workspace, vcsConn)
-		if err != nil {
-			// AUD-063: log the real cause server-side; return a generic detail (the raw err may carry
-			// VCS host/path/credential context).
-			apierror.Internal(c, "Failed to create configuration version from VCS", err)
-			return
+		// Created only with the run, below: a request refused on the way leaves no version behind.
+		fetching = &models.ConfigurationVersion{
+			WorkspaceID: workspaceID, Status: models.ConfigurationVersionStatusFetching, Source: "tfe-vcs",
+			Speculative: operation == models.RunOperationPlanOnly,
 		}
-		configVersionID = &createdConfigVersionID
-		logger.Infof("Run creation: Created configuration version %s from VCS", *configVersionID)
 	}
 
-	// TFE-compatible: a run created without an explicit configuration-version uses the workspace's
-	// LATEST configuration version (go-tfe RunCreateOptions.ConfigurationVersion is optional - e.g.
-	// tfe_workspace_run never sets it). Without this fallback the run has no config and the plan fails
-	// with "No configuration files". Only applies to non-VCS workspaces (the VCS block above already
-	// created a config version from the repo when applicable).
-	if configVersionID == nil {
+	// TFE-compatible: a run created without an explicit configuration-version on a workspace without
+	// VCS uses the workspace's LATEST configuration version (go-tfe RunCreateOptions.ConfigurationVersion
+	// is optional - e.g. tfe_workspace_run never sets it). Without this fallback the run has no config
+	// and the plan fails with "No configuration files".
+	if configVersionID == nil && !vcsBacked {
 		if latestCV, cvErr := h.configVersionRepo.GetLatestByWorkspaceID(workspaceID); cvErr == nil && latestCV != nil {
 			configVersionID = &latestCV.ID
 			logger.Infof("Run creation: no configuration-version supplied, defaulting to workspace's latest %s", *configVersionID)
@@ -809,7 +793,12 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 		AgentPoolID:            effectiveAgentPoolID, // workspace pool, or the inherited project default
 	}
 
-	if err := h.runRepo.Create(run); err != nil {
+	create := func() error { return h.runRepo.Create(run) }
+	if fetching != nil {
+		// The fetching version and the run are created in one transaction: neither exists alone.
+		create = func() error { return h.runRepo.CreateWithVersion(fetching, run) }
+	}
+	if err := create(); err != nil {
 		// If creation fails due to duplicate (race condition), try to get the existing run
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			recentRuns, err2 := h.runRepo.ListByWorkspaceAndOperationAndConfigVersion(workspaceID, operation, configVersionID, 1)
@@ -2055,181 +2044,6 @@ func (h *RunHandlerV2) GetQueue(c *gin.Context) {
 	formattedRuns := h.runCollection(c, runs)
 
 	jsonapi.WriteDocumentMeta(c, http.StatusOK, formattedRuns, jsonapi.NewPaginationMeta(1, limit, total))
-}
-
-// createConfigurationVersionFromVCS creates a configuration version by cloning from VCS
-// This is used when creating runs from UI without a configuration version
-func (h *RunHandlerV2) createConfigurationVersionFromVCS(ctx context.Context, workspace *models.Workspace, vcsConn *models.VCSConnection) (string, error) {
-	// Clone repository
-	tempDir, err := os.MkdirTemp("", fmt.Sprintf("workspace-%s-*", workspace.ID))
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			logger.Warnf("Failed to remove temp directory %s: %v", tempDir, err)
-		}
-	}()
-
-	// Build authenticated clone URL via provider registry (supports GitHub, Azure DevOps, etc.)
-	provider, providerErr := h.vcsRegistry.GetProvider(vcsConn)
-	if providerErr != nil {
-		return "", fmt.Errorf("failed to get VCS provider for connection %s: %w", vcsConn.ID, providerErr)
-	}
-	token, tokenErr := provider.GetFreshToken(ctx, vcsConn)
-	if tokenErr != nil {
-		return "", fmt.Errorf("failed to get fresh token for VCS connection %s: %w", vcsConn.ID, tokenErr)
-	}
-	cloneURL := provider.BuildCloneURL(vcsConn, token, workspace.VCSRepository)
-
-	// Clone repository at branch
-	branch := workspace.VCSBranch
-	if branch == "" {
-		branch = "main"
-	}
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, cloneURL, tempDir) //nolint:gosec // intentional: executing git command
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to clone repository: %w", err)
-	}
-
-	// Create tarball from repository root to preserve full structure
-	// This ensures relative module paths (e.g., ../module) work correctly
-	// The runner will handle the working directory path within the extracted structure
-	tarballPath := filepath.Join(os.TempDir(), fmt.Sprintf("workspace-%s-%s.tar.gz", workspace.ID, uuid.New().String()[:8]))
-	defer func() {
-		if err := os.Remove(tarballPath); err != nil {
-			logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
-		}
-	}()
-
-	// Always create tarball from repository root to preserve directory structure
-	// This allows relative module paths to work correctly
-	if err := h.createTarball(tempDir, tarballPath); err != nil {
-		return "", fmt.Errorf("failed to create tarball: %w", err)
-	}
-
-	// Create configuration version
-	configVersion := &models.ConfigurationVersion{
-		WorkspaceID:   workspace.ID,
-		Status:        models.ConfigurationVersionStatusPending,
-		Source:        "tfe-ui", // Mark as UI-triggered
-		AutoQueueRuns: false,
-		Speculative:   false,
-	}
-
-	if err := h.configVersionRepo.Create(configVersion); err != nil {
-		return "", fmt.Errorf("failed to create configuration version: %w", err)
-	}
-
-	// Upload tarball to MinIO
-	tarballFile, err := os.Open(tarballPath) //nolint:gosec // tarballPath is validated (in temp directory)
-	if err != nil {
-		return "", fmt.Errorf("failed to open tarball: %w", err)
-	}
-	defer func() {
-		if err := tarballFile.Close(); err != nil {
-			logger.Warnf("Failed to close tarball file: %v", err)
-		}
-	}()
-
-	storageKey := models.ConfigurationTarballKey(configVersion.ID)
-	if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
-		return "", fmt.Errorf("failed to upload configuration: %w", err)
-	}
-
-	// Update configuration version status to uploaded
-	configVersion.Status = models.ConfigurationVersionStatusUploaded
-	if err := h.configVersionRepo.Update(configVersion); err != nil {
-		return "", fmt.Errorf("failed to update configuration version status: %w", err)
-	}
-
-	return configVersion.ID, nil
-}
-
-// createTarball creates a gzipped tarball from a directory
-func (h *RunHandlerV2) createTarball(sourceDir, outputPath string) error {
-	file, err := os.Create(outputPath) //nolint:gosec // outputPath is validated (in temp directory)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			logger.Warnf("Failed to close file: %v", err)
-		}
-	}()
-
-	gzipWriter := gzip.NewWriter(file)
-	defer func() {
-		if err := gzipWriter.Close(); err != nil {
-			logger.Warnf("Failed to close gzip writer: %v", err)
-		}
-	}()
-
-	tarWriter := tar.NewWriter(gzipWriter)
-	defer func() {
-		if err := tarWriter.Close(); err != nil {
-			logger.Warnf("Failed to close tar writer: %v", err)
-		}
-	}()
-
-	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip hidden files and directories
-		if strings.HasPrefix(info.Name(), ".") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// Skip .git, .terraform, *.tfstate, .terraform.lock.hcl
-		if info.IsDir() && (info.Name() == ".git" || info.Name() == ".terraform") {
-			return filepath.SkipDir
-		}
-		if !info.IsDir() && (strings.HasSuffix(path, ".tfstate") || strings.HasSuffix(path, ".terraform.lock.hcl")) {
-			return nil
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(sourceDir, path)
-		if err != nil {
-			return err
-		}
-
-		// Create tar header
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		header.Name = relPath
-
-		// Write header
-		if err := tarWriter.WriteHeader(header); err != nil {
-			return err
-		}
-
-		// Write file content if not a directory
-		if !info.IsDir() {
-			data, err := os.Open(path) //nolint:gosec // path is from filepath.Walk, validated
-			if err != nil {
-				return err
-			}
-			defer func() {
-				if err := data.Close(); err != nil {
-					logger.Warnf("Failed to close data file: %v", err)
-				}
-			}()
-
-			if _, err := io.Copy(tarWriter, data); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
 }
 
 // AutoCancelConflictingRuns cancels previous runs that conflict with a new run being created

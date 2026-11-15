@@ -365,6 +365,12 @@ func SetupV2Routes(
 	// Used by workspace create/edit to populate the version dropdown
 	v2.GET("/terraform-versions", adminTFVersionHandler.ListEnabled)
 
+	// TFE GitHub App installations (#938): what tfe_github_app_installation reads. Organization-bound;
+	// the handler scopes the answer to the caller's organizations.
+	githubAppInstallations := handlers.NewGitHubAppInstallationsHandler(db, authService)
+	v2.GET("/github-app/installations", githubAppInstallations.List)
+	v2.GET("/github-app/installation/:id", githubAppInstallations.Get)
+
 	// Platform administration (#132): the TFE admin users lookup and actions, the admin
 	// organizations listing, and the deployment's platform settings. Every admin route is
 	// reserved to a platform administrator (platformadmin.Service.Require) and answers 404 to
@@ -1476,6 +1482,10 @@ func SetupV2Routes(
 		variableService, storageClient, playbookSyncRequester, db,
 	)
 	runnerAgentHandler.SetWorkItems(ansible.NewWorkItemRuntime(db, runnerInventoryService, ansibleServices.InventorySources))
+	// A module version from a tag is captured by a module_tag_snapshot work item and published
+	// from the snapshot it uploads (#938).
+	registryPublishingHandler.SetWorkItems(ansibleServices.WorkItems)
+	runnerAgentHandler.SetModulePublisher(modulePublisher)
 
 	// Wire OIDC workload identity services for self-hosted runners
 	// This allows the artifacts endpoint to generate OIDC tokens for runners

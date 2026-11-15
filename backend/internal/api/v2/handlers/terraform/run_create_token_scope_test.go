@@ -58,11 +58,9 @@ func setupRunCreateScope(t *testing.T) *runCreateScopeFixture {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
-		&models.Team{}, &models.TeamMember{}, &models.TeamOrganizationAccess{}, &models.TeamProjectAccess{},
-		&models.Project{}, &models.Workspace{}, &models.Run{},
-	); err != nil {
+	// The full production migration, so run creation finds every table it writes (task stages,
+	// team workspace access) on a fresh database too, not only on a development one.
+	if err := models.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	sfx := uuid.NewString()[:8]
@@ -92,12 +90,15 @@ func setupRunCreateScope(t *testing.T) *runCreateScopeFixture {
 	t.Cleanup(func() {
 		// Row-scoped only: TEST_DATABASE_URL points at the live dev database.
 		db.Where("workspace_id = ?", wsA.ID).Delete(&models.Run{})
+		db.Where("workspace_id = ?", wsA.ID).Delete(&models.ConfigurationVersion{})
 		db.Where("id = ?", wsA.ID).Delete(&models.Workspace{})
 		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamProjectAccess{})
 		db.Where("team_id = ?", ownersTeam.ID).Delete(&models.TeamMember{})
 		db.Where("id = ?", ownersTeam.ID).Delete(&models.Team{})
 		db.Where("id = ?", projA.ID).Delete(&models.Project{})
 		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.OrganizationMember{})
+		// Run creation resolves the organization's hosted pool, creating it when it is missing.
+		db.Where("organization_id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.AgentPool{})
 		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.Organization{})
 		db.Where("id = ?", owner.ID).Delete(&models.User{})
 	})
@@ -109,7 +110,7 @@ func setupRunCreateScope(t *testing.T) *runCreateScopeFixture {
 
 	h := NewRunHandlerV2(
 		runRepo, repository.NewWorkspaceRepository(db), orgRepo, authService,
-		nil, repository.NewConfigurationVersionRepository(db), nil, nil, nil, nil, rbacService, nil, nil, nil, nil, nil,
+		nil, repository.NewConfigurationVersionRepository(db), repository.NewVCSConnectionRepository(db), nil, nil, nil, rbacService, nil, nil, nil, nil, nil,
 		middleware.NewDBOrgResolver(db),
 	)
 

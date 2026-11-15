@@ -3,8 +3,6 @@
 package handlers
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -12,11 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -37,11 +32,6 @@ import (
 	"github.com/michielvha/stackweaver/core/storage"
 	"gorm.io/gorm"
 )
-
-// webhookCloneSem bounds concurrent per-workspace webhook clone goroutines (AUD-062). Without
-// it, a push touching thousands of workspaces would fan out an unbounded number of simultaneous
-// git clones (network / disk / token pressure). 8 slots keeps throughput while capping the burst.
-var webhookCloneSem = make(chan struct{}, 8)
 
 // VCSAppInstallationHandlerV2 handles VCS App installation flow (GitHub, Azure DevOps)
 type VCSAppInstallationHandlerV2 struct {
@@ -281,16 +271,17 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		tokenExpiresAt = &t
 	}
 
-	// Update existing ADO connection if one exists for this org
-	existing, getErr := h.vcsConnectionRepo.GetByOrganizationAndProvider(org.ID, models.VCSProviderAzureDevOps)
+	// The Azure DevOps organization is the connection's identity (#938): reconnecting it, in any
+	// case, refreshes that connection's tokens, and another Azure DevOps organization adds one.
+	existing, getErr := h.vcsConnectionRepo.GetByOrganizationProviderAndAccount(org.ID, models.VCSProviderAzureDevOps, adoOrgName)
 	// Only "not found" means there is none. Any other error leaves the question unanswered, and
-	// creating on it could give the organization a second connection for the provider.
+	// creating on it would be refused by the identity index anyway.
 	if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check for an existing VCS connection")
 		return
 	}
 
-	if getErr == nil && existing != nil && existing.ID != uuid.Nil {
+	update := func(existing *models.VCSConnection) {
 		existing.AccessToken = tokenResult.AccessToken
 		existing.RefreshToken = tokenResult.RefreshToken
 		existing.TokenExpiresAt = tokenExpiresAt
@@ -317,6 +308,9 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 			Type:       "vcs-connections",
 			Attributes: VCSConnectionAckAttributes{Provider: existing.Provider, AccountName: existing.AccountName},
 		})
+	}
+	if getErr == nil {
+		update(existing)
 		return
 	}
 
@@ -341,6 +335,14 @@ func (h *VCSAppInstallationHandlerV2) CompleteAzureDevOpsInstallation(c *gin.Con
 		}
 	}
 	if err := h.vcsConnectionRepo.Create(connection); err != nil {
+		// A concurrent completion for the same Azure DevOps organization created it first; this
+		// one refreshes it.
+		if repository.IsUniqueViolation(err) {
+			if winner, err := h.vcsConnectionRepo.GetByOrganizationProviderAndAccount(org.ID, models.VCSProviderAzureDevOps, adoOrgName); err == nil {
+				update(winner)
+				return
+			}
+		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create VCS connection")
 		return
 	}
@@ -408,8 +410,8 @@ func (h *VCSAppInstallationHandlerV2) HandleAzureDevOpsWebhook(c *gin.Context) {
 	case "pull_request":
 		h.handleAzureDevOpsPullRequestEvent(c, wp, payload)
 	default:
-		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), wp.EventType, "azure_devops", wp.Repository, wp.Branch, wp.Commit, "ignored",
-			fmt.Sprintf("Event type %q not handled", wp.EventType), http.StatusOK, string(payload))
+		h.recordAttributed(h.adoAttribution(wp.Organization), nil, fixedSummary("ignored", fmt.Sprintf("Event type %q not handled", wp.EventType)),
+			wp.EventType, "azure_devops", wp.Repository, wp.Branch, wp.Commit, http.StatusOK, string(payload))
 		response.Message(c, http.StatusOK, fmt.Sprintf("Event type %q ignored", wp.EventType))
 	}
 }
@@ -441,160 +443,18 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	committer := wp.Committer
 
 	for _, workspace := range filteredWorkspaces {
-		go func(ws models.Workspace) {
-			webhookCloneSem <- struct{}{}
-			defer func() { <-webhookCloneSem }()
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Errorf("PANIC in ADO webhook goroutine for workspace %s: %v", ws.ID, r)
-				}
-			}()
-
-			if commitHash == "" || len(commitHash) < 7 {
-				logger.Warnf("Invalid commit hash for workspace %s, skipping", ws.ID)
-				return
-			}
-
-			ctx := context.Background()
-
-			var vcsConn *models.VCSConnection
-			if ws.VCSConnectionID != nil {
-				var connErr error
-				vcsConn, connErr = h.workspaceConnection(&ws)
-				if connErr != nil {
-					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, connErr)
-					return
-				}
-			}
-
-			var cloneURL string
-			if vcsConn != nil && h.vcsRegistry != nil {
-				if provider, provErr := h.vcsRegistry.GetProvider(vcsConn); provErr == nil {
-					freshToken, _ := provider.GetFreshToken(ctx, vcsConn)
-					cloneURL = provider.BuildCloneURL(vcsConn, freshToken, ws.VCSRepository)
-				} else {
-					logger.Warnf("Failed to get provider for workspace %s: %v", ws.ID, provErr)
-				}
-			}
-			if cloneURL == "" {
-				logger.Errorf("Cannot build clone URL for workspace %s", ws.ID)
-				return
-			}
-
-			tempDir, tempErr := os.MkdirTemp("", fmt.Sprintf("workspace-ado-%s-*", ws.ID))
-			if tempErr != nil {
-				logger.Errorf("Failed to create temp dir for workspace %s: %v", ws.ID, tempErr)
-				return
-			}
-			defer func() { _ = os.RemoveAll(tempDir) }()
-
-			// AUD-135: validate the ADO-webhook-supplied clone URL + commit at the git sink with the
-			// same gitargs guard the GitHub/PR paths already use - otherwise a flag-shaped value
-			// (e.g. commit `--upload-pack=…`) argument-injects into git. `--` stops option parsing.
-			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
-			safeCommit := gitargs.CommitSHARe.FindString(commitHash)
-			if cloneURL == "" || safeCommit == "" {
-				logger.Warnf("Invalid clone URL or commit hash for workspace %s (ADO push), skipping", ws.ID)
-				return
-			}
-			cmd := exec.CommandContext(ctx, "git", "clone", "--", cloneURL, tempDir) //nolint:gosec // AUD-135: cloneURL validated via gitargs.GitURLRe; positionals after --
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to clone repository for workspace %s: %v", ws.ID, err)
-				return
-			}
-			cmd = exec.CommandContext(ctx, "git", "checkout", safeCommit) //nolint:gosec // AUD-135: safeCommit validated via gitargs.CommitSHARe
-			cmd.Dir = tempDir
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to checkout commit %s for workspace %s: %v", commitHash, ws.ID, err)
-				return
-			}
-
-			commitShort := safeCommit[:7]
-			tarballPath := filepath.Join(os.TempDir(), fmt.Sprintf("workspace-ado-%s-%s.tar.gz", ws.ID, commitShort))
-			defer func() {
-				if err := os.Remove(tarballPath); err != nil && !os.IsNotExist(err) {
-					logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
-				}
-			}()
-
-			if err := h.createTarball(tempDir, tarballPath); err != nil {
-				logger.Errorf("Failed to create tarball for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			existingCVs, checkErr := h.configVersionRepo.GetByWorkspaceID(ws.ID)
-			if checkErr == nil {
-				for _, cv := range existingCVs {
-					if cv.CommitHash == commitHash && cv.Status != models.ConfigurationVersionStatusErrored {
-						logger.Infof("Config version for commit %s already exists, skipping workspace %s", commitHash, ws.ID)
-						return
-					}
-				}
-			}
-
-			configVersion := &models.ConfigurationVersion{
-				WorkspaceID:   ws.ID,
-				Status:        models.ConfigurationVersionStatusPending,
-				Source:        "tfe-vcs",
-				AutoQueueRuns: true,
-				Speculative:   false,
-				CommitHash:    commitHash,
-				Committer:     committer,
-			}
-			if err := h.configVersionRepo.Create(configVersion); err != nil {
-				errStr := strings.ToLower(err.Error())
-				if strings.Contains(errStr, "duplicate") || strings.Contains(errStr, "unique constraint") {
-					logger.Infof("Config version for commit %s already exists (duplicate), skipping", commitHash)
-					return
-				}
-				logger.Errorf("Failed to create config version for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			tarballFile, fileErr := os.Open(tarballPath) //nolint:gosec // validated
-			if fileErr != nil {
-				logger.Errorf("Failed to open tarball for workspace %s: %v", ws.ID, fileErr)
-				return
-			}
-			defer func() { _ = tarballFile.Close() }()
-
-			if h.storageClient == nil {
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = "Storage client not initialized"
-				_ = h.configVersionRepo.Update(configVersion)
-				return
-			}
-
-			storageKey := models.ConfigurationTarballKey(configVersion.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
-				logger.Errorf("Failed to upload config for workspace %s: %v", ws.ID, err)
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = fmt.Sprintf("Failed to upload: %v", err)
-				_ = h.configVersionRepo.Update(configVersion)
-				return
-			}
-
-			configVersion.Status = models.ConfigurationVersionStatusUploaded
-			if err := h.configVersionRepo.Update(configVersion); err != nil {
-				logger.Errorf("Failed to update config version status for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			terraform.AutoCancelConflictingRuns(h.runRepo, ws.ID, models.RunOperationPlanAndApply)
-
-			run := &models.Run{
-				WorkspaceID:            ws.ID,
-				ConfigurationVersionID: &configVersion.ID,
-				Status:                 models.RunStatusPending,
-				Operation:              models.RunOperationPlanAndApply,
-				AutoApplyAfterPlan:     true,
-			}
-			if err := h.runRepo.Create(run); err != nil {
-				logger.Errorf("Failed to create run for workspace %s: %v", ws.ID, err)
-				return
-			}
+		ws := workspace
+		run, created, err := h.queueCapturedRun(&ws, captureSpec{commit: commitHash, committer: committer}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
+			terraform.AutoCancelConflictingRuns(runs, ws.ID, models.RunOperationPlanAndApply)
+		})
+		switch {
+		case err != nil:
+			logger.Errorf("Azure DevOps push: %v", err)
+		case !created:
+			logger.Infof("Azure DevOps push: workspace %s already has a run at %s", ws.ID, commitHash)
+		default:
 			logger.Infof("Created run %s for workspace %s (ADO push, commit %s)", run.ID, ws.ID, commitHash)
-		}(workspace)
+		}
 	}
 
 	// Sync inventories and playbooks for the repo and branch, whether or not a workspace matched.
@@ -607,6 +467,9 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 	}
 	changedCommits := []pushCommitFiles{{Modified: changed}}
 	syncedInventories, syncedPlaybooks := 0, 0
+	attribution := h.adoAttribution(wp.Organization)
+	reached := tallies{}
+	attribution.addWorkspaces(reached, filteredWorkspaces)
 	inventories, _ := h.inventoryRepo.FindByVCSRepositoryAndBranch(wp.Repository, branchName)
 	// AUD-102 (ADO residual): only sync inventories connected through THIS delivery's ADO org.
 	for _, inventory := range h.filterInventoriesByADOOrg(inventories, wp.Organization) {
@@ -615,6 +478,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 		}
 		inv := inventory
 		syncedInventories++
+		attribution.tally(reached, inv.VCSConnectionID).inventories++
 		h.requestInventorySync(&inv)
 	}
 	if h.playbookRepo != nil {
@@ -626,14 +490,15 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 			}
 			pb := playbook
 			syncedPlaybooks++
+			attribution.tally(reached, pb.VCSConnectionID).playbooks++
 			h.requestPlaybookSync(&pb)
 			h.launchWebhookTemplates(pb.ID, pb.Name, wp.Repository, branchName)
 		}
 	}
 
-	status, eventMessage := pushEventSummary(filteredWorkspaces, syncedPlaybooks, syncedInventories)
-	h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "push", "azure_devops", wp.Repository, branchName, commitHash, status,
-		eventMessage, http.StatusOK, string(payload))
+	_, eventMessage := pushEventSummary(filteredWorkspaces, syncedPlaybooks, syncedInventories)
+	h.recordAttributed(attribution, reached, pushTallySummary,
+		"push", "azure_devops", wp.Repository, branchName, commitHash, http.StatusOK, string(payload))
 
 	response.Message(c, http.StatusOK, "Azure DevOps push event processed: "+eventMessage)
 }
@@ -668,8 +533,8 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 	}
 
 	if len(filteredWorkspaces) == 0 {
-		h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
-			"No workspaces with speculative plans enabled", http.StatusOK, string(payload))
+		h.recordAttributed(h.adoAttribution(wp.Organization), nil, fixedSummary("ignored", "No workspaces with speculative plans enabled"),
+			"pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, http.StatusOK, string(payload))
 		response.Message(c, http.StatusOK, "No workspaces with speculative plans enabled")
 		return
 	}
@@ -687,9 +552,9 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 		h.postUntriggeredPassingStatusesADO(context.Background(),
 			splitUntriggeredWorkspaces(filteredWorkspaces, pathFiltered), wp.PRNumber)
 		if len(pathFiltered) == 0 {
-			h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, "ignored",
-				fmt.Sprintf("No workspaces match changed files (%d with speculative enabled)", len(filteredWorkspaces)),
-				http.StatusOK, string(payload))
+			h.recordAttributed(h.adoAttribution(wp.Organization), nil,
+				fixedSummary("ignored", "No workspace with speculative plans enabled matches the changed files"),
+				"pull_request", "azure_devops", wp.Repository, wp.BaseBranch, wp.Commit, http.StatusOK, string(payload))
 			response.Message(c, http.StatusOK, "No workspaces match the changed files")
 			return
 		}
@@ -701,158 +566,46 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 	commitHash := wp.Commit
 
 	for _, workspace := range filteredWorkspaces {
-		go func(ws models.Workspace) {
-			webhookCloneSem <- struct{}{}
-			defer func() { <-webhookCloneSem }()
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Errorf("PANIC in ADO PR webhook goroutine for workspace %s: %v", ws.ID, r)
-				}
-			}()
-
-			if commitHash == "" || len(commitHash) < 7 {
-				logger.Warnf("Invalid commit hash for workspace %s, skipping", ws.ID)
-				return
-			}
-
-			ctx := context.Background()
-
-			var vcsConn *models.VCSConnection
-			if ws.VCSConnectionID != nil {
-				var connErr error
-				vcsConn, connErr = h.workspaceConnection(&ws)
-				if connErr != nil {
-					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, connErr)
-					return
-				}
-			}
-
-			var cloneURL string
-			if vcsConn != nil && h.vcsRegistry != nil {
-				if provider, provErr := h.vcsRegistry.GetProvider(vcsConn); provErr == nil {
-					freshToken, _ := provider.GetFreshToken(ctx, vcsConn)
-					cloneURL = provider.BuildCloneURL(vcsConn, freshToken, ws.VCSRepository)
-				} else {
-					logger.Warnf("Failed to get provider for workspace %s: %v", ws.ID, provErr)
-				}
-			}
-			if cloneURL == "" {
-				logger.Errorf("Cannot build clone URL for workspace %s", ws.ID)
-				return
-			}
-
-			tempDir, tempErr := os.MkdirTemp("", fmt.Sprintf("workspace-ado-pr-%s-*", ws.ID))
-			if tempErr != nil {
-				logger.Errorf("Failed to create temp dir for workspace %s: %v", ws.ID, tempErr)
-				return
-			}
-			defer func() { _ = os.RemoveAll(tempDir) }()
-
-			// AUD-135: same gitargs guard as the push path - validate ADO-supplied URL/commit at the
-			// sink so a flag-shaped value can't argument-inject into git; `--` stops option parsing.
-			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
-			safeCommit := gitargs.CommitSHARe.FindString(commitHash)
-			if cloneURL == "" || safeCommit == "" {
-				logger.Warnf("Invalid clone URL or commit hash for workspace %s (ADO PR), skipping", ws.ID)
-				return
-			}
-			// Clone and checkout the PR head commit
-			cmd := exec.CommandContext(ctx, "git", "clone", "--", cloneURL, tempDir) //nolint:gosec // AUD-135: cloneURL validated via gitargs.GitURLRe; positionals after --
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to clone repository for workspace %s: %v", ws.ID, err)
-				return
-			}
-			cmd = exec.CommandContext(ctx, "git", "checkout", safeCommit) //nolint:gosec // AUD-135: safeCommit validated via gitargs.CommitSHARe
-			cmd.Dir = tempDir
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to checkout commit %s for workspace %s: %v", commitHash, ws.ID, err)
-				return
-			}
-
-			commitShort := safeCommit[:7]
-			tarballPath := filepath.Join(os.TempDir(), fmt.Sprintf("workspace-ado-pr-%s-%s.tar.gz", ws.ID, commitShort))
-			defer func() {
-				if err := os.Remove(tarballPath); err != nil && !os.IsNotExist(err) {
-					logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
-				}
-			}()
-
-			if err := h.createTarball(tempDir, tarballPath); err != nil {
-				logger.Errorf("Failed to create tarball for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			// Create speculative configuration version
-			configVersion := &models.ConfigurationVersion{
-				WorkspaceID:   ws.ID,
-				Status:        models.ConfigurationVersionStatusPending,
-				Source:        "tfe-vcs",
-				AutoQueueRuns: true,
-				Speculative:   true,
-				CommitHash:    commitHash,
-				Committer:     wp.Committer,
-				PRNumber:      wp.PRNumber,
-				SourceBranch:  wp.HeadBranch,
-			}
-			if err := h.configVersionRepo.Create(configVersion); err != nil {
-				errStr := strings.ToLower(err.Error())
-				if strings.Contains(errStr, "duplicate") || strings.Contains(errStr, "unique constraint") {
-					logger.Infof("Config version for commit %s already exists (duplicate), skipping", commitHash)
-					return
-				}
-				logger.Errorf("Failed to create config version for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			tarballFile, fileErr := os.Open(tarballPath) //nolint:gosec // validated
-			if fileErr != nil {
-				logger.Errorf("Failed to open tarball for workspace %s: %v", ws.ID, fileErr)
-				return
-			}
-			defer func() { _ = tarballFile.Close() }()
-
-			if h.storageClient == nil {
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = "Storage client not initialized"
-				_ = h.configVersionRepo.Update(configVersion)
-				return
-			}
-
-			storageKey := models.ConfigurationTarballKey(configVersion.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
-				logger.Errorf("Failed to upload config for workspace %s: %v", ws.ID, err)
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = fmt.Sprintf("Failed to upload: %v", err)
-				_ = h.configVersionRepo.Update(configVersion)
-				return
-			}
-
-			configVersion.Status = models.ConfigurationVersionStatusUploaded
-			if err := h.configVersionRepo.Update(configVersion); err != nil {
-				logger.Errorf("Failed to update config version status for workspace %s: %v", ws.ID, err)
-				return
-			}
-
+		ws := workspace
+		// The source branch's head is fetched by its ref: a pull request's commit need not be on the
+		// workspace's branch.
+		run, created, err := h.queueCapturedRun(&ws, captureSpec{
+			commit: commitHash, fetchRef: "refs/heads/" + wp.HeadBranch, committer: wp.Committer,
+			sourceBranch: wp.HeadBranch, prNumber: wp.PRNumber, speculative: true,
+		}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
 			// tfe_organization speculative_plan_management_enabled (default on): cancel superseded
 			// speculative plans for this branch/PR before queueing the new one.
 			if wsOrg := h.orgForWorkspace(&ws); wsOrg == nil || wsOrg.SpeculativePlanManagement() {
-				terraform.AutoCancelSupersededSpeculativeRuns(h.runRepo, h.configVersionRepo, ws.ID, wp.HeadBranch, wp.PRNumber)
+				terraform.AutoCancelSupersededSpeculativeRuns(runs, versions, ws.ID, wp.HeadBranch, wp.PRNumber)
 			}
+		})
+		if err != nil {
+			logger.Errorf("Azure DevOps PR #%d: %v", wp.PRNumber, err)
+			continue
+		}
+		if !created {
+			logger.Infof("Azure DevOps PR #%d: workspace %s already has a run at %s", wp.PRNumber, ws.ID, commitHash)
+			continue
+		}
+		logger.Infof("Created speculative run %s for workspace %s (ADO PR #%d, commit %s)",
+			run.ID, ws.ID, wp.PRNumber, commitHash)
 
-			// Create plan-only (speculative) run
-			run := &models.Run{
-				WorkspaceID:            ws.ID,
-				ConfigurationVersionID: &configVersion.ID,
-				Status:                 models.RunStatusPending,
-				Operation:              models.RunOperationPlanOnly,
-				AutoApplyAfterPlan:     false,
+		var vcsConn *models.VCSConnection
+		if ws.VCSConnectionID != nil {
+			if vcsConn, err = h.workspaceConnection(&ws); err != nil {
+				logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, err)
+				continue
 			}
-			if err := h.runRepo.Create(run); err != nil {
-				logger.Errorf("Failed to create speculative run for workspace %s: %v", ws.ID, err)
-				return
-			}
-			logger.Infof("Created speculative run %s for workspace %s (ADO PR #%d, commit %s)",
-				run.ID, ws.ID, wp.PRNumber, commitHash)
+		}
+		// The pending status is posted in the background, so the delivery is answered at once.
+		go func(ws models.Workspace, run *models.Run, vcsConn *models.VCSConnection) {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("PANIC posting the ADO PR status for workspace %s: %v", ws.ID, r)
+				}
+			}()
+			ctx := context.Background()
+			var err error
 
 			// Create Azure DevOps PR status check (pending)
 			if h.adoStatusService != nil && vcsConn != nil && wp.PRNumber > 0 {
@@ -909,58 +662,16 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 					}
 				}
 			}
-		}(workspace)
+		}(ws, run, vcsConn)
 	}
 
-	var triggeredNames []string
-	for _, ws := range filteredWorkspaces {
-		triggeredNames = append(triggeredNames, ws.Name)
-	}
-	h.recordWebhookEvent(h.orgFromADOOrg(wp.Organization), "pull_request", "azure_devops", wp.Repository, wp.BaseBranch, commitHash, "success",
-		fmt.Sprintf("PR #%d: %d workspace(s) triggered: %s", wp.PRNumber, len(filteredWorkspaces), strings.Join(triggeredNames, ", ")),
-		http.StatusOK, string(payload))
+	adoPRAttribution := h.adoAttribution(wp.Organization)
+	adoPRReached := tallies{}
+	adoPRAttribution.addWorkspaces(adoPRReached, filteredWorkspaces)
+	h.recordAttributed(adoPRAttribution, adoPRReached, pullRequestTallySummary(wp.PRNumber),
+		"pull_request", "azure_devops", wp.Repository, wp.BaseBranch, commitHash, http.StatusOK, string(payload))
 
 	response.Message(c, http.StatusOK, fmt.Sprintf("Azure DevOps PR event processed: %d workspace(s) queued for speculative plans", len(filteredWorkspaces)))
-}
-
-// orgFromInstallation resolves the organization that owns the GitHub App installation a
-// delivery came from. AUD-124: webhook events must be attributed to the *validated*
-// installation's org, not "the first workspace matching this repo name" - otherwise an
-// attacker who installs the app on a same-named repo files their payloads into a victim
-// org's webhook-event log. Returns nil when the installation can't be resolved, and the event
-// is then recorded with no org.
-func (h *VCSAppInstallationHandlerV2) orgFromInstallation(installationID string) *uuid.UUID {
-	if h.vcsConnectionRepo == nil || installationID == "" || installationID == "0" {
-		return nil
-	}
-	conn, err := h.vcsConnectionRepo.GetByInstallationID(installationID)
-	if err != nil || conn == nil || conn.OrganizationID == uuid.Nil {
-		return nil
-	}
-	id := conn.OrganizationID
-	return &id
-}
-
-// orgFromADOOrg is the Azure DevOps counterpart of orgFromInstallation: the organization of the
-// oldest connection whose token has proven access to the delivery's Azure DevOps organization
-// (adoConnectionTrusted), the Azure DevOps equivalent of a validated installation. A connection
-// that only names the Azure DevOps organization is skipped. Returns nil when no trusted
-// connection is for it.
-func (h *VCSAppInstallationHandlerV2) orgFromADOOrg(adoOrg string) *uuid.UUID {
-	if h.vcsConnectionRepo == nil || adoOrg == "" {
-		return nil
-	}
-	conns, err := h.vcsConnectionRepo.ListByProviderAndAccountName(models.VCSProviderAzureDevOps, adoOrg)
-	if err != nil {
-		return nil
-	}
-	for i := range conns {
-		if conns[i].OrganizationID != uuid.Nil && h.adoConnectionTrusted(context.Background(), &conns[i], adoOrg) {
-			id := conns[i].OrganizationID
-			return &id
-		}
-	}
-	return nil
 }
 
 // adoConnectionTrusted reports whether a delivery from the Azure DevOps organization adoOrg may
@@ -1021,9 +732,9 @@ func (h *VCSAppInstallationHandlerV2) verifyADOAccountWithToken(ctx context.Cont
 }
 
 // recordWebhookEvent records a webhook event for debugging and auditing, in the organization
-// the delivery was proven to come from: the one connected through its GitHub App installation
-// (orgFromInstallation) or its Azure DevOps organization (orgFromADOOrg). Without such an
-// organization the event is recorded with none.
+// the delivery was proven to come from: one connected through its GitHub App installation or its
+// Azure DevOps organization (recordAttributed calls it once per such organization). Without such
+// an organization the event is recorded with none.
 //
 // It never guesses an organization from the repository name. Repository names are not unique
 // across Azure DevOps organizations, and anyone can name a repository after another's, so a
@@ -1366,14 +1077,15 @@ func (h *VCSAppInstallationHandlerV2) HandleInstallationWebhook(c *gin.Context) 
 		c.Status(http.StatusOK)
 
 	case "deleted":
-		// Installation removed - delete VCS connection
-		connections, _ := h.vcsConnectionRepo.ListByProvider(models.VCSProviderGitHub)
-		for _, conn := range connections {
-			if conn.InstallationID == installationID {
-				_ = h.vcsConnectionRepo.Delete(conn.ID)
-				break
-			}
+		// The installation is gone from GitHub, so it goes from every organization that connected
+		// it (#938); their workspaces, modules, playbooks and inventories are detached.
+		deleted, err := h.vcsConnectionRepo.DeleteByInstallationID(installationID)
+		if err != nil {
+			logger.Errorf("Removing the connections on uninstalled installation %s: %v", installationID, err)
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
 		}
+		logger.Infof("Installation %s was uninstalled; removed %d connection(s)", installationID, len(deleted))
 		response.Message(c, http.StatusOK, "Installation deleted")
 
 	case "suspend":
@@ -1578,283 +1290,31 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 		}
 	}
 
-	// Process each filtered workspace in background goroutines
 	for _, workspace := range filteredWorkspaces {
-		// Process in background goroutine to avoid blocking webhook response
-		go func(ws models.Workspace) {
-			webhookCloneSem <- struct{}{}
-			defer func() { <-webhookCloneSem }()
-			// Recover from any panics to prevent crashing the backend
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Errorf("PANIC in goroutine for workspace %s: %v", ws.ID, r)
-					// Log stack trace if available
-					if err, ok := r.(error); ok {
-						logger.Errorf("Panic error details: %v", err)
-					}
-				}
-			}()
-
-			ctx := context.Background()
-
-			// Sanitise webhook-supplied inputs by rebinding through a strict
-			// regex match. Using FindString (which returns the matched
-			// substring or "") creates a value CodeQL Go's taint tracker
-			// recognises as derived solely from the regex - stronger than
-			// an inline MatchString guard, which doesn't propagate across
-			// goroutine variable captures. (Wave 8 / D1+D2.)
-			commitHash = gitargs.CommitSHARe.FindString(commitHash)
-			if commitHash == "" {
-				logger.Warnf("Invalid commit hash for workspace %s, skipping", ws.ID)
-				return
-			}
-			repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
-			if repositoryFullName == "" {
-				logger.Warnf("Invalid repository name for workspace %s, skipping", ws.ID)
-				return
-			}
-
-			// Get VCS connection for authentication
-			var vcsConn *models.VCSConnection
-			if ws.VCSConnectionID != nil {
-				var err error
-				vcsConn, err = h.workspaceConnection(&ws)
-				if err != nil {
-					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, err)
-					return
-				}
-			}
-
-			// Clone repository at commit
-			tempDir, err := os.MkdirTemp("", fmt.Sprintf("workspace-%s-*", ws.ID))
-			if err != nil {
-				logger.Errorf("Failed to create temp directory for workspace %s: %v", ws.ID, err)
-				return
-			}
-			defer func() {
-				if err := os.RemoveAll(tempDir); err != nil {
-					logger.Warnf("Failed to remove temp directory %s: %v", tempDir, err)
-				}
-			}()
-
-			// Clone using the workspace's VCS connection auth token. AUD-130: never fall
-			// back to an unauthenticated clone of the payload-supplied repo - for a private
-			// workspace that would run against un-authenticated code (or a same-named public
-			// repo an attacker controls). If we cannot build an authenticated URL, skip.
-			if vcsConn == nil || h.vcsRegistry == nil {
-				logger.Warnf("Workspace %s has no usable VCS connection - skipping webhook clone (AUD-130)", ws.ID)
-				return
-			}
-			provider, provErr := h.vcsRegistry.GetProvider(vcsConn)
-			if provErr != nil {
-				logger.Warnf("Failed to get VCS provider for workspace %s: %v - skipping", ws.ID, provErr)
-				return
-			}
-			freshToken, tokErr := provider.GetFreshToken(ctx, vcsConn)
-			if tokErr != nil || freshToken == "" {
-				logger.Warnf("No authenticated clone token for workspace %s (repo %s) - skipping to avoid unauthenticated clone (AUD-130)", ws.ID, ws.VCSRepository)
-				return
-			}
-			cloneURL := provider.BuildCloneURL(vcsConn, freshToken, ws.VCSRepository)
-			// Sanitise cloneURL by regex rebind right before the git sink so
-			// CodeQL's taint tracker sees the value as derived solely from
-			// gitargs.GitURLRe. (Wave 8 / D1, second pass.)
-			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
-			if cloneURL == "" {
-				logger.Warnf("Invalid clone URL for workspace %s, skipping", ws.ID)
-				return
-			}
-
-			// Clone repository - use unshallow clone first, then checkout specific commit
-			// We need full history to checkout arbitrary commits
-			cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, tempDir) //nolint:gosec // intentional: executing git command
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to clone repository for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			// Checkout specific commit
-			cmd = exec.CommandContext(ctx, "git", "checkout", commitHash) //nolint:gosec // intentional: executing git command
-			cmd.Dir = tempDir
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to checkout commit %s for workspace %s: %v", commitHash, ws.ID, err)
-				// Try to fetch the commit if checkout failed.
-				// Re-bind through the regex right before the sink - CodeQL
-				// loses the barrier when the value crosses an error branch.
-				safeCommit := gitargs.CommitSHARe.FindString(commitHash)
-				if safeCommit == "" {
-					return
-				}
-				cmd = exec.CommandContext(ctx, "git", "fetch", "origin", safeCommit) //nolint:gosec // intentional: executing git command
-				cmd.Dir = tempDir
-				if fetchErr := cmd.Run(); fetchErr != nil {
-					logger.Errorf("Failed to fetch commit %s for workspace %s: %v", commitHash, ws.ID, fetchErr)
-					return
-				}
-				// Try checkout again after fetch
-				cmd = exec.CommandContext(ctx, "git", "checkout", safeCommit) //nolint:gosec // intentional: executing git command
-				cmd.Dir = tempDir
-				if err := cmd.Run(); err != nil {
-					logger.Errorf("Failed to checkout commit %s for workspace %s after fetch: %v", commitHash, ws.ID, err)
-					return
-				}
-			}
-
-			// Create tarball from repository root to preserve full structure
-			// This ensures relative module paths (e.g., ../module) work correctly
-			// The runner will handle the working directory path within the extracted structure
-			// Use first 7 chars of commit hash (safe since we validated length above)
-			commitShort := commitHash
-			if len(commitHash) >= 7 {
-				commitShort = commitHash[:7]
-			}
-			tarballName := fmt.Sprintf("workspace-%s-%s.tar.gz", ws.ID, commitShort)
-			// filepath.IsLocal is a CodeQL-recognised sanitiser for go/path-injection.
-			// We checked all inputs upstream (regex-bound ws.ID UUID and commitShort
-			// derived from a regex-bound SHA), but the slice [:7] confuses CodeQL's
-			// barrier tracking, so we re-verify the joined filename here.
-			if !filepath.IsLocal(tarballName) {
-				logger.Warnf("Invalid tarball name for workspace %s, skipping", ws.ID)
-				return
-			}
-			tarballPath := filepath.Join(os.TempDir(), tarballName)
-			defer func() {
-				if err := os.Remove(tarballPath); err != nil && !os.IsNotExist(err) {
-					logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
-				}
-			}()
-
-			// Always create tarball from repository root to preserve directory structure
-			// This allows relative module paths to work correctly
-			if err := h.createTarball(tempDir, tarballPath); err != nil {
-				logger.Errorf("Failed to create tarball for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			// Check if configuration version for this commit already exists
-			// This prevents duplicate processing if webhook is called multiple times for same commit
-			existingCVs, checkErr := h.configVersionRepo.GetByWorkspaceID(ws.ID)
-			if checkErr == nil {
-				for _, cv := range existingCVs {
-					if cv.CommitHash == commitHash && cv.Status != models.ConfigurationVersionStatusErrored {
-						logger.Infof("Configuration version for commit %s already exists for workspace %s, skipping", commitHash, ws.ID)
-						return
-					}
-				}
-			}
-
-			// Create configuration version with commit info
-			configVersion := &models.ConfigurationVersion{
-				WorkspaceID:   ws.ID,
-				Status:        models.ConfigurationVersionStatusPending,
-				Source:        "tfe-vcs", // Mark as VCS-triggered
-				AutoQueueRuns: true,
-				Speculative:   false,
-				CommitHash:    commitHash,
-				Committer:     committer,
-			}
-
-			if err := h.configVersionRepo.Create(configVersion); err != nil {
-				logger.Errorf("Failed to create configuration version for workspace %s: %v", ws.ID, err)
-				// Check if it's a unique constraint violation (duplicate)
-				errStr := strings.ToLower(err.Error())
-				if strings.Contains(errStr, "duplicate") || strings.Contains(errStr, "unique constraint") || strings.Contains(errStr, "already exists") {
-					logger.Infof("Configuration version for commit %s already exists (duplicate), skipping", commitHash)
-					return
-				}
-				// For other errors, log and return (don't crash)
-				return
-			}
-
-			// Upload tarball to MinIO
-			tarballFile, err := os.Open(tarballPath) //nolint:gosec // tarballPath is validated (in temp directory)
-			if err != nil {
-				logger.Errorf("Failed to open tarball for workspace %s: %v", ws.ID, err)
-				return
-			}
-			defer func() {
-				if err := tarballFile.Close(); err != nil {
-					logger.Warnf("Failed to close tarball file: %v", err)
-				}
-			}()
-
-			storageKey := models.ConfigurationTarballKey(configVersion.ID)
-			if h.storageClient == nil {
-				logger.Errorf("storageClient is nil, cannot upload configuration for workspace %s", ws.ID)
-				// Mark configuration version as errored since we can't upload
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = "Storage client not initialized"
-				if updateErr := h.configVersionRepo.Update(configVersion); updateErr != nil {
-					logger.Errorf("Failed to update configuration version error status: %v", updateErr)
-				}
-				return
-			}
-
-			logger.Infof("Uploading tarball to MinIO: %s for workspace %s", storageKey, ws.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
-				logger.Errorf("Failed to upload configuration for workspace %s: %v", ws.ID, err)
-				// Mark configuration version as errored since upload failed
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = fmt.Sprintf("Failed to upload configuration: %v", err)
-				if updateErr := h.configVersionRepo.Update(configVersion); updateErr != nil {
-					logger.Errorf("Failed to update configuration version error status: %v", updateErr)
-				}
-				return
-			}
-
-			logger.Infof("Successfully uploaded tarball to MinIO: %s for workspace %s", storageKey, ws.ID)
-
-			// Update configuration version status to uploaded (only after successful upload)
-			configVersion.Status = models.ConfigurationVersionStatusUploaded
-			if err := h.configVersionRepo.Update(configVersion); err != nil {
-				logger.Errorf("Failed to update configuration version status for workspace %s: %v", ws.ID, err)
-				return
-			}
-			logger.Infof("Configuration version %s marked as uploaded for workspace %s", configVersion.ID, ws.ID)
-
-			// TFE-compatible: Auto-cancel previous plan-and-apply runs (pending/running/planned) before creating new one
-			// This uses the centralized auto-cancel logic (same as UI-triggered runs)
-			// VCS-triggered runs are always plan-and-apply, so cancel other plan-and-apply runs
-			terraform.AutoCancelConflictingRuns(h.runRepo, ws.ID, models.RunOperationPlanAndApply)
-
-			// Create plan-and-apply run (TFE-compatible: VCS-triggered runs are always plan-and-apply)
-			// This is a single run that goes through both phases: planning → planned → applying → applied
-			planAndApplyRun := &models.Run{
-				WorkspaceID:            ws.ID,
-				ConfigurationVersionID: &configVersion.ID,
-				CreatedBy:              nil, // VCS-triggered, no user
-				Status:                 models.RunStatusPending,
-				Operation:              models.RunOperationPlanAndApply, // VCS-triggered runs are always plan-and-apply
-				AutoApplyAfterPlan:     true,                            // VCS-triggered runs should auto-apply if workspace.AutoApply is enabled
-			}
-
-			if err := h.runRepo.Create(planAndApplyRun); err != nil {
-				logger.Errorf("Failed to create plan-and-apply run for workspace %s: %v", ws.ID, err)
-				// Check if it's a constraint violation (e.g., duplicate run)
-				if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique constraint") || strings.Contains(err.Error(), "foreign key") {
-					logger.Infof("Run creation failed due to constraint violation, skipping")
-					return
-				}
-				// For other errors, log and return (don't crash)
-				return
-			}
-
-			logger.Infof("Created plan-and-apply run %s for workspace %s from commit %s", planAndApplyRun.ID, ws.ID, commitHash)
-
-			// TFE-compatible: VCS-triggered runs are plan-and-apply runs
-			// The runner will automatically transition to applying phase after plan completes successfully
-			// if AutoApply is enabled (which is the default expectation for VCS pushes)
-			if ws.AutoApply && branchName == ws.VCSBranch {
-				logger.Infof("Auto-apply enabled for workspace %s, run will automatically transition to applying phase after plan completes", ws.ID)
-			}
-		}(workspace)
+		ws := workspace
+		// TFE-compatible: a VCS push runs plan and apply, after cancelling the workspace's other
+		// pending plan-and-apply runs (the same auto-cancel a UI-triggered run applies).
+		run, created, err := h.queueCapturedRun(&ws, captureSpec{commit: commitHash, committer: committer}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
+			terraform.AutoCancelConflictingRuns(runs, ws.ID, models.RunOperationPlanAndApply)
+		})
+		switch {
+		case err != nil:
+			logger.Errorf("GitHub push: %v", err)
+		case !created:
+			logger.Infof("GitHub push: workspace %s already has a run at %s", ws.ID, commitHash)
+		default:
+			logger.Infof("Created plan-and-apply run %s for workspace %s from commit %s", run.ID, ws.ID, commitHash)
+		}
 	}
 
-	syncedInventories, syncedPlaybooks := h.syncAnsibleOnGitHubPush(repositoryFullName, branchName, installationID, commitsForCheck)
+	attribution := h.installationAttribution(installationID)
+	reached := tallies{}
+	attribution.addWorkspaces(reached, filteredWorkspaces)
+	syncedInventories, syncedPlaybooks := h.syncAnsibleOnGitHubPush(repositoryFullName, branchName, installationID, commitsForCheck, attribution, reached)
 
-	status, eventMessage := pushEventSummary(filteredWorkspaces, syncedPlaybooks, syncedInventories)
-	h.recordWebhookEvent(h.orgFromInstallation(installationID), "push", "github", repositoryFullName, branchName, commitHash, status,
-		eventMessage, http.StatusOK, string(payload))
+	_, eventMessage := pushEventSummary(filteredWorkspaces, syncedPlaybooks, syncedInventories)
+	h.recordAttributed(attribution, reached, pushTallySummary,
+		"push", "github", repositoryFullName, branchName, commitHash, http.StatusOK, string(payload))
 
 	response.Message(c, http.StatusOK, "Branch push event processed: "+eventMessage)
 }
@@ -1872,7 +1332,7 @@ type pushCommitFiles = struct {
 // workspace: a playbook or inventory is linked to its repository and branch, not to a Terraform
 // workspace. Only resources connected through the delivery's installation, and whose path the
 // push changed, are synced. Returns how many inventories and playbooks were synced.
-func (h *VCSAppInstallationHandlerV2) syncAnsibleOnGitHubPush(repositoryFullName, branchName, installationID string, commits []pushCommitFiles) (syncedInventories, syncedPlaybooks int) {
+func (h *VCSAppInstallationHandlerV2) syncAnsibleOnGitHubPush(repositoryFullName, branchName, installationID string, commits []pushCommitFiles, attribution deliveryAttribution, reached tallies) (syncedInventories, syncedPlaybooks int) {
 	inventories, err := h.inventoryRepo.FindByVCSRepositoryAndBranch(repositoryFullName, branchName)
 	if err != nil {
 		logger.Errorf("Error finding inventories for repository %s, branch %s: %v", repositoryFullName, branchName, err)
@@ -1884,6 +1344,7 @@ func (h *VCSAppInstallationHandlerV2) syncAnsibleOnGitHubPush(repositoryFullName
 		}
 		logger.Infof("Triggering sync for inventory: %s (ID: %s)", inventory.Name, inventory.ID)
 		syncedInventories++
+		attribution.tally(reached, inventory.VCSConnectionID).inventories++
 		h.requestInventorySync(&inventory)
 	}
 
@@ -1901,6 +1362,7 @@ func (h *VCSAppInstallationHandlerV2) syncAnsibleOnGitHubPush(repositoryFullName
 		}
 		logger.Infof("Triggering sync for playbook: %s (ID: %s)", playbook.Name, playbook.ID)
 		syncedPlaybooks++
+		attribution.tally(reached, playbook.VCSConnectionID).playbooks++
 		h.requestPlaybookSync(&playbook)
 		h.launchWebhookTemplates(playbook.ID, playbook.Name, repositoryFullName, branchName)
 	}
@@ -1928,6 +1390,27 @@ func pushEventSummary(workspaces []models.Workspace, syncedPlaybooks, syncedInve
 	return "success", message
 }
 
+// pushTallySummary is pushEventSummary over one organization's tally.
+func pushTallySummary(e *orgTally) (string, string) {
+	return pushEventSummary(e.workspaces, e.playbooks, e.inventories)
+}
+
+// pullRequestTallySummary is the webhook-event status and message for a pull request in one
+// organization: the workspaces of that organization it triggered, or "ignored" when it
+// triggered none there.
+func pullRequestTallySummary(prNumber int) func(*orgTally) (string, string) {
+	return func(e *orgTally) (string, string) {
+		if len(e.workspaces) == 0 {
+			return "ignored", fmt.Sprintf("PR #%d: no workspace triggered", prNumber)
+		}
+		names := make([]string, 0, len(e.workspaces))
+		for _, ws := range e.workspaces {
+			names = append(names, ws.Name)
+		}
+		return "success", fmt.Sprintf("PR #%d: %d workspace(s) triggered: %s", prNumber, len(e.workspaces), strings.Join(names, ", "))
+	}
+}
+
 // handlePullRequestEvent handles GitHub pull request events for speculative plans
 // TFE-compatible: Creates speculative plan-only runs when PRs are opened or updated
 func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, payload []byte) {
@@ -1945,6 +1428,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			User struct {
 				Login string `json:"login"` // PR author username
 			} `json:"user"`
+			ChangedFiles int `json:"changed_files"` // how many files the pull request changes
 		} `json:"pull_request"`
 		Repository struct {
 			FullName string `json:"full_name"`
@@ -1973,6 +1457,13 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 	headSHA := prEvent.PullRequest.Head.SHA
 	repositoryFullName := prEvent.Repository.FullName
 	prNumber := prEvent.Number
+	// A delivery that triggers nothing is still recorded in each organization connected through the
+	// installation, as an Azure DevOps pull request is, so the event log shows why nothing ran.
+	ignored := func(message string) {
+		h.recordAttributed(h.installationAttribution(strconv.FormatInt(prEvent.Installation.ID, 10)), nil, fixedSummary("ignored", message),
+			"pull_request", "github", repositoryFullName, baseBranch, headSHA, http.StatusOK, string(payload))
+		response.Message(c, http.StatusOK, message)
+	}
 
 	logger.Infof("Received pull request event - action=%s, PR=%d, base=%s, head=%s, headSHA=%s, repository=%s",
 		prEvent.Action, prNumber, baseBranch, headBranch, headSHA, repositoryFullName)
@@ -1982,7 +1473,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 	workspaces, err := h.workspaceRepo.FindByVCSRepositoryAndBranch(repositoryFullName, baseBranch)
 	if err != nil {
 		logger.Errorf("Error finding workspaces for repository %s, branch %s: %v", repositoryFullName, baseBranch, err)
-		response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces found or error: %v", err))
+		ignored(fmt.Sprintf("No workspaces found or error: %v", err))
 		return
 	}
 	// AUD-102: only workspaces connected through THIS delivery's installation.
@@ -1990,7 +1481,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 	if len(workspaces) == 0 {
 		logger.Infof("No workspaces found for repository %s, branch %s", repositoryFullName, baseBranch)
-		response.Message(c, http.StatusOK, "No workspaces found for this repository and branch")
+		ignored("No workspaces found for this repository and branch")
 		return
 	}
 
@@ -2004,15 +1495,16 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 	if len(filteredWorkspaces) == 0 {
 		logger.Infof("No workspaces with speculative plans enabled for repository %s, branch %s", repositoryFullName, baseBranch)
-		response.Message(c, http.StatusOK, "No workspaces with speculative plans enabled")
+		ignored("No workspaces with speculative plans enabled")
 		return
 	}
 
 	logger.Infof("Found %d workspace(s) for PR #%d (filtered from %d total)", len(filteredWorkspaces), prNumber, len(workspaces))
 
-	// Get changed files using git diff between base and head branches for path-based filtering
-	// This allows us to only trigger workspaces whose paths are actually affected
-	changedFiles := h.getPRChangedFiles(repositoryFullName, baseBranch, headBranch, headSHA)
+	// The changed files, from GitHub's API with the delivering installation's token, decide which
+	// workspaces' paths are affected (#938). Without a complete list every workspace is triggered.
+	changedFiles := h.pullRequestFiles(c.Request.Context(), strconv.FormatInt(prEvent.Installation.ID, 10),
+		repositoryFullName, prNumber, prEvent.PullRequest.ChangedFiles)
 
 	// Filter workspaces based on changed files and their WorkingDirectory paths (GitOps-style filtering)
 	// This prevents unnecessary plan runs for workspaces whose code wasn't changed
@@ -2033,7 +1525,9 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			splitUntriggeredWorkspaces(filteredWorkspaces, finalFilteredWorkspaces), headSHA)
 		if len(finalFilteredWorkspaces) == 0 {
 			logger.Infof("No workspaces match the changed files for PR #%d (found %d workspace(s) but none match path filters)", prNumber, len(filteredWorkspaces))
-			response.Message(c, http.StatusOK, fmt.Sprintf("No workspaces match the changed files (found %d workspace(s) but none match path filters)", len(filteredWorkspaces)))
+			// The count would cover every organization the installation reaches, so the recorded
+			// event, which each organization reads, carries none.
+			ignored("No workspace with speculative plans enabled matches the changed files")
 			return
 		}
 		logger.Infof("Filtered to %d workspace(s) that match changed files (from %d total with speculative enabled)", len(finalFilteredWorkspaces), len(filteredWorkspaces))
@@ -2045,233 +1539,46 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 		logger.Infof("Could not determine changed files for PR #%d, triggering all %d workspaces with speculative enabled", prNumber, len(filteredWorkspaces))
 	}
 
-	// Process each workspace in background goroutines
 	for _, workspace := range filteredWorkspaces {
-		go func(ws models.Workspace) {
-			webhookCloneSem <- struct{}{}
-			defer func() { <-webhookCloneSem }()
-			// Recover from any panics to prevent crashing the backend
+		ws := workspace
+		// A pull request's head, a fork's included, is fetched from the base repository by its
+		// pull request ref.
+		run, created, err := h.queueCapturedRun(&ws, captureSpec{
+			commit: headSHA, fetchRef: fmt.Sprintf("refs/pull/%d/head", prNumber), committer: prEvent.PullRequest.User.Login,
+			sourceBranch: headBranch, prNumber: prNumber, speculative: true,
+		}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
+			// tfe_organization speculative_plan_management_enabled (default on): a newer commit to
+			// this branch/PR supersedes still-pending speculative plans.
+			if wsOrg := h.orgForWorkspace(&ws); wsOrg == nil || wsOrg.SpeculativePlanManagement() {
+				terraform.AutoCancelSupersededSpeculativeRuns(runs, versions, ws.ID, headBranch, prNumber)
+			}
+		})
+		if err != nil {
+			logger.Errorf("GitHub PR #%d: %v", prNumber, err)
+			continue
+		}
+		if !created {
+			logger.Infof("GitHub PR #%d: workspace %s already has a run at %s", prNumber, ws.ID, headSHA)
+			continue
+		}
+		logger.Infof("Created speculative plan-only run %s for workspace %s from PR #%d commit %s", run.ID, ws.ID, prNumber, headSHA)
+
+		var vcsConn *models.VCSConnection
+		if ws.VCSConnectionID != nil {
+			if vcsConn, err = h.workspaceConnection(&ws); err != nil {
+				logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, err)
+				continue
+			}
+		}
+		// The pending status check is posted in the background, so the delivery is answered at once.
+		go func(ws models.Workspace, run *models.Run, vcsConn *models.VCSConnection) {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Errorf("PANIC in goroutine for workspace %s: %v", ws.ID, r)
+					logger.Errorf("PANIC posting the status check for workspace %s: %v", ws.ID, r)
 				}
 			}()
-
 			ctx := context.Background()
-
-			// Sanitise via regex rebind. See Wave 8 plan / D1+D2.
-			headSHA = gitargs.CommitSHARe.FindString(headSHA)
-			if headSHA == "" {
-				logger.Warnf("Invalid PR head SHA for workspace %s, skipping", ws.ID)
-				return
-			}
-			headBranch = gitargs.RefNameRe.FindString(headBranch)
-			if headBranch == "" {
-				logger.Warnf("Invalid PR head branch for workspace %s, skipping", ws.ID)
-				return
-			}
-			repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
-			if repositoryFullName == "" {
-				logger.Warnf("Invalid repository name for workspace %s, skipping", ws.ID)
-				return
-			}
-
-			// Get VCS connection for authentication
-			var vcsConn *models.VCSConnection
-			if ws.VCSConnectionID != nil {
-				var err error
-				vcsConn, err = h.workspaceConnection(&ws)
-				if err != nil {
-					logger.Errorf("Failed to get VCS connection for workspace %s: %v", ws.ID, err)
-					return
-				}
-			}
-
-			// Clone repository at PR head commit
-			tempDir, err := os.MkdirTemp("", fmt.Sprintf("workspace-pr-%s-*", ws.ID))
-			if err != nil {
-				logger.Errorf("Failed to create temp directory for workspace %s: %v", ws.ID, err)
-				return
-			}
-			defer func() {
-				if err := os.RemoveAll(tempDir); err != nil {
-					logger.Warnf("Failed to remove temp directory %s: %v", tempDir, err)
-				}
-			}()
-
-			// Clone using the GitHub App installation token. AUD-130: never fall back to an
-			// unauthenticated clone of the payload-supplied repo for a connected workspace -
-			// skip if we can't authenticate.
-			if vcsConn == nil || vcsConn.InstallationID == "" || h.githubAppManager == nil || !h.githubAppManager.IsEnabled() {
-				logger.Warnf("Workspace %s has no usable GitHub App installation - skipping PR clone (AUD-130)", ws.ID)
-				return
-			}
-			githubService := h.githubAppManager.GetService()
-			installToken, err := githubService.GenerateInstallationToken(ctx, vcsConn.InstallationID)
-			if err != nil {
-				logger.Warnf("Failed to generate installation token for workspace %s: %v - skipping to avoid unauthenticated clone (AUD-130)", ws.ID, err)
-				return
-			}
-			cloneURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", installToken, repositoryFullName)
-			// Sanitise cloneURL just before the git sink. Wave 8 second pass.
-			cloneURL = gitargs.GitURLRe.FindString(cloneURL)
-			if cloneURL == "" {
-				logger.Warnf("Invalid PR clone URL for workspace %s, skipping", ws.ID)
-				return
-			}
-
-			// Clone repository
-			cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, tempDir) //nolint:gosec // intentional: executing git command
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to clone repository for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			// Checkout PR head branch
-			cmd = exec.CommandContext(ctx, "git", "checkout", headBranch) //nolint:gosec // intentional: executing git command
-			cmd.Dir = tempDir
-			if err := cmd.Run(); err != nil {
-				logger.Errorf("Failed to checkout branch %s for workspace %s: %v", headBranch, ws.ID, err)
-				// Re-bind through the regex right before the sink - CodeQL loses
-				// the barrier across the error branch.
-				safeBranch := gitargs.RefNameRe.FindString(headBranch)
-				if safeBranch == "" {
-					return
-				}
-				cmd = exec.CommandContext(ctx, "git", "fetch", "origin", safeBranch) //nolint:gosec // intentional: executing git command
-				cmd.Dir = tempDir
-				if fetchErr := cmd.Run(); fetchErr != nil {
-					logger.Errorf("Failed to fetch branch %s for workspace %s: %v", headBranch, ws.ID, fetchErr)
-					return
-				}
-				// Try checkout again after fetch
-				cmd = exec.CommandContext(ctx, "git", "checkout", safeBranch) //nolint:gosec // intentional: executing git command
-				cmd.Dir = tempDir
-				if err := cmd.Run(); err != nil {
-					logger.Errorf("Failed to checkout branch %s for workspace %s after fetch: %v", headBranch, ws.ID, err)
-					return
-				}
-			}
-
-			// Create tarball from repository root
-			commitShort := headSHA
-			if len(headSHA) >= 7 {
-				commitShort = headSHA[:7]
-			}
-			tarballName := fmt.Sprintf("workspace-pr-%s-%s.tar.gz", ws.ID, commitShort)
-			if !filepath.IsLocal(tarballName) {
-				logger.Warnf("Invalid PR tarball name for workspace %s, skipping", ws.ID)
-				return
-			}
-			tarballPath := filepath.Join(os.TempDir(), tarballName)
-			defer func() {
-				if err := os.Remove(tarballPath); err != nil && !os.IsNotExist(err) {
-					logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
-				}
-			}()
-
-			if err := h.createTarball(tempDir, tarballPath); err != nil {
-				logger.Errorf("Failed to create tarball for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			// Check if configuration version for this commit already exists
-			existingCVs, checkErr := h.configVersionRepo.GetByWorkspaceID(ws.ID)
-			if checkErr == nil {
-				for _, cv := range existingCVs {
-					if cv.CommitHash == headSHA && cv.Speculative && cv.Status != models.ConfigurationVersionStatusErrored {
-						logger.Infof("Configuration version for PR commit %s already exists for workspace %s, skipping", headSHA, ws.ID)
-						return
-					}
-				}
-			}
-
-			// Create speculative configuration version
-			configVersion := &models.ConfigurationVersion{
-				WorkspaceID:   ws.ID,
-				Status:        models.ConfigurationVersionStatusPending,
-				Source:        "tfe-vcs", // Mark as VCS-triggered
-				AutoQueueRuns: true,
-				Speculative:   true, // Mark as speculative (plan-only)
-				CommitHash:    headSHA,
-				Committer:     prEvent.PullRequest.User.Login,
-				PRNumber:      prNumber,
-				SourceBranch:  headBranch,
-			}
-
-			if err := h.configVersionRepo.Create(configVersion); err != nil {
-				logger.Errorf("Failed to create configuration version for workspace %s: %v", ws.ID, err)
-				errStr := strings.ToLower(err.Error())
-				if strings.Contains(errStr, "duplicate") || strings.Contains(errStr, "unique constraint") || strings.Contains(errStr, "already exists") {
-					logger.Infof("Configuration version for commit %s already exists (duplicate), skipping", headSHA)
-					return
-				}
-				return
-			}
-
-			// Upload tarball to MinIO
-			tarballFile, err := os.Open(tarballPath) //nolint:gosec // tarballPath is validated (in temp directory)
-			if err != nil {
-				logger.Errorf("Failed to open tarball for workspace %s: %v", ws.ID, err)
-				return
-			}
-			defer func() {
-				if err := tarballFile.Close(); err != nil {
-					logger.Warnf("Failed to close tarball file: %v", err)
-				}
-			}()
-
-			storageKey := models.ConfigurationTarballKey(configVersion.ID)
-			if h.storageClient == nil {
-				logger.Errorf("storageClient is nil, cannot upload configuration for workspace %s", ws.ID)
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = "Storage client not initialized"
-				if updateErr := h.configVersionRepo.Update(configVersion); updateErr != nil {
-					logger.Errorf("Failed to update configuration version error status: %v", updateErr)
-				}
-				return
-			}
-
-			logger.Infof("Uploading tarball to MinIO: %s for workspace %s", storageKey, ws.ID)
-			if err := h.storageClient.PutStream(ctx, storageKey, tarballFile, -1); err != nil {
-				logger.Errorf("Failed to upload configuration for workspace %s: %v", ws.ID, err)
-				configVersion.Status = models.ConfigurationVersionStatusErrored
-				configVersion.ErrorMessage = fmt.Sprintf("Failed to upload configuration: %v", err)
-				if updateErr := h.configVersionRepo.Update(configVersion); updateErr != nil {
-					logger.Errorf("Failed to update configuration version error status: %v", updateErr)
-				}
-				return
-			}
-
-			// Mark configuration version as uploaded
-			configVersion.Status = models.ConfigurationVersionStatusUploaded
-			if err := h.configVersionRepo.Update(configVersion); err != nil {
-				logger.Errorf("Failed to update configuration version status: %v", err)
-				return
-			}
-
-			// tfe_organization speculative_plan_management_enabled (default on): a newer commit to
-			// this branch/PR supersedes still-pending speculative plans - cancel them before
-			// queueing the new one.
-			if wsOrg := h.orgForWorkspace(&ws); wsOrg == nil || wsOrg.SpeculativePlanManagement() {
-				terraform.AutoCancelSupersededSpeculativeRuns(h.runRepo, h.configVersionRepo, ws.ID, headBranch, prNumber)
-			}
-
-			// Create plan-only run (speculative)
-			run := &models.Run{
-				WorkspaceID:            ws.ID,
-				ConfigurationVersionID: &configVersion.ID,
-				CreatedBy:              nil, // System-triggered
-				Status:                 models.RunStatusPending,
-				Operation:              models.RunOperationPlanOnly, // Plan-only for speculative runs
-			}
-
-			if err := h.runRepo.Create(run); err != nil {
-				logger.Errorf("Failed to create run for workspace %s: %v", ws.ID, err)
-				return
-			}
-
-			logger.Infof("Created speculative plan-only run %s for workspace %s from PR #%d commit %s", run.ID, ws.ID, prNumber, headSHA)
+			var err error
 
 			// Create GitHub status check
 			if h.statusService == nil {
@@ -2361,121 +1668,40 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 					logger.Infof("Created status check for run %s (PR #%d, commit %s)", run.ID, prNumber, headSHA)
 				}
 			}
-		}(workspace)
+		}(ws, run, vcsConn)
 	}
 
-	// Build list of triggered workspace names for the webhook event message
-	var prTriggeredNames []string
-	for _, ws := range filteredWorkspaces {
-		prTriggeredNames = append(prTriggeredNames, ws.Name)
-	}
-	prEventMessage := fmt.Sprintf("PR #%d: %d workspace(s) triggered for speculative plans", prNumber, len(filteredWorkspaces))
-	if len(prTriggeredNames) > 0 {
-		prEventMessage = fmt.Sprintf("PR #%d: %d workspace(s) triggered: %s", prNumber, len(filteredWorkspaces), strings.Join(prTriggeredNames, ", "))
-	}
-
-	// Record webhook event
-	h.recordWebhookEvent(h.orgFromInstallation(strconv.FormatInt(prEvent.Installation.ID, 10)), "pull_request", "github", repositoryFullName, headBranch, headSHA, "success",
-		prEventMessage, http.StatusOK, string(payload))
+	prAttribution := h.installationAttribution(strconv.FormatInt(prEvent.Installation.ID, 10))
+	prReached := tallies{}
+	prAttribution.addWorkspaces(prReached, filteredWorkspaces)
+	h.recordAttributed(prAttribution, prReached, pullRequestTallySummary(prNumber),
+		"pull_request", "github", repositoryFullName, headBranch, headSHA, http.StatusOK, string(payload))
 
 	response.Message(c, http.StatusOK, fmt.Sprintf("Pull request event processed: %d workspace(s) queued for speculative plans", len(filteredWorkspaces)))
 }
 
-// getPRChangedFiles uses git diff to get the list of files changed between base and head branches
-// Returns empty slice if unable to determine (e.g., no access to repo), which will trigger all workspaces
-func (h *VCSAppInstallationHandlerV2) getPRChangedFiles(repositoryFullName, baseBranch, headBranch, headSHA string) []string {
-	// Sanitise via regex rebind. Without this, a refname starting with
-	// "-" could smuggle arbitrary git options (CVE-2017-1000117 class).
-	// Wave 8 / D1.
-	repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
-	if repositoryFullName == "" {
-		logger.Warnf("getPRChangedFiles: invalid repository name")
+// pullRequestFiles returns the files pull request number of repo changes, read from GitHub's List
+// pull request files endpoint with an installation token of the delivering installation. It
+// returns nil, which triggers every workspace, when the list cannot be read or is truncated:
+// GitHub lists at most MaxPullRequestFiles files, and the delivery says how many changed.
+func (h *VCSAppInstallationHandlerV2) pullRequestFiles(ctx context.Context, installationID, repo string, number, changed int) []string {
+	if h.githubAppManager == nil || !h.githubAppManager.IsEnabled() {
 		return nil
 	}
-	baseBranch = gitargs.RefNameRe.FindString(baseBranch)
-	if baseBranch == "" {
-		logger.Warnf("getPRChangedFiles: invalid base branch")
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || gitargs.RepoFullNameRe.FindString(repo) == "" {
 		return nil
 	}
-	headBranch = gitargs.RefNameRe.FindString(headBranch)
-	if headBranch == "" {
-		logger.Warnf("getPRChangedFiles: invalid head branch")
-		return nil
-	}
-	if headSHA != "" {
-		headSHA = gitargs.CommitSHARe.FindString(headSHA)
-		if headSHA == "" {
-			logger.Warnf("getPRChangedFiles: invalid head SHA")
-			return nil
-		}
-	}
-
-	// Create a temporary directory for git operations
-	tempDir, err := os.MkdirTemp("", "pr-diff-*")
+	files, entries, complete, err := h.githubAppManager.GetService().ListPullRequestFiles(ctx, installationID, owner, name, number)
 	if err != nil {
-		logger.Errorf("Failed to create temp directory for PR diff: %v", err)
+		logger.Warnf("Listing the files of pull request #%d of %s failed, triggering every workspace: %v", number, repo, err)
 		return nil
 	}
-	defer func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			logger.Warnf("Failed to remove temp directory %s: %v", tempDir, err)
-		}
-	}()
-
-	ctx := context.Background()
-
-	// Clone repository (shallow clone is faster)
-	cloneURL := "https://github.com/" + repositoryFullName + ".git"
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "50", cloneURL, tempDir) //nolint:gosec // intentional: executing git command
-	if err := cmd.Run(); err != nil {
-		logger.Errorf("Failed to clone repository for PR diff: %v", err)
+	if !complete || entries < changed {
+		logger.Infof("Pull request #%d of %s lists %d of %d changed files, triggering every workspace", number, repo, entries, changed)
 		return nil
 	}
-
-	// Unshallow to allow fetching arbitrary branches
-	cmd = exec.CommandContext(ctx, "git", "fetch", "--unshallow")
-	cmd.Dir = tempDir
-	_ = cmd.Run() // Ignore error - repo might already be unshallow or unshallow might fail
-
-	// Fetch both base and head branches from origin using refspec format
-	// This ensures remote tracking refs are set up properly (required for git diff after shallow clone)
-	// Format: refs/heads/<branch>:refs/remotes/origin/<branch>
-	baseRefspec := fmt.Sprintf("refs/heads/%s:refs/remotes/origin/%s", baseBranch, baseBranch)
-	headRefspec := fmt.Sprintf("refs/heads/%s:refs/remotes/origin/%s", headBranch, headBranch)
-	cmd = exec.CommandContext(ctx, "git", "fetch", "origin", baseRefspec, headRefspec) //nolint:gosec // intentional: executing git command
-	cmd.Dir = tempDir
-	if err := cmd.Run(); err != nil {
-		logger.Errorf("Failed to fetch branches for PR diff: %v", err)
-		return nil
-	}
-
-	// Get changed files using git diff between origin/baseBranch and origin/headBranch
-	// Format: --name-only gives just the file names
-	var output []byte
-	cmd = exec.CommandContext(ctx, "git", "diff", "--name-only", "origin/"+baseBranch, "origin/"+headBranch) //nolint:gosec // intentional: executing git command with branch names
-	cmd.Dir = tempDir
-	output, err = cmd.Output()
-	if err != nil {
-		// Get stderr to see the actual error
-		if exitError, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitError.Stderr)
-			logger.Errorf("Failed to get PR diff (exit status %d): %s", exitError.ExitCode(), stderr)
-		} else {
-			logger.Errorf("Failed to get PR diff: %v", err)
-		}
-		return nil
-	}
-
-	// Parse output (one file per line)
-	changedFiles := make([]string, 0)
-	for _, line := range strings.Split(string(output), "\n") {
-		file := strings.TrimSpace(line)
-		if file != "" {
-			changedFiles = append(changedFiles, file)
-		}
-	}
-
-	return changedFiles
+	return files
 }
 
 // Helper function to get keys from map for logging
@@ -2567,99 +1793,4 @@ func getDirectory(path string) string {
 		return ""
 	}
 	return path[:lastSlash+1]
-}
-
-// createTarball creates a gzipped tarball from a directory (similar to module publisher)
-func (h *VCSAppInstallationHandlerV2) createTarball(sourceDir, outputPath string) error {
-	// Defence-in-depth and CodeQL barrier: rebuild outputPath from its basename
-	// after verifying it via filepath.IsLocal. Callers already validate, but
-	// CodeQL's path-injection tracker cannot follow the value across function
-	// boundaries, so the sanitiser must appear inline at the sink.
-	base := filepath.Base(outputPath)
-	if !filepath.IsLocal(base) {
-		return fmt.Errorf("invalid output path: %q", outputPath)
-	}
-	safePath := filepath.Join(os.TempDir(), base)
-	file, err := os.Create(safePath) //nolint:gosec // safePath is filepath.Join(TempDir, IsLocal(base))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			logger.Warnf("Failed to close file: %v", err)
-		}
-	}()
-
-	gzipWriter := gzip.NewWriter(file)
-	defer func() {
-		if err := gzipWriter.Close(); err != nil {
-			logger.Warnf("Failed to close gzip writer: %v", err)
-		}
-	}()
-
-	tarWriter := tar.NewWriter(gzipWriter)
-	defer func() {
-		if err := tarWriter.Close(); err != nil {
-			logger.Warnf("Failed to close tar writer: %v", err)
-		}
-	}()
-
-	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip hidden files and directories
-		if strings.HasPrefix(info.Name(), ".") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// Skip .git, .terraform, *.tfstate, .terraform.lock.hcl
-		if info.IsDir() && (info.Name() == ".git" || info.Name() == ".terraform") {
-			return filepath.SkipDir
-		}
-		if !info.IsDir() && (strings.HasSuffix(path, ".tfstate") || strings.HasSuffix(path, ".terraform.lock.hcl")) {
-			return nil
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(sourceDir, path)
-		if err != nil {
-			return err
-		}
-
-		// Create tar header
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		header.Name = relPath
-
-		// Write header
-		if err := tarWriter.WriteHeader(header); err != nil {
-			return err
-		}
-
-		// Write file content if not a directory
-		if !info.IsDir() {
-			data, err := os.Open(path) //nolint:gosec // path is from filepath.Walk, validated
-			if err != nil {
-				return err
-			}
-			defer func() {
-				if err := data.Close(); err != nil {
-					logger.Warnf("Failed to close data file: %v", err)
-				}
-			}()
-
-			if _, err := io.Copy(tarWriter, data); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
 }

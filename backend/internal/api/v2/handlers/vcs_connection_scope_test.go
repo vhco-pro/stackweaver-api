@@ -124,6 +124,7 @@ func (f *agentPrepFixture) storedWorkspaceNaming(t *testing.T, connection uuid.U
 	}
 	t.Cleanup(func() {
 		f.db.Where("id = ?", run.ID).Delete(&models.Run{})
+		f.db.Where("workspace_id = ?", workspace.ID).Delete(&models.ConfigurationVersion{})
 		f.db.Where("id = ?", workspace.ID).Delete(&models.Workspace{})
 	})
 	return workspace, run

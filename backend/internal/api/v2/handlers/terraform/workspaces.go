@@ -213,29 +213,55 @@ func (h *WorkspaceHandlerV2) checkIdentityBindingOffered(c *gin.Context, workspa
 
 // vcsRepoConnectionID resolves the connection a TFE `vcs-repo` block names to an identifier:
 // through `github-app-installation-id`, through `oauth-token-id` (a connection identifier here),
-// or, when the block names neither, the organization's own connection. It returns nil when the
-// block resolves to nothing, which leaves the workspace's connection as it is.
+// or, when the block names neither, the organization's connection when it has exactly one
+// (#938). It answers the request itself and reports false when the block cannot be resolved:
+//
+//   - an installation not connected in this organization is 400 "VCS connection not found",
+//     the same answer for an installation only another organization connected as for one nobody
+//     did, so the answer reveals nothing about other organizations (owner decision Q7);
+//   - neither field, with several connections in the organization, is 422 naming both fields,
+//     since any choice could be the wrong account.
+//
+// A nil identifier with true leaves the workspace's connection as it is: an `oauth-token-id`
+// that is not an identifier, or an organization with no connection at all.
 //
 // The installation is looked up within the organization. Several organizations may be connected
 // through one GitHub App installation, each with a connection row of its own, and an unscoped
 // lookup would hand back whichever row came first.
-func (h *WorkspaceHandlerV2) vcsRepoConnectionID(repo *VCSRepoRequest, organizationID uuid.UUID) *uuid.UUID {
+func (h *WorkspaceHandlerV2) vcsRepoConnectionID(c *gin.Context, repo *VCSRepoRequest, organizationID uuid.UUID) (*uuid.UUID, bool) {
 	switch {
 	case repo.GHAInstallationID != "":
-		if conn, err := h.vcsConnectionRepo.GetByInstallationIDAndOrganization(repo.GHAInstallationID, organizationID); err == nil {
-			return &conn.ID
+		conn, err := h.vcsConnectionRepo.GetByInstallationIDAndOrganization(repo.GHAInstallationID, organizationID)
+		switch {
+		case err == nil:
+			return &conn.ID, true
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "VCS connection not found")
+		default:
+			apierror.Internal(c, "Failed to check the VCS connection", err)
 		}
+		return nil, false
 	case repo.OAuthTokenID != "":
 		if parsedID, err := uuid.Parse(repo.OAuthTokenID); err == nil {
-			return &parsedID
+			return &parsedID, true
 		}
+		return nil, true
 	default:
-		// No explicit ID - use the org's VCS connection
-		if conns, err := h.vcsConnectionRepo.ListByOrganization(organizationID); err == nil && len(conns) > 0 {
-			return &conns[0].ID
+		conns, err := h.vcsConnectionRepo.ListByOrganization(organizationID)
+		if err != nil {
+			apierror.Internal(c, "Failed to list the VCS connections", err)
+			return nil, false
 		}
+		switch len(conns) {
+		case 0:
+			return nil, true
+		case 1:
+			return &conns[0].ID, true
+		}
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity",
+			"The organization has several VCS connections: name one with vcs-repo.github-app-installation-id or vcs-repo.oauth-token-id")
+		return nil, false
 	}
-	return nil
 }
 
 // vcsConnectionAccepted loads the VCS connection a workspace of the project is about to name, and
@@ -1192,7 +1218,11 @@ func (h *WorkspaceHandlerV2) Create(c *gin.Context) {
 		}
 		// Resolve VCS connection from github-app-installation-id or oauth-token-id
 		if vcsConnectionID == nil {
-			vcsConnectionID = h.vcsRepoConnectionID(req.Data.Attributes.VCSRepo, org.ID)
+			resolved, ok := h.vcsRepoConnectionID(c, req.Data.Attributes.VCSRepo, org.ID)
+			if !ok {
+				return
+			}
+			vcsConnectionID = resolved
 		}
 	}
 
@@ -1542,7 +1572,11 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		}
 		// Resolve VCS connection from github-app-installation-id or oauth-token-id
 		if attrs.VCSConnectionID == nil {
-			attrs.VCSConnectionID = h.vcsRepoConnectionID(attrs.VCSRepo, org.ID)
+			resolved, ok := h.vcsRepoConnectionID(c, attrs.VCSRepo, org.ID)
+			if !ok {
+				return
+			}
+			attrs.VCSConnectionID = resolved
 		}
 	}
 
@@ -2322,7 +2356,11 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		// Without the organization nothing can be resolved within it, and the connection is
 		// left as it is.
 		if attrs.VCSConnectionID == nil && org != nil {
-			attrs.VCSConnectionID = h.vcsRepoConnectionID(attrs.VCSRepo, org.ID)
+			resolved, ok := h.vcsRepoConnectionID(c, attrs.VCSRepo, org.ID)
+			if !ok {
+				return
+			}
+			attrs.VCSConnectionID = resolved
 		}
 	}
 

@@ -6,8 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -21,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/security/gitargs"
+	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
@@ -34,7 +33,11 @@ type RegistryPublishingHandler struct {
 	rbacService       *rbac.Service
 	githubAppManager  *vcs.GitHubAppManager
 	publisher         *registry.ModulePublisher
+	workItems         *coreansible.WorkItemService // requests module_tag_snapshot captures (#938)
 }
+
+// SetWorkItems sets the service that requests a tag's capture.
+func (h *RegistryPublishingHandler) SetWorkItems(s *coreansible.WorkItemService) { h.workItems = s }
 
 func NewRegistryPublishingHandler(
 	moduleRepo *repository.ModuleRepository,
@@ -208,16 +211,13 @@ func (h *RegistryPublishingHandler) CreateModule(c *gin.Context) {
 
 					// Validate version
 					if err := registry.ValidateSemanticVersion(version); err == nil {
-						// Check if version already exists
+						// Queue a capture of the latest tag; the version is published from its snapshot.
 						if !h.moduleVersionRepo.Exists(module.ID, version) {
-							// Publish the latest version in background
-							go func() {
-								if err := h.PublishFromGitTag(ctx, module.ID, tagName, req.VCSRepository); err != nil {
-									logger.Infof("Failed to auto-publish latest version %s for module %s: %v", version, module.Name, err)
-								} else {
-									logger.Infof("Auto-published latest version %s for module %s from tag %s", version, module.Name, tagName)
-								}
-							}()
+							if err := h.PublishFromGitTag(ctx, module.ID, tagName, req.VCSRepository); err != nil {
+								logger.Infof("Failed to queue the latest version %s of module %s: %v", version, module.Name, err)
+							} else {
+								logger.Infof("Queued the capture of tag %s for module %s", tagName, module.Name)
+							}
 						}
 					}
 				}
@@ -574,102 +574,49 @@ func (h *RegistryPublishingHandler) PublishVersion(c *gin.Context) {
 	})
 }
 
-// PublishFromGitTag publishes a module version from a Git tag (called by webhook handler)
+// PublishFromGitTag queues the publication of a module version from a Git tag, from a tag push
+// or the module's creation (#938): a module_tag_snapshot work item clones the repository at the
+// tag with the module's own connection, and the version is published from the snapshot it
+// uploads. The API clones nothing. A version that already exists is refused here, before any
+// capture is queued, and a tag whose capture is already active queues nothing.
 func (h *RegistryPublishingHandler) PublishFromGitTag(
 	ctx context.Context,
 	moduleID uuid.UUID,
 	tagName string,
 	repositoryFullName string,
 ) error {
-	// Sanitise via regex rebind. Without this, a tag named
-	// "--upload-pack=evil" or a repo name containing shell metacharacters
-	// could subvert the git invocations below (Wave 8 / D1).
-	tagName = gitargs.RefNameRe.FindString(tagName)
-	if tagName == "" {
+	if gitargs.RefNameRe.FindString(tagName) == "" {
 		return fmt.Errorf("invalid tag name")
 	}
-	repositoryFullName = gitargs.RepoFullNameRe.FindString(repositoryFullName)
-	if repositoryFullName == "" {
+	if gitargs.RepoFullNameRe.FindString(repositoryFullName) == "" {
 		return fmt.Errorf("invalid repository name")
 	}
-
-	// Get module to access VCS connection
+	if h.workItems == nil {
+		return fmt.Errorf("tag publishing is not configured")
+	}
 	module, err := h.moduleRepo.GetByID(moduleID)
 	if err != nil {
-		return fmt.Errorf("failed to get module: %w", err)
+		return fmt.Errorf("getting module %s: %w", moduleID, err)
 	}
-
-	// Extract version from tag
+	if module.VCSConnectionID == nil || !strings.EqualFold(module.VCSRepository, repositoryFullName) {
+		return fmt.Errorf("module %s does not publish the tags of %s", module.Name, repositoryFullName)
+	}
 	version := registry.ExtractVersionFromTag(tagName)
-
-	// Validate version
 	if err := registry.ValidateSemanticVersion(version); err != nil {
 		return fmt.Errorf("invalid version in tag %s: %w", tagName, err)
 	}
-
-	// Check if version already exists
-	if h.moduleVersionRepo.Exists(moduleID, version) {
+	if h.moduleVersionRepo.Exists(moduleID, registry.NormalizeVersion(version)) {
 		return fmt.Errorf("version %s already exists", version)
 	}
-
-	// Clone repository at tag
-	tempDir, err := os.MkdirTemp("", "module-clone-*")
+	item, created, err := h.workItems.RequestModuleTagSnapshot(ctx, module, tagName)
 	if err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
+		return fmt.Errorf("queueing the capture of tag %s: %w", tagName, err)
 	}
-	defer func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			logger.Warnf("Failed to remove temp directory %s: %v", tempDir, err)
-		}
-	}()
-
-	// Clone using git command with installation token if available
-	var cloneURL string
-	if module.VCSConnectionID != nil && h.githubAppManager != nil && h.githubAppManager.IsEnabled() {
-		// Get VCS connection to get installation ID
-		vcsConn, err := h.vcsConnectionRepo.GetByID(*module.VCSConnectionID)
-		if err == nil && vcsConn.InstallationID != "" {
-			// Generate installation token
-			githubService := h.githubAppManager.GetService()
-			installToken, err := githubService.GenerateInstallationToken(ctx, vcsConn.InstallationID)
-			if err == nil {
-				// Use token for authentication
-				cloneURL = fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", installToken, repositoryFullName)
-			} else {
-				logger.Warnf("Failed to generate installation token, using public clone: %v", err)
-				cloneURL = fmt.Sprintf("https://github.com/%s.git", repositoryFullName)
-			}
-		} else {
-			cloneURL = fmt.Sprintf("https://github.com/%s.git", repositoryFullName)
-		}
+	if created {
+		logger.Infof("Queued capture %s of module %s at tag %s", item.ID, module.Name, tagName)
 	} else {
-		cloneURL = fmt.Sprintf("https://github.com/%s.git", repositoryFullName)
+		logger.Infof("Module %s already has capture %s of tag %s", module.Name, item.ID, tagName)
 	}
-
-	// Clone repository at specific tag
-	// First, clone shallow with the tag
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", tagName, cloneURL, tempDir) //nolint:gosec // intentional: executing git command
-	if err := cmd.Run(); err != nil {
-		// If that fails, clone and checkout tag
-		cmd = exec.CommandContext(ctx, "git", "clone", "--depth", "1", cloneURL, tempDir) //nolint:gosec // intentional: executing git command
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to clone repository: %w", err)
-		}
-		// Checkout tag
-		cmd = exec.CommandContext(ctx, "git", "checkout", tagName) //nolint:gosec // G204: tagName is validated git tag from webhook
-		cmd.Dir = tempDir
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to checkout tag %s: %w", tagName, err)
-		}
-	}
-
-	// Publish version from directory
-	_, err = h.publisher.PublishVersionFromDirectory(ctx, moduleID, version, tempDir)
-	if err != nil {
-		return fmt.Errorf("failed to publish version from directory: %w", err)
-	}
-
-	logger.Infof("Successfully published module %s version %s from tag %s", module.Name, version, tagName)
 	return nil
 }
 

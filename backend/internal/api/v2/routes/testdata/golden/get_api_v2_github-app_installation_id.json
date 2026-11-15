@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "path": "/api/v2/github-app/installation/:id",
+  "status": 404,
+  "body": {
+    "errors": [
+      {
+        "status": "404",
+        "title": "Not Found"
+      }
+    ]
+  }
+}

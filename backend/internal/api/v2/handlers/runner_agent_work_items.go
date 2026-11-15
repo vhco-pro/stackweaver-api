@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,12 +17,15 @@ import (
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
+	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
+	"github.com/michielvha/stackweaver/core/security/gitargs"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/wakeup"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // The runner control plane of work items (#933, D2, decision 18): a sync is offered, claimed,
@@ -143,10 +147,13 @@ func (h *RunnerAgentHandler) getWorkItemArtifacts(c *gin.Context, id string) {
 	if err != nil {
 		// Nothing a later attempt could fix: the work item fails with the reason, and the runner
 		// is told so.
-		if _, finishErr := h.workItems.Finished(item, models.WorkItemStatusFailed, err.Error(), nil); finishErr != nil {
+		finished, finishErr := h.workItems.Finished(item, models.WorkItemStatusFailed, err.Error(), nil)
+		if finishErr != nil {
 			logger.Warnf("failing work item %s: %v", item.ID, finishErr)
 		}
-		h.revokeJobTokens(models.JobTypeWorkItem, item.ID)
+		if finished {
+			h.revokeWorkItemAttempt(item)
+		}
 		jsonapi.WriteError(c, http.StatusConflict, "Conflict", err.Error())
 		return
 	}
@@ -167,11 +174,14 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		if playbook.VCSConnectionID == nil || playbook.VCSRepository == "" {
 			return nil, errors.New("playbook has no VCS connection configured")
 		}
-		clone := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
+		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
 			return ansible.PlaybookVCSConnection(scope, playbook.ProjectID, *playbook.VCSConnectionID)
 		}, playbook.VCSRepository, playbook.VCSBranch)
-		if clone == nil {
+		if errors.Is(err, errCloneUnresolved) {
 			return nil, errors.New("the playbook's VCS connection could not be resolved")
+		}
+		if err != nil {
+			return nil, err
 		}
 		art.Clone, art.PlaybookPath = clone, playbook.PlaybookPath
 	case models.WorkItemInventoryFileSync:
@@ -182,11 +192,14 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		if inventory.VCSConnectionID == nil || inventory.VCSRepository == "" || inventory.InventoryPath == "" {
 			return nil, errors.New("inventory has no VCS connection configured")
 		}
-		clone := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
+		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
 			return ansible.InventoryVCSConnection(scope, inventory.OrganizationID, *inventory.VCSConnectionID)
 		}, inventory.VCSRepository, inventory.VCSBranch)
-		if clone == nil {
+		if errors.Is(err, errCloneUnresolved) {
 			return nil, errors.New("the inventory's VCS connection could not be resolved")
+		}
+		if err != nil {
+			return nil, err
 		}
 		art.Clone, art.InventoryPath = clone, inventory.InventoryPath
 		art.AzureSubscriptionID = h.orgAzureSubscription(item.OrganizationID)
@@ -202,11 +215,49 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		if ws.VCSConnectionID == nil || ws.VCSRepository == "" {
 			return nil, errors.New("the run's workspace has no VCS connection configured")
 		}
-		clone := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
+		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
 			return scope.VCSConnectionForProject(*ws.VCSConnectionID, ws.ProjectID)
 		}, ws.VCSRepository, ws.VCSBranch)
-		if clone == nil {
+		if errors.Is(err, errCloneUnresolved) {
 			return nil, errors.New("the workspace's VCS connection could not be resolved")
+		}
+		if err != nil {
+			return nil, err
+		}
+		// The run's fetching configuration version says which commit to capture (#938): a
+		// delivery's commit, or the branch head when it names none.
+		if run.ConfigurationVersionID != nil {
+			var cv models.ConfigurationVersion
+			if err := h.db.Select("id", "commit_hash", "fetch_ref").First(&cv, "id = ?", *run.ConfigurationVersionID).Error; err == nil {
+				clone.Commit, clone.FetchRef = cv.CommitHash, cv.FetchRef
+			}
+		}
+		art.Clone = clone
+	case models.WorkItemModuleTagSnapshot:
+		if item.ModuleID == nil || item.RequestedRef == "" {
+			return nil, errors.New("the work item names no module tag")
+		}
+		var module models.Module
+		if err := h.db.First(&module, "id = ?", *item.ModuleID).Error; err != nil {
+			return nil, fmt.Errorf("loading module: %w", err)
+		}
+		if module.VCSConnectionID == nil || module.VCSRepository == "" {
+			return nil, errors.New("the module has no VCS connection configured")
+		}
+		// The module's own connection, resolved within its organization, at the tag (#938).
+		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
+			return scope.VCSConnection(*module.VCSConnectionID, module.OrganizationID)
+		}, module.VCSRepository, item.RequestedRef)
+		if errors.Is(err, errCloneUnresolved) {
+			return nil, errors.New("the module's VCS connection could not be resolved")
+		}
+		if err != nil {
+			return nil, err
+		}
+		// No unauthenticated clone: a connection that cannot mint a token fails the capture, as
+		// AUD-130 requires of every clone.
+		if clone.Token == "" && clone.SSHPrivateKey == "" {
+			return nil, errors.New("the module's VCS connection could not mint a token")
 		}
 		art.Clone = clone
 	case models.WorkItemConstructedRebuild, models.WorkItemDynamicSourceSync:
@@ -225,27 +276,36 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 // target's organization: a target naming another organization's connection resolves to nothing.
 // The minted token travels beside the URL, never inside it, so the executor can hand it to git
 // without putting it in an argument or a file (decision 18).
-func (h *RunnerAgentHandler) cloneSourceFor(ctx context.Context, lookup func(*repository.OrganizationScope) (*models.VCSConnection, error), repo, branch string) *runnercontract.CloneSource {
+func (h *RunnerAgentHandler) cloneSourceFor(ctx context.Context, lookup func(*repository.OrganizationScope) (*models.VCSConnection, error), repo, branch string) (*runnercontract.CloneSource, error) {
 	if h.vcsRegistry == nil {
-		return nil
+		return nil, errCloneUnresolved
 	}
 	conn, err := lookup(repository.NewOrganizationScope(h.db).WithContext(ctx))
 	if err != nil {
 		if !errors.Is(err, ansible.ErrInvalidInput) {
 			logger.Warnf("loading the VCS connection for %s failed: %v", repo, err)
 		}
-		return nil
+		return nil, errCloneUnresolved
 	}
 	provider, err := h.vcsRegistry.GetProvider(conn)
 	if err != nil {
-		return nil
+		return nil, errCloneUnresolved
 	}
-	token, _ := provider.GetFreshToken(ctx, conn)
+	// No unauthenticated clone of a connected repository (AUD-130, #938): a connection that
+	// cannot mint its token fails the work item with the provider's reason.
+	token, err := provider.GetFreshToken(ctx, conn)
+	if err != nil {
+		return nil, fmt.Errorf("the VCS connection could not mint a token: %w", err)
+	}
 	if branch == "" {
 		branch = "main"
 	}
-	return cloneSourceFromURL(provider.BuildCloneURL(conn, token, repo), branch)
+	return cloneSourceFromURL(provider.BuildCloneURL(conn, token, repo), branch), nil
 }
+
+// errCloneUnresolved is cloneSourceFor's answer when the target's connection does not resolve
+// within its organization; each work item kind reports it in its own words.
+var errCloneUnresolved = errors.New("the VCS connection could not be resolved")
 
 // cloneSourceFromURL splits a credential-embedded clone URL into the bare URL and its credential.
 func cloneSourceFromURL(raw, branch string) *runnercontract.CloneSource {
@@ -313,13 +373,34 @@ func (h *RunnerAgentHandler) jobCompleteWorkItem(c *gin.Context, id string, req 
 	case "canceled":
 		status = models.WorkItemStatusCanceled
 	}
-	if _, err := h.workItems.Finished(item, status, req.ErrorMessage, req.WorkResult); err != nil {
+	if h.beforeWorkItemFinish != nil {
+		h.beforeWorkItemFinish(item.ID)
+	}
+	finished, err := h.workItems.Finished(item, status, req.ErrorMessage, req.WorkResult)
+	if err != nil {
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
-	h.revokeJobTokens(models.JobTypeWorkItem, id)
+	if !finished {
+		// Finished already, or reclaimed since this request was authorized: the completion
+		// changed nothing, and the current attempt's credentials are left alone.
+		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTerminal, "Forbidden", "the work item was finished or reclaimed")
+		return
+	}
+	h.revokeWorkItemAttempt(item)
 	h.wakeCallersPool(c)
 	response.Status(c, http.StatusOK, "completed")
+}
+
+// revokeWorkItemAttempt revokes the job tokens of the attempt of item the request was authorized
+// for, never a later attempt's.
+func (h *RunnerAgentHandler) revokeWorkItemAttempt(item *models.WorkItem) {
+	if h.apiKeyService == nil {
+		return
+	}
+	if err := h.apiKeyService.RevokeJobAttemptTokens(models.JobTypeWorkItem, item.ID, max(item.Attempt, 1)); err != nil {
+		logger.Warnf("revoking the job tokens of work item %s attempt %d: %v", item.ID, item.Attempt, err)
+	}
 }
 
 // workItemStatus answers a work item's status poll.
@@ -352,9 +433,13 @@ func (h *RunnerAgentHandler) UploadSnapshot(c *gin.Context) {
 		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTerminal, "Forbidden", "the work item has finished")
 		return
 	}
+	if h.snapshotAuthorized != nil {
+		h.snapshotAuthorized(item.ID)
+	}
 	snapshotOfPlaybook := item.Kind == models.WorkItemPlaybookSnapshot && item.PlaybookID != nil
 	snapshotOfRun := item.Kind == models.WorkItemConfigurationSnapshot && item.RunID != nil
-	if !snapshotOfPlaybook && !snapshotOfRun {
+	snapshotOfModule := item.Kind == models.WorkItemModuleTagSnapshot && item.ModuleID != nil
+	if !snapshotOfPlaybook && !snapshotOfRun && !snapshotOfModule {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "this work item captures no snapshot")
 		return
 	}
@@ -377,14 +462,19 @@ func (h *RunnerAgentHandler) UploadSnapshot(c *gin.Context) {
 		return
 	}
 	commit := strings.TrimSpace(c.GetHeader(runnercontract.HeaderSnapshotCommit))
+	if snapshotOfModule {
+		h.publishModuleSnapshot(c, item, commit, data)
+		return
+	}
+	if snapshotOfRun {
+		// The commit is recorded with the accepted upload, never by a refused one.
+		h.storeRunConfiguration(c, item, commit, data)
+		return
+	}
 	if commit != "" {
 		if err := h.workItems.Items().SetCommit(id, commit); err != nil {
 			logger.Warnf("recording the snapshot commit of work item %s: %v", id, err)
 		}
-	}
-	if snapshotOfRun {
-		h.storeRunConfiguration(c, item, commit, data)
-		return
 	}
 	// A playbook deleted while its snapshot was captured stays gone: its delete pruned this prefix.
 	var kept int64
@@ -408,43 +498,173 @@ func (h *RunnerAgentHandler) UploadSnapshot(c *gin.Context) {
 	response.Status(c, http.StatusOK, "stored")
 }
 
-// storeRunConfiguration makes a configuration_snapshot's upload the configuration version of its
-// run (#933, decision 18): a version of the run's workspace, sourced from VCS at the commit, stored
-// sealed where every configuration tarball is, and set on the run if it still has none; the run's
-// pool is then woken, because the run is now offerable.
+// publishModuleSnapshot publishes the module version a module_tag_snapshot captured (#938). The
+// commit is recorded on the work item only once the version is published, which is what its
+// completion checks. A version that exists, whether an alias tag's capture or a manual upload
+// published it first, answers 409 and publishes nothing.
+func (h *RunnerAgentHandler) publishModuleSnapshot(c *gin.Context, item *models.WorkItem, commit string, data []byte) {
+	if h.modulePublisher == nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusServiceUnavailable, "Module publishing is not configured")
+		return
+	}
+	if gitargs.CommitSHARe.FindString(commit) == "" {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "the snapshot names no commit")
+		return
+	}
+	// Publication holds the work item's row in its own transaction, before it writes storage, so a
+	// cancellation or reclaim that lands while this request is in flight waits for it and one that
+	// landed first is seen: a capture that lost its authority publishes neither a version nor an
+	// archive. The commit, the completion's proof, is recorded in that transaction too, so a
+	// version exists exactly when its proof does.
+	conflict := ""
+	version, err := h.modulePublisher.PublishCapturedVersion(c.Request.Context(), *item.ModuleID, item.RequestedRef, commit, bytes.NewReader(data),
+		func(tx *gorm.DB) error {
+			var locked models.WorkItem
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "status", "runner_id", "attempt").First(&locked, "id = ?", item.ID).Error; err != nil {
+				return err
+			}
+			if conflict = heldConflict(&locked, item); conflict != "" {
+				return errCaptureNotHeld
+			}
+			return tx.Model(&models.WorkItem{}).Where("id = ?", item.ID).Update("commit", commit).Error
+		})
+	switch {
+	case conflict != "":
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", conflict)
+		return
+	case errors.Is(err, registry.ErrVersionExists):
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", err.Error())
+		return
+	case err != nil:
+		logger.Errorf("publishing the capture of work item %s: %v", item.ID, err)
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		return
+	}
+	logger.Infof("Published version %s of module %s from capture %s", version.Version, *item.ModuleID, item.ID)
+	response.Status(c, http.StatusOK, "published")
+}
+
+// errCaptureNotHeld ends a capture's write when its work item no longer belongs to the request.
+var errCaptureNotHeld = errors.New("the capture no longer holds its work item")
+
+// heldConflict says why a work item, read under its row lock, no longer belongs to the request
+// authorized for it as authorized, or "" when it still does: it is running, held by the same
+// runner in the same attempt (#938). The attempt can advance between authorization and the lock.
+func heldConflict(locked, authorized *models.WorkItem) string {
+	if locked.Status != models.WorkItemStatusRunning {
+		return "the work item has finished"
+	}
+	sameRunner := (locked.RunnerID == nil) == (authorized.RunnerID == nil) &&
+		(locked.RunnerID == nil || *locked.RunnerID == *authorized.RunnerID)
+	if !sameRunner || max(locked.Attempt, 1) != max(authorized.Attempt, 1) {
+		return "a later attempt of this work item exists"
+	}
+	return ""
+}
+
+// storeRunConfiguration makes a configuration_snapshot's upload the configuration of its run
+// (#933, decision 18; #938). One transaction holds the work item, checked to be the running attempt
+// the request was authorized for, and then the run's row, so the orchestrator's conversion of a run
+// without a version, which attaches through that row, serializes with the upload. It fills the
+// version the run holds at that moment: a fetching one, once, at its requested commit; for a run
+// that still has none, a new version created and attached here. An uploaded version never changes
+// again, and a capture canceled or reclaimed meanwhile changes nothing. The run's pool is woken
+// once its configuration is uploaded.
 func (h *RunnerAgentHandler) storeRunConfiguration(c *gin.Context, item *models.WorkItem, commit string, data []byte) {
 	var run models.Run
-	if err := h.db.Select("id", "workspace_id", "agent_pool_id", "configuration_version_id").First(&run, "id = ?", *item.RunID).Error; err != nil {
+	conflict, notFound := "", false
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		var locked models.WorkItem
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "status", "runner_id", "attempt").First(&locked, "id = ?", item.ID).Error; err != nil {
+			return err
+		}
+		if conflict = heldConflict(&locked, item); conflict != "" {
+			return nil
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "workspace_id", "agent_pool_id", "configuration_version_id", "operation").
+			First(&run, "id = ?", *item.RunID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				notFound = true
+				return nil
+			}
+			return err
+		}
+		var cvID string
+		if run.ConfigurationVersionID == nil {
+			// A run converted by no orchestrator yet, while an older one requested its capture
+			// during a rolling deploy: the capture makes its version, as before #938, attached
+			// under the run's lock.
+			cv := &models.ConfigurationVersion{
+				WorkspaceID: run.WorkspaceID, Status: models.ConfigurationVersionStatusFetching, Source: "tfe-vcs",
+				Speculative: run.Operation == models.RunOperationPlanOnly,
+			}
+			if err := tx.Create(cv).Error; err != nil {
+				return fmt.Errorf("creating the configuration version of run %s: %w", run.ID, err)
+			}
+			res := tx.Model(&models.Run{}).Where("id = ? AND configuration_version_id IS NULL", run.ID).Update("configuration_version_id", cv.ID)
+			if res.Error != nil {
+				return fmt.Errorf("attaching the configuration version of run %s: %w", run.ID, res.Error)
+			}
+			if res.RowsAffected != 1 {
+				return fmt.Errorf("run %s was given a configuration version while its row was held", run.ID)
+			}
+			cvID = cv.ID
+		} else {
+			cvID = *run.ConfigurationVersionID
+		}
+		var cv models.ConfigurationVersion
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&cv, "id = ?", cvID).Error; err != nil {
+			return err
+		}
+		switch {
+		case cv.Status != models.ConfigurationVersionStatusFetching:
+			conflict = "the configuration was already captured"
+			return nil
+		case cv.CommitHash != "" && commit != cv.CommitHash:
+			conflict = "the snapshot is not of the requested commit"
+			return nil
+		}
+		if err := h.storageClient.Put(c.Request.Context(), models.ConfigurationTarballKey(cv.ID), data); err != nil {
+			return fmt.Errorf("storing the configuration of run %s: %w", run.ID, err)
+		}
+		updates := map[string]any{"status": models.ConfigurationVersionStatusUploaded}
+		if cv.CommitHash == "" && commit != "" {
+			updates["commit_hash"] = commit
+		}
+		res := tx.Model(&models.ConfigurationVersion{}).Where("id = ? AND status = ?", cv.ID, models.ConfigurationVersionStatusFetching).Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("configuration version %s left fetching while it was held", cv.ID)
+		}
+		if commit == "" {
+			return nil
+		}
+		return tx.Model(&models.WorkItem{}).Where("id = ?", item.ID).Update("commit", commit).Error
+	})
+	switch {
+	case err != nil:
+		logger.Errorf("storing the configuration of run %s: %v", *item.RunID, err)
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	case notFound:
 		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
 		return
-	}
-	cv := &models.ConfigurationVersion{WorkspaceID: run.WorkspaceID, Status: models.ConfigurationVersionStatusPending, Source: "tfe-vcs", CommitHash: commit}
-	cvRepo := repository.NewConfigurationVersionRepository(h.db)
-	if err := cvRepo.Create(cv); err != nil {
-		logger.Errorf("creating the configuration version of run %s: %v", run.ID, err)
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+	case conflict != "":
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", conflict)
 		return
 	}
-	if err := h.storageClient.Put(c.Request.Context(), models.ConfigurationTarballKey(cv.ID), data); err != nil {
-		logger.Errorf("storing the configuration of run %s: %v", run.ID, err)
-		cv.Status, cv.ErrorMessage = models.ConfigurationVersionStatusErrored, "storing the snapshot failed"
-		_ = cvRepo.Update(cv)
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	cv.Status = models.ConfigurationVersionStatusUploaded
-	if err := cvRepo.Update(cv); err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	if err := h.db.Model(&models.Run{}).Where("id = ? AND configuration_version_id IS NULL", run.ID).Update("configuration_version_id", cv.ID).Error; err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	if run.AgentPoolID != nil {
-		var pool models.AgentPool
-		hosted := h.db.Select("id", "kind").First(&pool, "id = ?", *run.AgentPoolID).Error == nil && pool.IsHosted()
-		wakeup.Publish(c.Request.Context(), h.wakeRedis, wakeup.KeyForPool(run.AgentPoolID.String(), hosted))
-	}
+	h.wakeRunPool(c, &run)
 	response.Status(c, http.StatusOK, "stored")
+}
+
+// wakeRunPool wakes the launchers of the run's pool, now that its configuration is uploaded.
+func (h *RunnerAgentHandler) wakeRunPool(c *gin.Context, run *models.Run) {
+	if run.AgentPoolID == nil {
+		return
+	}
+	var pool models.AgentPool
+	hosted := h.db.Select("id", "kind").First(&pool, "id = ?", *run.AgentPoolID).Error == nil && pool.IsHosted()
+	wakeup.Publish(c.Request.Context(), h.wakeRedis, wakeup.KeyForPool(run.AgentPoolID.String(), hosted))
 }

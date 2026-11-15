@@ -220,12 +220,16 @@ type QueueDepthEngines struct {
 // VCSConnectionAttributes: snake_case members, a StackWeaver-native surface predating the
 // hyphenated convention; renaming them is a wire change and not this task.
 type VCSConnectionAttributes struct {
-	Provider       models.VCSProvider `json:"provider"`
-	AccountName    string             `json:"account_name"`
-	AccountType    string             `json:"account_type"`
-	TokenExpiresAt *string            `json:"token_expires_at"`
-	CreatedAt      string             `json:"created_at"`
-	UpdatedAt      string             `json:"updated_at"`
+	Provider    models.VCSProvider `json:"provider"`
+	AccountName string             `json:"account_name"`
+	AccountType string             `json:"account_type"`
+	// InstallationID is the GitHub App installation of an App connection, empty for any other
+	// connection (#938). It is an identifier GitHub shows in the installation's settings URL, not
+	// a secret, and the UI builds the "Configure on GitHub" link from it.
+	InstallationID string  `json:"installation_id"`
+	TokenExpiresAt *string `json:"token_expires_at"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 }
 
 // vcsConnectionResource builds the shared shape.
@@ -237,6 +241,7 @@ func vcsConnectionResource(conn *models.VCSConnection, orgID uuid.UUID) jsonapi.
 			Provider:       conn.Provider,
 			AccountName:    conn.AccountName,
 			AccountType:    conn.AccountType,
+			InstallationID: conn.InstallationID,
 			TokenExpiresAt: jsonapi.FormatTimePtr(conn.TokenExpiresAt),
 			CreatedAt:      jsonapi.FormatTime(conn.CreatedAt),
 			UpdatedAt:      jsonapi.FormatTime(conn.UpdatedAt),

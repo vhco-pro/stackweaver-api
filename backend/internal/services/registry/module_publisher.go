@@ -6,6 +6,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/security/archive"
 	"github.com/michielvha/stackweaver/core/storage"
+	"gorm.io/gorm"
 )
 
 // ModulePublisher handles module publishing operations
@@ -96,90 +98,80 @@ func (p *ModulePublisher) CreateModule(
 	return module, nil
 }
 
+// ErrVersionExists is returned when the module already has the version being published.
+var ErrVersionExists = errors.New("version already exists for this module")
+
 // PublishVersionFromTarball publishes a module version from an uploaded tarball
 func (p *ModulePublisher) PublishVersionFromTarball(
 	ctx context.Context,
 	moduleID uuid.UUID,
 	version string,
 	tarballReader io.Reader,
-	tarballSize int64,
+	_ int64,
 ) (*models.ModuleVersion, error) {
-	// Validate version
+	return p.publish(ctx, moduleID, version, "", tarballReader, nil)
+}
+
+// PublishCapturedVersion publishes a module version from the snapshot a module_tag_snapshot work
+// item captured at tag and commit (#938). The version records them as its source. authorize runs
+// first in the publication's transaction, before storage is written: it holds and checks the work
+// item and records the capture's proof there, so the version is published if and only if the
+// capture still had the authority to publish it and its proof is recorded.
+func (p *ModulePublisher) PublishCapturedVersion(ctx context.Context, moduleID uuid.UUID, tag, commit string, snapshot io.Reader, authorize func(tx *gorm.DB) error) (*models.ModuleVersion, error) {
+	return p.publish(ctx, moduleID, ExtractVersionFromTag(tag), models.ModuleTagSource(tag, commit), snapshot, authorize)
+}
+
+// publish validates, parses and stores a module version. The archive is built first; then, under
+// the lock on the module and the normalized version, the version is checked, the archive written
+// and the row inserted, so of two publishers of one version the second waits and is refused with
+// ErrVersionExists before it writes storage. An insert that fails removes the archive it wrote.
+func (p *ModulePublisher) publish(ctx context.Context, moduleID uuid.UUID, version, source string, tarballReader io.Reader, authorize func(tx *gorm.DB) error) (*models.ModuleVersion, error) {
 	if err := ValidateSemanticVersion(version); err != nil {
 		return nil, err
 	}
-
 	version = NormalizeVersion(version)
 
-	// Get module
 	module, err := p.moduleRepo.GetByID(moduleID)
 	if err != nil {
 		return nil, fmt.Errorf("module not found: %w", err)
 	}
-
-	// Check if version already exists
 	if p.moduleVersionRepo.Exists(moduleID, version) {
-		return nil, fmt.Errorf("version %s already exists for this module", version)
+		return nil, fmt.Errorf("version %s: %w", version, ErrVersionExists)
 	}
 
-	// Create temporary directory for extraction
 	tempDir, err := os.MkdirTemp("", "module-*")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+		return nil, fmt.Errorf("creating a temporary directory: %w", err)
 	}
 	defer func() {
 		if err := os.RemoveAll(tempDir); err != nil {
 			logger.Warnf("Failed to remove temp directory %s: %v", tempDir, err)
 		}
 	}()
-
-	// Extract tarball
 	if err := p.extractTarball(tarballReader, tempDir); err != nil {
-		return nil, fmt.Errorf("failed to extract tarball: %w", err)
+		return nil, fmt.Errorf("extracting the tarball: %w", err)
 	}
-
-	// Parse metadata
 	metadata, err := p.parser.ParseModule(tempDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse module: %w", err)
+		return nil, fmt.Errorf("parsing the module: %w", err)
 	}
-
-	// Create tarball from extracted directory (to ensure clean format)
+	// Rebuilt from the extracted directory to ensure a clean format.
 	tarballPath := filepath.Join(tempDir, "module.tar.gz")
 	if err := p.createTarball(tempDir, tarballPath); err != nil {
-		return nil, fmt.Errorf("failed to create tarball: %w", err)
+		return nil, fmt.Errorf("creating the tarball: %w", err)
 	}
+	// Each publication attempt writes an archive of its own (#938): two publishers of one version
+	// never share a key, so the cleanup of an attempt that did not commit removes only its own
+	// archive, never the one a successful attempt published. The version row names its archive.
+	storagePath := fmt.Sprintf("modules/%s/%s/%s/%s-%s.tar.gz",
+		module.Organization.Name, module.Name, module.Provider, version, strings.ReplaceAll(uuid.NewString(), "-", "")[:12])
 
-	// Upload to storage
-	storagePath := fmt.Sprintf("modules/%s/%s/%s/%s.tar.gz",
-		module.Organization.Name, module.Name, module.Provider, version)
-
-	tarballFile, err := os.Open(tarballPath) //nolint:gosec // tarballPath is validated (in temp directory)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open tarball: %w", err)
-	}
-	defer func() {
-		if err := tarballFile.Close(); err != nil {
-			logger.Warnf("Failed to close tarball file: %v", err)
-		}
-	}()
-
-	fileInfo, err := tarballFile.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	if err := p.storage.PutStream(ctx, storagePath, tarballFile, fileInfo.Size()); err != nil {
-		return nil, fmt.Errorf("failed to upload to storage: %w", err)
-	}
-
-	// Create module version
 	metadataJSONB := models.JSONB(metadata.ConvertToJSONB())
 	moduleVersion := &models.ModuleVersion{
 		ModuleID:     moduleID,
 		Version:      version,
+		Source:       source,
 		TarballPath:  storagePath,
-		TarballSize:  fileInfo.Size(),
 		Readme:       metadata.Readme,
 		Inputs:       models.JSONB{"inputs": metadataJSONB["inputs"]},
 		Outputs:      models.JSONB{"outputs": metadataJSONB["outputs"]},
@@ -188,108 +180,45 @@ func (p *ModulePublisher) PublishVersionFromTarball(
 		Submodules:   models.JSONB{"submodules": metadataJSONB["submodules"]},
 		PublishedAt:  time.Now(),
 	}
-
-	if err := p.moduleVersionRepo.Create(moduleVersion); err != nil {
-		return nil, fmt.Errorf("failed to create module version: %w", err)
-	}
-
-	return moduleVersion, nil
-}
-
-// PublishVersionFromDirectory publishes a module version from a directory (used for Git tag publishing)
-func (p *ModulePublisher) PublishVersionFromDirectory(
-	ctx context.Context,
-	moduleID uuid.UUID,
-	version string,
-	sourceDir string,
-) (*models.ModuleVersion, error) {
-	// Validate version
-	if err := ValidateSemanticVersion(version); err != nil {
+	wrote := false
+	err = p.moduleVersionRepo.WithPublishLock(moduleID, version, func(tx *gorm.DB, versions *repository.ModuleVersionRepository) error {
+		if authorize != nil {
+			if err := authorize(tx); err != nil {
+				return err
+			}
+		}
+		if versions.Exists(moduleID, version) {
+			return fmt.Errorf("version %s: %w", version, ErrVersionExists)
+		}
+		tarballFile, err := os.Open(tarballPath) //nolint:gosec // tarballPath is validated (in temp directory)
+		if err != nil {
+			return fmt.Errorf("opening the tarball: %w", err)
+		}
+		defer func() { _ = tarballFile.Close() }()
+		fileInfo, err := tarballFile.Stat()
+		if err != nil {
+			return fmt.Errorf("reading the tarball size: %w", err)
+		}
+		if err := p.storage.PutStream(ctx, storagePath, tarballFile, fileInfo.Size()); err != nil {
+			return fmt.Errorf("uploading to storage: %w", err)
+		}
+		wrote = true
+		moduleVersion.TarballSize = fileInfo.Size()
+		if err := versions.Create(moduleVersion); err != nil {
+			return fmt.Errorf("creating the module version: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		// Nothing committed, the commit itself included: the archive this attempt wrote is
+		// removed, so storage never holds an archive no version names.
+		if wrote {
+			if delErr := p.storage.Delete(ctx, storagePath); delErr != nil {
+				logger.Warnf("removing the archive of unpublished version %s: %v", version, delErr)
+			}
+		}
 		return nil, err
 	}
-
-	version = NormalizeVersion(version)
-
-	// Get module
-	module, err := p.moduleRepo.GetByID(moduleID)
-	if err != nil {
-		return nil, fmt.Errorf("module not found: %w", err)
-	}
-
-	// Check if version already exists
-	if p.moduleVersionRepo.Exists(moduleID, version) {
-		return nil, fmt.Errorf("version %s already exists for this module", version)
-	}
-
-	// Parse metadata
-	metadata, err := p.parser.ParseModule(sourceDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse module: %w", err)
-	}
-
-	// Create tarball
-	tarballPath := filepath.Join(os.TempDir(), fmt.Sprintf("module-%s-%s.tar.gz", module.Name, version))
-	defer func() {
-		if err := os.Remove(tarballPath); err != nil {
-			logger.Warnf("Failed to remove tarball %s: %v", tarballPath, err)
-		}
-	}()
-
-	if err := p.createTarball(sourceDir, tarballPath); err != nil {
-		return nil, fmt.Errorf("failed to create tarball: %w", err)
-	}
-
-	// Upload to storage
-	storagePath := fmt.Sprintf("modules/%s/%s/%s/%s.tar.gz",
-		module.Organization.Name, module.Name, module.Provider, version)
-
-	// Security: Validate tarballPath is within temp directory
-	cleanTarballPath := filepath.Clean(tarballPath)
-	cleanTempDir := filepath.Clean(os.TempDir())
-	if !strings.HasPrefix(cleanTarballPath, cleanTempDir+string(filepath.Separator)) && cleanTarballPath != cleanTempDir {
-		return nil, fmt.Errorf("invalid tarball path: %s", tarballPath)
-	}
-
-	tarballFile, err := os.Open(tarballPath) //nolint:gosec // tarballPath is validated above
-	if err != nil {
-		return nil, fmt.Errorf("failed to open tarball: %w", err)
-	}
-	defer func() {
-		if err := tarballFile.Close(); err != nil {
-			logger.Warnf("Failed to close tarball file: %v", err)
-		}
-	}()
-
-	fileInfo, err := tarballFile.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	if err := p.storage.PutStream(ctx, storagePath, tarballFile, fileInfo.Size()); err != nil {
-		return nil, fmt.Errorf("failed to upload to storage: %w", err)
-	}
-
-	// Create module version
-	metadataJSONB := models.JSONB(metadata.ConvertToJSONB())
-	moduleVersion := &models.ModuleVersion{
-		ModuleID:     moduleID,
-		Version:      version,
-		Source:       fmt.Sprintf("git tag: %s", version),
-		TarballPath:  storagePath,
-		TarballSize:  fileInfo.Size(),
-		Readme:       metadata.Readme,
-		Inputs:       models.JSONB{"inputs": metadataJSONB["inputs"]},
-		Outputs:      models.JSONB{"outputs": metadataJSONB["outputs"]},
-		Dependencies: models.JSONB{"dependencies": metadataJSONB["dependencies"]},
-		Resources:    models.JSONB{"resources": metadataJSONB["resources"]},
-		Submodules:   models.JSONB{"submodules": metadataJSONB["submodules"]},
-		PublishedAt:  time.Now(),
-	}
-
-	if err := p.moduleVersionRepo.Create(moduleVersion); err != nil {
-		return nil, fmt.Errorf("failed to create module version: %w", err)
-	}
-
 	return moduleVersion, nil
 }
 

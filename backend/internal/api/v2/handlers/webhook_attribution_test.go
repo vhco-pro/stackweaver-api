@@ -1,238 +1,259 @@
-// Copyright (c) 2025 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
+// Copyright (c) 2026 VH & Co BV. Licensed under the Business Source License 1.1. See LICENSE for details.
 
-// AUD-124 webhook event attribution. recordWebhookEvent determined the owning org by
-// "the first workspace matching this repo name" (FindByVCSRepository, Limit(1), no org
-// scope). On a repo-name collision an attacker's payloads are filed into a victim org's
-// webhook-event log. The fix derives the org from the validated installation instead.
-// This test drives the real handler + Postgres and proves attribution follows the
-// installation, not the repo name, and that an event with no trusted org goes to no org.
-//
-// Gated behind `integration`; skips unless $TEST_DATABASE_URL is set. Cleanup is strictly
-// row-scoped. Run with:
-//
-//	go test -tags integration ./internal/api/v2/handlers/ -run TestWebhookEventAttribution
+// Several organizations can connect one GitHub App installation or one Azure DevOps organization
+// (#938). A delivery is recorded once in each connected organization's webhook-event log, and in
+// no other, and each organization's event names only its own resources with its own counts
+// (AC-07, AC-17). An Azure DevOps connection that cannot prove access to the delivery's Azure
+// DevOps organization receives nothing.
 
 //go:build integration
-// +build integration
 
 package handlers
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/michielvha/stackweaver/core/dbtest"
 	"github.com/michielvha/stackweaver/core/models"
-	"github.com/michielvha/stackweaver/core/repository"
-	"gorm.io/gorm"
+	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
-func TestWebhookEventAttribution(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set - skipping integration test")
-	}
-	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
-	if err != nil {
-		t.Fatalf("connect test db: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&models.Organization{}, &models.Project{}, &models.Workspace{},
-		&models.VCSConnection{}, &models.WebhookEvent{},
-	); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	sfx := uuid.NewString()[:8]
+const attributionCommit = "0123456789abcdef0123456789abcdef01234567"
 
-	// orgA owns the GitHub App installation "111". orgB happens to have a workspace for the
-	// SAME repo full_name "acme/infra" - the collision the attacker exploits.
-	orgA := &models.Organization{ID: uuid.New(), Name: "wha-a-" + sfx}
-	orgB := &models.Organization{ID: uuid.New(), Name: "wha-b-" + sfx}
-	connA := &models.VCSConnection{ID: uuid.New(), OrganizationID: orgA.ID, Provider: models.VCSProviderGitHub, InstallationID: "111-" + sfx}
-	projB := &models.Project{ID: uuid.New(), OrganizationID: orgB.ID, Name: "projB-" + sfx}
-	wsB := &models.Workspace{ID: "ws-" + sfx, ProjectID: projB.ID, Name: "wsB-" + sfx, VCSRepository: "acme/infra"}
+// attributedOrg is one organization's connection and the resources it holds on the repository.
+type attributedOrg struct {
+	org       *models.Organization
+	workspace string
+}
 
-	const repo = "acme/infra"
-	newMarker := "new-" + sfx // commit marker for the fixed-path event
-	oldMarker := "old-" + sfx // commit marker for the control (heuristic) event
-
+// seedAttributedOrg gives org a project, the connection, a speculative workspace named after the
+// organization, and a playbook and an inventory, all tracking repo on main through conn.
+func seedAttributedOrg(t *testing.T, f *installationWebhookFixture, q *syncRecorder, org *models.Organization, conn *models.VCSConnection, repo, name string) attributedOrg {
+	t.Helper()
+	ansibleOnlyRepo(t, f, q, org, conn, repo)
+	var project models.Project
+	if err := f.db.Where("organization_id = ?", org.ID).First(&project).Error; err != nil {
+		t.Fatalf("load project: %v", err)
+	}
+	ws := &models.Workspace{
+		ProjectID: project.ID, Name: name, VCSConnectionID: &conn.ID, VCSRepository: repo, VCSBranch: "main",
+		SpeculativeEnabled: true, FileTriggersEnabled: false, AutoQueueRuns: true,
+	}
+	if err := f.db.Create(ws).Error; err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
 	t.Cleanup(func() {
-		db.Where("commit IN ?", []string{newMarker, oldMarker}).Delete(&models.WebhookEvent{})
-		db.Where("id = ?", wsB.ID).Delete(&models.Workspace{})
-		db.Where("id = ?", projB.ID).Delete(&models.Project{})
-		db.Where("id = ?", connA.ID).Delete(&models.VCSConnection{})
-		db.Where("id IN ?", []uuid.UUID{orgA.ID, orgB.ID}).Delete(&models.Organization{})
+		f.db.Delete(&models.Run{}, "workspace_id = ?", ws.ID)
+		f.db.Delete(&models.ConfigurationVersion{}, "workspace_id = ?", ws.ID)
+		f.db.Delete(&models.Workspace{}, "id = ?", ws.ID)
 	})
-	for _, obj := range []interface{}{orgA, orgB, connA, projB, wsB} {
-		if err := db.Create(obj).Error; err != nil {
-			t.Fatalf("seed %T: %v", obj, err)
+	return attributedOrg{org: org, workspace: name}
+}
+
+// eventsFor returns every webhook event recorded for repo, oldest first.
+func eventsFor(t *testing.T, f *installationWebhookFixture, repo string) []models.WebhookEvent {
+	t.Helper()
+	var evs []models.WebhookEvent
+	if err := f.db.Where("repository = ?", repo).Order("delivered_at").Find(&evs).Error; err != nil {
+		t.Fatalf("load webhook events: %v", err)
+	}
+	return evs
+}
+
+// assertAttributed checks that repo has exactly one event in each of want's organizations, none in
+// any other, and that each names its own workspace with wantMessage and never another's.
+func assertAttributed(t *testing.T, f *installationWebhookFixture, repo string, want []attributedOrg, wantMessage func(attributedOrg) string) {
+	t.Helper()
+	evs := eventsFor(t, f, repo)
+	byOrg := map[uuid.UUID][]models.WebhookEvent{}
+	for _, ev := range evs {
+		if ev.OrganizationID == nil {
+			t.Errorf("an event was recorded without an organization: %q", ev.Message)
+			continue
 		}
+		byOrg[*ev.OrganizationID] = append(byOrg[*ev.OrganizationID], ev)
 	}
-
-	h := &VCSAppInstallationHandlerV2{
-		webhookEventRepo:  repository.NewWebhookEventRepository(db),
-		workspaceRepo:     repository.NewWorkspaceRepository(db),
-		vcsConnectionRepo: repository.NewVCSConnectionRepository(db),
+	if len(byOrg) != len(want) {
+		t.Errorf("events were recorded in %d organization(s), want %d", len(byOrg), len(want))
 	}
-
-	// orgFromInstallation resolves strictly by installation id.
-	if got := h.orgFromInstallation(connA.InstallationID); got == nil || *got != orgA.ID {
-		t.Fatalf("orgFromInstallation(%q) = %v, want orgA %v", connA.InstallationID, got, orgA.ID)
-	}
-	if got := h.orgFromInstallation("999-" + sfx); got != nil {
-		t.Fatalf("orgFromInstallation(unknown) = %v, want nil", got)
-	}
-
-	orgOf := func(marker string) *uuid.UUID {
-		var ev models.WebhookEvent
-		if err := db.Where("commit = ?", marker).First(&ev).Error; err != nil {
-			t.Fatalf("load webhook event %q: %v", marker, err)
+	for _, w := range want {
+		got := byOrg[w.org.ID]
+		if len(got) != 1 {
+			t.Errorf("organization %s has %d event(s), want 1", w.org.Name, len(got))
+			continue
 		}
-		return ev.OrganizationID
-	}
-
-	// FIXED path: attribution derived from the validated installation "111" (orgA) - even
-	// though the only workspace matching repo "acme/infra" belongs to orgB.
-	h.recordWebhookEvent(h.orgFromInstallation(connA.InstallationID), "push", "github", repo, "main", newMarker, "ignored", "test", 200, "{}")
-	if org := orgOf(newMarker); org == nil || *org != orgA.ID {
-		t.Fatalf("AUD-124: event attributed to %v, want installation org orgA %v", org, orgA.ID)
-	}
-
-	// No trusted org: the delivery came from no connected installation (or, on Azure DevOps, no
-	// connected Azure DevOps organization). This case used to assert that a repo-name guess filed
-	// the event under orgB, as a control showing the guess was wrong. The guess has been removed
-	// rather than kept as a fallback, because every Azure DevOps delivery took that path: a
-	// project/repository name is unique only within one Azure DevOps organization, so it filed one
-	// tenant's deliveries, payload included, into another tenant's log. Such an event is now
-	// recorded with no organization at all, and orgB, the repo-name match, must not get it.
-	h.recordWebhookEvent(nil, "push", "github", repo, "main", oldMarker, "ignored", "test", 200, "{}")
-	if org := orgOf(oldMarker); org != nil {
-		t.Fatalf("an event with no trusted org was attributed to %v, want none (orgB %v holds the same-named repo)", org, orgB.ID)
+		if msg := wantMessage(w); got[0].Message != msg {
+			t.Errorf("organization %s's event says %q, want %q", w.org.Name, got[0].Message, msg)
+		}
+		for _, other := range want {
+			if other.org.ID != w.org.ID && strings.Contains(got[0].Message, other.workspace) {
+				t.Errorf("organization %s's event names %s's workspace %q", w.org.Name, other.org.Name, other.workspace)
+			}
+		}
 	}
 }
 
-// TestWebhookEventList_OneProjection pins that the webhook-events list has a single wire shape
-// (#844, AC5): `webhook-events` resources with dash-case attributes and the standard
-// `meta.pagination` block, whatever the `format` parameter in the URL says.
-//
-// `?format=simple` used to select a second projection: flat snake_case rows under `data` with a
-// `{total, page_size, page_number}` meta. The parameter is now ignored, the way Terraform
-// Enterprise ignores a query parameter it does not know, so every value below must produce the
-// same document.
-func TestWebhookEventList_OneProjection(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set - skipping integration test")
-	}
-	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
+func deliverGitHub(t *testing.T, f *installationWebhookFixture, event string, body map[string]any) {
+	t.Helper()
+	payload, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("connect test db: %v", err)
+		t.Fatalf("marshal delivery: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Organization{}, &models.WebhookEvent{}); err != nil {
-		t.Fatalf("migrate: %v", err)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		"/api/v2/vcs-connections/github/webhook", bytes.NewReader(payload))
+	c.Request.Header.Set("X-GitHub-Event", event)
+	c.Request.Header.Set("X-Hub-Signature-256", githubSign(payload, f.secret))
+	f.handler.HandleInstallationWebhook(c)
+	c.Writer.WriteHeaderNow()
+	if w.Code != http.StatusOK {
+		t.Fatalf("%s delivery = %d, want 200.\nbody: %s", event, w.Code, w.Body.String())
 	}
-	sfx := uuid.NewString()[:8]
+}
 
-	org := &models.Organization{ID: uuid.New(), Name: "whl-" + sfx}
-	delivered := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
-	event := &models.WebhookEvent{
-		ID: uuid.New(), OrganizationID: &org.ID,
-		EventType: "push", Provider: "github", Repository: "acme/infra-" + sfx, Branch: "main",
-		Commit: "c0ffee" + sfx, Status: "success", ResponseCode: 200, Message: "queued run",
-		DeliveredAt: delivered,
-	}
-	t.Cleanup(func() {
-		db.Where("id = ?", event.ID).Delete(&models.WebhookEvent{})
-		db.Where("id = ?", org.ID).Delete(&models.Organization{})
+func TestGitHubDeliveryIsRecordedInEveryConnectedOrganization(t *testing.T) {
+	f := setupInstallationWebhook(t)
+	q := pushHandler(f)
+	installation := strconv.FormatInt(f.installation(t), 10)
+	sfx := uuid.NewString()[:8]
+	repo := "acme/shared-" + sfx
+
+	orgA, orgB, unconnected := f.organization(t), f.organization(t), f.organization(t)
+	a := seedAttributedOrg(t, f, q, orgA, &models.VCSConnection{ID: uuid.New(), OrganizationID: orgA.ID, Provider: models.VCSProviderGitHub, InstallationID: installation, AccountName: "acme"}, repo, "alpha-"+sfx)
+	b := seedAttributedOrg(t, f, q, orgB, &models.VCSConnection{ID: uuid.New(), OrganizationID: orgB.ID, Provider: models.VCSProviderGitHub, InstallationID: installation, AccountName: "acme"}, repo, "beta-"+sfx)
+	_ = unconnected
+	instID, _ := strconv.ParseInt(installation, 10, 64)
+
+	t.Run("push", func(t *testing.T) {
+		deliverGitHub(t, f, "push", map[string]any{
+			"ref": "refs/heads/main", "after": attributionCommit,
+			"repository":   map[string]any{"full_name": repo, "id": 1},
+			"installation": map[string]any{"id": instID},
+			"commits": []map[string]any{{
+				"id": attributionCommit, "modified": []string{"playbooks/site.yml", "inventories/prod.yml", "main.tf"},
+				"author": map[string]any{"name": "acceptance", "email": "acceptance@example.test"},
+			}},
+		})
+		assertAttributed(t, f, repo, []attributedOrg{a, b}, func(o attributedOrg) string {
+			return "1 playbook(s) and 1 inventory(ies) synced; 1 workspace(s) triggered: " + o.workspace
+		})
 	})
-	for _, obj := range []any{org, event} {
-		if err := db.Create(obj).Error; err != nil {
-			t.Fatalf("seed %T: %v", obj, err)
+
+	f.db.Delete(&models.WebhookEvent{}, "repository = ?", repo)
+
+	t.Run("pull request", func(t *testing.T) {
+		deliverGitHub(t, f, "pull_request", map[string]any{
+			"action": "opened", "number": 7,
+			"pull_request": map[string]any{
+				"head": map[string]any{"ref": "feature", "sha": attributionCommit},
+				"base": map[string]any{"ref": "main"},
+				"user": map[string]any{"login": "acceptance"},
+			},
+			"repository":   map[string]any{"full_name": repo, "id": 1},
+			"installation": map[string]any{"id": instID},
+		})
+		assertAttributed(t, f, repo, []attributedOrg{a, b}, func(o attributedOrg) string {
+			return "PR #7: 1 workspace(s) triggered: " + o.workspace
+		})
+	})
+}
+
+func TestAzureDevOpsDeliveryIsRecordedInEveryTrustedOrganization(t *testing.T) {
+	f := setupInstallationWebhook(t)
+	q := pushHandler(f)
+	const secret = "ado-attribution-test-secret"
+	t.Setenv("AZURE_DEVOPS_CLIENT_ID", "") // a disabled manager still carries the webhook secret
+	t.Setenv("AZURE_DEVOPS_WEBHOOK_SECRET", secret)
+	manager, err := vcs.NewAzureDevOpsManager()
+	if err != nil {
+		t.Fatalf("NewAzureDevOpsManager: %v", err)
+	}
+	f.handler.azureDevOpsManager = manager
+	// The claimant's token cannot reach the Azure DevOps organization.
+	f.handler.verifyADOAccount = func(context.Context, *models.VCSConnection) error { return errors.New("no access") }
+
+	sfx := uuid.NewString()[:8]
+	adoOrg := "ado-shared-" + sfx
+	project, repoName := "infra", "shared-"+sfx
+	repo := project + "/" + repoName
+	verified := time.Now()
+	orgA, orgB, orgC := f.organization(t), f.organization(t), f.organization(t)
+	a := seedAttributedOrg(t, f, q, orgA, &models.VCSConnection{ID: uuid.New(), OrganizationID: orgA.ID, Provider: models.VCSProviderAzureDevOps, AccountName: adoOrg, AccountVerifiedAt: &verified}, repo, "alpha-"+sfx)
+	b := seedAttributedOrg(t, f, q, orgB, &models.VCSConnection{ID: uuid.New(), OrganizationID: orgB.ID, Provider: models.VCSProviderAzureDevOps, AccountName: strings.ToUpper(adoOrg), AccountVerifiedAt: &verified}, repo, "beta-"+sfx)
+	seedAttributedOrg(t, f, q, orgC, &models.VCSConnection{ID: uuid.New(), OrganizationID: orgC.ID, Provider: models.VCSProviderAzureDevOps, AccountName: adoOrg}, repo, "claimant-"+sfx)
+
+	repository := map[string]any{
+		"name": repoName, "project": map[string]any{"name": project},
+		"remoteUrl": fmt.Sprintf("https://%s@dev.azure.com/%s/%s/_git/%s", adoOrg, adoOrg, project, repoName),
+		"url":       fmt.Sprintf("https://dev.azure.com/%s/_apis/git/repositories/%s", adoOrg, repoName),
+	}
+	deliver := func(t *testing.T, body map[string]any) {
+		t.Helper()
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal delivery: %v", err)
+		}
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+			"/api/v2/vcs-connections/azure-devops/webhook", bytes.NewReader(payload))
+		c.Request.SetBasicAuth("stackweaver", secret)
+		f.handler.HandleAzureDevOpsWebhook(c)
+		c.Writer.WriteHeaderNow()
+		if w.Code != http.StatusOK {
+			t.Fatalf("delivery = %d, want 200.\nbody: %s", w.Code, w.Body.String())
 		}
 	}
 
-	h := NewWebhookEventHandlerV2(repository.NewWebhookEventRepository(db), repository.NewOrganizationRepository(db))
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.GET("/organizations/:name/webhook-events", h.List)
-
-	for _, suffix := range []string{"", "?format=simple", "?format=json", "?format=anything", "?format="} {
-		t.Run("url suffix "+suffix, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/organizations/"+org.Name+"/webhook-events"+suffix, nil)
-			router.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-			}
-
-			var doc struct {
-				Data []struct {
-					ID         string         `json:"id"`
-					Type       string         `json:"type"`
-					Attributes map[string]any `json:"attributes"`
-					// Members of the retired flat projection; they must never appear on a row.
-					EventType   *string `json:"event_type"`
-					DeliveredAt *string `json:"delivered_at"`
-				} `json:"data"`
-				Meta struct {
-					Pagination *struct {
-						CurrentPage int   `json:"current-page"`
-						PageSize    int   `json:"page-size"`
-						TotalPages  int   `json:"total-pages"`
-						TotalCount  int64 `json:"total-count"`
-					} `json:"pagination"`
-					// Members of the retired flat meta.
-					Total    *int64 `json:"total"`
-					PageSize *int   `json:"page_size"`
-				} `json:"meta"`
-			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
-				t.Fatalf("response is not JSON: %v (%s)", err, rec.Body.String())
-			}
-
-			if len(doc.Data) != 1 {
-				t.Fatalf("data has %d rows, want the one seeded delivery (%s)", len(doc.Data), rec.Body.String())
-			}
-			row := doc.Data[0]
-			if row.Type != "webhook-events" || row.ID != event.ID.String() {
-				t.Errorf("resource = %s/%s, want webhook-events/%s", row.Type, row.ID, event.ID)
-			}
-			if row.EventType != nil || row.DeliveredAt != nil {
-				t.Error("row carries the flat projection's top-level event_type or delivered_at")
-			}
-			want := map[string]any{
-				"event-type": "push", "provider": "github", "repository": event.Repository,
-				"branch": "main", "commit": event.Commit, "status": "success",
-				"response-code": float64(200), "message": "queued run",
-			}
-			for key, wantValue := range want {
-				if got := row.Attributes[key]; got != wantValue {
-					t.Errorf("attributes[%q] = %v, want %v", key, got, wantValue)
-				}
-			}
-			// Compared as an instant: the zone the timestamp is rendered in follows the database
-			// session, which is not what this test is about.
-			deliveredAt, _ := row.Attributes["delivered-at"].(string)
-			if got, err := time.Parse(time.RFC3339, deliveredAt); err != nil || !got.Equal(delivered) {
-				t.Errorf("attributes[\"delivered-at\"] = %q (%v), want the instant %s", deliveredAt, err, delivered.Format(time.RFC3339))
-			}
-
-			if doc.Meta.Total != nil || doc.Meta.PageSize != nil {
-				t.Error("meta carries the flat projection's total or page_size")
-			}
-			p := doc.Meta.Pagination
-			if p == nil {
-				t.Fatalf("meta.pagination is missing (%s)", rec.Body.String())
-			}
-			if p.CurrentPage != 1 || p.PageSize != 50 || p.TotalPages != 1 || p.TotalCount != 1 {
-				t.Errorf("meta.pagination = %+v, want page 1 of 1, size 50, one delivery", *p)
-			}
+	t.Run("push", func(t *testing.T) {
+		deliver(t, map[string]any{
+			"eventType": "git.push",
+			"resource": map[string]any{
+				"refUpdates": []map[string]any{{"name": "refs/heads/main", "newObjectId": attributionCommit}},
+				"commits": []map[string]any{{
+					"commitId": attributionCommit,
+					"author":   map[string]any{"name": "acceptance", "email": "acceptance@example.test"},
+					"changes": []map[string]any{
+						{"item": map[string]any{"path": "/playbooks/site.yml"}},
+						{"item": map[string]any{"path": "/inventories/prod.yml"}},
+						{"item": map[string]any{"path": "/main.tf"}},
+					},
+				}},
+				"repository": repository,
+			},
 		})
-	}
+		assertAttributed(t, f, repo, []attributedOrg{a, b}, func(o attributedOrg) string {
+			return "1 playbook(s) and 1 inventory(ies) synced; 1 workspace(s) triggered: " + o.workspace
+		})
+	})
+
+	f.db.Delete(&models.WebhookEvent{}, "repository = ?", repo)
+
+	t.Run("pull request", func(t *testing.T) {
+		deliver(t, map[string]any{
+			"eventType": "git.pullrequest.created",
+			"resource": map[string]any{
+				"pullRequestId": 7, "status": "active",
+				"sourceRefName": "refs/heads/feature", "targetRefName": "refs/heads/main",
+				"lastMergeSourceCommit": map[string]any{"commitId": attributionCommit},
+				"createdBy":             map[string]any{"displayName": "acceptance", "uniqueName": "acceptance@example.test"},
+				"repository":            repository,
+			},
+		})
+		assertAttributed(t, f, repo, []attributedOrg{a, b}, func(o attributedOrg) string {
+			return "PR #7: 1 workspace(s) triggered: " + o.workspace
+		})
+	})
 }

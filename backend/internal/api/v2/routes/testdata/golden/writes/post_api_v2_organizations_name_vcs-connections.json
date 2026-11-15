@@ -72,6 +72,7 @@
         "account_name": "acme-platform",
         "account_type": "organization",
         "created_at": "\u003ctimestamp\u003e",
+        "installation_id": "",
         "provider": "azure_devops",
         "token_expires_at": "\u003ctimestamp\u003e",
         "updated_at": "\u003ctimestamp\u003e"
