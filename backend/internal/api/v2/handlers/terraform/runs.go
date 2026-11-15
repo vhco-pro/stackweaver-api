@@ -2126,38 +2126,27 @@ func AutoCancelConflictingRuns(runRepo *repository.RunRepository, workspaceID st
 // This is deliberately narrower than AutoCancelConflictingRuns' plan-only arm: that cancels EVERY
 // plan-only run on the workspace, which would kill another open PR's still-relevant plan. Here a
 // run is superseded only when its configuration version is speculative AND belongs to the same
-// source branch (or, as a fallback, the same PR number) as the incoming commit.
+// pull request number as the incoming commit, or to the same source branch when the delivery
+// carries no number (see RunRepository.ListSupersedable). The version
+// repository is unused: the match is one query, so callers inside a capture transaction pass
+// their transaction-bound repositories unchanged.
 func AutoCancelSupersededSpeculativeRuns(
 	runRepo *repository.RunRepository,
-	configVersionRepo *repository.ConfigurationVersionRepository,
+	_ *repository.ConfigurationVersionRepository,
 	workspaceID, sourceBranch string,
 	prNumber int,
 ) {
 	if sourceBranch == "" && prNumber == 0 {
 		return // nothing to match on - never fall back to cancelling all speculative runs
 	}
-	existingRuns, _, err := runRepo.ListByWorkspace(workspaceID, 100, 0)
+	// Every matching run, not a page of the history: a pending run behind many newer runs is
+	// still superseded.
+	existingRuns, err := runRepo.ListSupersedable(workspaceID, sourceBranch, prNumber)
 	if err != nil {
 		logger.Warnf("Failed to list existing runs for speculative auto-cancel: %v", err)
 		return
 	}
 	for _, existingRun := range existingRuns {
-		if existingRun.Status != models.RunStatusPending &&
-			existingRun.Status != models.RunStatusPlanned {
-			continue
-		}
-		if existingRun.Operation != models.RunOperationPlanOnly || existingRun.ConfigurationVersionID == nil {
-			continue
-		}
-		cv, err := configVersionRepo.GetByIDForWorkspace(*existingRun.ConfigurationVersionID, existingRun.WorkspaceID)
-		if err != nil || cv == nil || !cv.Speculative {
-			continue
-		}
-		sameBranch := sourceBranch != "" && cv.SourceBranch == sourceBranch
-		samePR := prNumber != 0 && cv.PRNumber == prNumber
-		if !sameBranch && !samePR {
-			continue
-		}
 		// AUD-140: guarded transition - a run that completes between the SELECT and this write
 		// must not be clobbered back to cancelled.
 		now := time.Now()
