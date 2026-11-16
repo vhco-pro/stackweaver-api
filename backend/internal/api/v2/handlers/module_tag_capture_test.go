@@ -17,6 +17,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
@@ -56,6 +59,43 @@ func moduleTarball(t *testing.T, body string) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+// A module that carries a large file publishes (R-31 F-02): the archive the publisher builds must
+// not include itself while it is being written.
+func TestModuleTagCapture_AModuleWithALargeFilePublishes(t *testing.T) {
+	f := setupModuleCapture(t)
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	// Random bytes do not compress, so the archive grows while it is written, as in R-31's probe.
+	asset := make([]byte, 512*1024)
+	if _, err := rand.Read(asset); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []struct {
+		name string
+		body []byte
+	}{{"main.tf", []byte(`variable "a" {}`)}, {"assets.bin", asset}} {
+		if err := tw.WriteHeader(&tar.Header{Name: file.name, Mode: 0o644, Size: int64(len(file.body)), ModTime: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(file.body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.publisher.PublishVersionFromTarball(t.Context(), f.module.ID, "9.0.0", bytes.NewReader(buf.Bytes()), int64(buf.Len())); err != nil {
+		t.Fatalf("a module with a %d byte file failed to publish: %v", len(asset), err)
+	}
+	if !f.versions.Exists(f.module.ID, "9.0.0") {
+		t.Error("version 9.0.0 was not published")
+	}
 }
 
 // mainTF returns main.tf from a stored module archive.
@@ -136,6 +176,86 @@ func capturesOf(items []models.WorkItem, tag string) []models.WorkItem {
 		}
 	}
 	return out
+}
+
+// A tag push reports the captures it queued, not publications: the version is published later,
+// when the capture uploads (R-36 F-01).
+func TestModuleTagCapture_ATagPushReportsQueuedCaptures(t *testing.T) {
+	f := setupCapture(t)
+	f.tagPublishing()
+	seedTagModule(t, f.installationWebhookFixture, f.org.ID, &f.connA.ID, f.repo)
+	payload, _ := json.Marshal(map[string]any{
+		"ref": "refs/tags/v2.0.0", "ref_type": "tag",
+		"repository":   map[string]any{"full_name": f.repo, "id": 1},
+		"installation": map[string]any{"id": f.instA},
+	})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/vcs-connections/github/webhook", bytes.NewReader(payload))
+	c.Request.Header.Set("X-GitHub-Event", "push")
+	c.Request.Header.Set("X-Hub-Signature-256", githubSign(payload, f.secret))
+	f.handler.HandleInstallationWebhook(c)
+	c.Writer.WriteHeaderNow()
+	if w.Code != http.StatusOK {
+		t.Fatalf("tag push = %d %s", w.Code, w.Body.String())
+	}
+	if body := w.Body.String(); !strings.Contains(body, "1 module capture(s) queued") || strings.Contains(body, "published") {
+		t.Errorf("tag push answered %s, want it to report one queued capture and no publication", body)
+	}
+}
+
+// A tag dispatch whose request is canceled while the pool's only connection is taken stops waiting
+// for one and queues no capture (R-31 F-03).
+func TestModuleTagCapture_ACanceledTagDispatchDoesNotWaitForAConnection(t *testing.T) {
+	f := setupCapture(t)
+	f.tagPublishing()
+	module := seedTagModule(t, f.installationWebhookFixture, f.org.ID, &f.connA.ID, f.repo)
+	sqlDB, err := f.db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	held, release, holder := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		holder <- f.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT 1").Error; err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+			<-holder
+		}
+		sqlDB.SetMaxOpenConns(0)
+	}()
+	<-held
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- f.handler.registryPublisher.PublishFromGitTag(ctx, module.ID, "v4.5.6", f.repo) }()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a canceled tag dispatch succeeded without a connection")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled tag dispatch kept waiting for a database connection")
+	}
+	close(release)
+	released = true
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+	if got := capturesOf(captures(t, f.installationWebhookFixture, module), "v4.5.6"); len(got) != 0 {
+		t.Errorf("a canceled tag dispatch queued %d capture(s), want none", len(got))
+	}
 }
 
 func TestModuleTagCapture_EachTagIsCapturedOnce(t *testing.T) {
@@ -480,8 +600,123 @@ func TestModuleTagCapture_APublicationWithoutItsProofIsRolledBack(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The proof is recorded before the archive is written, so this failure writes no archive.
+	// (A failure after the write leaves its archive in place under owner decision Q13; see
+	// TestModuleTagCapture_AFailedPublicationLeavesTheSuccessfulArchive.)
 	if len(left) != 0 {
-		t.Errorf("the archive of the unpublished version was left in storage: %v", left)
+		t.Errorf("a publication refused before its archive write left %v in storage", left)
+	}
+}
+
+// A publisher whose request is canceled while the pool's only connection is taken gives up
+// without waiting for one, before the lock as well as at it (R-30 F-01).
+func TestModuleTagCapture_ACanceledPublisherDoesNotWaitForAConnection(t *testing.T) {
+	f := setupModuleCapture(t)
+	sqlDB, err := f.db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	held, release, holder := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		holder <- f.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT 1").Error; err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+			<-holder
+		}
+		sqlDB.SetMaxOpenConns(0)
+	}()
+	<-held
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.publisher.PublishVersionFromTarball(ctx, f.module.ID, "8.0.0", bytes.NewReader(moduleTarball(t, `variable "a" {}`)), 0)
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a canceled publisher published without a connection")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled publisher kept waiting for a database connection")
+	}
+	close(release)
+	released = true
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+	if f.versions.Exists(f.module.ID, "8.0.0") {
+		t.Error("the canceled publisher's version exists")
+	}
+}
+
+// A publisher waiting for another publication of the same version gives up when its request is
+// canceled (R-23 F-03): it returns promptly, holds no connection and writes nothing.
+func TestModuleTagCapture_ACanceledWaiterGivesUpItsTurn(t *testing.T) {
+	f := setupModuleCapture(t)
+	held, release := make(chan struct{}), make(chan struct{})
+	holder := make(chan error, 1)
+	go func() {
+		// The publication lock's own key, held the way WithPublishLock holds it.
+		holder <- f.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", "module-version:"+f.module.ID.String()+":5.0.0").Error; err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		<-holder
+	}()
+	<-held
+	ctx, cancel := context.WithCancel(t.Context())
+	waiter := make(chan error, 1)
+	go func() {
+		_, err := f.publisher.PublishVersionFromTarball(ctx, f.module.ID, "5.0.0", bytes.NewReader(moduleTarball(t, `variable "a" {}`)), 0)
+		waiter <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-waiter:
+		if err == nil {
+			t.Fatal("a canceled waiter published")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled waiter kept waiting for the lock")
+	}
+	close(release)
+	if f.versions.Exists(f.module.ID, "5.0.0") {
+		t.Error("the canceled waiter's version exists")
+	}
+	var module models.Module
+	f.db.Preload("Organization").First(&module, "id = ?", f.module.ID)
+	left, err := f.store.List(t.Context(), "modules/"+module.Organization.Name+"/"+module.Name+"/"+module.Provider+"/5.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Errorf("the canceled waiter wrote %v", left)
 	}
 }
 
@@ -522,8 +757,15 @@ func TestModuleTagCapture_AFailedPublicationLeavesTheSuccessfulArchive(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(left) != 1 || left[0].Key != version.TarballPath {
-		t.Errorf("archives of version 6.0.0 = %v, want only the published one at %s", left, version.TarballPath)
+	// Owner decision Q13 (R-26 F-01) replaced the cleanup this test once asserted: the failed
+	// attempt deletes nothing, so its archive stays beside the published one, and the version
+	// names the published archive.
+	keys := make([]string, 0, len(left))
+	for _, o := range left {
+		keys = append(keys, o.Key)
+	}
+	if len(left) != 2 || !slices.Contains(keys, version.TarballPath) {
+		t.Errorf("archives of version 6.0.0 = %v, want the failed attempt's and the published one at %s", keys, version.TarballPath)
 	}
 }
 

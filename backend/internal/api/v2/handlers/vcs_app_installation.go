@@ -444,7 +444,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPushEvent(c *gin.Context,
 
 	for _, workspace := range filteredWorkspaces {
 		ws := workspace
-		run, created, err := h.queueCapturedRun(&ws, captureSpec{commit: commitHash, committer: committer}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
+		run, created, err := h.queueCapturedRun(c.Request.Context(), &ws, captureSpec{commit: commitHash, committer: committer}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
 			terraform.AutoCancelConflictingRuns(runs, ws.ID, models.RunOperationPlanAndApply)
 		})
 		switch {
@@ -569,7 +569,7 @@ func (h *VCSAppInstallationHandlerV2) handleAzureDevOpsPullRequestEvent(c *gin.C
 		ws := workspace
 		// The source branch's head is fetched by its ref: a pull request's commit need not be on the
 		// workspace's branch.
-		run, created, err := h.queueCapturedRun(&ws, captureSpec{
+		run, created, err := h.queueCapturedRun(c.Request.Context(), &ws, captureSpec{
 			commit: commitHash, fetchRef: "refs/heads/" + wp.HeadBranch, committer: wp.Committer,
 			sourceBranch: wp.HeadBranch, prNumber: wp.PRNumber, speculative: true,
 		}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
@@ -1182,9 +1182,9 @@ func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []
 			continue
 		}
 
-		logger.Infof("Publishing module %s/%s/%s version from tag %s", module.Organization.Name, module.Name, module.Provider, tagName)
+		logger.Infof("Queueing the capture of module %s/%s/%s at tag %s", module.Organization.Name, module.Name, module.Provider, tagName)
 
-		// Publish version from Git tag
+		// Queue the tag's capture; the version is published when the capture uploads (#938).
 		if err := h.registryPublisher.PublishFromGitTag(
 			c.Request.Context(),
 			module.ID,
@@ -1192,15 +1192,15 @@ func (h *VCSAppInstallationHandlerV2) handlePushEvent(c *gin.Context, payload []
 			repositoryFullName,
 		); err != nil {
 			// Log error but continue processing other modules
-			logger.Errorf("Failed to publish module %s/%s/%s from tag %s: %v", module.Organization.Name, module.Name, module.Provider, tagName, err)
+			logger.Errorf("Failed to queue the capture of module %s/%s/%s at tag %s: %v", module.Organization.Name, module.Name, module.Provider, tagName, err)
 			continue
 		}
 
 		successCount++
-		logger.Infof("Successfully published module %s/%s/%s version from tag %s", module.Organization.Name, module.Name, module.Provider, tagName)
+		logger.Infof("Queued the capture of module %s/%s/%s at tag %s", module.Organization.Name, module.Name, module.Provider, tagName)
 	}
 
-	response.Message(c, http.StatusOK, fmt.Sprintf("Tag push event processed: %d module(s) published", successCount))
+	response.Message(c, http.StatusOK, fmt.Sprintf("Tag push event processed: %d module capture(s) queued", successCount))
 }
 
 // handleBranchPushEvent handles GitHub branch push events for workspace runs
@@ -1294,7 +1294,7 @@ func (h *VCSAppInstallationHandlerV2) handleBranchPushEvent(c *gin.Context, payl
 		ws := workspace
 		// TFE-compatible: a VCS push runs plan and apply, after cancelling the workspace's other
 		// pending plan-and-apply runs (the same auto-cancel a UI-triggered run applies).
-		run, created, err := h.queueCapturedRun(&ws, captureSpec{commit: commitHash, committer: committer}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
+		run, created, err := h.queueCapturedRun(c.Request.Context(), &ws, captureSpec{commit: commitHash, committer: committer}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
 			terraform.AutoCancelConflictingRuns(runs, ws.ID, models.RunOperationPlanAndApply)
 		})
 		switch {
@@ -1424,11 +1424,11 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 			} `json:"head"`
 			Base struct {
 				Ref string `json:"ref"` // Target branch (typically "main")
+				SHA string `json:"sha"` // Target branch commit the delivery compares against
 			} `json:"base"`
 			User struct {
 				Login string `json:"login"` // PR author username
 			} `json:"user"`
-			ChangedFiles int `json:"changed_files"` // how many files the pull request changes
 		} `json:"pull_request"`
 		Repository struct {
 			FullName string `json:"full_name"`
@@ -1501,15 +1501,19 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 
 	logger.Infof("Found %d workspace(s) for PR #%d (filtered from %d total)", len(filteredWorkspaces), prNumber, len(workspaces))
 
-	// The changed files, from GitHub's API with the delivering installation's token, decide which
-	// workspaces' paths are affected (#938). Without a complete list every workspace is triggered.
+	// The files this delivery's revision changes, from GitHub's API with the delivering
+	// installation's token, decide which workspaces' paths are affected (#938). They are read for
+	// the delivered commit, so a pull request that moved on meanwhile does not change them. Without
+	// a complete list every workspace is triggered.
 	changedFiles := h.pullRequestFiles(c.Request.Context(), strconv.FormatInt(prEvent.Installation.ID, 10),
-		repositoryFullName, prNumber, prEvent.PullRequest.ChangedFiles)
+		repositoryFullName, prEvent.PullRequest.Base.SHA, headSHA)
 
 	// Filter workspaces based on changed files and their WorkingDirectory paths (GitOps-style filtering)
 	// This prevents unnecessary plan runs for workspaces whose code wasn't changed
 	finalFilteredWorkspaces := make([]models.Workspace, 0)
-	if len(changedFiles) > 0 {
+	// nil is no list; an empty list is a complete answer that matches only workspaces with file
+	// triggers disabled.
+	if changedFiles != nil {
 		logger.Infof("PR #%d changed files: %v", prNumber, changedFiles)
 		for _, workspace := range filteredWorkspaces {
 			if h.isWorkspaceAffectedByFiles(workspace, changedFiles) {
@@ -1543,7 +1547,7 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 		ws := workspace
 		// A pull request's head, a fork's included, is fetched from the base repository by its
 		// pull request ref.
-		run, created, err := h.queueCapturedRun(&ws, captureSpec{
+		run, created, err := h.queueCapturedRun(c.Request.Context(), &ws, captureSpec{
 			commit: headSHA, fetchRef: fmt.Sprintf("refs/pull/%d/head", prNumber), committer: prEvent.PullRequest.User.Login,
 			sourceBranch: headBranch, prNumber: prNumber, speculative: true,
 		}, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
@@ -1680,11 +1684,12 @@ func (h *VCSAppInstallationHandlerV2) handlePullRequestEvent(c *gin.Context, pay
 	response.Message(c, http.StatusOK, fmt.Sprintf("Pull request event processed: %d workspace(s) queued for speculative plans", len(filteredWorkspaces)))
 }
 
-// pullRequestFiles returns the files pull request number of repo changes, read from GitHub's List
-// pull request files endpoint with an installation token of the delivering installation. It
-// returns nil, which triggers every workspace, when the list cannot be read or is truncated:
-// GitHub lists at most MaxPullRequestFiles files, and the delivery says how many changed.
-func (h *VCSAppInstallationHandlerV2) pullRequestFiles(ctx context.Context, installationID, repo string, number, changed int) []string {
+// pullRequestFiles returns the files a pull request delivery changes, read from GitHub's Compare two
+// commits endpoint at the delivery's base and head commits with an installation token of the
+// delivering installation, so the list describes that revision. It returns nil, which triggers
+// every workspace, when either commit is missing or the list cannot be read or is truncated: GitHub
+// lists at most MaxCompareFiles files.
+func (h *VCSAppInstallationHandlerV2) pullRequestFiles(ctx context.Context, installationID, repo, baseSHA, headSHA string) []string {
 	if h.githubAppManager == nil || !h.githubAppManager.IsEnabled() {
 		return nil
 	}
@@ -1692,13 +1697,17 @@ func (h *VCSAppInstallationHandlerV2) pullRequestFiles(ctx context.Context, inst
 	if !ok || gitargs.RepoFullNameRe.FindString(repo) == "" {
 		return nil
 	}
-	files, entries, complete, err := h.githubAppManager.GetService().ListPullRequestFiles(ctx, installationID, owner, name, number)
-	if err != nil {
-		logger.Warnf("Listing the files of pull request #%d of %s failed, triggering every workspace: %v", number, repo, err)
+	if gitargs.CommitSHARe.FindString(baseSHA) == "" || gitargs.CommitSHARe.FindString(headSHA) == "" {
+		logger.Infof("Pull request delivery of %s names no base or head commit, triggering every workspace", repo)
 		return nil
 	}
-	if !complete || entries < changed {
-		logger.Infof("Pull request #%d of %s lists %d of %d changed files, triggering every workspace", number, repo, entries, changed)
+	files, complete, err := h.githubAppManager.GetService().CompareFiles(ctx, installationID, owner, name, baseSHA, headSHA)
+	if err != nil {
+		logger.Warnf("Comparing %s...%s of %s failed, triggering every workspace: %v", baseSHA, headSHA, repo, err)
+		return nil
+	}
+	if !complete {
+		logger.Infof("Comparing %s...%s of %s reached GitHub's %d-file limit, triggering every workspace", baseSHA, headSHA, repo, vcs.MaxCompareFiles)
 		return nil
 	}
 	return files

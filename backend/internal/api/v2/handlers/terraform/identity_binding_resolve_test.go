@@ -34,7 +34,10 @@ func TestRunCreate_IdentityBindingMustBeOfferedByThePool(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		f.db.Where("id = ?", f.workspace).Updates(map[string]any{"identity_binding_id": nil, "agent_pool_id": nil})
+		// The runs reference the pool, and the workspace update needs its model to run at all;
+		// without both the pools cannot be deleted where the foreign keys restrict (R-32 F-02).
+		f.db.Where("workspace_id = ?", f.workspace).Delete(&models.Run{})
+		f.db.Model(&models.Workspace{}).Where("id = ?", f.workspace).Updates(map[string]any{"identity_binding_id": nil, "agent_pool_id": nil})
 		f.db.Model(&models.Project{}).Where("id = ?", f.projectA).Update("identity_binding_id", nil)
 		f.db.Where("id IN ?", []uuid.UUID{offered.ID, foreign.ID}).Delete(&models.IdentityBinding{})
 		f.db.Where("id IN ?", []uuid.UUID{pool.ID, other.ID}).Delete(&models.AgentPool{})

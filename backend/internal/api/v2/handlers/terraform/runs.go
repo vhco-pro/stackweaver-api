@@ -796,7 +796,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 	create := func() error { return h.runRepo.Create(run) }
 	if fetching != nil {
 		// The fetching version and the run are created in one transaction: neither exists alone.
-		create = func() error { return h.runRepo.CreateWithVersion(fetching, run) }
+		create = func() error { return h.runRepo.CreateWithVersionContext(c.Request.Context(), fetching, run) }
 	}
 	if err := create(); err != nil {
 		// If creation fails due to duplicate (race condition), try to get the existing run

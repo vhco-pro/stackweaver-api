@@ -67,7 +67,7 @@ func (h *RunnerAgentHandler) configTarball(ctx context.Context, run *models.Run)
 	if err != nil {
 		return nil, fmt.Errorf("looking up the configuration version of run %s: %w", run.ID, err)
 	}
-	return h.storageClient.Get(ctx, models.ConfigurationTarballKey(cv.ID))
+	return h.storageClient.Get(ctx, cv.TarballKey())
 }
 
 // latestState reads the latest state of a run's workspace, decrypted.

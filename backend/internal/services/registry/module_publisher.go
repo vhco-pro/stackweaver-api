@@ -121,23 +121,17 @@ func (p *ModulePublisher) PublishCapturedVersion(ctx context.Context, moduleID u
 	return p.publish(ctx, moduleID, ExtractVersionFromTag(tag), models.ModuleTagSource(tag, commit), snapshot, authorize)
 }
 
-// publish validates, parses and stores a module version. The archive is built first; then, under
-// the lock on the module and the normalized version, the version is checked, the archive written
-// and the row inserted, so of two publishers of one version the second waits and is refused with
-// ErrVersionExists before it writes storage. An insert that fails removes the archive it wrote.
+// publish validates, parses and stores a module version. The archive is built first, with no
+// database call; then one transaction that follows ctx takes the lock on the module and the
+// normalized version, reads the module, checks the version, writes the archive and inserts the
+// row, so of two publishers of one version the second waits and is refused with ErrVersionExists
+// before it writes storage, and a caller whose context ends stops waiting for the lock or for a
+// connection. A failed attempt deletes nothing (owner decision Q13).
 func (p *ModulePublisher) publish(ctx context.Context, moduleID uuid.UUID, version, source string, tarballReader io.Reader, authorize func(tx *gorm.DB) error) (*models.ModuleVersion, error) {
 	if err := ValidateSemanticVersion(version); err != nil {
 		return nil, err
 	}
 	version = NormalizeVersion(version)
-
-	module, err := p.moduleRepo.GetByID(moduleID)
-	if err != nil {
-		return nil, fmt.Errorf("module not found: %w", err)
-	}
-	if p.moduleVersionRepo.Exists(moduleID, version) {
-		return nil, fmt.Errorf("version %s: %w", version, ErrVersionExists)
-	}
 
 	tempDir, err := os.MkdirTemp("", "module-*")
 	if err != nil {
@@ -148,30 +142,29 @@ func (p *ModulePublisher) publish(ctx context.Context, moduleID uuid.UUID, versi
 			logger.Warnf("Failed to remove temp directory %s: %v", tempDir, err)
 		}
 	}()
-	if err := p.extractTarball(tarballReader, tempDir); err != nil {
+	// The module is extracted into its own directory and the archive written beside it, so the
+	// walk that builds the archive never reads the archive while it is being written.
+	moduleDir := filepath.Join(tempDir, "module")
+	if err := os.Mkdir(moduleDir, 0o700); err != nil {
+		return nil, fmt.Errorf("creating the module directory: %w", err)
+	}
+	if err := p.extractTarball(tarballReader, moduleDir); err != nil {
 		return nil, fmt.Errorf("extracting the tarball: %w", err)
 	}
-	metadata, err := p.parser.ParseModule(tempDir)
+	metadata, err := p.parser.ParseModule(moduleDir)
 	if err != nil {
 		return nil, fmt.Errorf("parsing the module: %w", err)
 	}
 	// Rebuilt from the extracted directory to ensure a clean format.
 	tarballPath := filepath.Join(tempDir, "module.tar.gz")
-	if err := p.createTarball(tempDir, tarballPath); err != nil {
+	if err := p.createTarball(moduleDir, tarballPath); err != nil {
 		return nil, fmt.Errorf("creating the tarball: %w", err)
 	}
-	// Each publication attempt writes an archive of its own (#938): two publishers of one version
-	// never share a key, so the cleanup of an attempt that did not commit removes only its own
-	// archive, never the one a successful attempt published. The version row names its archive.
-	storagePath := fmt.Sprintf("modules/%s/%s/%s/%s-%s.tar.gz",
-		module.Organization.Name, module.Name, module.Provider, version, strings.ReplaceAll(uuid.NewString(), "-", "")[:12])
-
 	metadataJSONB := models.JSONB(metadata.ConvertToJSONB())
 	moduleVersion := &models.ModuleVersion{
 		ModuleID:     moduleID,
 		Version:      version,
 		Source:       source,
-		TarballPath:  storagePath,
 		Readme:       metadata.Readme,
 		Inputs:       models.JSONB{"inputs": metadataJSONB["inputs"]},
 		Outputs:      models.JSONB{"outputs": metadataJSONB["outputs"]},
@@ -180,16 +173,25 @@ func (p *ModulePublisher) publish(ctx context.Context, moduleID uuid.UUID, versi
 		Submodules:   models.JSONB{"submodules": metadataJSONB["submodules"]},
 		PublishedAt:  time.Now(),
 	}
-	wrote := false
-	err = p.moduleVersionRepo.WithPublishLock(moduleID, version, func(tx *gorm.DB, versions *repository.ModuleVersionRepository) error {
+	err = p.moduleVersionRepo.WithPublishLockContext(ctx, moduleID, version, func(tx *gorm.DB, versions *repository.ModuleVersionRepository) error {
 		if authorize != nil {
 			if err := authorize(tx); err != nil {
 				return err
 			}
 		}
+		module, err := repository.NewModuleRepository(tx).GetByID(moduleID)
+		if err != nil {
+			return fmt.Errorf("module not found: %w", err)
+		}
 		if versions.Exists(moduleID, version) {
 			return fmt.Errorf("version %s: %w", version, ErrVersionExists)
 		}
+		// Each publication attempt writes an archive of its own (#938): two publishers of one
+		// version never share a key, so an attempt that does not commit never touches the archive
+		// a successful attempt published. The version row names its archive.
+		storagePath := fmt.Sprintf("modules/%s/%s/%s/%s-%s.tar.gz",
+			module.Organization.Name, module.Name, module.Provider, version, strings.ReplaceAll(uuid.NewString(), "-", "")[:12])
+		moduleVersion.TarballPath = storagePath
 		tarballFile, err := os.Open(tarballPath) //nolint:gosec // tarballPath is validated (in temp directory)
 		if err != nil {
 			return fmt.Errorf("opening the tarball: %w", err)
@@ -202,7 +204,6 @@ func (p *ModulePublisher) publish(ctx context.Context, moduleID uuid.UUID, versi
 		if err := p.storage.PutStream(ctx, storagePath, tarballFile, fileInfo.Size()); err != nil {
 			return fmt.Errorf("uploading to storage: %w", err)
 		}
-		wrote = true
 		moduleVersion.TarballSize = fileInfo.Size()
 		if err := versions.Create(moduleVersion); err != nil {
 			return fmt.Errorf("creating the module version: %w", err)
@@ -210,13 +211,9 @@ func (p *ModulePublisher) publish(ctx context.Context, moduleID uuid.UUID, versi
 		return nil
 	})
 	if err != nil {
-		// Nothing committed, the commit itself included: the archive this attempt wrote is
-		// removed, so storage never holds an archive no version names.
-		if wrote {
-			if delErr := p.storage.Delete(ctx, storagePath); delErr != nil {
-				logger.Warnf("removing the archive of unpublished version %s: %v", version, delErr)
-			}
-		}
+		// A failed attempt deletes nothing (owner decision Q13): its archive has a key of its own,
+		// and whether the transaction committed can be unknown when the acknowledgement is lost,
+		// so no deletion could be ordered safely against it. The archive stays unreferenced.
 		return nil, err
 	}
 	return moduleVersion, nil

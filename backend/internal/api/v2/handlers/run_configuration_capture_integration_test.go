@@ -12,7 +12,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -21,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
@@ -120,6 +123,233 @@ func (f *workItemRunnerFixture) state(t *testing.T, run *models.Run, cvID string
 	return r, cv
 }
 
+// holdWorkItem holds the work item's row lock, as a concurrent upload or completion holds it,
+// until the returned release is called.
+func holdWorkItem(t *testing.T, db *gorm.DB, id string) (release func()) {
+	t.Helper()
+	held, done, holder := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		holder <- db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT id FROM work_items WHERE id = ? FOR UPDATE", id).Error; err != nil {
+				return err
+			}
+			close(held)
+			<-done
+			return nil
+		})
+	}()
+	<-held
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			close(done)
+			if err := <-holder; err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	t.Cleanup(release)
+	return release
+}
+
+// sendCanceled serves req with a context canceled 300 ms in and reports whether the handler
+// returned within 5 s of that.
+func sendCanceled(t *testing.T, r *gin.Engine, req *http.Request) bool {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(httptest.NewRecorder(), req.WithContext(ctx))
+		close(done)
+	}()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+		return true
+	case <-time.After(5 * time.Second):
+		return false
+	}
+}
+
+// A capture request whose context ends while the pool's only connection is taken stops waiting
+// for one and creates nothing (R-33 F-01).
+func TestConfigurationCapture_ACanceledRequestDoesNotWaitForAConnection(t *testing.T) {
+	f := setupWorkItemRunner(t)
+	run, _ := f.fetchingRun(t, captureCommit, "refs/pull/7/head")
+	sqlDB, err := f.db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	held, release, holder := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		holder <- f.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT 1").Error; err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+			<-holder
+		}
+		sqlDB.SetMaxOpenConns(0)
+	}()
+	<-held
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.items.RequestConfigurationSnapshot(ctx, run)
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a canceled capture request succeeded without a connection")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled capture request kept waiting for a database connection")
+	}
+	close(release)
+	released = true
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	f.db.Model(&models.WorkItem{}).Where("run_id = ?", run.ID).Count(&n)
+	if n != 0 {
+		t.Errorf("a canceled capture request created %d work item(s), want none", n)
+	}
+}
+
+// An upload or a completion whose request is canceled while it waits for the work item stops
+// waiting and changes nothing (R-32 F-01).
+func TestConfigurationCapture_ACanceledRequestStopsWaitingForTheWorkItem(t *testing.T) {
+	f := setupWorkItemRunner(t)
+	run, cv := f.fetchingRun(t, captureCommit, "refs/pull/7/head")
+	item := f.captureClaimed(t, run)
+
+	release := holdWorkItem(t, f.db, item.ID)
+	upload := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/snapshot", bytes.NewReader([]byte("config")))
+	upload.Header.Set("X-Test-Key", "wi")
+	upload.Header.Set(runnercontract.HeaderSnapshotCommit, captureCommit)
+	if !sendCanceled(t, f.r, upload) {
+		t.Fatal("a canceled upload kept waiting for the work item")
+	}
+	release()
+	var got models.ConfigurationVersion
+	if err := f.db.First(&got, "id = ?", cv.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.ConfigurationVersionStatusFetching {
+		t.Errorf("the version after a canceled upload = %s, want still fetching", got.Status)
+	}
+
+	release = holdWorkItem(t, f.db, item.ID)
+	body, _ := json.Marshal(JobCompleteRequest{RunnerID: f.runnerA2.ID.String(), Status: "failed", ErrorMessage: "x", WorkResult: &runnercontract.WorkResult{}})
+	complete := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/complete", bytes.NewReader(body))
+	complete.Header.Set("Content-Type", "application/json")
+	complete.Header.Set("X-Test-Key", "wi")
+	if !sendCanceled(t, f.r, complete) {
+		t.Fatal("a canceled completion kept waiting for the work item")
+	}
+	release()
+	if st := f.reload(t, item.ID).Status; st != models.WorkItemStatusRunning {
+		t.Errorf("the capture after a canceled completion = %s, want still running", st)
+	}
+}
+
+// A capture whose pinned version cannot be read is served no clone source rather than one with no
+// commit, which would capture the branch head instead of the requested revision (R-34 F-03).
+func TestConfigurationCapture_AnUnreadablePinIsAnError(t *testing.T) {
+	f := setupWorkItemRunner(t)
+	run, _ := f.fetchingRun(t, captureCommit, "refs/pull/7/head")
+	item := f.captureClaimed(t, run)
+	name := "test:fail-version-read-" + uuid.NewString()[:8]
+	if err := f.db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "configuration_versions" {
+			_ = tx.AddError(errors.New("injected read failure"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.db.Callback().Query().Remove(name) })
+	rec := runnerDo(t, f.r, "wi", http.MethodGet, "/api/v2/runner/jobs/"+item.ID+"/artifacts", nil)
+	_ = f.db.Callback().Query().Remove(name)
+	if rec.Code == http.StatusOK {
+		var art runnercontract.WorkItemArtifacts
+		_ = json.Unmarshal(rec.Body.Bytes(), &art)
+		t.Errorf("artifacts with an unreadable pin answered 200 with commit %q", func() string {
+			if art.Clone == nil {
+				return ""
+			}
+			return art.Clone.Commit
+		}())
+	}
+}
+
+// An artifacts request whose context ends while the pool's only connection is taken stops waiting
+// for one (R-34 F-02).
+func TestConfigurationCapture_ACanceledArtifactsRequestDoesNotWaitForAConnection(t *testing.T) {
+	f := setupWorkItemRunner(t)
+	run, _ := f.fetchingRun(t, captureCommit, "refs/pull/7/head")
+	item := f.captureClaimed(t, run)
+	sqlDB, err := f.db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	held, release, holder := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		holder <- f.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SELECT 1").Error; err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+			<-holder
+		}
+		sqlDB.SetMaxOpenConns(0)
+	}()
+	<-held
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.h.workItemArtifacts(ctx, item)
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a canceled artifacts request succeeded without a connection")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled artifacts request kept waiting for a database connection")
+	}
+	close(release)
+	released = true
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConfigurationCapture_FillsTheFetchingVersion(t *testing.T) {
 	f := setupWorkItemRunner(t)
 	run, cv := f.fetchingRun(t, captureCommit, "refs/pull/7/head")
@@ -146,7 +376,7 @@ func TestConfigurationCapture_FillsTheFetchingVersion(t *testing.T) {
 	if got.Status != models.ConfigurationVersionStatusUploaded || got.CommitHash != captureCommit || !got.Speculative || got.PRNumber != 7 {
 		t.Errorf("configuration version = status %s commit %s speculative %v pr %d", got.Status, got.CommitHash, got.Speculative, got.PRNumber)
 	}
-	if data, err := f.store.Get(t.Context(), models.ConfigurationTarballKey(cv.ID)); err != nil || string(data) != "config tarball" {
+	if data, err := f.store.Get(t.Context(), got.TarballKey()); err != nil || got.ArchiveKey == "" || string(data) != "config tarball" {
 		t.Errorf("stored configuration = %q (%v)", data, err)
 	}
 	if f.reload(t, item.ID).Status != models.WorkItemStatusCompleted {
@@ -207,7 +437,7 @@ func TestConfigurationCapture_AnUploadedCaptureNeverChanges(t *testing.T) {
 	if got.Status != models.ConfigurationVersionStatusUploaded || got.CommitHash != captureCommit {
 		t.Errorf("configuration version = status %s commit %s, want the first upload kept", got.Status, got.CommitHash)
 	}
-	if data, _ := f.store.Get(t.Context(), models.ConfigurationTarballKey(cv.ID)); string(data) != "first" {
+	if data, _ := f.store.Get(t.Context(), got.TarballKey()); string(data) != "first" {
 		t.Errorf("stored configuration = %q, want the first upload", data)
 	}
 }

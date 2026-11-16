@@ -60,6 +60,8 @@ type captureFixture struct {
 	githubManager *vcs.GitHubAppManager
 	// prFiles answers GitHub's List pull request files call; nil lists main.tf.
 	prFiles http.HandlerFunc
+	// compareFiles answers GitHub's Compare two commits call; nil lists main.tf.
+	compareFiles http.HandlerFunc
 }
 
 func setupCapture(t *testing.T) *captureFixture {
@@ -135,6 +137,14 @@ func setupCapture(t *testing.T) *captureFixture {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `[{"filename":"main.tf"}]`)
 	})
+	mux.HandleFunc("GET /repos/{owner}/{repo}/compare/{basehead}", func(w http.ResponseWriter, r *http.Request) {
+		if f.compareFiles != nil {
+			f.compareFiles(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"files":[{"filename":"main.tf"}]}`)
+	})
 	f.githubAPI = httptest.NewServer(mux)
 	t.Cleanup(f.githubAPI.Close)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -195,12 +205,27 @@ func (f *captureFixture) githubPush(commit string) map[string]any {
 	}
 }
 
+// prBaseSHA is the base revision every faked pull request delivery names.
+const prBaseSHA = "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12"
+
+// compareJSON answers a compare call with the given changed files.
+func compareJSON(files ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		entries := make([]string, len(files))
+		for i, name := range files {
+			entries[i] = fmt.Sprintf(`{"filename":%q}`, name)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"files":[%s]}`, strings.Join(entries, ","))
+	}
+}
+
 func (f *captureFixture) githubPullRequest(commit string) map[string]any {
 	return map[string]any{
 		"action": "synchronize", "number": 7,
 		"pull_request": map[string]any{
 			"head": map[string]any{"ref": "feature", "sha": commit, "repo": map[string]any{"full_name": "forker/capture"}},
-			"base": map[string]any{"ref": "main"},
+			"base": map[string]any{"ref": "main", "sha": prBaseSHA},
 			"user": map[string]any{"login": "forker"},
 		},
 		"repository":   map[string]any{"full_name": f.repo, "id": 1},
@@ -429,48 +454,31 @@ func (f *captureFixture) pathWorkspaces(t *testing.T) (a, b *models.Workspace) {
 func TestWebhookCapture_PullRequestTriggersTheChangedWorkspaces(t *testing.T) {
 	f := setupCapture(t)
 	a, b := f.pathWorkspaces(t)
+	many := make([]string, 300)
+	for i := range many {
+		many[i] = fmt.Sprintf("a/file-%d.tf", i)
+	}
 	cases := []struct {
 		name         string
 		files        http.HandlerFunc
-		changedFiles int
 		wantA, wantB int
 	}{
-		{"the listed files touch only a", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if r.URL.Query().Get("page") != "" && r.URL.Query().Get("page") != "1" {
-				_, _ = fmt.Fprint(w, `[]`)
-				return
-			}
-			_, _ = fmt.Fprint(w, `[{"filename":"a/main.tf"}]`)
-		}, 1, 1, 0},
+		{"the changed files touch only a", compareJSON("a/main.tf"), 1, 0},
 		{"a file renamed from a to b", func(w http.ResponseWriter, r *http.Request) {
 			// The workspace the file left changed as much as the one it moved to.
 			w.Header().Set("Content-Type", "application/json")
-			if r.URL.Query().Get("page") != "" && r.URL.Query().Get("page") != "1" {
-				_, _ = fmt.Fprint(w, `[]`)
-				return
-			}
-			_, _ = fmt.Fprint(w, `[{"filename":"b/main.tf","previous_filename":"a/main.tf","status":"renamed"}]`)
-		}, 1, 1, 1},
+			_, _ = fmt.Fprint(w, `{"files":[{"filename":"b/main.tf","previous_filename":"a/main.tf","status":"renamed"}]}`)
+		}, 1, 1},
 		{"the file list fails", func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unavailable", http.StatusBadGateway)
-		}, 1, 1, 1},
-		{"the file list is truncated", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if r.URL.Query().Get("page") != "" && r.URL.Query().Get("page") != "1" {
-				_, _ = fmt.Fprint(w, `[]`)
-				return
-			}
-			_, _ = fmt.Fprint(w, `[{"filename":"a/main.tf"}]`)
-		}, 3001, 1, 1},
+		}, 1, 1},
+		{"the file list reaches GitHub's 300-file cap", compareJSON(many...), 1, 1},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f.prFiles = tc.files
+			f.compareFiles = tc.files
 			commit := strings.Repeat(strconv.Itoa(i+1), 40)
-			body := f.githubPullRequest(commit)
-			body["pull_request"].(map[string]any)["changed_files"] = tc.changedFiles
-			f.github(t, "pull_request", body)
+			f.github(t, "pull_request", f.githubPullRequest(commit))
 			if got := len(f.pairs(t, a)); got != tc.wantA {
 				t.Errorf("workspace a has %d runs, want %d", got, tc.wantA)
 			}
@@ -482,6 +490,101 @@ func TestWebhookCapture_PullRequestTriggersTheChangedWorkspaces(t *testing.T) {
 				f.db.Where("workspace_id = ?", ws.ID).Delete(&models.ConfigurationVersion{})
 			}
 		})
+	}
+}
+
+// A successful comparison with no changed files is a complete, empty list: only a workspace with
+// file triggers disabled matches it, not every workspace (R-43 F-01, AC-22).
+func TestWebhookCapture_AnEmptyComparisonTriggersOnlyAlwaysOnWorkspaces(t *testing.T) {
+	f := setupCapture(t)
+	a, b := f.pathWorkspaces(t)
+	if err := f.db.Model(&models.Workspace{}).Where("id = ?", b.ID).Update("file_triggers_enabled", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.compareFiles = compareJSON()
+	f.github(t, "pull_request", f.githubPullRequest(strings.Repeat("e", 40)))
+	if got := len(f.pairs(t, a)); got != 0 {
+		t.Errorf("workspace a, whose directory nothing changed, has %d runs, want 0", got)
+	}
+	if got := len(f.pairs(t, b)); got != 1 {
+		t.Errorf("workspace b, with file triggers off, has %d runs, want 1", got)
+	}
+}
+
+// The changed files are read for the delivered revision (R-39 F-01): a pull request that moved on
+// to other files before the delivery is processed does not change which workspaces it triggers.
+func TestWebhookCapture_PullRequestFilesArePinnedToTheDeliveredCommit(t *testing.T) {
+	f := setupCapture(t)
+	a, b := f.pathWorkspaces(t)
+	commit := strings.Repeat("c", 40)
+	var asked string
+	f.compareFiles = func(w http.ResponseWriter, r *http.Request) {
+		asked = r.PathValue("basehead")
+		if strings.HasSuffix(asked, "..."+commit) {
+			compareJSON("a/main.tf")(w, r)
+			return
+		}
+		compareJSON("b/main.tf")(w, r)
+	}
+	// The pull request has since moved on to a commit that changes only b.
+	f.prFiles = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") != "" && r.URL.Query().Get("page") != "1" {
+			_, _ = fmt.Fprint(w, `[]`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `[{"filename":"b/main.tf"}]`)
+	}
+	f.github(t, "pull_request", f.githubPullRequest(commit))
+	if asked != prBaseSHA+"..."+commit {
+		t.Errorf("the changed files were read for %q, want %s...%s", asked, prBaseSHA, commit)
+	}
+	if got := len(f.pairs(t, a)); got != 1 {
+		t.Errorf("workspace a, which the delivered commit changes, has %d runs, want 1", got)
+	}
+	if got := len(f.pairs(t, b)); got != 0 {
+		t.Errorf("workspace b, which only the newer commit changes, has %d runs, want 0", got)
+	}
+}
+
+// The existing trigger settings decide which workspaces the delivered files reach (R-39 F-02):
+// file triggers off reaches every change, and a trigger prefix monitors its directory too.
+func TestWebhookCapture_PullRequestFilesFollowTheTriggerSettings(t *testing.T) {
+	f := setupCapture(t)
+	a, b := f.pathWorkspaces(t)
+	if err := f.db.Model(&models.Workspace{}).Where("id = ?", b.ID).Update("file_triggers_enabled", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	prefixed := &models.Workspace{
+		ProjectID: f.wsApp.ProjectID, Name: "path-prefixed-" + uuid.NewString()[:6], VCSConnectionID: &f.connA.ID,
+		VCSRepository: f.repo, VCSBranch: "main", SpeculativeEnabled: true, FileTriggersEnabled: true,
+		AutoQueueRuns: true, WorkingDirectory: "d", TriggerPrefixes: `["shared"]`,
+	}
+	unrelated := &models.Workspace{
+		ProjectID: f.wsApp.ProjectID, Name: "path-unrelated-" + uuid.NewString()[:6], VCSConnectionID: &f.connA.ID,
+		VCSRepository: f.repo, VCSBranch: "main", SpeculativeEnabled: true, FileTriggersEnabled: true,
+		AutoQueueRuns: true, WorkingDirectory: "e",
+	}
+	for _, ws := range []*models.Workspace{prefixed, unrelated} {
+		if err := f.db.Create(ws).Error; err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			f.db.Where("workspace_id = ?", ws.ID).Delete(&models.Run{})
+			f.db.Where("workspace_id = ?", ws.ID).Delete(&models.ConfigurationVersion{})
+			f.db.Where("id = ?", ws.ID).Delete(&models.Workspace{})
+		})
+	}
+	f.compareFiles = compareJSON("shared/vars.tf")
+	f.github(t, "pull_request", f.githubPullRequest(strings.Repeat("d", 40)))
+	for _, c := range []struct {
+		name string
+		ws   *models.Workspace
+		want int
+	}{{"a (working directory only)", a, 0}, {"b (file triggers off)", b, 1}, {"d (trigger prefix shared)", prefixed, 1}, {"e (working directory only)", unrelated, 0}} {
+		if got := len(f.pairs(t, c.ws)); got != c.want {
+			t.Errorf("workspace %s has %d runs, want %d", c.name, got, c.want)
+		}
 	}
 }
 
@@ -520,7 +623,7 @@ func TestWebhookCapture_AFailedReplacementCancelsNothing(t *testing.T) {
 	}
 	// The replacement reuses the first run's id, so its insert fails after the supersede step.
 	broken := &models.Run{ID: first[0].run.ID, WorkspaceID: f.wsApp.ID, Status: models.RunStatusPending, Operation: models.RunOperationPlanOnly}
-	created, err := f.handler.runRepo.CreateCaptured(cv, broken, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
+	created, err := f.handler.runRepo.CreateCapturedContext(t.Context(), cv, broken, func(runs *repository.RunRepository, versions *repository.ConfigurationVersionRepository) {
 		terraform.AutoCancelSupersededSpeculativeRuns(runs, versions, f.wsApp.ID, "feature", 7)
 	})
 	if err == nil || created {

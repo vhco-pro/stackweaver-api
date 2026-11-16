@@ -435,7 +435,7 @@ func TestWorkItemRunner_ConfigurationSnapshotGatesTheRun(t *testing.T) {
 	if cv.Status != models.ConfigurationVersionStatusUploaded || cv.CommitHash != "feedface" || cv.Source != "tfe-vcs" || cv.WorkspaceID != run.WorkspaceID {
 		t.Errorf("configuration version = %+v", cv)
 	}
-	if data, err := f.store.Get(t.Context(), "configuration-versions/"+cv.ID+"/config.tar.gz"); err != nil || string(data) != "config tarball" {
+	if data, err := f.store.Get(t.Context(), cv.TarballKey()); err != nil || cv.ArchiveKey == "" || string(data) != "config tarball" {
 		t.Errorf("stored configuration = %q (%v)", data, err)
 	}
 	if got := offeredRuns(); !slices.Contains(got, run.ID) {
