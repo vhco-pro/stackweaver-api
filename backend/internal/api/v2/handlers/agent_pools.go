@@ -479,7 +479,15 @@ func (h *AgentPoolHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
+	// The lookup above runs outside the delete, so a delete that overlaps another delete of the
+	// same pool can pass it and then remove no row (#856). The pool is gone either way, so
+	// answer as the lookup would have.
 	if err := h.poolRepo.Delete(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Agent pool not found")
+			return
+		}
+		logger.Errorf("deleting agent pool %s: %v", id, err)
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to delete agent pool")
 		return
 	}

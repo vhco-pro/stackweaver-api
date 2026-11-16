@@ -3,12 +3,15 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
@@ -22,6 +25,14 @@ type RunnerHandlerV2 struct {
 	poolRepo    *repository.AgentPoolRepository
 	orgRepo     *repository.OrganizationRepository
 	rbacService *rbac.Service
+	apiKeys     *apikey.Service
+}
+
+// SetAPIKeyService wires the API key service Delete uses to remove a deleted launcher's tokens.
+// Set after construction because the service is built later in route registration, as for
+// AgentPoolHandlerV2.SetAPIKeyService.
+func (h *RunnerHandlerV2) SetAPIKeyService(s *apikey.Service) {
+	h.apiKeys = s
 }
 
 // NewRunnerHandlerV2 creates a new runner handler
@@ -281,7 +292,7 @@ func (h *RunnerHandlerV2) Delete(c *gin.Context) {
 
 	runner, err := h.runnerRepo.GetByID(id)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
 		} else {
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
@@ -293,9 +304,27 @@ func (h *RunnerHandlerV2) Delete(c *gin.Context) {
 		return
 	}
 
+	// The lookup above runs outside the delete's transaction, so a delete that overlaps another
+	// delete of the same launcher can pass it and then remove no row (#856). The launcher is gone
+	// either way, so answer as the lookup would have.
 	if err := h.runnerRepo.Delete(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Launcher not found")
+			return
+		}
+		logger.Errorf("deleting launcher %s: %v", id, err)
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
+	}
+
+	// Registration minted the launcher a token (a `runner-<name>` key with runner:<id>:* scopes).
+	// Deregistration already removes it; a delete must too, or the key stays in its owner's API
+	// key list. The launcher is gone at this point, so a failure is logged rather than answered:
+	// the token cannot authenticate without its launcher (RunnerAuth).
+	if h.apiKeys != nil {
+		if err := h.apiKeys.DeleteAPIKeysForRunner(id); err != nil {
+			logger.Errorf("deleting the tokens of deleted launcher %s: %v", id, err)
+		}
 	}
 
 	c.Status(http.StatusNoContent)
