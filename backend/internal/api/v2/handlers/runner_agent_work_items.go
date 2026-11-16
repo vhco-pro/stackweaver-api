@@ -147,7 +147,7 @@ func (h *RunnerAgentHandler) getWorkItemArtifacts(c *gin.Context, id string) {
 	if err != nil {
 		// Nothing a later attempt could fix: the work item fails with the reason, and the runner
 		// is told so.
-		finished, finishErr := h.workItems.Finished(item, models.WorkItemStatusFailed, err.Error(), nil)
+		finished, finishErr := h.workItems.FinishedContext(c.Request.Context(), item, models.WorkItemStatusFailed, err.Error(), nil)
 		if finishErr != nil {
 			logger.Warnf("failing work item %s: %v", item.ID, finishErr)
 		}
@@ -208,7 +208,7 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 			return nil, errors.New("the work item names no run")
 		}
 		var run models.Run
-		if err := h.db.Preload("Workspace").First(&run, "id = ?", *item.RunID).Error; err != nil {
+		if err := h.db.WithContext(ctx).Preload("Workspace").First(&run, "id = ?", *item.RunID).Error; err != nil {
 			return nil, fmt.Errorf("loading run: %w", err)
 		}
 		ws := run.Workspace
@@ -228,9 +228,12 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		// delivery's commit, or the branch head when it names none.
 		if run.ConfigurationVersionID != nil {
 			var cv models.ConfigurationVersion
-			if err := h.db.Select("id", "commit_hash", "fetch_ref").First(&cv, "id = ?", *run.ConfigurationVersionID).Error; err == nil {
-				clone.Commit, clone.FetchRef = cv.CommitHash, cv.FetchRef
+			// A version that cannot be read is an error: serving no commit would capture the
+			// branch head instead of the requested revision.
+			if err := h.db.WithContext(ctx).Select("id", "commit_hash", "fetch_ref").First(&cv, "id = ?", *run.ConfigurationVersionID).Error; err != nil {
+				return nil, fmt.Errorf("loading the run's configuration version: %w", err)
 			}
+			clone.Commit, clone.FetchRef = cv.CommitHash, cv.FetchRef
 		}
 		art.Clone = clone
 	case models.WorkItemModuleTagSnapshot:
@@ -238,7 +241,7 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 			return nil, errors.New("the work item names no module tag")
 		}
 		var module models.Module
-		if err := h.db.First(&module, "id = ?", *item.ModuleID).Error; err != nil {
+		if err := h.db.WithContext(ctx).First(&module, "id = ?", *item.ModuleID).Error; err != nil {
 			return nil, fmt.Errorf("loading module: %w", err)
 		}
 		if module.VCSConnectionID == nil || module.VCSRepository == "" {
@@ -376,7 +379,7 @@ func (h *RunnerAgentHandler) jobCompleteWorkItem(c *gin.Context, id string, req 
 	if h.beforeWorkItemFinish != nil {
 		h.beforeWorkItemFinish(item.ID)
 	}
-	finished, err := h.workItems.Finished(item, status, req.ErrorMessage, req.WorkResult)
+	finished, err := h.workItems.FinishedContext(c.Request.Context(), item, status, req.ErrorMessage, req.WorkResult)
 	if err != nil {
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
@@ -573,7 +576,9 @@ func heldConflict(locked, authorized *models.WorkItem) string {
 func (h *RunnerAgentHandler) storeRunConfiguration(c *gin.Context, item *models.WorkItem, commit string, data []byte) {
 	var run models.Run
 	conflict, notFound := "", false
-	err := h.db.Transaction(func(tx *gorm.DB) error {
+	// The transaction, its row-lock waits included, follows the request: an upload whose request
+	// ends stops waiting and changes nothing.
+	err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var locked models.WorkItem
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "status", "runner_id", "attempt").First(&locked, "id = ?", item.ID).Error; err != nil {
 			return err
@@ -624,10 +629,14 @@ func (h *RunnerAgentHandler) storeRunConfiguration(c *gin.Context, item *models.
 			conflict = "the snapshot is not of the requested commit"
 			return nil
 		}
-		if err := h.storageClient.Put(c.Request.Context(), models.ConfigurationTarballKey(cv.ID), data); err != nil {
+		// Object storage is outside this transaction: a canceled write can still land after the
+		// rollback. Each upload therefore writes its own object, recorded below with the status, so
+		// a late write lands where nothing reads (R-48, R-49).
+		key := models.ConfigurationCaptureKey(cv.ID, uuid.NewString())
+		if err := h.storageClient.Put(c.Request.Context(), key, data); err != nil {
 			return fmt.Errorf("storing the configuration of run %s: %w", run.ID, err)
 		}
-		updates := map[string]any{"status": models.ConfigurationVersionStatusUploaded}
+		updates := map[string]any{"status": models.ConfigurationVersionStatusUploaded, "archive_key": key}
 		if cv.CommitHash == "" && commit != "" {
 			updates["commit_hash"] = commit
 		}
@@ -665,6 +674,6 @@ func (h *RunnerAgentHandler) wakeRunPool(c *gin.Context, run *models.Run) {
 		return
 	}
 	var pool models.AgentPool
-	hosted := h.db.Select("id", "kind").First(&pool, "id = ?", *run.AgentPoolID).Error == nil && pool.IsHosted()
+	hosted := h.db.WithContext(c.Request.Context()).Select("id", "kind").First(&pool, "id = ?", *run.AgentPoolID).Error == nil && pool.IsHosted()
 	wakeup.Publish(c.Request.Context(), h.wakeRedis, wakeup.KeyForPool(run.AgentPoolID.String(), hosted))
 }

@@ -594,7 +594,8 @@ func (h *RegistryPublishingHandler) PublishFromGitTag(
 	if h.workItems == nil {
 		return fmt.Errorf("tag publishing is not configured")
 	}
-	module, err := h.moduleRepo.GetByID(moduleID)
+	// Every query follows ctx, so a request that ends stops waiting for a connection.
+	module, err := h.moduleRepo.WithContext(ctx).GetByID(moduleID)
 	if err != nil {
 		return fmt.Errorf("getting module %s: %w", moduleID, err)
 	}
@@ -605,7 +606,7 @@ func (h *RegistryPublishingHandler) PublishFromGitTag(
 	if err := registry.ValidateSemanticVersion(version); err != nil {
 		return fmt.Errorf("invalid version in tag %s: %w", tagName, err)
 	}
-	if h.moduleVersionRepo.Exists(moduleID, registry.NormalizeVersion(version)) {
+	if h.moduleVersionRepo.WithContext(ctx).Exists(moduleID, registry.NormalizeVersion(version)) {
 		return fmt.Errorf("version %s already exists", version)
 	}
 	item, created, err := h.workItems.RequestModuleTagSnapshot(ctx, module, tagName)

@@ -193,7 +193,8 @@ func TestAtRestWriters_ConfigurationSnapshot(t *testing.T) {
 	if err := f.db.Where("workspace_id = ?", run.WorkspaceID).Order("created_at DESC").First(&cv).Error; err != nil {
 		t.Fatalf("no configuration version from the snapshot: %v", err)
 	}
-	f.assertSealedObject(t, "configuration-versions/"+cv.ID+"/config.tar.gz", tarball)
+	// The capture records its own key, under the sealed configuration prefix and suffix (R-49).
+	f.assertSealedObject(t, cv.TarballKey(), tarball)
 }
 
 func TestAtRestWriters_LargeState(t *testing.T) {

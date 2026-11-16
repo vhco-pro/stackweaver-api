@@ -2629,7 +2629,7 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	var tarball []byte
 	if run.ConfigurationVersionID != nil && h.storageClient != nil {
 		if configVersion, cvErr := h.runConfigurationVersion(&run); cvErr == nil {
-			storageKey := models.ConfigurationTarballKey(configVersion.ID)
+			storageKey := configVersion.TarballKey()
 			ctx := context.Background()
 			if data, err := h.storageClient.Get(ctx, storageKey); err == nil {
 				tarball = data

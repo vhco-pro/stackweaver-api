@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/michielvha/stackweaver/core/models"
@@ -23,7 +24,7 @@ type captureSpec struct {
 // orchestrator requests the run's configuration_snapshot work item, and an executor fetches the
 // commit with the workspace's own connection. supersede runs only when a pair is created. created
 // is false when the commit already has one.
-func (h *VCSAppInstallationHandlerV2) queueCapturedRun(ws *models.Workspace, s captureSpec, supersede func(*repository.RunRepository, *repository.ConfigurationVersionRepository)) (run *models.Run, created bool, err error) {
+func (h *VCSAppInstallationHandlerV2) queueCapturedRun(ctx context.Context, ws *models.Workspace, s captureSpec, supersede func(*repository.RunRepository, *repository.ConfigurationVersionRepository)) (run *models.Run, created bool, err error) {
 	if gitargs.CommitSHARe.FindString(s.commit) == "" {
 		return nil, false, fmt.Errorf("delivered commit %q is not a commit id", s.commit)
 	}
@@ -48,7 +49,7 @@ func (h *VCSAppInstallationHandlerV2) queueCapturedRun(ws *models.Workspace, s c
 	if s.speculative {
 		run.Operation, run.AutoApplyAfterPlan = models.RunOperationPlanOnly, false
 	}
-	created, err = h.runRepo.CreateCaptured(cv, run, supersede)
+	created, err = h.runRepo.CreateCapturedContext(ctx, cv, run, supersede)
 	if err != nil {
 		return nil, false, fmt.Errorf("queueing the run of workspace %s at %s: %w", ws.ID, s.commit, err)
 	}
