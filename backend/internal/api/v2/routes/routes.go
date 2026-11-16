@@ -913,6 +913,8 @@ func SetupV2Routes(
 	// than through the constructor because the service is built after the agent-pool
 	// handler; the route resolves it per request.
 	agentPoolHandler.SetAPIKeyService(tokenAPIKeyService)
+	// A launcher delete removes the launcher's own tokens with it (#856).
+	runnerHandler.SetAPIKeyService(tokenAPIKeyService)
 	tokenHandler := handlers.NewTokenHandlerV2(tokenAPIKeyService, authService)
 	tokenHandler.SetPlatformAdmin(platformAdmin)
 	// A user-bound token acts as its owner in every organization they belong to, and these
