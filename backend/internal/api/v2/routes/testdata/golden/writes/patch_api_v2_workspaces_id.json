@@ -70,7 +70,8 @@
                   "nullable": true
                 },
                 "description": {
-                  "type": "string"
+                  "type": "string",
+                  "nullable": true
                 },
                 "execution-mode": {
                   "type": "string"
@@ -175,7 +176,8 @@
                   "type": "string"
                 },
                 "working-directory": {
-                  "type": "string"
+                  "type": "string",
+                  "nullable": true
                 }
               }
             },

@@ -464,8 +464,11 @@ type UpdateWorkspaceRequestV2 struct {
 	Data struct {
 		Type       string `json:"type"`
 		Attributes struct {
-			Name            string          `json:"name,omitempty"`
-			Description     string          `json:"description,omitempty"`
+			Name string `json:"name,omitempty"`
+			// Description and WorkingDirectory are pointers so an omitted attribute keeps the stored
+			// value and an explicit "" clears it, as TFE does (#1089); go-tfe sends both as optional
+			// pointers.
+			Description     *string         `json:"description,omitempty"`
 			VCSConnectionID *uuid.UUID      `json:"vcs-connection-id,omitempty"`
 			VCSProvider     string          `json:"vcs-provider,omitempty"`
 			VCSRepository   string          `json:"vcs-repository,omitempty"`
@@ -474,7 +477,7 @@ type UpdateWorkspaceRequestV2 struct {
 			// TerraformVersion: null clears the stored version back to inheriting; absent or "" keeps it
 			// (#1069, Q4). go-tfe never sends null, so the provider cannot clear a pin by accident.
 			TerraformVersion           jsonapi.Nullable[string] `json:"terraform-version,omitempty"`
-			WorkingDirectory           string                   `json:"working-directory,omitempty"`
+			WorkingDirectory           *string                  `json:"working-directory,omitempty"`
 			AutoQueueRuns              *bool                    `json:"auto-queue-runs,omitempty"`
 			AutoApply                  *bool                    `json:"auto-apply,omitempty"`
 			AutoApplyRunTrigger        *bool                    `json:"auto-apply-run-trigger,omitempty"`
@@ -1554,12 +1557,10 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		workspace.Name = attrs.Name
 	}
 
-	// Update description (allow empty string to clear)
-	// Note: In JSON:API, if description is not provided, it will be empty string
-	// We update if it's different from current value
-	if workspace.Description != attrs.Description {
-		changes["description"] = attrs.Description
-		workspace.Description = attrs.Description
+	// Update description: omitted keeps it, "" clears it.
+	if attrs.Description != nil && workspace.Description != *attrs.Description {
+		changes["description"] = *attrs.Description
+		workspace.Description = *attrs.Description
 	}
 
 	// TFE-compatible: Handle vcs-repo nested attribute (go-tfe sends this on update)
@@ -1643,10 +1644,10 @@ func (h *WorkspaceHandlerV2) Update(c *gin.Context) {
 		workspace.TofuVersion = version
 	}
 
-	// Update working directory (allow empty string to clear)
-	if workspace.WorkingDirectory != attrs.WorkingDirectory {
-		changes["working_directory"] = attrs.WorkingDirectory
-		workspace.WorkingDirectory = attrs.WorkingDirectory
+	// Update working directory: omitted keeps it, "" clears it.
+	if attrs.WorkingDirectory != nil && workspace.WorkingDirectory != *attrs.WorkingDirectory {
+		changes["working_directory"] = *attrs.WorkingDirectory
+		workspace.WorkingDirectory = *attrs.WorkingDirectory
 	}
 
 	// Update auto-queue-runs
@@ -2409,9 +2410,9 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		workspace.AutoApply = *attrs.AutoApply
 	}
 
-	// Update description
-	if attrs.Description != "" {
-		workspace.Description = attrs.Description
+	// Update description: omitted keeps it, "" clears it.
+	if attrs.Description != nil {
+		workspace.Description = *attrs.Description
 	}
 
 	// Update name
@@ -2425,9 +2426,9 @@ func (h *WorkspaceHandlerV2) UpdateByID(c *gin.Context) {
 		workspace.TofuVersion = version
 	}
 
-	// Update working directory
-	if attrs.WorkingDirectory != workspace.WorkingDirectory {
-		workspace.WorkingDirectory = attrs.WorkingDirectory
+	// Update working directory: omitted keeps it, "" clears it.
+	if attrs.WorkingDirectory != nil {
+		workspace.WorkingDirectory = *attrs.WorkingDirectory
 	}
 
 	// Update run timeout; zero resets it to inherit.
