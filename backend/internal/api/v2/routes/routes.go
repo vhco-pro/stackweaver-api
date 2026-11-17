@@ -1483,6 +1483,7 @@ func SetupV2Routes(
 		ansibleCredentialRepo, ansibleConfigRepo, runnerInventoryService, vcsRegistry, runnerCryptoSvc,
 		variableService, storageClient, playbookSyncRequester, db,
 	)
+	runnerAgentHandler.SetRBACService(rbacService)
 	runnerAgentHandler.SetWorkItems(ansible.NewWorkItemRuntime(db, runnerInventoryService, ansibleServices.InventorySources))
 	// A module version from a tag is captured by a module_tag_snapshot work item and published
 	// from the snapshot it uploads (#938).

@@ -13,6 +13,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -20,13 +21,15 @@ type APIKeyHandler struct {
 	apiKeyService   *apikey.Service
 	authService     *auth.Service
 	activityService *activity.Service
+	rbacService     *rbac.Service
 }
 
-func NewAPIKeyHandler(apiKeyService *apikey.Service, authService *auth.Service, activityService *activity.Service) *APIKeyHandler {
+func NewAPIKeyHandler(apiKeyService *apikey.Service, authService *auth.Service, activityService *activity.Service, rbacService *rbac.Service) *APIKeyHandler {
 	return &APIKeyHandler{
 		apiKeyService:   apiKeyService,
 		authService:     authService,
 		activityService: activityService,
+		rbacService:     rbacService,
 	}
 }
 
@@ -123,6 +126,10 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 		expiresAt = &parsed
 	}
 
+	if !h.mayGrantRegistration(c, user.ID, req.Scopes) {
+		return
+	}
+
 	// Create the API key with scopes
 	apiKey, plainKey, err := h.apiKeyService.CreateAPIKey(user.ID, req.Name, req.Scopes, expiresAt)
 	if err != nil {
@@ -215,4 +222,32 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNoContent)
+}
+
+// mayGrantRegistration answers for a key that would carry runner:register: such a key lets a
+// launcher join the organization's agent pools and receive their jobs, so the caller needs the
+// permission that creating an agent token needs (org:manage-agent-pools), not just membership.
+// It writes the refusal and returns false when the caller lacks it. Scopes that do not parse are
+// left to CreateAPIKey, which rejects them.
+func (h *APIKeyHandler) mayGrantRegistration(c *gin.Context, userID uuid.UUID, scopes []string) bool {
+	for _, raw := range scopes {
+		scope, err := apikey.ParseScope(raw)
+		if err != nil || scope.Permission != "runner:register" || scope.Type != "org" || scope.ResourceID == nil {
+			continue
+		}
+		if h.rbacService == nil {
+			jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "launcher registration keys cannot be created on this server")
+			return false
+		}
+		ok, err := h.rbacService.CheckOrgManageAgentPools(c.Request.Context(), userID, *scope.ResourceID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, jsonapi.TitleInternal, "checking the agent pool permission")
+			return false
+		}
+		if !ok {
+			jsonapi.WriteError(c, http.StatusForbidden, jsonapi.TitleForbidden, "a launcher registration key needs permission to manage the organization's agent pools")
+			return false
+		}
+	}
+	return true
 }

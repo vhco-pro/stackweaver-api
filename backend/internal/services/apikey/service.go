@@ -117,6 +117,14 @@ func (s *Service) CreateAPIKey(userID uuid.UUID, name string, scopes []string, e
 		if scope.Type == ScopeTypePlatform {
 			return nil, "", fmt.Errorf("platform scopes are only valid on user tokens")
 		}
+		// A runner scope makes the key that launcher's identity on the control plane, so it is
+		// issued only by CreateRunnerToken when a launcher registers, never on request.
+		if scope.Type == "runner" {
+			return nil, "", fmt.Errorf("launcher scopes are only issued at launcher registration")
+		}
+		if scope.Permission == "runner:register" && scope.Type != "org" {
+			return nil, "", fmt.Errorf("runner:register is an organization permission")
+		}
 	}
 
 	// Validate organization, project, and team access

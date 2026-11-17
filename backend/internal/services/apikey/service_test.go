@@ -53,6 +53,18 @@ func TestCreateAPIKey_RejectsUnboundScopes(t *testing.T) {
 			scopes:          []string{"org:" + uuid.New().String() + ":*"},
 			wantErrContains: "wildcard scopes are not permitted",
 		},
+		// A launcher token is minted only at registration (CreateRunnerToken). A key that names a
+		// runner would act as that launcher on the control plane.
+		{
+			name:            "runner scope beside an org scope",
+			scopes:          []string{"org:" + uuid.New().String() + ":read", "runner:" + uuid.New().String() + ":jobs"},
+			wantErrContains: "launcher scopes are only issued at launcher registration",
+		},
+		{
+			name:            "registration permission on a project scope",
+			scopes:          []string{"project:" + uuid.New().String() + ":runner:register"},
+			wantErrContains: "runner:register is an organization permission",
+		},
 	}
 
 	for _, tc := range cases {

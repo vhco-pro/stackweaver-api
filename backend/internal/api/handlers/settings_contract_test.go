@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
 	"github.com/michielvha/stackweaver/core/dbtest"
@@ -106,6 +107,7 @@ func (f *fakeBrowserSessions) DeleteByZitadelSID(sid string) (int64, error) {
 
 type settingsFixture struct {
 	router   *gin.Engine
+	db       *gorm.DB
 	user     *models.User
 	orgID    string
 	twoFA    *fakeTwoFactor
@@ -133,17 +135,21 @@ func setupSettingsContract(t *testing.T) *settingsFixture {
 	}
 	t.Cleanup(func() {
 		db.Where("user_id = ?", user.ID).Delete(&models.APIKey{})
+		db.Where("user_id = ?", user.ID).Delete(&models.TeamMember{})
+		db.Where("organization_id = ?", org.ID).Delete(&models.Team{})
 		db.Where("organization_id = ?", org.ID).Delete(&models.OrganizationMember{})
 		db.Where("id = ?", org.ID).Delete(&models.Organization{})
 		db.Where("id = ?", user.ID).Delete(&models.User{})
 	})
 
 	orgRepo := repository.NewOrganizationRepository(db)
+	teamRepo := repository.NewTeamRepository(db)
+	projectRepo := repository.NewProjectRepository(db)
 	authService := auth.NewService(repository.NewUserRepository(db))
-	f := &settingsFixture{user: user, orgID: org.ID.String(), twoFA: &fakeTwoFactor{password: "old-password"}, sessions: &fakeSessions{}, browser: &fakeBrowserSessions{}}
+	f := &settingsFixture{db: db, user: user, orgID: org.ID.String(), twoFA: &fakeTwoFactor{password: "old-password"}, sessions: &fakeSessions{}, browser: &fakeBrowserSessions{}}
 	totpHandler := &TOTPHandler{totpService: f.twoFA, authService: authService}
 	sessionsHandler := &SessionsHandler{sessionsService: f.sessions, authService: authService, browserSessions: f.browser}
-	keys := NewAPIKeyHandler(apikey.NewService(repository.NewAPIKeyRepository(db), orgRepo, repository.NewProjectRepository(db), repository.NewTeamRepository(db)), authService, nil)
+	keys := NewAPIKeyHandler(apikey.NewService(repository.NewAPIKeyRepository(db), orgRepo, projectRepo, teamRepo), authService, nil, rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -332,7 +338,7 @@ func TestSettingsContract(t *testing.T) {
 		f.refused(t, http.MethodPost, "/api/v2/settings/api-keys", `{"name":"ci"}`, settingsDocumentRequired("api-keys"))
 		f.refused(t, http.MethodPost, "/api/v2/settings/api-keys", `{"data":{"type":"tokens","attributes":{"name":"ci"}}}`, `data.type must be "api-keys" (got "tokens")`)
 		created := oneSettingsResource(t, f.doc(t, http.MethodPost, "/api/v2/settings/api-keys",
-			`{"data":{"type":"api-keys","attributes":{"name":"contract-ci","scopes":["org:`+f.orgID+`:runner:register"],"expires-at":"2030-01-01T00:00:00Z"}}}`, http.StatusCreated), "api-keys")
+			`{"data":{"type":"api-keys","attributes":{"name":"contract-ci","scopes":["org:`+f.orgID+`:read"],"expires-at":"2030-01-01T00:00:00Z"}}}`, http.StatusCreated), "api-keys")
 		var org struct {
 			Data struct{ Type, ID string } `json:"data"`
 		}
@@ -354,5 +360,37 @@ func TestSettingsContract(t *testing.T) {
 		if code, raw := f.call(t, http.MethodDelete, "/api/v2/settings/api-keys/"+created.ID, ""); code != http.StatusNotFound {
 			t.Errorf("deleting a missing key: got %d %s, want 404", code, raw)
 		}
+	})
+}
+
+// TestCreateAPIKey_RegistrationScopeNeedsAgentPoolPermission: a launcher registration key lets a
+// launcher join the organization's agent pools and receive their jobs, so minting one needs the
+// permission that creating an agent token needs, not just membership of the organization.
+func TestCreateAPIKey_RegistrationScopeNeedsAgentPoolPermission(t *testing.T) {
+	f := setupSettingsContract(t)
+	body := `{"data":{"type":"api-keys","attributes":{"name":"launchers","scopes":["org:` + f.orgID + `:runner:register"]}}}`
+
+	t.Run("a member without manage-agent-pools is refused", func(t *testing.T) {
+		code, raw := f.call(t, http.MethodPost, "/api/v2/settings/api-keys", body)
+		if code != http.StatusForbidden {
+			t.Fatalf("got %d %s, want 403", code, raw)
+		}
+		var keys int64
+		f.db.Model(&models.APIKey{}).Where("user_id = ?", f.user.ID).Count(&keys)
+		if keys != 0 {
+			t.Fatalf("%d keys were stored for a refused request", keys)
+		}
+	})
+
+	t.Run("an owner may mint one", func(t *testing.T) {
+		orgID := uuid.MustParse(f.orgID)
+		owners := &models.Team{ID: uuid.New(), OrganizationID: orgID, Name: "owners"}
+		if err := f.db.Create(owners).Error; err != nil {
+			t.Fatalf("seed owners team: %v", err)
+		}
+		if err := f.db.Create(&models.TeamMember{ID: uuid.New(), TeamID: owners.ID, UserID: f.user.ID}).Error; err != nil {
+			t.Fatalf("seed owners membership: %v", err)
+		}
+		f.doc(t, http.MethodPost, "/api/v2/settings/api-keys", body, http.StatusCreated)
 	})
 }

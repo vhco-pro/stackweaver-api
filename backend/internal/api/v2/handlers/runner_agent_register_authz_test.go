@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
@@ -34,6 +35,7 @@ func (f *agentPrepFixture) registerRouter(owner uuid.UUID) *gin.Engine {
 		runnerRepo:    repository.NewRunnerRepository(f.db),
 		poolRepo:      repository.NewAgentPoolRepository(f.db),
 		apiKeyService: svc,
+		rbacService:   rbac.NewServiceWithTeams(repository.NewOrganizationRepository(f.db), repository.NewTeamRepository(f.db), repository.NewProjectRepository(f.db)),
 	}
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
@@ -66,7 +68,27 @@ func TestRegisterAuthz(t *testing.T) {
 	if err := f.db.Create(owner).Error; err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.db.Where("id = ?", owner.ID).Delete(&models.User{}) })
+	// member belongs to the organization without permission to manage its agent pools.
+	member := &models.User{ID: uuid.New(), ZitadelSubject: "regauthz-m-" + sfx, Email: "regauthz-m-" + sfx + "@test.local"}
+	owners := &models.Team{ID: uuid.New(), OrganizationID: f.orgA, Name: "owners"}
+	readers := &models.Team{ID: uuid.New(), OrganizationID: f.orgA, Name: "readers-" + sfx}
+	for _, row := range []any{
+		member, owners, readers,
+		&models.OrganizationMember{ID: uuid.New(), OrganizationID: f.orgA, UserID: owner.ID},
+		&models.OrganizationMember{ID: uuid.New(), OrganizationID: f.orgA, UserID: member.ID},
+		&models.TeamMember{ID: uuid.New(), TeamID: owners.ID, UserID: owner.ID},
+		&models.TeamMember{ID: uuid.New(), TeamID: readers.ID, UserID: member.ID},
+	} {
+		if err := f.db.Create(row).Error; err != nil {
+			t.Fatalf("seed %T: %v", row, err)
+		}
+	}
+	t.Cleanup(func() {
+		f.db.Where("team_id IN ?", []uuid.UUID{owners.ID, readers.ID}).Delete(&models.TeamMember{})
+		f.db.Where("id IN ?", []uuid.UUID{owners.ID, readers.ID}).Delete(&models.Team{})
+		f.db.Where("user_id IN ?", []uuid.UUID{owner.ID, member.ID}).Delete(&models.OrganizationMember{})
+		f.db.Where("id IN ?", []uuid.UUID{owner.ID, member.ID}).Delete(&models.User{})
+	})
 	r := f.registerRouter(owner.ID)
 	org := f.orgA.String()
 
@@ -103,6 +125,57 @@ func TestRegisterAuthz(t *testing.T) {
 		t.Cleanup(func() { f.db.Where("id = ?", key.ID).Delete(&models.APIKey{}) })
 		f.keys["k"] = key
 		runnerName := "regauthz-ok-" + uuid.NewString()[:8]
+		rec := runnerDo(t, r, "k", http.MethodPost, "/api/v2/runner/register", map[string]any{"agent_pool_id": f.poolA.String(), "name": runnerName, "tofu_version": "1.9.0"})
+		if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+			t.Fatalf("register: status %d, want success (%s)", rec.Code, rec.Body.String())
+		}
+		var runner models.Runner
+		if err := f.db.First(&runner, "name = ?", runnerName).Error; err != nil {
+			t.Fatalf("no runner row after a successful registration: %v", err)
+		}
+		t.Cleanup(func() {
+			f.db.Where("scopes::text LIKE ?", "%runner:"+runner.ID.String()+":%").Delete(&models.APIKey{})
+			f.db.Where("id = ?", runner.ID).Delete(&models.Runner{})
+		})
+	})
+
+	// A registration key stands for its owner: one whose owner may not manage the agent pools
+	// registers nothing, however it was created. The key is stored, so nothing but that check
+	// stands between it and a registration.
+	t.Run("a stored registration key of a member without manage-agent-pools", func(t *testing.T) {
+		key := &models.APIKey{Name: "regauthz-member-" + sfx, Kind: models.APIKeyKindOrg, KeyHash: "z", KeyPrefix: "tfe-m" + sfx[:3], Scopes: models.StringArray{"org:" + org + ":runner:register"}, OrganizationID: &f.orgA, UserID: &member.ID}
+		if err := f.db.Create(key).Error; err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.db.Where("id = ?", key.ID).Delete(&models.APIKey{}) })
+		f.keys["k"] = key
+		runnerName := "regauthz-member-" + uuid.NewString()[:8]
+		rec := runnerDo(t, r, "k", http.MethodPost, "/api/v2/runner/register", map[string]any{"agent_pool_id": f.poolA.String(), "name": runnerName, "tofu_version": "1.9.0"})
+		var n int64
+		f.db.Model(&models.Runner{}).Where("name = ?", runnerName).Count(&n)
+		if n != 0 {
+			var runner models.Runner
+			if f.db.First(&runner, "name = ?", runnerName).Error == nil {
+				f.db.Where("scopes::text LIKE ?", "%runner:"+runner.ID.String()+":%").Delete(&models.APIKey{})
+				f.db.Where("id = ?", runner.ID).Delete(&models.Runner{})
+			}
+		}
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("register: status %d, want 403 (%s)", rec.Code, rec.Body.String())
+		}
+		if n != 0 {
+			t.Errorf("a refused registration left %d runner row(s)", n)
+		}
+	})
+
+	t.Run("an agent token of the pool, whatever its creator may do now", func(t *testing.T) {
+		key := &models.APIKey{Name: "regauthz-agent-" + sfx, Kind: models.APIKeyKindOrg, KeyHash: "y", KeyPrefix: "tfe-a" + sfx[:3], Scopes: models.StringArray{"org:" + org + ":runner:register"}, OrganizationID: &f.orgA, UserID: &member.ID, IsAgentToken: true, AgentPoolID: &f.poolA}
+		if err := f.db.Create(key).Error; err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.db.Where("id = ?", key.ID).Delete(&models.APIKey{}) })
+		f.keys["k"] = key
+		runnerName := "regauthz-agent-" + uuid.NewString()[:8]
 		rec := runnerDo(t, r, "k", http.MethodPost, "/api/v2/runner/register", map[string]any{"agent_pool_id": f.poolA.String(), "name": runnerName, "tofu_version": "1.9.0"})
 		if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
 			t.Fatalf("register: status %d, want success (%s)", rec.Code, rec.Body.String())
