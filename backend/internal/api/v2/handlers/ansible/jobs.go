@@ -288,10 +288,23 @@ func (h *JobHandler) ListByOrganization(c *gin.Context) {
 		return
 	}
 
+	// filter[job-template-id] and filter[playbook-id] narrow the list to one template's or one
+	// playbook's jobs, so a template or playbook page reads its recent jobs from every page (#914).
+	// The names stay literal at each c.Query call, where the golden harness records what a
+	// handler reads for the API reference.
+	var filter repository.JobListFilter
+	var ok bool
+	if filter.TemplateID, ok = optionalUUIDFilter(c, "filter[job-template-id]", c.Query("filter[job-template-id]")); !ok {
+		return
+	}
+	if filter.PlaybookID, ok = optionalUUIDFilter(c, "filter[playbook-id]", c.Query("filter[playbook-id]")); !ok {
+		return
+	}
+
 	page, perPage := jsonapi.PageParams(c, 20, 100)
 	offset := (page - 1) * perPage
 
-	jobs, total, err := h.jobService.ListJobsByOrganization(org.ID, perPage, offset)
+	jobs, total, err := h.jobService.ListJobsByOrganizationFiltered(org.ID, filter, perPage, offset)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to list jobs")
 		return
@@ -1179,4 +1192,18 @@ func formatEventSummaryResponse(event *models.AnsibleJobEvent) jsonapi.Resource[
 		},
 		Relationships: EventRelationships{Job: jsonapi.ToOne(event.JobID.String(), "ansible-jobs")},
 	}
+}
+
+// optionalUUIDFilter parses the value of the query filter name: nil when it is empty, and a 400
+// written, with ok false, when it is not a UUID.
+func optionalUUIDFilter(c *gin.Context, name, raw string) (*uuid.UUID, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid "+name+": must be a UUID")
+		return nil, false
+	}
+	return &id, true
 }

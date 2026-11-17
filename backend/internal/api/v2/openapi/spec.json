@@ -34106,6 +34106,24 @@
             }
           },
           {
+            "description": "Keeps the jobs launched from this job template. A template of another organization matches nothing.",
+            "in": "query",
+            "name": "filter[job-template-id]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keeps the jobs that ran this playbook, whether launched from a template or not.",
+            "in": "query",
+            "name": "filter[playbook-id]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Which page to return, 1-based.",
             "in": "query",
             "name": "page[number]",
