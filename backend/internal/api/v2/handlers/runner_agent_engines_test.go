@@ -32,7 +32,7 @@ func TestEngines_OfferOnlyTheDeclaredEngines(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { f.db.Where("id = ?", owner.ID).Delete(&models.User{}) })
-	key := &models.APIKey{Name: "engines-" + sfx, Kind: models.APIKeyKindOrg, KeyHash: "x", KeyPrefix: "tfe-" + sfx[:4], Scopes: models.StringArray{"org:" + f.orgA.String() + ":runner:register"}, OrganizationID: &f.orgA, UserID: &owner.ID}
+	key := &models.APIKey{Name: "engines-" + sfx, Kind: models.APIKeyKindOrg, KeyHash: "x", KeyPrefix: "tfe-" + sfx[:4], Scopes: models.StringArray{"org:" + f.orgA.String() + ":runner:register"}, OrganizationID: &f.orgA, UserID: &owner.ID, IsAgentToken: true, AgentPoolID: &f.poolA}
 	if err := f.db.Create(key).Error; err != nil {
 		t.Fatal(err)
 	}

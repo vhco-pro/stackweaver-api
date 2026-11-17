@@ -245,11 +245,30 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 		c.Next()
 	})
 
+	// A key a member minted for themselves that names runner A1: an organization key of A1's
+	// organization, so the organization match alone would accept it. A launcher token carries
+	// launcher scopes only; anything else beside them means it was not minted at registration.
+	selfMinted := &models.APIKey{
+		Kind: models.APIKeyKindOrg,
+		Scopes: models.StringArray{
+			"org:" + f.orgA.String() + ":read",
+			"runner:" + f.runnerA1.ID.String() + ":heartbeat",
+			"runner:" + f.runnerA1.ID.String() + ":jobs",
+		},
+		OrganizationID: &f.orgA,
+	}
+	selfMintedRouter := build(func(c *gin.Context) {
+		c.Set("auth_method", "api_key")
+		c.Set("api_key", selfMinted)
+		c.Next()
+	})
+
 	cases := []struct {
 		name   string
 		router *gin.Engine
 		want   int
 	}{
+		{"key with launcher and other scopes forbidden", selfMintedRouter, http.StatusForbidden},
 		{"runner token without an org forbidden", unboundRouter, http.StatusForbidden},
 		{"runner token for another org forbidden", mismatchRouter, http.StatusForbidden},
 		{"jwt identity blocked", jwtRouter, http.StatusUnauthorized},

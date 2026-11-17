@@ -675,6 +675,10 @@ func (h *AgentPoolHandlerV2) authorizeQueueDepth(c *gin.Context, pool *models.Ag
 			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have the launcher registration scope (runner:register) for this organization")
 			return false
 		}
+		if status, detail := registrationKeyVerdict(c, h.rbacService, pool.OrganizationID); status != 0 {
+			jsonapi.WriteError(c, status, http.StatusText(status), detail)
+			return false
+		}
 		// Pool-binding enforcement, matching runner registration: an agent token
 		// (tfe_agent_token) is bound to one pool and must not read another's depth.
 		// An ordinary org-level runner:register key has no binding and may read any

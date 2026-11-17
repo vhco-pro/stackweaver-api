@@ -4,6 +4,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -108,7 +109,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 		for _, id := range checker.GetScopedRunners() {
 			distinct[id] = struct{}{}
 		}
-		if len(distinct) != 1 {
+		if len(distinct) != 1 || !onlyRunnerScopes(apiKey.Scopes) {
 			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this API key is not a launcher token")
 			c.Abort()
 			return
@@ -142,6 +143,19 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 }
 
 // runnerTokenMatches reports whether a runner token's kind and organization fit its runner.
+// onlyRunnerScopes reports whether every scope is a runner scope. CreateRunnerToken mints launcher
+// tokens with runner scopes alone, while a key created on request must bind an organization with
+// an org, project or team scope; so a key that mixes the two was not issued at registration and
+// does not stand for the launcher it names.
+func onlyRunnerScopes(scopes models.StringArray) bool {
+	for _, raw := range scopes {
+		if typ, _, _ := strings.Cut(raw, ":"); typ != "runner" {
+			return false
+		}
+	}
+	return len(scopes) > 0
+}
+
 func runnerTokenMatches(key *models.APIKey, runner *models.Runner) bool {
 	if runner.IsHosted() {
 		return key.Kind == models.APIKeyKindHosted && key.OrganizationID == nil && runner.OrganizationID == nil

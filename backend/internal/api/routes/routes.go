@@ -18,6 +18,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/profile"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/sessions"
 	"github.com/michielvha/stackweaver/backend/internal/services/totp"
 	"github.com/michielvha/stackweaver/core/queue"
@@ -146,7 +147,9 @@ func SetupRoutes(
 		if apiKeyService != nil {
 			auditLogRepo := repository.NewAuditLogRepository(db)
 			activityService := activity.NewService(auditLogRepo)
-			apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyService, authService, activityService)
+			orgRepo := repository.NewOrganizationRepository(db)
+			rbacService := rbac.NewServiceWithTeams(orgRepo, repository.NewTeamRepository(db), repository.NewProjectRepository(db))
+			apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyService, authService, activityService, rbacService)
 			settings.GET("/api-keys", apiKeyHandler.ListAPIKeys)
 			settings.POST("/api-keys", apiKeyHandler.CreateAPIKey)
 			settings.DELETE("/api-keys/:id", apiKeyHandler.DeleteAPIKey)

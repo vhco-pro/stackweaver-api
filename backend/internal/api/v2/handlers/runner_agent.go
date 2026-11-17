@@ -22,6 +22,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
@@ -53,6 +54,7 @@ type RunnerAgentHandler struct {
 	jobExecRepo       *repository.RunnerJobExecutionRepository
 	poolRepo          *repository.AgentPoolRepository
 	apiKeyService     *apikey.Service
+	rbacService       *rbac.Service
 	ansibleJobRepo    *repository.AnsibleJobRepository
 	playbookRepo      *repository.AnsiblePlaybookRepository
 	inventoryRepo     *repository.AnsibleInventoryRepository
@@ -224,6 +226,42 @@ func (h *RunnerAgentHandler) SetLogBuffer(lb *logbuffer.RedisLogBuffer) {
 	h.logBuffer = lb
 }
 
+// SetRBACService injects the permission check that holds an organization registration key to its
+// owner's current permission (registrationKeyVerdict). Without it such keys register nothing; agent
+// and just-in-time tokens are unaffected.
+func (h *RunnerAgentHandler) SetRBACService(s *rbac.Service) {
+	h.rbacService = s
+}
+
+// registrationKeyVerdict holds an organization key carrying runner:register to its owner's current
+// permission. A key created on request stands for its owner, who must hold
+// org:manage-agent-pools in orgID now, so a key created before that was required, or whose owner
+// has since lost the permission, registers nothing. An agent token or a just-in-time token is a
+// pool credential issued under that permission and passes. It answers 0 when the key may act, or
+// the status and detail to refuse with.
+func registrationKeyVerdict(c *gin.Context, rbacService *rbac.Service, orgID uuid.UUID) (int, string) {
+	raw, _ := c.Get("api_key")
+	key, ok := raw.(*models.APIKey)
+	if !ok || key == nil {
+		return http.StatusUnauthorized, "API key required for launcher registration"
+	}
+	if key.IsAgentToken || key.IsJITToken {
+		return 0, ""
+	}
+	const refused = "the owner of this key may not manage the organization's agent pools, so it cannot register launchers; use an agent token of the pool"
+	if key.UserID == nil || rbacService == nil {
+		return http.StatusForbidden, refused
+	}
+	may, err := rbacService.CheckOrgManageAgentPools(c.Request.Context(), *key.UserID, orgID)
+	if err != nil {
+		return http.StatusInternalServerError, "the key owner's agent pool permission could not be read"
+	}
+	if !may {
+		return http.StatusForbidden, refused
+	}
+	return 0, ""
+}
+
 // RegisterRequest is runnercontract.RegisterRequest, the shared runner wire contract.
 type RegisterRequest = runnercontract.RegisterRequest
 
@@ -360,6 +398,10 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	// Check for runner:register permission on the organization
 	if !grantsRunnerRegister(scopeChecker, pool.OrganizationID) {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "API key does not have the launcher registration scope (runner:register) for this organization")
+		return
+	}
+	if status, detail := registrationKeyVerdict(c, h.rbacService, pool.OrganizationID); status != 0 {
+		jsonapi.WriteError(c, status, http.StatusText(status), detail)
 		return
 	}
 
