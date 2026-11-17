@@ -1114,6 +1114,8 @@
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible.(*JobHandler).ListByOrganization-fm",
       "query": [
+        "filter[job-template-id]",
+        "filter[playbook-id]",
         "page[number]",
         "page[size]"
       ]
