@@ -1545,7 +1545,7 @@ func SetupV2Routes(
 		// then bind each job to that runner's org/pool/assignment. Registered after
 		// /register so the middleware does not apply to it.
 		runnerAuthed := runnerAgent.Group("")
-		runnerAuthed.Use(middleware.RunnerAuth(runnerRepo), runnerRateLimit)
+		runnerAuthed.Use(middleware.RunnerAuth(runnerRepo, rbacService), runnerRateLimit)
 		{
 			// A job token (#933, D1) reaches one job's data and nothing that acts for the runner.
 			runnerAuthed.POST("/heartbeat", middleware.RequireRunnerToken(), runnerAgentHandler.Heartbeat)

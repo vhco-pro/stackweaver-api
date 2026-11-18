@@ -52,10 +52,13 @@ type agentPrepFixture struct {
 	jobDataStore *snapshotStore
 }
 
+// runnerTokenFor is the launcher token registration issues to r: its runner scopes, its
+// organization and, as the mark of registration's permission check, its pool.
 func runnerTokenFor(r *models.Runner) *models.APIKey {
 	return &models.APIKey{
 		Scopes:         models.StringArray{"runner:" + r.ID.String() + ":heartbeat", "runner:" + r.ID.String() + ":jobs"},
 		OrganizationID: r.OrganizationID,
+		AgentPoolID:    r.AgentPoolID,
 	}
 }
 
@@ -151,7 +154,7 @@ func (f *agentPrepFixture) router(register func(authed *gin.RouterGroup)) *gin.E
 		c.Next()
 	})
 	authed := r.Group("/api/v2/runner")
-	authed.Use(middleware.RunnerAuth(repository.NewRunnerRepository(f.db)))
+	authed.Use(middleware.RunnerAuth(repository.NewRunnerRepository(f.db), nil))
 	register(authed)
 	return r
 }

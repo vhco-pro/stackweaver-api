@@ -86,7 +86,7 @@ func setupRateLimitFixture(t *testing.T, db *gorm.DB, svc *apikey.Service) *rate
 	// Each runner's token, minted as registration mints it (bcrypt-hashed, stored), in parallel.
 	f.tokens = make([]string, launchers)
 	parallel(t, launchers, func(i int) error {
-		_, raw, err := svc.CreateRunnerToken(owner.ID, f.runners[i].ID, org.ID, "ratelimit runner "+strconv.Itoa(i))
+		_, raw, err := svc.CreateRunnerToken(owner.ID, f.runners[i].ID, org.ID, *f.runners[i].AgentPoolID, "ratelimit runner "+strconv.Itoa(i))
 		f.tokens[i] = raw
 		return err
 	})
@@ -152,7 +152,7 @@ func productionChain(db *gorm.DB, svc *apikey.Service) *gin.Engine {
 	v2.Use(AuthMiddleware(authSvc))
 	v2.GET("/organizations", func(c *gin.Context) { c.Status(http.StatusOK) })
 	runner := v2.Group("/runner")
-	runner.Use(RunnerAuth(repository.NewRunnerRepository(db)), RunnerPrincipalRateLimit(RunnerRateBudgetsFrom(func(string) string { return "" })))
+	runner.Use(RunnerAuth(repository.NewRunnerRepository(db), nil), RunnerPrincipalRateLimit(RunnerRateBudgetsFrom(func(string) string { return "" })))
 	runner.POST("/heartbeat", RequireRunnerToken(), func(c *gin.Context) { c.Status(http.StatusOK) })
 	runner.POST("/jobs/:id/output", func(c *gin.Context) { c.Status(http.StatusOK) })
 	return r

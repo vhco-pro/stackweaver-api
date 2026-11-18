@@ -137,6 +137,14 @@ func TestRegisterAuthz(t *testing.T) {
 			f.db.Where("scopes::text LIKE ?", "%runner:"+runner.ID.String()+":%").Delete(&models.APIKey{})
 			f.db.Where("id = ?", runner.ID).Delete(&models.Runner{})
 		})
+		// The launcher token registration issued carries the pool, the mark RunnerAuth trusts.
+		var token models.APIKey
+		if err := f.db.First(&token, "scopes::text LIKE ?", "%runner:"+runner.ID.String()+":%").Error; err != nil {
+			t.Fatalf("no launcher token after a successful registration: %v", err)
+		}
+		if token.AgentPoolID == nil || *token.AgentPoolID != f.poolA {
+			t.Errorf("launcher token pool = %v, want %s", token.AgentPoolID, f.poolA)
+		}
 	})
 
 	// A registration key stands for its owner: one whose owner may not manage the agent pools
