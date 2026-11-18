@@ -348,6 +348,12 @@ func (s *Service) CreateRunnerToken(userID, runnerID, orgID, poolID uuid.UUID, n
 	return apiKey, key, nil
 }
 
+// RunnerTokens lists a customer launcher's live launcher tokens (organization keys with its runner
+// scopes), for RunnerAuth's check of a job token minted before launcher tokens were marked.
+func (s *Service) RunnerTokens(runnerID uuid.UUID) ([]*models.APIKey, error) {
+	return s.apiKeyRepo.LiveByScopePrefix("runner:"+runnerID.String()+":", models.APIKeyKindOrg, time.Now())
+}
+
 // RunnerTokenTTL is how long a runner token lives without a heartbeat (#933, D1). Every heartbeat
 // past half of it renews it (RenewRunnerToken), so a running launcher never sees it expire, while
 // the token of a runner that stopped calling dies on its own.

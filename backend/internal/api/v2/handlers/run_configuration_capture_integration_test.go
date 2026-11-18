@@ -580,7 +580,7 @@ func TestConfigurationCapture_AReclaimedAttemptChangesNothing(t *testing.T) {
 		var newer *models.APIKey
 		f.h.beforeWorkItemFinish = func(id string) {
 			reclaim(id)
-			key, _, err := f.svc.CreateJobToken(f.orgA, apikey.JobPrincipal{Kind: models.JobTypeWorkItem, JobID: id, RunnerID: f.runnerA2.ID, Attempt: 2}, time.Now().Add(time.Hour))
+			key, _, err := f.svc.CreateJobToken(f.orgA, f.runnerA2.AgentPoolID, apikey.JobPrincipal{Kind: models.JobTypeWorkItem, JobID: id, RunnerID: f.runnerA2.ID, Attempt: 2}, time.Now().Add(time.Hour))
 			if err != nil {
 				t.Errorf("mint the newer attempt's token: %v", err)
 			}

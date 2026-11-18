@@ -97,12 +97,12 @@ func setupRateLimitFixture(t *testing.T, db *gorm.DB, svc *apikey.Service) *rate
 	parallel(t, executors+1, func(i int) error {
 		if i == executors {
 			f.noisyJob = "run-rlnoisy" + sfx
-			_, raw, err := svc.CreateJobToken(org.ID, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: f.noisyJob, RunnerID: f.runners[0].ID, Attempt: 1}, expires)
+			_, raw, err := svc.CreateJobToken(org.ID, f.runners[0].AgentPoolID, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: f.noisyJob, RunnerID: f.runners[0].ID, Attempt: 1}, expires)
 			f.noisyToken = raw
 			return err
 		}
 		f.jobIDs[i] = "run-rl" + strconv.Itoa(100+i) + sfx
-		_, raw, err := svc.CreateJobToken(org.ID, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: f.jobIDs[i], RunnerID: f.runners[i].ID, Attempt: 1}, expires)
+		_, raw, err := svc.CreateJobToken(org.ID, f.runners[i].AgentPoolID, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: f.jobIDs[i], RunnerID: f.runners[i].ID, Attempt: 1}, expires)
 		f.jobTokens[i] = raw
 		return err
 	})

@@ -133,7 +133,7 @@ func (h *RunnerAgentHandler) JobToken(c *gin.Context) {
 
 	expiresAt := time.Now().Add(time.Duration(timeout)*time.Second + apikey.JobTokenGrace)
 	principal := apikey.JobPrincipal{Kind: kind, JobID: jobID, RunnerID: runner.ID, Attempt: attempt}
-	_, raw, err := h.apiKeyService.CreateJobToken(orgID, principal, expiresAt)
+	_, raw, err := h.apiKeyService.CreateJobToken(orgID, runner.AgentPoolID, principal, expiresAt)
 	if err != nil {
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return

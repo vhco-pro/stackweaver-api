@@ -131,7 +131,7 @@ func (f *agentPrepFixture) mixedVersionAPI(t *testing.T) *mixedVersionAPI {
 // mint mints the job token of a run claimed by runner, as the launcher's /token call does.
 func (m *mixedVersionAPI) mint(t *testing.T, f *agentPrepFixture, run *models.Run, runner *models.Runner) string {
 	t.Helper()
-	key, raw, err := m.svc.CreateJobToken(f.orgA, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: run.ID, RunnerID: runner.ID, Attempt: 1}, time.Now().Add(time.Hour))
+	key, raw, err := m.svc.CreateJobToken(f.orgA, runner.AgentPoolID, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: run.ID, RunnerID: runner.ID, Attempt: 1}, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,7 +88,11 @@ func ParseJobPrincipal(scopes []string) (p JobPrincipal, ok bool) {
 
 // CreateJobToken mints the job token for principal p of a job in orgID, valid until expiresAt.
 // The token has no owner and the job kind; the caller has authorized the runner's claim.
-func (s *Service) CreateJobToken(orgID uuid.UUID, p JobPrincipal, expiresAt time.Time) (*models.APIKey, string, error) {
+//
+// poolID is the agent pool of the launcher the token is minted for, nil for a hosted launcher. It
+// is stored as the token's AgentPoolID, marking the token as minted for a launcher that passed
+// RunnerAuth as it now works (a customer job token without it predates that check).
+func (s *Service) CreateJobToken(orgID uuid.UUID, poolID *uuid.UUID, p JobPrincipal, expiresAt time.Time) (*models.APIKey, string, error) {
 	key, err := GenerateAPIKey()
 	if err != nil {
 		return nil, "", fmt.Errorf("generating job token: %w", err)
@@ -104,6 +108,7 @@ func (s *Service) CreateJobToken(orgID uuid.UUID, p JobPrincipal, expiresAt time
 		KeyPrefix:      GetKeyPrefix(key),
 		Scopes:         jobScopes(p),
 		OrganizationID: &orgID,
+		AgentPoolID:    poolID,
 		ExpiresAt:      &expiresAt,
 	}
 	if err := s.apiKeyRepo.Create(apiKey); err != nil {

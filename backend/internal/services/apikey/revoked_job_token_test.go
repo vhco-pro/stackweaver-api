@@ -33,7 +33,7 @@ func TestRevokedJobToken_RecognisedAfterRevocation(t *testing.T) {
 	svc := NewService(repo, nil, nil, nil)
 	jobID := "run-" + uuid.NewString()[:12]
 	p := JobPrincipal{Kind: models.JobTypeTofuRun, JobID: jobID, RunnerID: uuid.New(), Attempt: 1}
-	key, raw, err := svc.CreateJobToken(uuid.New(), p, time.Now().Add(time.Hour))
+	key, raw, err := svc.CreateJobToken(uuid.New(), nil, p, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("minting: %v", err)
 	}
