@@ -58,6 +58,9 @@ func TestRegistryToken_MintedPerJobAndScopedToItsOrganization(t *testing.T) {
 	if key.Kind != models.APIKeyKindJob || key.UserID != nil || key.OrganizationID == nil || *key.OrganizationID != f.orgA {
 		t.Fatalf("registry token: kind %q owner %v org %v", key.Kind, key.UserID, key.OrganizationID)
 	}
+	if key.AgentPoolID == nil || *key.AgentPoolID != f.poolA {
+		t.Fatalf("registry token pool = %v, want the run's pool %s", key.AgentPoolID, f.poolA)
+	}
 
 	// The registry protocol's read check accepts it for organization A's private artifacts and
 	// for no other organization's.
@@ -82,6 +85,15 @@ func TestRegistryToken_MintedPerJobAndScopedToItsOrganization(t *testing.T) {
 		t.Error("the registry token read another organization's private registry")
 	}
 
+	// A registry token without its job's pool, as one minted before registry tokens carried it,
+	// cannot be traced to its launcher and is refused.
+	if err := f.db.Model(&models.APIKey{}).Where("id = ?", key.ID).Update("agent_pool_id", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	if read("a") {
+		t.Error("a registry token without its job's pool read its organization's private registry")
+	}
+
 	// A second fetch replaces the job's registry token rather than adding one.
 	_, _ = artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob)
 	var n int64
@@ -89,6 +101,25 @@ func TestRegistryToken_MintedPerJobAndScopedToItsOrganization(t *testing.T) {
 	if n != 1 {
 		t.Errorf("registry tokens for the job after two fetches = %d, want 1", n)
 	}
+
+	// A run without its own pool is authorized through its workspace's, and its registry token
+	// carries that pool.
+	var ws models.Workspace
+	if err := f.db.First(&ws, "id = ?", run.WorkspaceID).Error; err != nil || ws.AgentPoolID == nil {
+		t.Fatalf("the run's workspace has no pool: %v", err)
+	}
+	if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Update("agent_pool_id", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	arts, _ = artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob)
+	if arts.Registry == nil || len(arts.Registry.Hosts) != 1 {
+		t.Fatalf("registry block for a run without its own pool = %+v, want one token", arts.Registry)
+	}
+	fallback, err := svc.VerifyAPIKey(arts.Registry.Hosts[0].Token)
+	if err != nil || fallback.AgentPoolID == nil || *fallback.AgentPoolID != *ws.AgentPoolID {
+		t.Fatalf("registry token of a run without its own pool: pool %v (err %v), want the workspace's %s", fallback, err, *ws.AgentPoolID)
+	}
+	token = arts.Registry.Hosts[0].Token
 
 	// Revocation with the job's tokens removes it.
 	if err := svc.RevokeJobTokens(models.JobTypeTofuRun, run.ID); err != nil {

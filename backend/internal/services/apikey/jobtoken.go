@@ -157,7 +157,11 @@ func (s *Service) IsRevokedJobToken(key string) bool {
 // key with registry:read for orgID, accepted by the registry protocol's read check for that
 // organization's private artifacts and by nothing else. It is a separate credential from the job
 // token because it is exported into the engine's environment, where the job token never is.
-func (s *Service) CreateJobRegistryToken(orgID uuid.UUID, kind models.JobType, jobID string, expiresAt time.Time) (string, error) {
+//
+// poolID is the job's agent pool (the hosted pool for hosted capacity), stored as the token's
+// AgentPoolID: IsJobRegistryTokenFor accepts only a registry token with it, so one minted before
+// registry tokens carried their job's pool, which cannot be traced to its launcher, is refused.
+func (s *Service) CreateJobRegistryToken(orgID, poolID uuid.UUID, kind models.JobType, jobID string, expiresAt time.Time) (string, error) {
 	key, err := GenerateAPIKey()
 	if err != nil {
 		return "", fmt.Errorf("generating registry token: %w", err)
@@ -173,6 +177,7 @@ func (s *Service) CreateJobRegistryToken(orgID uuid.UUID, kind models.JobType, j
 		KeyPrefix:      GetKeyPrefix(key),
 		Scopes:         models.StringArray{registryReadScope, jobRegistryScopePrefix + string(kind) + ":" + jobID},
 		OrganizationID: &orgID,
+		AgentPoolID:    &poolID,
 		ExpiresAt:      &expiresAt,
 	}
 	if err := s.apiKeyRepo.Create(apiKey); err != nil {
@@ -186,9 +191,10 @@ func (s *Service) RevokeJobRegistryTokens(kind models.JobType, jobID string) err
 	return s.apiKeyRepo.DeleteByScopePrefix(jobRegistryScopePrefix + string(kind) + ":" + jobID)
 }
 
-// IsJobRegistryTokenFor reports whether key is a job's registry token for orgID.
+// IsJobRegistryTokenFor reports whether key is a job's registry token for orgID, minted with its
+// job's pool (CreateJobRegistryToken).
 func IsJobRegistryTokenFor(key *models.APIKey, orgID uuid.UUID) bool {
-	if key == nil || key.Kind != models.APIKeyKindJob || key.OrganizationID == nil || *key.OrganizationID != orgID {
+	if key == nil || key.Kind != models.APIKeyKindJob || key.OrganizationID == nil || *key.OrganizationID != orgID || key.AgentPoolID == nil {
 		return false
 	}
 	return slices.Contains(key.Scopes, registryReadScope)

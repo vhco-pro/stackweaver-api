@@ -1602,9 +1602,18 @@ func (h *RunnerAgentHandler) jobRegistryBlock(c *gin.Context, run *models.Run) *
 	if err := h.apiKeyService.RevokeJobRegistryTokens(models.JobTypeTofuRun, run.ID); err != nil {
 		logger.Warnf("replacing the registry token of run %s: %v", run.ID, err)
 	}
+	// The run's pool, falling back to its workspace's, as runOrgAndPool authorized it.
+	pool := run.AgentPoolID
+	if pool == nil {
+		pool = run.Workspace.AgentPoolID
+	}
+	if pool == nil {
+		logger.Warnf("run %s has no agent pool to mint its registry token for", run.ID)
+		return nil
+	}
 	timeout := settings.EffectiveWorkspaceRunTimeout(&run.Workspace, settings.DeploymentRunTimeout(os.Getenv)).Value
 	expiresAt := time.Now().Add(time.Duration(timeout)*time.Second + apikey.JobTokenGrace)
-	token, err := h.apiKeyService.CreateJobRegistryToken(run.Workspace.Project.OrganizationID, models.JobTypeTofuRun, run.ID, expiresAt)
+	token, err := h.apiKeyService.CreateJobRegistryToken(run.Workspace.Project.OrganizationID, *pool, models.JobTypeTofuRun, run.ID, expiresAt)
 	if err != nil {
 		logger.Warnf("minting the registry token of run %s: %v", run.ID, err)
 		return nil
