@@ -195,7 +195,7 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 	build := func(authSetter gin.HandlerFunc) *gin.Engine {
 		r := gin.New()
 		r.Use(authSetter)
-		r.Use(middleware.RunnerAuth(runnerRepo, rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo)))
+		r.Use(middleware.RunnerAuth(runnerRepo, &middleware.LauncherTrust{Permissions: rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo), Tokens: apiKeySvc}))
 		r.GET("/probe", func(c *gin.Context) {
 			runner, ok := callingRunner(c)
 			if !ok {
@@ -303,11 +303,44 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 		c.Next()
 	})
 
+	// Job tokens carry their launcher's pool too. One minted before that mark stands only while its
+	// launcher holds a launcher token RunnerAuth accepts: runner A1 holds the marked token above,
+	// runner A2 only an unmarked one whose owner may not manage the agent pools.
+	a2Unmarked := &models.APIKey{
+		Name: "runauthz-a2-unmarked", Kind: models.APIKeyKindOrg, KeyHash: "runauthz-a2-" + uuid.NewString(), KeyPrefix: "tfe-a2un",
+		Scopes:         models.StringArray{"runner:" + f.runnerA2.ID.String() + ":heartbeat", "runner:" + f.runnerA2.ID.String() + ":jobs"},
+		OrganizationID: &f.orgA, UserID: &user.ID,
+	}
+	if err := f.db.Create(a2Unmarked).Error; err != nil {
+		t.Fatalf("seed A2 launcher token: %v", err)
+	}
+	jobRouter := func(runner *models.Runner, marked bool) *gin.Engine {
+		key, _, err := apiKeySvc.CreateJobToken(f.orgA, runner.AgentPoolID, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: "run-" + uuid.NewString()[:8], RunnerID: runner.ID, Attempt: 1}, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatalf("mint job token: %v", err)
+		}
+		t.Cleanup(func() { f.db.Where("id = ?", key.ID).Delete(&models.APIKey{}) })
+		if key.AgentPoolID == nil || *key.AgentPoolID != *runner.AgentPoolID {
+			t.Fatalf("a job token carries pool %v, want %s", key.AgentPoolID, *runner.AgentPoolID)
+		}
+		if !marked {
+			key.AgentPoolID = nil
+		}
+		return build(func(c *gin.Context) {
+			c.Set("auth_method", "api_key")
+			c.Set("api_key", key)
+			c.Next()
+		})
+	}
+
 	cases := []struct {
 		name   string
 		router *gin.Engine
 		want   int
 	}{
+		{"unmarked job token of a launcher without an accepted launcher token forbidden", jobRouter(f.runnerA2, false), http.StatusForbidden},
+		{"unmarked job token of a launcher with a marked launcher token resolves", jobRouter(f.runnerA1, false), http.StatusOK},
+		{"marked job token resolves", jobRouter(f.runnerA2, true), http.StatusOK},
 		{"unmarked token whose owner may not manage agent pools forbidden", unmarkedRouter, http.StatusForbidden},
 		{"unmarked token whose owner may manage agent pools resolves", unmarkedAdminRouter, http.StatusOK},
 		{"key with launcher and other scopes forbidden", selfMintedRouter, http.StatusForbidden},

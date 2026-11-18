@@ -47,8 +47,10 @@ const JobPrincipalKey = "job_principal"
 // AgentPoolID (apikey.CreateRunnerToken), which says registration checked the credential for
 // agent pool permission. A token without that mark was issued before the check, so it stands only
 // while its owner, the user whose key registered the launcher, may still manage the
-// organization's agent pools. permissions answers that; with none, such tokens are refused.
-func RunnerAuth(runnerRepo *repository.RunnerRepository, permissions AgentPoolPermission) gin.HandlerFunc {
+// organization's agent pools. A customer job token carries the same mark (apikey.CreateJobToken);
+// one without it was minted before, so it stands only while its launcher's token would. trust
+// answers both; with none, unmarked tokens are refused.
+func RunnerAuth(runnerRepo *repository.RunnerRepository, trust *LauncherTrust) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Only API-key identities may act as runners. Block JWT/browser sessions.
 		if method, _ := c.Get("auth_method"); method != "api_key" {
@@ -94,6 +96,13 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository, permissions AgentPoolPe
 				jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "this job token is for a different job")
 				c.Abort()
 				return
+			}
+			if !runner.IsHosted() && apiKey.AgentPoolID == nil {
+				if status, detail := unmarkedJobTokenVerdict(c, trust, runner); status != 0 {
+					jsonapi.WriteError(c, status, http.StatusText(status), detail)
+					c.Abort()
+					return
+				}
 			}
 			c.Set(CallingRunnerKey, runner)
 			c.Set(JobPrincipalKey, principal)
@@ -144,7 +153,7 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository, permissions AgentPoolPe
 			return
 		}
 		if !runner.IsHosted() && apiKey.AgentPoolID == nil {
-			if status, detail := unmarkedTokenVerdict(c, permissions, apiKey, runner); status != 0 {
+			if status, detail := unmarkedTokenVerdict(c, trust, apiKey, runner); status != 0 {
 				jsonapi.WriteError(c, status, http.StatusText(status), detail)
 				c.Abort()
 				return
@@ -163,15 +172,25 @@ type AgentPoolPermission interface {
 	CheckOrgManageAgentPools(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
 }
 
+// LauncherTokenSource lists a customer launcher's live launcher tokens
+// (apikey.Service.RunnerTokens).
+type LauncherTokenSource interface {
+	RunnerTokens(runnerID uuid.UUID) ([]*models.APIKey, error)
+}
+
+// LauncherTrust is what RunnerAuth needs to judge a token minted before tokens were marked: the
+// permission its owner must hold, and the launcher tokens a job token's launcher holds.
+type LauncherTrust struct {
+	Permissions AgentPoolPermission
+	Tokens      LauncherTokenSource
+}
+
 // unmarkedTokenVerdict holds a launcher token issued before registration checked agent pool
 // permission to its owner's current permission. It answers 0 when the token may act, or the
 // status and detail to refuse with.
-func unmarkedTokenVerdict(c *gin.Context, permissions AgentPoolPermission, key *models.APIKey, runner *models.Runner) (int, string) {
+func unmarkedTokenVerdict(c *gin.Context, trust *LauncherTrust, key *models.APIKey, runner *models.Runner) (int, string) {
 	const refused = "this launcher token was issued before launcher registration required permission to manage agent pools, and its owner does not have it; restart the launcher to register it again"
-	if permissions == nil || key.UserID == nil || runner.OrganizationID == nil {
-		return http.StatusForbidden, refused
-	}
-	may, err := permissions.CheckOrgManageAgentPools(c.Request.Context(), *key.UserID, *runner.OrganizationID)
+	may, err := launcherTokenStands(c.Request.Context(), trust, key, runner)
 	if err != nil {
 		return http.StatusInternalServerError, "the launcher token owner's agent pool permission could not be read"
 	}
@@ -179,6 +198,46 @@ func unmarkedTokenVerdict(c *gin.Context, permissions AgentPoolPermission, key *
 		return http.StatusForbidden, refused
 	}
 	return 0, ""
+}
+
+// unmarkedJobTokenVerdict holds a customer job token minted before job tokens were marked to its
+// launcher: it stands only while the launcher holds a launcher token RunnerAuth accepts. It
+// answers 0 when the token may act, or the status and detail to refuse with.
+func unmarkedJobTokenVerdict(c *gin.Context, trust *LauncherTrust, runner *models.Runner) (int, string) {
+	const refused = "this job token was minted for a launcher whose registration does not meet the agent pool permission check; register the launcher again and rerun the job"
+	if trust == nil || trust.Tokens == nil {
+		return http.StatusForbidden, refused
+	}
+	tokens, err := trust.Tokens.RunnerTokens(runner.ID)
+	if err != nil {
+		return http.StatusInternalServerError, "the launcher's tokens could not be read"
+	}
+	for _, t := range tokens {
+		if !onlyRunnerScopes(t.Scopes) || !runnerTokenMatches(t, runner) {
+			continue
+		}
+		may, err := launcherTokenStands(c.Request.Context(), trust, t, runner)
+		if err != nil {
+			return http.StatusInternalServerError, "the launcher token owner's agent pool permission could not be read"
+		}
+		if may {
+			return 0, ""
+		}
+	}
+	return http.StatusForbidden, refused
+}
+
+// launcherTokenStands reports whether RunnerAuth accepts key as runner's launcher token on
+// provenance: marked with a pool at registration, or unmarked with an owner who may still manage
+// the organization's agent pools.
+func launcherTokenStands(ctx context.Context, trust *LauncherTrust, key *models.APIKey, runner *models.Runner) (bool, error) {
+	if key.AgentPoolID != nil {
+		return true, nil
+	}
+	if trust == nil || trust.Permissions == nil || key.UserID == nil || runner.OrganizationID == nil {
+		return false, nil
+	}
+	return trust.Permissions.CheckOrgManageAgentPools(ctx, *key.UserID, *runner.OrganizationID)
 }
 
 // onlyRunnerScopes reports whether every scope is a runner scope. CreateRunnerToken mints launcher
