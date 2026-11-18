@@ -742,6 +742,13 @@ func (h *AgentPoolHandlerV2) JITToken(c *gin.Context) {
 	if !h.authorizeQueueDepth(c, pool, id) {
 		return
 	}
+	// A just-in-time token registers one launcher once; it never mints another.
+	if raw, ok := c.Get("api_key"); ok {
+		if k, ok := raw.(*models.APIKey); ok && k != nil && k.IsJITToken {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "a just-in-time token cannot mint another")
+			return
+		}
+	}
 	var req JITTokenRequest
 	if c.Request.ContentLength != 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -761,6 +768,19 @@ func (h *AgentPoolHandlerV2) JITToken(c *gin.Context) {
 	owner, ok := h.jitOwner(c)
 	if !ok {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "a just-in-time token is minted with a user's credential")
+		return
+	}
+	// The token is held to its owner at registration (registrationKeyVerdict), so it is minted only
+	// for an owner who may manage the organization's agent pools now.
+	if h.rbacService == nil {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "just-in-time tokens cannot be minted on this server")
+		return
+	}
+	if may, err := h.rbacService.CheckOrgManageAgentPools(c.Request.Context(), owner, pool.OrganizationID); err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	} else if !may {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "the user behind this credential may not manage the organization's agent pools, so it cannot mint a just-in-time token")
 		return
 	}
 	key, token, err := h.apiKeyService.CreateJITToken(owner, pool.ID, pool.OrganizationID, ttl)
