@@ -637,8 +637,11 @@ func (h *RunnerAgentHandler) generateRunnerAPIKey(runner *models.Runner, userID 
 	if h.apiKeyService == nil {
 		return "", fmt.Errorf("api key service not configured for launcher token minting")
 	}
+	if runner.AgentPoolID == nil {
+		return "", fmt.Errorf("launcher %s has no agent pool to mint its token for", runner.ID)
+	}
 	_ = h.apiKeyService.DeleteAPIKeysForRunner(runner.ID)
-	_, rawKey, err := h.apiKeyService.CreateRunnerToken(userID, runner.ID, runner.OrgID(), "runner-"+runner.Name)
+	_, rawKey, err := h.apiKeyService.CreateRunnerToken(userID, runner.ID, runner.OrgID(), *runner.AgentPoolID, "runner-"+runner.Name)
 	if err != nil {
 		return "", err
 	}

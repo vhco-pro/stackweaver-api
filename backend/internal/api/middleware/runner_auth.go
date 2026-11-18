@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -41,7 +42,13 @@ const JobPrincipalKey = "job_principal"
 //
 // The /runner/register route is exempt (a runner has no identity yet): it stays on
 // the org-scoped runner:register key path.
-func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
+//
+// A customer launcher token minted at registration carries the launcher's pool as its
+// AgentPoolID (apikey.CreateRunnerToken), which says registration checked the credential for
+// agent pool permission. A token without that mark was issued before the check, so it stands only
+// while its owner, the user whose key registered the launcher, may still manage the
+// organization's agent pools. permissions answers that; with none, such tokens are refused.
+func RunnerAuth(runnerRepo *repository.RunnerRepository, permissions AgentPoolPermission) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Only API-key identities may act as runners. Block JWT/browser sessions.
 		if method, _ := c.Get("auth_method"); method != "api_key" {
@@ -136,6 +143,13 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if !runner.IsHosted() && apiKey.AgentPoolID == nil {
+			if status, detail := unmarkedTokenVerdict(c, permissions, apiKey, runner); status != 0 {
+				jsonapi.WriteError(c, status, http.StatusText(status), detail)
+				c.Abort()
+				return
+			}
+		}
 
 		c.Set(CallingRunnerKey, runner)
 		c.Next()
@@ -143,6 +157,30 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository) gin.HandlerFunc {
 }
 
 // runnerTokenMatches reports whether a runner token's kind and organization fit its runner.
+// AgentPoolPermission answers whether a user may manage an organization's agent pools
+// (rbac.Service.CheckOrgManageAgentPools).
+type AgentPoolPermission interface {
+	CheckOrgManageAgentPools(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
+}
+
+// unmarkedTokenVerdict holds a launcher token issued before registration checked agent pool
+// permission to its owner's current permission. It answers 0 when the token may act, or the
+// status and detail to refuse with.
+func unmarkedTokenVerdict(c *gin.Context, permissions AgentPoolPermission, key *models.APIKey, runner *models.Runner) (int, string) {
+	const refused = "this launcher token was issued before launcher registration required permission to manage agent pools, and its owner does not have it; restart the launcher to register it again"
+	if permissions == nil || key.UserID == nil || runner.OrganizationID == nil {
+		return http.StatusForbidden, refused
+	}
+	may, err := permissions.CheckOrgManageAgentPools(c.Request.Context(), *key.UserID, *runner.OrganizationID)
+	if err != nil {
+		return http.StatusInternalServerError, "the launcher token owner's agent pool permission could not be read"
+	}
+	if !may {
+		return http.StatusForbidden, refused
+	}
+	return 0, ""
+}
+
 // onlyRunnerScopes reports whether every scope is a runner scope. CreateRunnerToken mints launcher
 // tokens with runner scopes alone, while a key created on request must bind an organization with
 // an org, project or team scope; so a key that mixes the two was not issued at registration and

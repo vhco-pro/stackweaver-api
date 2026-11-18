@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -183,7 +184,7 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 	})
 
 	// A valid runner token for runnerA1, and a non-runner org token.
-	_, runnerTokenRaw, err := apiKeySvc.CreateRunnerToken(user.ID, f.runnerA1.ID, f.orgA, "test-runner-token")
+	_, runnerTokenRaw, err := apiKeySvc.CreateRunnerToken(user.ID, f.runnerA1.ID, f.orgA, f.poolA, "test-runner-token")
 	if err != nil {
 		t.Fatalf("mint runner token: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 	build := func(authSetter gin.HandlerFunc) *gin.Engine {
 		r := gin.New()
 		r.Use(authSetter)
-		r.Use(middleware.RunnerAuth(runnerRepo))
+		r.Use(middleware.RunnerAuth(runnerRepo, rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo)))
 		r.GET("/probe", func(c *gin.Context) {
 			runner, ok := callingRunner(c)
 			if !ok {
@@ -263,11 +264,52 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 		c.Next()
 	})
 
+	// Launcher tokens issued before registration checked agent pool permission carry no pool. Such
+	// a token stands only while its owner may manage the organization's agent pools: user is not
+	// even a member of org A, poolAdmin owns it.
+	poolAdmin := &models.User{ID: uuid.New(), ZitadelSubject: "runauthz-adm-" + uuid.NewString()[:8], Email: "runauthz-adm-" + uuid.NewString()[:8] + "@test.local"}
+	owners := &models.Team{ID: uuid.New(), OrganizationID: f.orgA, Name: "owners"}
+	for _, row := range []any{
+		poolAdmin, owners,
+		&models.OrganizationMember{ID: uuid.New(), OrganizationID: f.orgA, UserID: poolAdmin.ID},
+		&models.TeamMember{ID: uuid.New(), TeamID: owners.ID, UserID: poolAdmin.ID},
+	} {
+		if err := f.db.Create(row).Error; err != nil {
+			t.Fatalf("seed %T: %v", row, err)
+		}
+	}
+	t.Cleanup(func() {
+		f.db.Where("team_id = ?", owners.ID).Delete(&models.TeamMember{})
+		f.db.Where("id = ?", owners.ID).Delete(&models.Team{})
+		f.db.Where("user_id = ?", poolAdmin.ID).Delete(&models.OrganizationMember{})
+		f.db.Where("id = ?", poolAdmin.ID).Delete(&models.User{})
+	})
+	if runnerKey.AgentPoolID == nil || *runnerKey.AgentPoolID != f.poolA {
+		t.Fatalf("a launcher token carries pool %v, want %s", runnerKey.AgentPoolID, f.poolA)
+	}
+	unmarked := *runnerKey
+	unmarked.AgentPoolID = nil
+	unmarkedRouter := build(func(c *gin.Context) {
+		c.Set("auth_method", "api_key")
+		c.Set("api_key", &unmarked)
+		c.Next()
+	})
+	unmarkedAdmin := *runnerKey
+	unmarkedAdmin.AgentPoolID = nil
+	unmarkedAdmin.UserID = &poolAdmin.ID
+	unmarkedAdminRouter := build(func(c *gin.Context) {
+		c.Set("auth_method", "api_key")
+		c.Set("api_key", &unmarkedAdmin)
+		c.Next()
+	})
+
 	cases := []struct {
 		name   string
 		router *gin.Engine
 		want   int
 	}{
+		{"unmarked token whose owner may not manage agent pools forbidden", unmarkedRouter, http.StatusForbidden},
+		{"unmarked token whose owner may manage agent pools resolves", unmarkedAdminRouter, http.StatusOK},
 		{"key with launcher and other scopes forbidden", selfMintedRouter, http.StatusForbidden},
 		{"runner token without an org forbidden", unboundRouter, http.StatusForbidden},
 		{"runner token for another org forbidden", mismatchRouter, http.StatusForbidden},
@@ -326,7 +368,7 @@ func TestRunnerAuthz_HeartbeatRenewsTheRunnerToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { f.db.Where("id = ?", owner.ID).Delete(&models.User{}) })
-	key, _, err := svc.CreateRunnerToken(owner.ID, f.runnerA1.ID, f.orgA, "renewal-"+sfx)
+	key, _, err := svc.CreateRunnerToken(owner.ID, f.runnerA1.ID, f.orgA, f.poolA, "renewal-"+sfx)
 	if err == nil {
 		t.Cleanup(func() { f.db.Where("id = ?", key.ID).Delete(&models.APIKey{}) })
 	}

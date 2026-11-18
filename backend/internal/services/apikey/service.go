@@ -304,7 +304,12 @@ func (s *Service) CreateUserTokenWithScopes(userID uuid.UUID, name string, expir
 // identity minted by an already-authorized registration (the caller presented an
 // org-scoped key carrying runner:register). The token is org-bound so every
 // downstream authorization check can compare the runner's org to the target job.
-func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name string) (*models.APIKey, string, error) {
+//
+// poolID is the agent pool the launcher registered into. It is stored as the token's AgentPoolID,
+// which marks the token as issued through registration as it now works, where the registration
+// credential was checked for agent pool permission (RunnerAuth trusts a token with this mark; one
+// without it predates the check and stands only while its owner still holds that permission).
+func (s *Service) CreateRunnerToken(userID, runnerID, orgID, poolID uuid.UUID, name string) (*models.APIKey, string, error) {
 	key, err := GenerateAPIKey()
 	if err != nil {
 		return nil, "", fmt.Errorf("generating the launcher token: %w", err)
@@ -332,6 +337,7 @@ func (s *Service) CreateRunnerToken(userID, runnerID, orgID uuid.UUID, name stri
 		KeyPrefix:      GetKeyPrefix(key),
 		Scopes:         scopes,
 		OrganizationID: &orgID,
+		AgentPoolID:    &poolID,
 		ExpiresAt:      &expiresAt,
 	}
 

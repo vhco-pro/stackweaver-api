@@ -79,7 +79,7 @@ func (f *agentPrepFixture) releaseN1(svc *apikey.Service) *gin.Engine {
 	}
 	r := gin.New()
 	runner := r.Group("/api/v2/runner")
-	runner.Use(middleware.AuthMiddleware(authSvc), middleware.RunnerAuth(repository.NewRunnerRepository(f.db)))
+	runner.Use(middleware.AuthMiddleware(authSvc), middleware.RunnerAuth(repository.NewRunnerRepository(f.db), nil))
 	runner.GET("/jobs/:id/status", h.GetJobStatus)
 	runner.GET("/jobs/:id/artifacts", middleware.JobData(), h.GetJobArtifacts)
 	runner.POST("/jobs/:id/output", h.JobOutput)

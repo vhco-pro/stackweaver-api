@@ -154,11 +154,11 @@ func TestRunnerDelete_LosingConcurrentDeleteIsNotFound(t *testing.T) {
 func TestRunnerDelete_RemovesTheLaunchersTokens(t *testing.T) {
 	f := setupRunnerDeleteFixture(t)
 	other := uuid.New()
-	own, _, err := f.keys.CreateRunnerToken(f.owner.ID, f.runner.ID, f.orgA.ID, "runner-"+f.runner.Name)
+	own, _, err := f.keys.CreateRunnerToken(f.owner.ID, f.runner.ID, f.orgA.ID, *f.runner.AgentPoolID, "runner-"+f.runner.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	kept, _, err := f.keys.CreateRunnerToken(f.owner.ID, other, f.orgA.ID, "runner-other-"+f.sfx)
+	kept, _, err := f.keys.CreateRunnerToken(f.owner.ID, other, f.orgA.ID, *f.runner.AgentPoolID, "runner-other-"+f.sfx)
 	if err != nil {
 		t.Fatal(err)
 	}
