@@ -18,6 +18,7 @@ package handlers
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/runnercontract"
 	"gorm.io/gorm"
 )
 
@@ -195,7 +197,7 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 	build := func(authSetter gin.HandlerFunc) *gin.Engine {
 		r := gin.New()
 		r.Use(authSetter)
-		r.Use(middleware.RunnerAuth(runnerRepo, &middleware.LauncherTrust{Permissions: rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo), Tokens: apiKeySvc}))
+		r.Use(middleware.RunnerAuth(runnerRepo, &middleware.LauncherTrust{Permissions: rbac.NewServiceWithTeams(orgRepo, teamRepo, projectRepo)}))
 		r.GET("/probe", func(c *gin.Context) {
 			runner, ok := callingRunner(c)
 			if !ok {
@@ -303,17 +305,9 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 		c.Next()
 	})
 
-	// Job tokens carry their launcher's pool too. One minted before that mark stands only while its
-	// launcher holds a launcher token RunnerAuth accepts: runner A1 holds the marked token above,
-	// runner A2 only an unmarked one whose owner may not manage the agent pools.
-	a2Unmarked := &models.APIKey{
-		Name: "runauthz-a2-unmarked", Kind: models.APIKeyKindOrg, KeyHash: "runauthz-a2-" + uuid.NewString(), KeyPrefix: "tfe-a2un",
-		Scopes:         models.StringArray{"runner:" + f.runnerA2.ID.String() + ":heartbeat", "runner:" + f.runnerA2.ID.String() + ":jobs"},
-		OrganizationID: &f.orgA, UserID: &user.ID,
-	}
-	if err := f.db.Create(a2Unmarked).Error; err != nil {
-		t.Fatalf("seed A2 launcher token: %v", err)
-	}
+	// Job tokens carry their launcher's pool too. A customer job token minted before that mark cannot
+	// be traced to the credential that minted it, so it is refused even when its launcher's own token
+	// is marked, as runner A1's is.
 	jobRouter := func(runner *models.Runner, marked bool) *gin.Engine {
 		key, _, err := apiKeySvc.CreateJobToken(f.orgA, runner.AgentPoolID, apikey.JobPrincipal{Kind: models.JobTypeTofuRun, JobID: "run-" + uuid.NewString()[:8], RunnerID: runner.ID, Attempt: 1}, time.Now().Add(time.Hour))
 		if err != nil {
@@ -338,8 +332,8 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 		router *gin.Engine
 		want   int
 	}{
-		{"unmarked job token of a launcher without an accepted launcher token forbidden", jobRouter(f.runnerA2, false), http.StatusForbidden},
-		{"unmarked job token of a launcher with a marked launcher token resolves", jobRouter(f.runnerA1, false), http.StatusOK},
+		{"unmarked job token forbidden", jobRouter(f.runnerA2, false), http.StatusForbidden},
+		{"unmarked job token forbidden though its launcher's token is marked", jobRouter(f.runnerA1, false), http.StatusForbidden},
 		{"marked job token resolves", jobRouter(f.runnerA2, true), http.StatusOK},
 		{"unmarked token whose owner may not manage agent pools forbidden", unmarkedRouter, http.StatusForbidden},
 		{"unmarked token whose owner may manage agent pools resolves", unmarkedAdminRouter, http.StatusOK},
@@ -360,6 +354,14 @@ func TestRunnerAuthz_Middleware(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.want, rec.Body.String())
 			}
 		})
+	}
+
+	// The refusal of an unmarked job token is coded job-token-revoked, so the executor holding it
+	// stops instead of retrying while its job keeps running.
+	rec := httptest.NewRecorder()
+	jobRouter(f.runnerA2, false).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/probe", nil))
+	if !strings.Contains(rec.Body.String(), runnercontract.ErrorCodeJobTokenRevoked) {
+		t.Errorf("unmarked job token refusal = %s, want error code %s", rec.Body.String(), runnercontract.ErrorCodeJobTokenRevoked)
 	}
 }
 

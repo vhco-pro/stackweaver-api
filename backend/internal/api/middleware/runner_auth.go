@@ -47,9 +47,8 @@ const JobPrincipalKey = "job_principal"
 // AgentPoolID (apikey.CreateRunnerToken), which says registration checked the credential for
 // agent pool permission. A token without that mark was issued before the check, so it stands only
 // while its owner, the user whose key registered the launcher, may still manage the
-// organization's agent pools. A customer job token carries the same mark (apikey.CreateJobToken);
-// one without it was minted before, so it stands only while its launcher's token would. trust
-// answers both; with none, unmarked tokens are refused.
+// organization's agent pools. trust answers that; with none, such tokens are refused. A customer
+// job token carries the same mark (apikey.CreateJobToken); one without it is refused.
 func RunnerAuth(runnerRepo *repository.RunnerRepository, trust *LauncherTrust) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Only API-key identities may act as runners. Block JWT/browser sessions.
@@ -97,12 +96,13 @@ func RunnerAuth(runnerRepo *repository.RunnerRepository, trust *LauncherTrust) g
 				c.Abort()
 				return
 			}
+			// A customer job token minted before job tokens carried their launcher's pool cannot be
+			// traced to the credential that minted it, so it is refused as revoked: the executor
+			// holding it stops (executor.Client treats job-token-revoked as the end of its job).
 			if !runner.IsHosted() && apiKey.AgentPoolID == nil {
-				if status, detail := unmarkedJobTokenVerdict(c, trust, runner); status != 0 {
-					jsonapi.WriteError(c, status, http.StatusText(status), detail)
-					c.Abort()
-					return
-				}
+				jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTokenRevoked, "Forbidden", "this job token was minted before job tokens recorded their launcher's registration; rerun the job")
+				c.Abort()
+				return
 			}
 			c.Set(CallingRunnerKey, runner)
 			c.Set(JobPrincipalKey, principal)
@@ -172,17 +172,10 @@ type AgentPoolPermission interface {
 	CheckOrgManageAgentPools(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
 }
 
-// LauncherTokenSource lists a customer launcher's live launcher tokens
-// (apikey.Service.RunnerTokens).
-type LauncherTokenSource interface {
-	RunnerTokens(runnerID uuid.UUID) ([]*models.APIKey, error)
-}
-
-// LauncherTrust is what RunnerAuth needs to judge a token minted before tokens were marked: the
-// permission its owner must hold, and the launcher tokens a job token's launcher holds.
+// LauncherTrust is what RunnerAuth needs to judge a launcher token issued before launcher tokens
+// were marked: the permission its owner must hold.
 type LauncherTrust struct {
 	Permissions AgentPoolPermission
-	Tokens      LauncherTokenSource
 }
 
 // unmarkedTokenVerdict holds a launcher token issued before registration checked agent pool
@@ -198,33 +191,6 @@ func unmarkedTokenVerdict(c *gin.Context, trust *LauncherTrust, key *models.APIK
 		return http.StatusForbidden, refused
 	}
 	return 0, ""
-}
-
-// unmarkedJobTokenVerdict holds a customer job token minted before job tokens were marked to its
-// launcher: it stands only while the launcher holds a launcher token RunnerAuth accepts. It
-// answers 0 when the token may act, or the status and detail to refuse with.
-func unmarkedJobTokenVerdict(c *gin.Context, trust *LauncherTrust, runner *models.Runner) (int, string) {
-	const refused = "this job token was minted for a launcher whose registration does not meet the agent pool permission check; register the launcher again and rerun the job"
-	if trust == nil || trust.Tokens == nil {
-		return http.StatusForbidden, refused
-	}
-	tokens, err := trust.Tokens.RunnerTokens(runner.ID)
-	if err != nil {
-		return http.StatusInternalServerError, "the launcher's tokens could not be read"
-	}
-	for _, t := range tokens {
-		if !onlyRunnerScopes(t.Scopes) || !runnerTokenMatches(t, runner) {
-			continue
-		}
-		may, err := launcherTokenStands(c.Request.Context(), trust, t, runner)
-		if err != nil {
-			return http.StatusInternalServerError, "the launcher token owner's agent pool permission could not be read"
-		}
-		if may {
-			return 0, ""
-		}
-	}
-	return http.StatusForbidden, refused
 }
 
 // launcherTokenStands reports whether RunnerAuth accepts key as runner's launcher token on
