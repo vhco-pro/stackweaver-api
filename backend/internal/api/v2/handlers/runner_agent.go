@@ -236,16 +236,17 @@ func (h *RunnerAgentHandler) SetRBACService(s *rbac.Service) {
 // registrationKeyVerdict holds an organization key carrying runner:register to its owner's current
 // permission. A key created on request stands for its owner, who must hold
 // org:manage-agent-pools in orgID now, so a key created before that was required, or whose owner
-// has since lost the permission, registers nothing. An agent token or a just-in-time token is a
-// pool credential issued under that permission and passes. It answers 0 when the key may act, or
-// the status and detail to refuse with.
+// has since lost the permission, registers nothing. A just-in-time token is held to its owner, the
+// user whose credential minted it, the same way. An agent token is a pool credential issued under
+// that permission and passes. It answers 0 when the key may act, or the status and detail to
+// refuse with.
 func registrationKeyVerdict(c *gin.Context, rbacService *rbac.Service, orgID uuid.UUID) (int, string) {
 	raw, _ := c.Get("api_key")
 	key, ok := raw.(*models.APIKey)
 	if !ok || key == nil {
 		return http.StatusUnauthorized, "API key required for launcher registration"
 	}
-	if key.IsAgentToken || key.IsJITToken {
+	if key.IsAgentToken && !key.IsJITToken {
 		return 0, ""
 	}
 	const refused = "the owner of this key may not manage the organization's agent pools, so it cannot register launchers; use an agent token of the pool"

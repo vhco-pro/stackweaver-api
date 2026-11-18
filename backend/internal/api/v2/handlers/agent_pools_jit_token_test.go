@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
+	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
@@ -30,8 +31,9 @@ import (
 // AuthMiddleware registerRouter uses.
 func (f *agentPrepFixture) operatorRouter() *gin.Engine {
 	svc := apikey.NewService(repository.NewAPIKeyRepository(f.db), nil, nil, nil)
-	pools := &AgentPoolHandlerV2{poolRepo: repository.NewAgentPoolRepository(f.db), apiKeyService: svc, runnerRepo: repository.NewRunnerRepository(f.db)}
-	runners := &RunnerAgentHandler{db: f.db, runnerRepo: repository.NewRunnerRepository(f.db), poolRepo: repository.NewAgentPoolRepository(f.db), apiKeyService: svc}
+	perms := rbac.NewServiceWithTeams(repository.NewOrganizationRepository(f.db), repository.NewTeamRepository(f.db), repository.NewProjectRepository(f.db))
+	pools := &AgentPoolHandlerV2{poolRepo: repository.NewAgentPoolRepository(f.db), apiKeyService: svc, runnerRepo: repository.NewRunnerRepository(f.db), rbacService: perms}
+	runners := &RunnerAgentHandler{db: f.db, runnerRepo: repository.NewRunnerRepository(f.db), poolRepo: repository.NewAgentPoolRepository(f.db), apiKeyService: svc, rbacService: perms}
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		key := f.keys[c.GetHeader("X-Test-Key")]
@@ -69,15 +71,51 @@ func (f *agentPrepFixture) agentToken(t *testing.T, owner uuid.UUID, org, pool u
 	return k
 }
 
+// operatorOwner is a user who owns org A, as an operator who manages its agent pools does.
 func (f *agentPrepFixture) operatorOwner(t *testing.T) uuid.UUID {
 	t.Helper()
-	sfx := uuid.NewString()[:8]
-	owner := &models.User{ID: uuid.New(), ZitadelSubject: "operator-" + sfx, Email: "operator-" + sfx + "@test.local"}
-	if err := f.db.Create(owner).Error; err != nil {
+	id := f.orgUser(t, "operator-")
+	var owners models.Team
+	if err := f.db.Where(models.Team{OrganizationID: f.orgA, Name: "owners"}).FirstOrCreate(&owners, models.Team{ID: uuid.New(), OrganizationID: f.orgA, Name: "owners"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.db.Where("id = ?", owner.ID).Delete(&models.User{}) })
-	return owner.ID
+	f.join(t, owners.ID, id)
+	t.Cleanup(func() {
+		var left int64
+		f.db.Model(&models.TeamMember{}).Where("team_id = ?", owners.ID).Count(&left)
+		if left == 0 {
+			f.db.Where("id = ?", owners.ID).Delete(&models.Team{})
+		}
+	})
+	return id
+}
+
+// orgUser is a member of org A in no team.
+func (f *agentPrepFixture) orgUser(t *testing.T, prefix string) uuid.UUID {
+	t.Helper()
+	sfx := uuid.NewString()[:8]
+	u := &models.User{ID: uuid.New(), ZitadelSubject: prefix + sfx, Email: prefix + sfx + "@test.local"}
+	m := &models.OrganizationMember{ID: uuid.New(), OrganizationID: f.orgA, UserID: u.ID}
+	for _, row := range []any{u, m} {
+		if err := f.db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		f.db.Where("id = ?", m.ID).Delete(&models.OrganizationMember{})
+		f.db.Where("id = ?", u.ID).Delete(&models.User{})
+	})
+	return u.ID
+}
+
+// join adds user to team until the test ends.
+func (f *agentPrepFixture) join(t *testing.T, team, user uuid.UUID) {
+	t.Helper()
+	tm := &models.TeamMember{ID: uuid.New(), TeamID: team, UserID: user}
+	if err := f.db.Create(tm).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Where("id = ?", tm.ID).Delete(&models.TeamMember{}) })
 }
 
 // mintJIT mints a JIT token for pool with the key named by header and returns the stored key.
@@ -241,5 +279,57 @@ func TestQueueDepth_ByEngineWithHeadroom(t *testing.T) {
 	}
 	if a.Capacity != 5 || a.InFlight != 1 || a.Headroom != 4 {
 		t.Errorf("capacity %d, in flight %d, headroom %d; want 5, 1, 4", a.Capacity, a.InFlight, a.Headroom)
+	}
+}
+
+// TestJITToken_HeldToItsOwner: a just-in-time token stands for the user whose credential minted it.
+// It is minted, and registers a launcher, only while that user may manage the organization's agent
+// pools, and it never mints another just-in-time token.
+func TestJITToken_HeldToItsOwner(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	operator := f.operatorOwner(t)
+	member := f.orgUser(t, "jit-member-")
+	r := f.operatorRouter()
+	f.keys["operator-agent"] = f.agentToken(t, operator, f.orgA, f.poolA)
+	f.keys["member-agent"] = f.agentToken(t, member, f.orgA, f.poolA)
+
+	if _, code := f.mintJIT(t, r, "member-agent", f.poolA); code != http.StatusForbidden {
+		t.Errorf("minting with an agent token whose creator may not manage agent pools = %d, want 403", code)
+	}
+
+	jit, code := f.mintJIT(t, r, "operator-agent", f.poolA)
+	if code != http.StatusCreated {
+		t.Fatalf("minting with the operator's agent token = %d, want 201", code)
+	}
+	f.keys["jit"] = jit
+	if _, code := f.mintJIT(t, r, "jit", f.poolA); code != http.StatusForbidden {
+		t.Errorf("a just-in-time token minting another = %d, want 403", code)
+	}
+
+	// A just-in-time token whose owner may not manage the agent pools, as one minted before
+	// minting checked that would be, registers nothing.
+	stale := &models.APIKey{
+		ID: uuid.New(), Name: "jit-stale-" + uuid.NewString()[:6], Kind: models.APIKeyKindOrg, KeyHash: "jit-stale-" + uuid.NewString(), KeyPrefix: "tfe-js",
+		Scopes: models.StringArray{"org:" + f.orgA.String() + ":runner:register"}, OrganizationID: &f.orgA, AgentPoolID: &f.poolA,
+		IsAgentToken: true, IsJITToken: true, UserID: &member, ExpiresAt: new(time.Now().Add(time.Hour)),
+	}
+	if err := f.db.Create(stale).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Where("id = ?", stale.ID).Delete(&models.APIKey{}) })
+	f.keys["stale"] = stale
+	name := "jit-stale-" + uuid.NewString()[:8]
+	rec := runnerDo(t, r, "stale", http.MethodPost, "/api/v2/runner/register", map[string]any{"agent_pool_id": f.poolA.String(), "name": name, "tofu_version": "1.9.0"})
+	var n int64
+	f.db.Model(&models.Runner{}).Where("name = ?", name).Count(&n)
+	if n != 0 {
+		var runner models.Runner
+		if f.db.First(&runner, "name = ?", name).Error == nil {
+			f.db.Where("scopes::text LIKE ?", "%runner:"+runner.ID.String()+":%").Delete(&models.APIKey{})
+			f.db.Where("id = ?", runner.ID).Delete(&models.Runner{})
+		}
+	}
+	if rec.Code != http.StatusForbidden || n != 0 {
+		t.Errorf("registering with a just-in-time token whose owner may not manage agent pools = %d (%d runner rows), want 403 and none", rec.Code, n)
 	}
 }
