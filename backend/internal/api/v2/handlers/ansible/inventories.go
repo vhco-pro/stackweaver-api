@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -79,33 +78,14 @@ func (h *InventoryHandler) storedVCSConnection(ctx context.Context, inventory *m
 }
 
 // maybeRegisterADOWebhook registers Azure DevOps service hook subscriptions for a specific repo
-// in a background goroutine. Silently skips if not ADO, no webhook base URL, or wrong repo format.
+// in a background goroutine (vcs.RegisterRepoWebhooksInBackground). A registration it cannot make,
+// such as one without STACKWEAVER_WEBHOOK_BASE_URL, is logged as a warning.
 //
 // It takes the connection, not its identifier: the registration is made with the connection's
 // token, so the caller hands over a connection held to the inventory's organization
 // (storedVCSConnection).
 func (h *InventoryHandler) maybeRegisterADOWebhook(conn *models.VCSConnection, repoPath string) {
-	if conn == nil || conn.Provider != models.VCSProviderAzureDevOps || repoPath == "" || h.vcsRegistry == nil {
-		return
-	}
-	webhookBaseURL := os.Getenv("STACKWEAVER_WEBHOOK_BASE_URL")
-	if webhookBaseURL == "" {
-		return
-	}
-	parts := strings.SplitN(repoPath, "/", 2)
-	if len(parts) != 2 {
-		return
-	}
-	go func(projectName, repoName string) {
-		provider, err := h.vcsRegistry.GetProvider(conn)
-		if err != nil {
-			return
-		}
-		bgCtx := context.Background()
-		if rErr := provider.RegisterWebhooksForRepo(bgCtx, conn, webhookBaseURL, projectName, repoName); rErr != nil {
-			logger.Warnf("Failed to register ADO webhooks for ansible inventory repo %s/%s: %v", projectName, repoName, rErr)
-		}
-	}(parts[0], parts[1])
+	vcs.RegisterRepoWebhooksInBackground(h.vcsRegistry, conn, repoPath, "inventory")
 }
 
 // CreateInventoryRequest represents the request to create an inventory
