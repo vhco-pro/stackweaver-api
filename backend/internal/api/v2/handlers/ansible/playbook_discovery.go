@@ -63,17 +63,22 @@ func (h *PlaybookHandler) enqueueInitialSync(playbook *models.AnsiblePlaybook) {
 	if playbook.VCSConnectionID == nil || playbook.VCSRepository == "" || h.workItems == nil {
 		return
 	}
-	playbook.LastSyncStatus = "syncing"
-	if err := h.playbookRepo.Update(playbook); err != nil {
-		logger.Warnf("Failed to update playbook sync status: %v", err)
-	}
+	h.setSyncStatus(playbook, "syncing", "")
 	if _, err := h.workItems.RequestPlaybookSnapshot(context.Background(), playbook, "manual"); err != nil {
-		playbook.LastSyncStatus = "pending"
-		playbook.LastSyncError = "Auto-sync could not be requested: " + err.Error()
-		if updateErr := h.playbookRepo.Update(playbook); updateErr != nil {
-			logger.Warnf("Failed to update playbook after the sync request error: %v", updateErr)
-		}
+		h.setSyncStatus(playbook, "pending", "Auto-sync could not be requested: "+err.Error())
 	}
+}
+
+// setSyncStatus records a sync status on the playbook row and on the struct the response is
+// written from. The row is written by identifier, so the status write changes nothing else on it
+// (#927). A failure is logged, because the request the status belongs to has already succeeded
+// or failed on its own.
+func (h *PlaybookHandler) setSyncStatus(playbook *models.AnsiblePlaybook, status, syncError string) {
+	if err := h.playbookRepo.UpdateSyncStatus(playbook.ID, status, syncError); err != nil {
+		logger.Warnf("Failed to set the sync status of playbook %s: %v", playbook.ID, err)
+		return
+	}
+	playbook.LastSyncStatus, playbook.LastSyncError = status, syncError
 }
 
 // resolveDiscoveryContext validates the org (from the :name path param), the

@@ -853,22 +853,17 @@ func (h *PlaybookHandler) SyncPlaybook(c *gin.Context) {
 	}
 
 	// Update sync status to syncing
-	playbook.LastSyncStatus = "syncing"
-	playbook.LastSyncError = ""
-	if err := h.playbookRepo.Update(playbook); err != nil {
+	if err := h.playbookRepo.UpdateSyncStatus(playbook.ID, "syncing", ""); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update sync status")
 		return
 	}
+	playbook.LastSyncStatus, playbook.LastSyncError = "syncing", ""
 
 	// Request the snapshot work item
 	if h.workItems != nil {
 		if _, err := h.workItems.RequestPlaybookSnapshot(c.Request.Context(), playbook, "manual"); err != nil {
 			// Revert status when the sync cannot be requested
-			playbook.LastSyncStatus = "failed"
-			playbook.LastSyncError = "Failed to request the sync: " + err.Error()
-			if updateErr := h.playbookRepo.Update(playbook); updateErr != nil {
-				logger.Warnf("Failed to update playbook after the sync request error: %v", updateErr)
-			}
+			h.setSyncStatus(playbook, "failed", "Failed to request the sync: "+err.Error())
 
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
 			return
