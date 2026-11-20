@@ -3,12 +3,10 @@
 package terraform
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -297,34 +295,15 @@ func storedVCSConnection(repo *repository.VCSConnectionRepository, workspace *mo
 
 // maybeRegisterADOWebhook fires a background goroutine to register per-repository Service Hook
 // subscriptions in Azure DevOps when a workspace is linked to an ADO repo.
-// It is a no-op when the connection is not ADO, when STACKWEAVER_WEBHOOK_BASE_URL is unset,
-// or when vcsRegistry is not configured.
+// It is a no-op when the connection is not ADO or vcsRegistry is not configured; a registration
+// it cannot make, such as one without STACKWEAVER_WEBHOOK_BASE_URL, is logged as a warning
+// (vcs.RegisterRepoWebhooksInBackground).
 //
 // It takes the connection, not its identifier: the registration is made with the connection's
 // token, so the caller hands over a connection held to the workspace's organization
 // (storedVCSConnection).
 func (h *WorkspaceHandlerV2) maybeRegisterADOWebhook(conn *models.VCSConnection, repoPath string) {
-	if conn == nil || conn.Provider != models.VCSProviderAzureDevOps || repoPath == "" || h.vcsRegistry == nil {
-		return
-	}
-	webhookBaseURL := os.Getenv("STACKWEAVER_WEBHOOK_BASE_URL")
-	if webhookBaseURL == "" {
-		return
-	}
-	parts := strings.SplitN(repoPath, "/", 2)
-	if len(parts) != 2 {
-		return
-	}
-	go func(projectName, repoName string) {
-		provider, err := h.vcsRegistry.GetProvider(conn)
-		if err != nil {
-			return
-		}
-		bgCtx := context.Background()
-		if rErr := provider.RegisterWebhooksForRepo(bgCtx, conn, webhookBaseURL, projectName, repoName); rErr != nil {
-			logger.Warnf("Failed to register ADO webhooks for repo %s/%s: %v", projectName, repoName, rErr)
-		}
-	}(parts[0], parts[1])
+	vcs.RegisterRepoWebhooksInBackground(h.vcsRegistry, conn, repoPath, "workspace")
 }
 
 // VCSRepoRequest represents the TFE-compatible vcs-repo nested attribute

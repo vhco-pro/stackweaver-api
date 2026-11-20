@@ -8,8 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
-	"os"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -150,33 +148,14 @@ func generateHostConfigKey() (string, error) {
 }
 
 // maybeRegisterADOWebhook registers Azure DevOps service hook subscriptions for a specific repo
-// in a background goroutine. Silently skips if not ADO, no webhook base URL, or wrong repo format.
+// in a background goroutine (vcs.RegisterRepoWebhooksInBackground). A registration it cannot make,
+// such as one without STACKWEAVER_WEBHOOK_BASE_URL, is logged as a warning.
 //
 // It takes the connection, not its identifier: the registration is made with the connection's
 // token, so the caller hands over a connection it has already held to the playbook's
 // organization (vcsConnectionAccepted, storedVCSConnection, resolveDiscoveryContext).
 func (h *PlaybookHandler) maybeRegisterADOWebhook(conn *models.VCSConnection, repoPath string) {
-	if conn == nil || conn.Provider != models.VCSProviderAzureDevOps || repoPath == "" || h.vcsRegistry == nil {
-		return
-	}
-	webhookBaseURL := os.Getenv("STACKWEAVER_WEBHOOK_BASE_URL")
-	if webhookBaseURL == "" {
-		return
-	}
-	parts := strings.SplitN(repoPath, "/", 2)
-	if len(parts) != 2 {
-		return
-	}
-	go func(projectName, repoName string) {
-		provider, err := h.vcsRegistry.GetProvider(conn)
-		if err != nil {
-			return
-		}
-		bgCtx := context.Background()
-		if rErr := provider.RegisterWebhooksForRepo(bgCtx, conn, webhookBaseURL, projectName, repoName); rErr != nil {
-			logger.Warnf("Failed to register ADO webhooks for ansible playbook repo %s/%s: %v", projectName, repoName, rErr)
-		}
-	}(parts[0], parts[1])
+	vcs.RegisterRepoWebhooksInBackground(h.vcsRegistry, conn, repoPath, "playbook")
 }
 
 // vcsConnectionAccepted loads the VCS connection a playbook of the project is about to name, and

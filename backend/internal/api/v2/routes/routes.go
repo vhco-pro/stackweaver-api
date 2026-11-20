@@ -146,6 +146,9 @@ func SetupV2Routes(
 	}
 	if azureDevOpsManager != nil && azureDevOpsManager.IsEnabled() {
 		logger.Infof("Azure DevOps VCS integration enabled (client_id=%s)", azureDevOpsManager.GetClientID())
+		if os.Getenv(vcs.WebhookBaseURLEnv) == "" {
+			logger.Warnf("Azure DevOps is enabled, but %v", vcs.ErrWebhookBaseURLUnset)
+		}
 	} else {
 		logger.Infof("Azure DevOps VCS integration disabled (AZURE_DEVOPS_CLIENT_ID/SECRET not set)")
 	}
