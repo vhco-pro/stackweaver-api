@@ -342,17 +342,14 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 		if !h.setConstructedInputs(c, org.ID, inventory, req.Data.Attributes.InputInventoryIDs) {
 			return
 		}
-		inventory.LastSyncStatus = "syncing"
 		if err := h.inventoryRepo.Update(inventory); err != nil {
 			logger.Warnf("Failed to persist constructed inventory fields: %v", err)
 		}
+		h.setSyncStatus(inventory, "syncing", "")
 		if h.workItems != nil {
 			if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
 				logger.Warnf("Failed to request the initial constructed inventory build: %v", err)
-				inventory.LastSyncStatus = "pending"
-				if updateErr := h.inventoryRepo.Update(inventory); updateErr != nil {
-					logger.Warnf("Failed to update inventory after the build request error: %v", updateErr)
-				}
+				h.setSyncStatus(inventory, "pending", inventory.LastSyncError)
 			}
 		}
 		jsonapi.WriteDocument(c, http.StatusCreated, formatInventoryResponse(inventory))
@@ -361,18 +358,11 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 
 	// Auto-trigger sync for VCS-backed inventories
 	if inventory.VCSConnectionID != nil && inventory.VCSRepository != "" && inventory.InventoryPath != "" && h.workItems != nil {
-		inventory.LastSyncStatus = "syncing"
-		if err := h.inventoryRepo.Update(inventory); err != nil {
-			logger.Warnf("Failed to update inventory sync status: %v", err)
-		}
+		h.setSyncStatus(inventory, "syncing", "")
 
 		if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
 			// Log error but don't fail the create request
-			inventory.LastSyncStatus = "pending"
-			inventory.LastSyncError = "Auto-sync could not be requested: " + err.Error()
-			if updateErr := h.inventoryRepo.Update(inventory); updateErr != nil {
-				logger.Warnf("Failed to update inventory after sync queue error: %v", updateErr)
-			}
+			h.setSyncStatus(inventory, "pending", "Auto-sync could not be requested: "+err.Error())
 		}
 	}
 
@@ -857,22 +847,17 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 	}
 
 	// Update sync status to syncing
-	inventory.LastSyncStatus = "syncing"
-	inventory.LastSyncError = ""
-	if err := h.inventoryRepo.Update(inventory); err != nil {
+	if err := h.inventoryRepo.SetSyncStatus(inventory.ID, "syncing", ""); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update sync status")
 		return
 	}
+	inventory.LastSyncStatus, inventory.LastSyncError = "syncing", ""
 
 	// Request the sync work item
 	if h.workItems != nil {
 		if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
 			// Revert status when the sync cannot be requested
-			inventory.LastSyncStatus = "failed"
-			inventory.LastSyncError = "Failed to request the sync: " + err.Error()
-			if updateErr := h.inventoryRepo.Update(inventory); updateErr != nil {
-				logger.Warnf("Failed to update inventory after the sync request error: %v", updateErr)
-			}
+			h.setSyncStatus(inventory, "failed", "Failed to request the sync: "+err.Error())
 
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
 			return
@@ -880,6 +865,18 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 	}
 
 	jsonapi.WriteDocument(c, http.StatusAccepted, formatInventoryResponse(inventory))
+}
+
+// setSyncStatus records a sync status on the inventory row and on the struct the response is
+// written from. The row is written by identifier: the struct may have been loaded with its hosts
+// and groups, and only the status columns are this write's to change (#927). A failure is logged,
+// because the request the status belongs to has already succeeded or failed on its own.
+func (h *InventoryHandler) setSyncStatus(inventory *models.AnsibleInventory, status, syncError string) {
+	if err := h.inventoryRepo.SetSyncStatus(inventory.ID, status, syncError); err != nil {
+		logger.Warnf("Failed to set the sync status of inventory %s: %v", inventory.ID, err)
+		return
+	}
+	inventory.LastSyncStatus, inventory.LastSyncError = status, syncError
 }
 
 // formatInventoryResponse formats an inventory for JSON:API response
