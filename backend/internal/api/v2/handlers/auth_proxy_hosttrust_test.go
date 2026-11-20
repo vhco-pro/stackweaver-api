@@ -166,3 +166,87 @@ func TestGetPublicHost_UnconfiguredTrustsHeader(t *testing.T) {
 		t.Fatalf("unconfigured getPublicHost = %q, want header value localhost:5173", got)
 	}
 }
+
+// TestIsTrustedHost_MatchesConfiguredPort is the port half of the AUD-113 residual: the allowlist
+// compared the host alone, so any port on a trusted host could be advertised in a public URL. A
+// configured entry with an explicit port now matches only that host:port; an entry without one
+// matches the host with no port or with its scheme's default port (80 or 443 for a bare entry,
+// whose scheme is unknown).
+func TestIsTrustedHost_MatchesConfiguredPort(t *testing.T) {
+	p := NewAuthProxy(AuthProxyConfig{
+		ZitadelInternalURL:  "http://localhost:8080",
+		PublicAPIBaseURL:    "https://api.example.com",
+		PublicFrontendURL:   "http://localhost:5173",
+		ZitadelIssuer:       "http://auth.example.com",
+		TrustedForwardHosts: []string{"edge.example.com", "proxy.example.com:8443"},
+		IsProduction:        true,
+	})
+
+	cases := map[string]bool{
+		// https entry, no port: bare host and 443 only.
+		"api.example.com":      true,
+		"api.example.com:443":  true,
+		"api.example.com:8443": false,
+		"api.example.com:80":   false,
+		// http entry with an explicit port: that port only.
+		"localhost:5173": true,
+		"localhost":      false,
+		"localhost:8022": false,
+		"localhost:80":   false,
+		// http entry, no port: bare host and 80 only.
+		"auth.example.com":     true,
+		"auth.example.com:80":  true,
+		"auth.example.com:443": false,
+		// Bare entry, no port, scheme unknown: bare host, 80 and 443.
+		"edge.example.com":      true,
+		"edge.example.com:80":   true,
+		"edge.example.com:443":  true,
+		"edge.example.com:8080": false,
+		// Bare entry with an explicit port: that port only.
+		"proxy.example.com:8443": true,
+		"proxy.example.com":      false,
+		"proxy.example.com:443":  false,
+		// Never trusted.
+		"evil.attacker.com":      false,
+		"evil.attacker.com:5173": false,
+	}
+	for host, want := range cases {
+		if got := p.isTrustedHost(host); got != want {
+			t.Errorf("isTrustedHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+// TestGetPublicHost_UntrustedPortFallsBackToConfiguredAuthority: a forwarding header naming a
+// trusted host on another port is not honored, and the fallback is the configured authority with
+// its port, so the derived base URL is exactly the configured one.
+func TestGetPublicHost_UntrustedPortFallsBackToConfiguredAuthority(t *testing.T) {
+	p := NewAuthProxy(AuthProxyConfig{
+		ZitadelInternalURL: "http://localhost:8080",
+		PublicAPIBaseURL:   "http://localhost:8022",
+		PublicFrontendURL:  "http://localhost:5173",
+	})
+
+	cases := []struct {
+		name    string
+		headers map[string]string
+		host    string
+		want    string
+	}{
+		{"other port in a forwarding header", map[string]string{"X-Forwarded-Host": "localhost:9999"}, "evil.attacker.com", "localhost:8022"},
+		{"other port in the Host header", nil, "localhost:9999", "localhost:8022"},
+		{"no port where one is configured", map[string]string{"X-Zitadel-Public-Host": "localhost"}, "evil.attacker.com", "localhost:8022"},
+		{"configured frontend authority honored", map[string]string{"X-Forwarded-Host": "localhost:5173"}, "evil.attacker.com", "localhost:5173"},
+		{"configured api authority honored", nil, "localhost:8022", "localhost:8022"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := p.getPublicHost(hostReq(t, tc.headers, tc.host)); got != tc.want {
+				t.Fatalf("getPublicHost = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := p.getPublicBaseURL(hostReq(t, map[string]string{"X-Forwarded-Host": "localhost:9999"}, "localhost:9999")); got != "http://localhost:8022" {
+		t.Fatalf("getPublicBaseURL = %q, want http://localhost:8022", got)
+	}
+}

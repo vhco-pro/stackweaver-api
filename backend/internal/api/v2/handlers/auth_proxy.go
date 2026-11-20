@@ -156,7 +156,9 @@ type AuthProxyConfig struct {
 	// is ignored and the configured canonical host is used instead, so a direct
 	// attacker request cannot poison the discovery doc or IdP redirect URLs.
 	// The hosts of PublicAPIBaseURL, PublicFrontendURL and ZitadelIssuer are
-	// added automatically. Empty derived set → trust all (legacy dev behavior).
+	// added automatically. Ports count: an entry with a port matches only that
+	// port, one without matches no port or its scheme's default (80 or 443 for a
+	// bare host). Empty derived set → trust all (legacy dev behavior).
 	// Extra entries read from STACKWEAVER_TRUSTED_HOSTS in main.go.
 	TrustedForwardHosts []string
 	// PostLogoutAllowedHosts is a list of host names that the
@@ -275,11 +277,11 @@ type AuthProxy struct {
 	decoyOrgIDsStop      chan struct{}
 	decoyOrgIDsSweepOnce sync.Once
 
-	// trustedHosts is the normalized (lowercased, port-stripped) allowlist of
-	// hosts honored from forwarding headers (AUD-113/AUD-071). Built once at
-	// construction from PublicAPIBaseURL/PublicFrontendURL/ZitadelIssuer +
-	// TrustedForwardHosts. Empty → trust all (unconfigured dev behavior).
-	trustedHosts []string
+	// trustedHosts is the allowlist of authorities honored from forwarding
+	// headers (AUD-113/AUD-071). Built once at construction from
+	// PublicAPIBaseURL/PublicFrontendURL/ZitadelIssuer + TrustedForwardHosts,
+	// in that order. Empty → trust all (unconfigured dev behavior).
+	trustedHosts []trustedHost
 
 	// userReadyTimeout bounds how long CreateUser waits for Zitadel's read
 	// side to report a freshly created user as active. See waitForUserActive.
@@ -348,15 +350,19 @@ func NewAuthProxy(config AuthProxyConfig) *AuthProxy {
 	// AUD-113/AUD-071: build the trusted-host allowlist from the configured
 	// public URLs. A forwarding-header host outside this set is ignored so it
 	// can't poison the discovery doc / IdP redirect URLs.
-	seen := map[string]bool{}
+	seen := map[trustedHost]bool{}
 	addHost := func(raw string) {
-		h := normalizeHost(hostFromURLOrHost(raw))
-		if h == "" && strings.TrimSpace(raw) != "" {
-			logger.Warnf("auth proxy: ignoring trusted-host entry %q - not a valid host[:port]", raw)
+		if strings.TrimSpace(raw) == "" {
+			return
 		}
-		if h != "" && !seen[h] {
-			seen[h] = true
-			p.trustedHosts = append(p.trustedHosts, h)
+		t, ok := parseTrustedHost(raw)
+		if !ok {
+			logger.Warnf("auth proxy: ignoring trusted-host entry %q - not a valid host[:port] or URL", raw)
+			return
+		}
+		if !seen[t] {
+			seen[t] = true
+			p.trustedHosts = append(p.trustedHosts, t)
 		}
 	}
 	addHost(config.PublicAPIBaseURL)
@@ -698,19 +704,65 @@ func (p *AuthProxy) CallZitadel(ctx context.Context, method, path string, body a
 // The proxy is the API's connection to Zitadel for the browser-session checks.
 var _ auth.ZitadelCaller = (*AuthProxy)(nil)
 
-// hostFromURLOrHost returns the host of a URL string (scheme://host/…) or, if the
-// value is already a bare host, the value itself. Empty in → empty out.
-func hostFromURLOrHost(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if strings.Contains(s, "://") {
-		if u, err := url.Parse(s); err == nil {
-			return u.Host
+// trustedHost is one allowlist entry: a lowercased host, the port the entry named
+// (empty when it named none) and the default port of its scheme (80 for http, 443
+// for https, empty for a bare host whose scheme is unknown).
+type trustedHost struct {
+	host        string
+	port        string
+	defaultPort string
+}
+
+// parseTrustedHost reads an allowlist entry, a URL (scheme://host[:port]/…) or a
+// bare host[:port], and reports whether its authority is valid.
+func parseTrustedHost(raw string) (trustedHost, bool) {
+	raw = strings.TrimSpace(raw)
+	authority, scheme := raw, ""
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return trustedHost{}, false
 		}
+		authority, scheme = u.Host, strings.ToLower(u.Scheme)
 	}
-	return s
+	host, port, ok := parseAuthority(authority)
+	if !ok {
+		return trustedHost{}, false
+	}
+	t := trustedHost{host: host, port: port}
+	switch scheme {
+	case "http":
+		t.defaultPort = "80"
+	case "https":
+		t.defaultPort = "443"
+	}
+	return t, true
+}
+
+// matches reports whether a validated host and port may be advertised under this
+// entry. An entry with a port matches only that port. An entry without one matches
+// no port or its scheme's default port, and a bare entry, whose scheme is unknown,
+// matches 80 and 443, the default ports of the two schemes public URLs use.
+func (t trustedHost) matches(host, port string) bool {
+	if host != t.host {
+		return false
+	}
+	switch {
+	case t.port != "":
+		return port == t.port
+	case port == "":
+		return true
+	case t.defaultPort != "":
+		return port == t.defaultPort
+	default:
+		return port == "80" || port == "443"
+	}
+}
+
+// authority is the entry as a host[:port] value for a public URL, keeping the
+// port the entry named.
+func (t trustedHost) authority() string {
+	return joinAuthority(t.host, t.port)
 }
 
 // parseAuthority splits a Host-header style value into a lowercased host and an
@@ -791,6 +843,12 @@ func canonicalHost(v string) string {
 	if !ok {
 		return ""
 	}
+	return joinAuthority(host, port)
+}
+
+// joinAuthority rebuilds host[:port] from validated parts, bracketing an IPv6
+// literal.
+func joinAuthority(host, port string) string {
 	if port != "" {
 		return net.JoinHostPort(host, port)
 	}
@@ -800,31 +858,21 @@ func canonicalHost(v string) string {
 	return host
 }
 
-// normalizeHost lowercases a host and strips any :port so allowlist membership
-// is compared on the host alone. It returns "" for anything that is not a plain
-// authority, so a malformed value can never match an allowlist entry.
-func normalizeHost(h string) string {
-	host, _, ok := parseAuthority(h)
-	if !ok {
-		return ""
-	}
-	return host
-}
-
-// isTrustedHost reports whether host may be advertised in a public URL. With no
-// configured allowlist (dev / same-origin) every host is trusted, preserving the
-// legacy behavior; once any public URL is configured (production), only its host
-// and its siblings pass (AUD-113/AUD-071).
-func (p *AuthProxy) isTrustedHost(host string) bool {
+// isTrustedHost reports whether a host[:port] value may be advertised in a public
+// URL. With no configured allowlist (dev / same-origin) every host is trusted,
+// preserving the legacy behavior; once any public URL is configured (production),
+// only a configured authority passes, port included (AUD-113/AUD-071). A malformed
+// value never matches.
+func (p *AuthProxy) isTrustedHost(value string) bool {
 	if len(p.trustedHosts) == 0 {
 		return true
 	}
-	h := normalizeHost(host)
-	if h == "" {
+	host, port, ok := parseAuthority(value)
+	if !ok {
 		return false
 	}
 	for _, t := range p.trustedHosts {
-		if t == h {
+		if t.matches(host, port) {
 			return true
 		}
 	}
@@ -834,12 +882,12 @@ func (p *AuthProxy) isTrustedHost(host string) bool {
 // getPublicHost resolves the browser-visible host for building callback URLs (per D4).
 // Priority: x-zitadel-public-host → x-zitadel-forward-host → x-forwarded-host → host header.
 // AUD-113/AUD-071: a forwarding-header (or Host) value is only honored when it is on the
-// configured trusted-host allowlist - otherwise it is a forgeable input and we fall back to
-// the configured canonical host (p.trustedHosts[0]) so a direct attacker request cannot steer
-// the discovery doc / IdP redirect URLs to an attacker-controlled host. The value
-// returned is always rebuilt by canonicalHost from its validated parts, never the
-// raw header, so a value that merely normalizes to a trusted host cannot smuggle
-// anything else into the URL.
+// configured trusted-host allowlist, port included - otherwise it is a forgeable input and we
+// fall back to the configured canonical authority (p.trustedHosts[0], with its port) so a
+// direct attacker request cannot steer the discovery doc / IdP redirect URLs to an
+// attacker-controlled host or port. The value returned is always rebuilt by canonicalHost
+// from its validated parts, never the raw header, so a value that merely normalizes to a
+// trusted host cannot smuggle anything else into the URL.
 func (p *AuthProxy) getPublicHost(c *gin.Context) string {
 	for _, header := range []string{
 		"X-Zitadel-Public-Host",
@@ -856,7 +904,7 @@ func (p *AuthProxy) getPublicHost(c *gin.Context) string {
 	// Nothing presented a valid trusted host - return the configured canonical
 	// host rather than an attacker-controlled one.
 	if len(p.trustedHosts) > 0 {
-		return p.trustedHosts[0]
+		return p.trustedHosts[0].authority()
 	}
 	// Unconfigured dev with a missing or malformed Host: an empty host is better
 	// than echoing an unvalidated value into a URL.
