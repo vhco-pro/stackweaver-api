@@ -103,7 +103,7 @@ func TestTeamLookupsPastTheOldPage(t *testing.T) {
 	}
 
 	// AC1: the notification audience includes the holder.
-	audience, err := svc.ListTeamsWithWorkspaceAccess(org.ID, project.ID, workspace.ID)
+	audience, err := svc.ListTeamsWithWorkspaceAccess(t.Context(), org.ID, project.ID, workspace.ID)
 	if err != nil {
 		t.Fatalf("ListTeamsWithWorkspaceAccess: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestTeamLookupsPastTheOldPage(t *testing.T) {
 	}
 
 	// AC2: the ansible template access listing includes it too.
-	listing, err := svc.GetTeamAccessForAnsibleTemplate(org.ID, project.ID)
+	listing, err := svc.GetTeamAccessForAnsibleTemplate(t.Context(), org.ID, project.ID)
 	if err != nil {
 		t.Fatalf("GetTeamAccessForAnsibleTemplate: %v", err)
 	}

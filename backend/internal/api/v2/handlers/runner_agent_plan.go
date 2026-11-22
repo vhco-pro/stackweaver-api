@@ -15,6 +15,7 @@ import (
 	"github.com/michielvha/stackweaver/core/crypto"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/runnercontract"
+	"github.com/michielvha/stackweaver/core/storage"
 	"gorm.io/gorm"
 )
 
@@ -50,6 +51,9 @@ func isUnsealedPlan(data []byte) bool {
 
 // loadRunForJob loads a run and authorizes the caller as its assigned runner or its job token.
 func (h *RunnerAgentHandler) loadRunForJob(c *gin.Context) (*models.Run, bool) {
+	scoped := *h
+	scoped.db = h.db.WithContext(c.Request.Context())
+	h = &scoped
 	var run models.Run
 	if err := h.db.First(&run, "id = ?", c.Param("id")).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -122,7 +126,11 @@ func (h *RunnerAgentHandler) DownloadPlan(c *gin.Context) {
 	}
 	data, err := h.storageClient.Get(c.Request.Context(), planFileKey(run.ID))
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "No saved plan for this run")
+		if errors.Is(err, storage.ErrNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "No saved plan for this run")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
 		return
 	}
 	plan, err := h.atRest().DecryptAtRest(data, isUnsealedPlan)
@@ -135,18 +143,20 @@ func (h *RunnerAgentHandler) DownloadPlan(c *gin.Context) {
 
 // planDescriptor returns the saved plan an apply phase applies, or nil when the run is not applying
 // or its plan phase stored none.
-func (h *RunnerAgentHandler) planDescriptor(ctx context.Context, run *models.Run) *runnercontract.PlanDescriptor {
+//
+//nolint:nilnil // A non-apply phase or an apply without a saved plan has no descriptor.
+func (h *RunnerAgentHandler) planDescriptor(ctx context.Context, run *models.Run) (*runnercontract.PlanDescriptor, error) {
 	if run.Status != models.RunStatusApplying || h.storageClient == nil {
-		return nil
+		return nil, nil
 	}
 	objects, err := h.storageClient.List(ctx, planFileKey(run.ID))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for _, o := range objects {
 		if o.Key == planFileKey(run.ID) {
-			return &runnercontract.PlanDescriptor{Path: planFilePath(run.ID), SizeBytes: o.Size}
+			return &runnercontract.PlanDescriptor{Path: planFilePath(run.ID), SizeBytes: o.Size}, nil
 		}
 	}
-	return nil
+	return nil, nil
 }

@@ -59,6 +59,7 @@ func setupHostedRunnerFixture(t *testing.T) *hostedRunnerFixture {
 	}
 	r := f.router(func(authed *gin.RouterGroup) {
 		authed.POST("/heartbeat", middleware.RequireRunnerToken(), h.Heartbeat)
+		authed.POST("/jobs/:id/start", middleware.RequireRunnerToken(), h.JobStart)
 		authed.POST("/jobs/:id/token", middleware.RequireRunnerToken(), h.JobToken)
 		authed.GET("/jobs/:id/status", h.GetJobStatus)
 	})
@@ -125,6 +126,9 @@ func TestHostedRunner_ServesEveryOrganizationOfItsGroup(t *testing.T) {
 	}
 
 	// Job tokens are bound to their job's organization.
+	if rec := runnerDo(t, f.r, "hosted", http.MethodPost, "/api/v2/runner/jobs/"+runB+"/start", runnercontract.JobStartRequest{RunnerID: f.runner.ID.String()}); rec.Code != http.StatusOK {
+		t.Fatalf("starting org B's reserved run: %d", rec.Code)
+	}
 	code, tokB := f.mintJobToken(t, f.r, f.svc, "hosted", runB, "jobB")
 	if code != http.StatusOK {
 		t.Fatalf("job token for org B's run: %d", code)

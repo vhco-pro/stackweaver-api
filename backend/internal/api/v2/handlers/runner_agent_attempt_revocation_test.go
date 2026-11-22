@@ -25,7 +25,6 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
@@ -75,7 +74,6 @@ func (f *agentPrepFixture) attemptRouter() (*gin.Engine, *apikey.Service) {
 		playbookRepo:   playbookRepo,
 		vcsRegistry:    registry,
 		storageClient:  newSnapshotStore(),
-		syncRequester:  ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
 	}
 	return f.router(func(authed *gin.RouterGroup) {
 		authed.POST("/jobs/:id/start", middleware.RequireRunnerToken(), h.JobStart)
@@ -195,7 +193,7 @@ func TestAttempt_ReclaimRevokesEarlierTokens(t *testing.T) {
 		t.Fatalf("mint: %d", code)
 	}
 	// The job is put back for a re-dispatch, and a2 claims it.
-	if err := f.db.Model(&models.AnsibleJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": models.AnsibleJobStatusPending, "runner_id": nil}).Error; err != nil {
+	if err := f.db.Model(&models.AnsibleJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": models.AnsibleJobStatusPending, "runner_id": nil, "queued_at": time.Now()}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if rec := runnerDo(t, r, "a2", http.MethodPost, "/api/v2/runner/jobs/"+job.ID.String()+"/start", map[string]any{"runner_id": f.runnerA2.ID.String()}); rec.Code != http.StatusOK {

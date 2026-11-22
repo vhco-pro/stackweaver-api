@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
@@ -44,6 +45,9 @@ func TestPlacement_RecordedFromTheClaimAndTheExecutor(t *testing.T) {
 	r := f.placementRouter()
 
 	job := f.seedJob(t, nil, nil)
+	if err := f.db.Model(job).Update("queued_at", time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
 	if rec := runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/jobs/"+job.ID.String()+"/start", map[string]any{"runner_id": f.runnerA1.ID.String(), "placement": claimPlacement}); rec.Code != http.StatusOK {
 		t.Fatalf("claim: %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -120,6 +124,9 @@ func TestPlacement_AReportWithOnlyAPlacementRecordsTheDigest(t *testing.T) {
 	}
 
 	job := f.seedJob(t, nil, nil)
+	if err := f.db.Model(job).Update("queued_at", time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
 	if rec := runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/jobs/"+job.ID.String()+"/start", map[string]any{"runner_id": f.runnerA1.ID.String(), "placement": map[string]any{"driver": "kubernetes"}}); rec.Code != http.StatusOK {
 		t.Fatalf("job claim: %d (%s)", rec.Code, rec.Body.String())
 	}

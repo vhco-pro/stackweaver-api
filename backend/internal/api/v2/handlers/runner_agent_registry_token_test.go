@@ -40,12 +40,12 @@ func TestRegistryToken_MintedPerJobAndScopedToItsOrganization(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	store := newSnapshotStore()
 	r, svc := f.blobRouter(t, store)
-	run := f.seedRun(t, f.runnerA1)
+	run := f.seedClaimedPlan(t)
 	if code, _ := f.mintJobToken(t, r, svc, "a1", run.ID, "job"); code != http.StatusOK {
 		t.Fatalf("mint: %d", code)
 	}
 
-	arts, _ := artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob)
+	arts, _ := artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob, map[string]string{runnercontract.ArtifactSequenceHeader: "1"})
 	if arts.Registry == nil || len(arts.Registry.Hosts) != 1 || arts.Registry.Hosts[0].Host != "registry.example.test" || arts.Registry.Hosts[0].Token == "" {
 		t.Fatalf("registry block = %+v, want one token for registry.example.test", arts.Registry)
 	}
@@ -95,9 +95,14 @@ func TestRegistryToken_MintedPerJobAndScopedToItsOrganization(t *testing.T) {
 	}
 
 	// A second fetch replaces the job's registry token rather than adding one.
-	_, _ = artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob)
+	second, _ := artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob, map[string]string{runnercontract.ArtifactSequenceHeader: "2"})
+	if second.Registry == nil || len(second.Registry.Hosts) != 1 || second.Registry.Hosts[0].Token == "" {
+		t.Fatal("replacement did not return a registry credential")
+	}
 	var n int64
-	f.db.Model(&models.APIKey{}).Where("scopes::text LIKE ?", "%job-registry:tofu_run:"+run.ID+"%").Count(&n)
+	if err := f.db.Model(&models.APIKey{}).Where("scopes::text LIKE ?", "%job-registry:tofu_run:"+run.ID+"%").Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
 	if n != 1 {
 		t.Errorf("registry tokens for the job after two fetches = %d, want 1", n)
 	}
@@ -111,7 +116,7 @@ func TestRegistryToken_MintedPerJobAndScopedToItsOrganization(t *testing.T) {
 	if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Update("agent_pool_id", nil).Error; err != nil {
 		t.Fatal(err)
 	}
-	arts, _ = artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob)
+	arts, _ = artifactsAs(t, r, "job", run.ID, runnercontract.CapabilityBlob, map[string]string{runnercontract.ArtifactSequenceHeader: "3"})
 	if arts.Registry == nil || len(arts.Registry.Hosts) != 1 {
 		t.Fatalf("registry block for a run without its own pool = %+v, want one token", arts.Registry)
 	}
@@ -125,7 +130,7 @@ func TestRegistryToken_MintedPerJobAndScopedToItsOrganization(t *testing.T) {
 	if err := svc.RevokeJobTokens(models.JobTypeTofuRun, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.VerifyAPIKey(token); err == nil {
+	if _, err := svc.VerifyAPIKey(second.Registry.Hosts[0].Token); err == nil {
 		t.Error("the registry token survived the revocation of the job's tokens")
 	}
 }

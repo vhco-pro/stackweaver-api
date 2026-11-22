@@ -161,7 +161,11 @@ func TestTeamCandidateNarrowingAgreesWithTheFullScan(t *testing.T) {
 		t.Fatalf("list every team: %v", err)
 	}
 	wantWorkspace := names(everyTeam, func(team *models.Team) bool {
-		return svc.teamReachesWorkspace(team, project.ID, workspace.ID)
+		reaches, err := svc.teamReachesWorkspace(t.Context(), team, project.ID, workspace.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reaches
 	})
 	if len(wantWorkspace) == 0 {
 		t.Fatal("the corpus produced no reaching teams, so this test would prove nothing")
@@ -174,14 +178,18 @@ func TestTeamCandidateNarrowingAgreesWithTheFullScan(t *testing.T) {
 		t.Fatalf("ListWithAnyAccess: %v", err)
 	}
 	gotNarrowed := names(candidates, func(team *models.Team) bool {
-		return svc.teamReachesWorkspace(team, project.ID, workspace.ID)
+		reaches, err := svc.teamReachesWorkspace(t.Context(), team, project.ID, workspace.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reaches
 	})
 	if !equalStrings(gotNarrowed, wantWorkspace) {
 		t.Errorf("candidate narrowing changed the answer:\n  full scan: %v\n  narrowed:  %v", wantWorkspace, gotNarrowed)
 	}
 
 	// And the shipped call site agrees with the full scan.
-	shipped, err := svc.ListTeamsWithWorkspaceAccess(org.ID, project.ID, workspace.ID)
+	shipped, err := svc.ListTeamsWithWorkspaceAccess(t.Context(), org.ID, project.ID, workspace.ID)
 	if err != nil {
 		t.Fatalf("ListTeamsWithWorkspaceAccess: %v", err)
 	}
@@ -197,10 +205,13 @@ func TestTeamCandidateNarrowingAgreesWithTheFullScan(t *testing.T) {
 	// The ansible path has its own legs - org access and project access, no owners bypass - so it is
 	// differentiated separately against the same corpus.
 	wantAnsible := names(everyTeam, func(team *models.Team) bool {
-		access := svc.ansibleTemplateAccessFor(team, project.ID)
+		access, err := svc.ansibleTemplateAccessFor(t.Context(), team, project.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return access.Read || access.Write || access.Execute
 	})
-	shippedAnsible, err := svc.GetTeamAccessForAnsibleTemplate(org.ID, project.ID)
+	shippedAnsible, err := svc.GetTeamAccessForAnsibleTemplate(t.Context(), org.ID, project.ID)
 	if err != nil {
 		t.Fatalf("GetTeamAccessForAnsibleTemplate: %v", err)
 	}

@@ -33,6 +33,7 @@ func (f *agentPrepFixture) seedApplyingRun(t *testing.T) *models.Run {
 	run := f.seedRun(t, f.runnerA1)
 	if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Updates(map[string]any{
 		"status": models.RunStatusApplying, "operation": models.RunOperationPlanAndApply, "plan_completed_at": time.Now(),
+		"dispatched_at": time.Now(), "claimed_phase": "apply", "claimed_run_type": "apply", "phase_attempt": 1,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}

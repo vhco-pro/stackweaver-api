@@ -4,11 +4,13 @@ package rbac
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"gorm.io/gorm"
 )
 
 type Service struct {
@@ -131,7 +133,7 @@ func (s *Service) CheckResourcePermission(
 		ctx = withoutSubject(ctx)
 	}
 
-	project, err := s.projectRepo.GetByID(*projectID)
+	project, err := s.projectRepo.WithContext(ctx).GetByID(*projectID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get project: %w", err)
 	}
@@ -140,7 +142,7 @@ func (s *Service) CheckResourcePermission(
 	// 1. Tenant isolation: User must have at least one team in the org (team-based access)
 	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
-		return false, nil // Not in any team in org = no access
+		return false, err
 	}
 
 	if s.teamRepo == nil {
@@ -153,7 +155,13 @@ func (s *Service) CheckResourcePermission(
 	if err != nil {
 		return false, fmt.Errorf("failed to get user teams: %w", err)
 	}
-	grants := s.grantsFor(teams, *projectID, resourceType, resourceID)
+	if memberOfOwnersTeam(teams) {
+		return true, nil
+	}
+	grants, err := s.grantsFor(ctx, teams, *projectID, resourceType, resourceID)
+	if err != nil {
+		return false, err
+	}
 
 	// 3. Check if permission is in union
 	return s.permits(grants, resourceType, resourceID, *projectID, permission), nil
@@ -204,18 +212,22 @@ type TeamWithWorkspaceAccess struct {
 //
 // Note leg 2 is deliberately broad: a team with org-wide read is notified about every change request in
 // the organization. That is TFE's semantics, not an accident.
-func (s *Service) ListTeamsWithWorkspaceAccess(orgID, projectID uuid.UUID, workspaceID string) ([]TeamWithWorkspaceAccess, error) {
+func (s *Service) ListTeamsWithWorkspaceAccess(ctx context.Context, orgID, projectID uuid.UUID, workspaceID string) ([]TeamWithWorkspaceAccess, error) {
 	if s.teamRepo == nil {
 		return nil, fmt.Errorf("team repository not available")
 	}
-	teams, err := s.teamRepo.ListWithAnyAccess(orgID, projectID, workspaceID)
+	teams, err := s.teamRepo.WithContext(ctx).ListWithAnyAccess(orgID, projectID, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list teams: %w", err)
 	}
 	out := make([]TeamWithWorkspaceAccess, 0, len(teams))
 	for i := range teams {
 		team := &teams[i]
-		if s.teamReachesWorkspace(team, projectID, workspaceID) {
+		reaches, err := s.teamReachesWorkspace(ctx, team, projectID, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if reaches {
 			out = append(out, TeamWithWorkspaceAccess{TeamID: team.ID, TeamName: team.Name})
 		}
 	}
@@ -224,51 +236,55 @@ func (s *Service) ListTeamsWithWorkspaceAccess(orgID, projectID uuid.UUID, works
 
 // teamReachesWorkspace reports whether any of the four access legs gives this team read or write on the
 // workspace. Ordered cheapest-first: the owners check and the preloaded org access need no query.
-func (s *Service) teamReachesWorkspace(team *models.Team, projectID uuid.UUID, workspaceID string) bool {
+func (s *Service) teamReachesWorkspace(ctx context.Context, team *models.Team, projectID uuid.UUID, workspaceID string) (bool, error) {
 	reaches := func(perms map[Permission]bool) bool {
 		return perms[PermissionWorkspaceRead] || perms[PermissionWorkspaceWrite]
 	}
 
 	// 1. owners bypass (same by-name rule checkOrgPermission and IsOrgOwner use).
 	if team.Name == "owners" {
-		return true
+		return true, nil
 	}
 
 	// 2. org-wide access. OrganizationAccess is preloaded by TeamRepository.List.
 	if team.OrganizationAccess != nil && reaches(s.getPermissionsFromOrganizationAccess(team.OrganizationAccess)) {
-		return true
+		return true, nil
 	}
 
 	// 3. project access on the workspace's parent project.
-	if pa, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && pa != nil {
-		if reaches(s.getPermissionsFromProjectAccess(pa, ResourceTypeTerraformWorkspace)) {
-			return true
-		}
+	teams := s.teamRepo.WithContext(ctx)
+	projectAccess, err := projectGrant(teams, team.ID, projectID)
+	if err != nil {
+		return false, err
+	}
+	if projectAccess != nil && reaches(s.getPermissionsFromProjectAccess(projectAccess, ResourceTypeTerraformWorkspace)) {
+		return true, nil
 	}
 
 	// 4. a direct grant on the workspace.
-	if wa, err := s.teamRepo.GetWorkspaceAccessByTeamAndWorkspace(team.ID, workspaceID); err == nil && wa != nil {
-		if reaches(s.getPermissionsFromWorkspaceAccess(wa)) {
-			return true
-		}
+	workspaceAccess, err := workspaceGrant(teams, team.ID, workspaceID)
+	if err != nil {
+		return false, err
 	}
-
-	return false
+	return workspaceAccess != nil && reaches(s.getPermissionsFromWorkspaceAccess(workspaceAccess)), nil
 }
 
-func (s *Service) GetTeamAccessForAnsibleTemplate(orgID, projectID uuid.UUID) ([]TeamAnsibleTemplateAccess, error) {
+func (s *Service) GetTeamAccessForAnsibleTemplate(ctx context.Context, orgID, projectID uuid.UUID) ([]TeamAnsibleTemplateAccess, error) {
 	if s.teamRepo == nil {
 		return nil, fmt.Errorf("team repository not available")
 	}
 	// Candidates only, then the same mapping as before - see ListTeamsWithWorkspaceAccess for why the
 	// verdict stays in Go. This path has no workspace leg, so it passes an empty workspace id.
-	teams, err := s.teamRepo.ListWithAnyAccess(orgID, projectID, "")
+	teams, err := s.teamRepo.WithContext(ctx).ListWithAnyAccess(orgID, projectID, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list teams: %w", err)
 	}
 	result := make([]TeamAnsibleTemplateAccess, 0, len(teams))
 	for i := range teams {
-		access := s.ansibleTemplateAccessFor(&teams[i], projectID)
+		access, err := s.ansibleTemplateAccessFor(ctx, &teams[i], projectID)
+		if err != nil {
+			return nil, err
+		}
 		if access.Read || access.Write || access.Execute {
 			result = append(result, access)
 		}
@@ -282,14 +298,18 @@ func (s *Service) GetTeamAccessForAnsibleTemplate(orgID, projectID uuid.UUID) ([
 //
 // Extracted so the differential test for #800 can compute the expected answer with the same code the
 // production path uses, rather than a second copy of the mapping that would drift from it.
-func (s *Service) ansibleTemplateAccessFor(team *models.Team, projectID uuid.UUID) TeamAnsibleTemplateAccess {
+func (s *Service) ansibleTemplateAccessFor(ctx context.Context, team *models.Team, projectID uuid.UUID) (TeamAnsibleTemplateAccess, error) {
 	perms := map[Permission]bool{}
 	if team.OrganizationAccess != nil {
 		for perm := range s.getPermissionsFromOrganizationAccess(team.OrganizationAccess) {
 			perms[perm] = true
 		}
 	}
-	if projectAccess, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && projectAccess != nil {
+	projectAccess, err := projectGrant(s.teamRepo.WithContext(ctx), team.ID, projectID)
+	if err != nil {
+		return TeamAnsibleTemplateAccess{}, err
+	}
+	if projectAccess != nil {
 		for perm := range s.getPermissionsFromProjectAccess(projectAccess, ResourceTypeAnsibleJobTemplate) {
 			perms[perm] = true
 		}
@@ -300,7 +320,7 @@ func (s *Service) ansibleTemplateAccessFor(team *models.Team, projectID uuid.UUI
 		Read:     perms[PermissionAnsibleJobTemplateRead],
 		Write:    perms[PermissionAnsibleJobTemplateWrite],
 		Execute:  perms[PermissionAnsibleJobExecute],
-	}
+	}, nil
 }
 
 // getPermissionsFromOrganizationAccess extracts all permissions from team organization access
@@ -879,7 +899,7 @@ func (s *Service) CheckWorkspaceAdminPermission(
 		}
 		ctx = withoutSubject(ctx)
 	}
-	project, err := s.projectRepo.GetByID(projectID)
+	project, err := s.projectRepo.WithContext(ctx).GetByID(projectID)
 	if err != nil {
 		return false, fmt.Errorf("getting project %s: %w", projectID, err)
 	}
@@ -891,16 +911,21 @@ func (s *Service) CheckWorkspaceAdminPermission(
 	if err != nil {
 		return false, fmt.Errorf("getting teams of user %s: %w", userID, err)
 	}
+	repo := s.teamRepo.WithContext(ctx)
 	for _, team := range teams {
-		if pa, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && pa != nil && pa.Access != nil {
-			if *pa.Access == "admin" || *pa.Access == "maintain" {
-				return true, nil
-			}
+		pa, err := projectGrant(repo, team.ID, projectID)
+		if err != nil {
+			return false, err
 		}
-		if wa, err := s.teamRepo.GetWorkspaceAccessByTeamAndWorkspace(team.ID, workspaceID); err == nil && wa != nil && wa.Access != nil {
-			if *wa.Access == "admin" {
-				return true, nil
-			}
+		if pa != nil && pa.Access != nil && (*pa.Access == "admin" || *pa.Access == "maintain") {
+			return true, nil
+		}
+		wa, err := workspaceGrant(repo, team.ID, workspaceID)
+		if err != nil {
+			return false, err
+		}
+		if wa != nil && wa.Access != nil && *wa.Access == "admin" {
+			return true, nil
 		}
 	}
 	return false, nil
@@ -938,7 +963,7 @@ func (s *Service) CheckOrgManageMembership(ctx context.Context, userID, organiza
 	// Tenant isolation: user must have at least one team in the org (team-based access)
 	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
-		return false, nil
+		return false, err
 	}
 
 	if s.teamRepo == nil {
@@ -977,7 +1002,7 @@ func (s *Service) CheckOrgManageTeams(ctx context.Context, userID, organizationI
 	// Tenant isolation: user must have at least one team in the org (team-based access)
 	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
-		return false, nil
+		return false, err
 	}
 
 	if s.teamRepo == nil {
@@ -1018,7 +1043,7 @@ func (s *Service) IsOrgOwner(ctx context.Context, userID, organizationID uuid.UU
 	// Tenant isolation: user must have at least one team in the org (team-based access)
 	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
-		return false, nil
+		return false, err
 	}
 
 	if s.teamRepo == nil {
@@ -1110,7 +1135,7 @@ func (s *Service) OrgPermissionsForOrganizations(
 			}
 		}
 	} else {
-		teams, err = s.teamRepo.GetTeamsByUserIDForOrganizations(userID, orgIDs)
+		teams, err = s.teamRepo.WithContext(ctx).GetTeamsByUserIDForOrganizations(userID, orgIDs)
 	}
 	if err != nil {
 		return nil, err
@@ -1210,7 +1235,10 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userID, organizat
 		return map[Permission]bool{}, nil
 	}
 	inOrg, err := s.inOrg(ctx, userID, organizationID)
-	if err != nil || !inOrg {
+	if err != nil {
+		return nil, err
+	}
+	if !inOrg {
 		return nil, fmt.Errorf("user not in organization")
 	}
 
@@ -1236,9 +1264,12 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, userID, organizat
 		if team.OrganizationAccess != nil {
 			orgAccess = team.OrganizationAccess
 		} else {
-			orgAccess, err = s.teamRepo.GetOrganizationAccess(team.ID)
-			if err != nil {
+			orgAccess, err = s.teamRepo.WithContext(ctx).GetOrganizationAccess(team.ID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
+			}
+			if err != nil {
+				return nil, err
 			}
 		}
 		if orgAccess != nil {
@@ -1273,7 +1304,7 @@ func (s *Service) checkOrgPermission(ctx context.Context, userID, organizationID
 	// Tenant isolation: user must have at least one team in the org (team-based access)
 	inOrg, err := s.inOrg(ctx, userID, organizationID)
 	if err != nil || !inOrg {
-		return false, nil
+		return false, err
 	}
 
 	if s.teamRepo == nil {
@@ -1302,9 +1333,12 @@ func (s *Service) checkOrgPermission(ctx context.Context, userID, organizationID
 		} else {
 			// Fallback: fetch if not preloaded (shouldn't happen, but be defensive)
 			var err error
-			orgAccess, err = s.teamRepo.GetOrganizationAccess(team.ID)
-			if err != nil {
+			orgAccess, err = s.teamRepo.WithContext(ctx).GetOrganizationAccess(team.ID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
+			}
+			if err != nil {
+				return false, err
 			}
 		}
 

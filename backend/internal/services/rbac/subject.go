@@ -4,12 +4,14 @@ package rbac
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"gorm.io/gorm"
 )
 
 // A request authenticated by an organization token that carries no organization-level scope is
@@ -123,13 +125,13 @@ func (subj Subject) projectScopeAllows(permission Permission, projectID *uuid.UU
 func UserInOrg(ctx context.Context, orgRepo *repository.OrganizationRepository, userID, orgID uuid.UUID) (bool, error) {
 	subj, ok := subjectFrom(ctx)
 	if !ok {
-		return orgRepo.UserInOrg(userID, orgID)
+		return orgRepo.WithContext(ctx).UserInOrg(userID, orgID)
 	}
 	if subj.organizationID != orgID || subj.denied {
 		return false, nil
 	}
 	if subj.kind == subjectProject {
-		return orgRepo.UserInOrg(userID, orgID)
+		return orgRepo.WithContext(ctx).UserInOrg(userID, orgID)
 	}
 	return true, nil
 }
@@ -139,7 +141,7 @@ func UserInOrg(ctx context.Context, orgRepo *repository.OrganizationRepository, 
 func TeamsInOrg(ctx context.Context, orgRepo *repository.OrganizationRepository, teamRepo *repository.TeamRepository, userID, orgID uuid.UUID) ([]models.Team, error) {
 	subj, ok := subjectFrom(ctx)
 	if !ok {
-		return teamRepo.GetTeamsByUserID(userID, orgID)
+		return teamRepo.WithContext(ctx).GetTeamsByUserID(userID, orgID)
 	}
 	if subj.kind == subjectProject {
 		return nil, nil
@@ -148,9 +150,15 @@ func TeamsInOrg(ctx context.Context, orgRepo *repository.OrganizationRepository,
 	if err != nil || !in {
 		return nil, err
 	}
-	team, err := teamRepo.GetByID(subj.teamID)
-	if err != nil || team.OrganizationID != orgID {
-		return nil, nil //nolint:nilerr // a team that is gone grants nothing
+	team, err := teamRepo.WithContext(ctx).GetByID(subj.teamID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if team.OrganizationID != orgID {
+		return nil, nil
 	}
 	return []models.Team{*team}, nil
 }
@@ -178,7 +186,7 @@ func (s *Service) teamsOf(ctx context.Context, userID, orgID uuid.UUID) ([]model
 	if ok && subj.kind == subjectProject {
 		// A project-scoped key is capped at each check, and within that cap holds what its owner
 		// holds; the owner's teams are what that is computed from.
-		return s.teamRepo.GetTeamsByUserID(userID, orgID)
+		return s.teamRepo.WithContext(ctx).GetTeamsByUserID(userID, orgID)
 	}
 	return TeamsInOrg(ctx, s.orgRepo, s.teamRepo, userID, orgID)
 }

@@ -50,8 +50,10 @@ func (h *RunnerAgentHandler) jobImage(kind models.JobType, jobID string, pool *u
 		var tmpl *models.AnsibleJobTemplate
 		if job.TemplateID != nil {
 			var t models.AnsibleJobTemplate
-			if h.db.Select("id", "run_image_id").First(&t, "id = ?", *job.TemplateID).Error == nil {
+			if err := h.db.Select("id", "run_image_id").First(&t, "id = ?", *job.TemplateID).Error; err == nil {
 				tmpl = &t
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("loading the job template: %w", err)
 			}
 		}
 		resolved, table = settings.EffectiveTemplateRunImage(tmpl, &job.Project, &job.Project.Organization), &models.AnsibleJob{}
@@ -127,7 +129,11 @@ func (h *RunnerAgentHandler) GetPullCredential(c *gin.Context) {
 	}
 	var img models.RunImage
 	if err := h.db.First(&img, "id = ?", id).Error; err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run image not found")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run image not found")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
 		return
 	}
 	if runner.IsHosted() {
@@ -150,7 +156,11 @@ func (h *RunnerAgentHandler) GetPullCredential(c *gin.Context) {
 	}
 	var cred models.AnsibleCredential
 	if err := h.db.First(&cred, "id = ? AND organization_id = ? AND type = ?", *img.RegistryCredentialID, img.OrganizationID, models.CredentialTypeRegistry).Error; err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the run image's registry credential is gone")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the run image's registry credential is gone")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
 		return
 	}
 	password := ""

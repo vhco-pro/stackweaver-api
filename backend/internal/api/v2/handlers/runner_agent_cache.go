@@ -19,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/runnercontract"
+	"github.com/michielvha/stackweaver/core/storage"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -103,9 +104,9 @@ func (h *RunnerAgentHandler) jobOrganization(c *gin.Context) (uuid.UUID, bool) {
 			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
 			return uuid.Nil, false
 		}
-		job, err := h.ansibleJobRepo.GetByID(jobID)
+		job, err := h.ansibleJobRepo.WithContext(c.Request.Context()).GetByID(jobID)
 		if err != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
+			writeRunnerJobReadError(c, err)
 			return uuid.Nil, false
 		}
 		if !h.authorizeRunnerForAnsibleJob(c, job, true) {
@@ -141,8 +142,11 @@ func (h *RunnerAgentHandler) serveCacheEntry(c *gin.Context, entry *models.Cache
 	}
 	body, err := h.storageClient.GetStream(c.Request.Context(), models.CacheObjectKey(entry.OrganizationID, entry.Kind, entry.SHA256))
 	if err != nil {
-		// The row outlived its object (a janitor mid-sweep): the reader falls back to its source.
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Cache entry not found")
+		if errors.Is(err, storage.ErrNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Cache entry not found")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
 		return
 	}
 	defer func() { _ = body.Close() }()
@@ -249,6 +253,9 @@ func (h *RunnerAgentHandler) GetCacheEntry(c *gin.Context) {
 	if !cacheKey(c, kind, sum) {
 		return
 	}
+	scoped := *h
+	scoped.db = h.db.WithContext(c.Request.Context())
+	h = &scoped
 	org, ok := h.cacheOrganization(c, "")
 	if !ok {
 		return

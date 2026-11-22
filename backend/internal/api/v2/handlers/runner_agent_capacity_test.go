@@ -21,25 +21,23 @@ import (
 )
 
 // seedPendingAnsibleJob inserts a released pending job into the given pool. It
-// creates the real parent graph (org → project → inventory) so the live
-// foreign-key constraints are satisfied.
+// creates its project and inventory in the pool's owning organization.
 func seedPendingAnsibleJob(t *testing.T, h *RunnerAgentHandler, poolID uuid.UUID) uuid.UUID {
 	t.Helper()
 	suffix := uuid.NewString()[:8]
 
-	org := &models.Organization{ID: uuid.New(), Name: "captest-org-" + suffix}
-	if err := h.db.Create(org).Error; err != nil {
-		t.Fatalf("seed org: %v", err)
+	var pool models.AgentPool
+	if err := h.db.First(&pool, "id = ?", poolID).Error; err != nil {
+		t.Fatalf("load the pool owner: %v", err)
 	}
-	t.Cleanup(func() { h.db.Delete(&models.Organization{}, "id = ?", org.ID) })
 
-	project := &models.Project{ID: uuid.New(), OrganizationID: org.ID, Name: "captest-proj-" + suffix}
+	project := &models.Project{ID: uuid.New(), OrganizationID: pool.OrganizationID, Name: "captest-proj-" + suffix}
 	if err := h.db.Create(project).Error; err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
 	t.Cleanup(func() { h.db.Delete(&models.Project{}, "id = ?", project.ID) })
 
-	inv := &models.AnsibleInventory{ID: uuid.New(), OrganizationID: org.ID, Name: "captest-inv-" + suffix, Type: models.InventoryTypeStatic}
+	inv := &models.AnsibleInventory{ID: uuid.New(), OrganizationID: pool.OrganizationID, Name: "captest-inv-" + suffix, Type: models.InventoryTypeStatic}
 	if err := h.db.Create(inv).Error; err != nil {
 		t.Fatalf("seed inventory: %v", err)
 	}
@@ -140,7 +138,7 @@ func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 		seedPendingAnsibleJob(t, h, poolID)
 	}
 
-	offered, err := h.findPendingJobsForRunner(runner)
+	offered, err := h.findPendingJobsForRunner(t.Context(), runner)
 	if err != nil {
 		t.Fatalf("findPendingJobsForRunner: %v", err)
 	}
@@ -160,7 +158,7 @@ func TestFindPendingJobs_CapacityCapsOffering(t *testing.T) {
 	// the kind harness: 2 agents, 3 slices, one slice pending on an online runner until
 	// the spec timed out. This assertion previously expected 0, which conflated "no new
 	// work" with "nothing at all" and encoded the starvation as intended behaviour.
-	offered, err = h.findPendingJobsForRunner(runner)
+	offered, err = h.findPendingJobsForRunner(t.Context(), runner)
 	if err != nil {
 		t.Fatalf("findPendingJobsForRunner (full): %v", err)
 	}
@@ -201,11 +199,11 @@ func TestFindPendingJobs_DistributesAcrossRunners(t *testing.T) {
 		seedPendingAnsibleJob(t, h, pool.ID)
 	}
 
-	offeredA, err := h.findPendingJobsForRunner(runnerA)
+	offeredA, err := h.findPendingJobsForRunner(t.Context(), runnerA)
 	if err != nil {
 		t.Fatalf("offer A: %v", err)
 	}
-	offeredB, err := h.findPendingJobsForRunner(runnerB)
+	offeredB, err := h.findPendingJobsForRunner(t.Context(), runnerB)
 	if err != nil {
 		t.Fatalf("offer B: %v", err)
 	}

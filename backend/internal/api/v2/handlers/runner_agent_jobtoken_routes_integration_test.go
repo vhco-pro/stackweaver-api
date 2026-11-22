@@ -26,7 +26,6 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
@@ -50,7 +49,6 @@ func (f *agentPrepFixture) jobDataRouter(t *testing.T) (*gin.Engine, *apikey.Ser
 		vcsRegistry:    vcs.NewProviderRegistry(nil, nil, nil, nil),
 		storageClient:  newSnapshotStore(),
 		cryptoService:  cs,
-		syncRequester:  ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
 	}
 	f.jobDataStore = h.storageClient.(*snapshotStore)
 	return f.router(func(authed *gin.RouterGroup) {

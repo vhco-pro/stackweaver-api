@@ -61,7 +61,11 @@ func (h *RunnerHandlerV2) requireManageAgentPools(c *gin.Context, orgID uuid.UUI
 	}
 	uid := userID.(uuid.UUID)
 	ok, err := h.rbacService.CheckOrgManageAgentPools(c.Request.Context(), uid, orgID)
-	if err != nil || !ok {
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+		return false
+	}
+	if !ok {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to manage agent pools and launchers for this organization")
 		return false
 	}

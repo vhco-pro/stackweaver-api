@@ -4,11 +4,13 @@ package rbac
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"gorm.io/gorm"
 )
 
 // teamGrants is what a caller's teams hold in one organization: each team's organization access
@@ -44,27 +46,59 @@ func (g *teamGrants) addWorkspace(a *models.TeamWorkspaceAccess) {
 	g.workspace[a.TeamID][a.WorkspaceID] = a
 }
 
+func projectGrant(teams *repository.TeamRepository, teamID, projectID uuid.UUID) (*models.TeamProjectAccess, error) {
+	grant, err := teams.GetProjectAccessByTeamAndProject(teamID, projectID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil //nolint:nilnil // An absent grant is an ordinary result.
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read team project access: %w", err)
+	}
+	return grant, nil
+}
+
+func workspaceGrant(teams *repository.TeamRepository, teamID uuid.UUID, workspaceID string) (*models.TeamWorkspaceAccess, error) {
+	grant, err := teams.GetWorkspaceAccessByTeamAndWorkspace(teamID, workspaceID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil //nolint:nilnil // An absent grant is an ordinary result.
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read team workspace access: %w", err)
+	}
+	return grant, nil
+}
+
 // grantsFor loads the teams' grants bearing on one resource of one project.
-func (s *Service) grantsFor(teams []models.Team, projectID uuid.UUID, resourceType ResourceType, resourceID string) *teamGrants {
+func (s *Service) grantsFor(ctx context.Context, teams []models.Team, projectID uuid.UUID, resourceType ResourceType, resourceID string) (*teamGrants, error) {
 	g := newTeamGrants(teams)
+	repo := s.teamRepo.WithContext(ctx)
 	for _, team := range teams {
-		if pa, err := s.teamRepo.GetProjectAccessByTeamAndProject(team.ID, projectID); err == nil && pa != nil {
+		pa, err := projectGrant(repo, team.ID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if pa != nil {
 			g.addProject(pa)
 		}
-		if resourceID != "" && resourceType == ResourceTypeTerraformWorkspace {
-			if wa, err := s.teamRepo.GetWorkspaceAccessByTeamAndWorkspace(team.ID, resourceID); err == nil && wa != nil {
-				g.addWorkspace(wa)
-			}
+		if resourceID == "" || resourceType != ResourceTypeTerraformWorkspace {
+			continue
+		}
+		wa, err := workspaceGrant(repo, team.ID, resourceID)
+		if err != nil {
+			return nil, err
+		}
+		if wa != nil {
+			g.addWorkspace(wa)
 		}
 	}
-	return g
+	return g, nil
 }
 
 // allGrants loads every project and workspace grant the teams hold.
-func (s *Service) allGrants(teams []models.Team) (*teamGrants, error) {
+func (s *Service) allGrants(ctx context.Context, teams []models.Team) (*teamGrants, error) {
 	g := newTeamGrants(teams)
 	for _, team := range teams {
-		full, err := s.teamRepo.GetByID(team.ID)
+		full, err := s.teamRepo.WithContext(ctx).GetByID(team.ID)
 		if err != nil {
 			return nil, fmt.Errorf("getting grants of team %s: %w", team.ID, err)
 		}
@@ -231,13 +265,13 @@ func (s *Service) readable(ctx context.Context, userID, orgID uuid.UUID, n int, 
 	}
 	in, err := s.inOrg(evalCtx, userID, orgID)
 	if err != nil || !in {
-		return keep, nil //nolint:nilerr // not a member: nothing is readable, as in CheckResourcePermission
+		return keep, err
 	}
 	teams, err := s.teamsOf(evalCtx, userID, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("getting teams of user %s: %w", userID, err)
 	}
-	g, err := s.allGrants(teams)
+	g, err := s.allGrants(evalCtx, teams)
 	if err != nil {
 		return nil, err
 	}

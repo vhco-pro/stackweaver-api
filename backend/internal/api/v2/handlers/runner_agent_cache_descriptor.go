@@ -16,7 +16,6 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/settings"
 )
 
@@ -113,10 +112,9 @@ func (h *RunnerAgentHandler) runCacheDescriptorFor(ctx context.Context, run *mod
 // ansibleCacheDescriptor resolves an Ansible job's entries from the Galaxy requirements of its
 // playbook's snapshot: a pinned collection or role at that version, an unpinned one at the newest
 // version the organization caches, and a git source at its pinned commit or, on a branch or tag,
-// at the repository's newest cached commits. A
-// playbook cloned fresh for each job has no snapshot to read, so it gets no descriptor.
+// at the repository's newest cached commits. Jobs without an assigned snapshot get no descriptor.
 func (h *RunnerAgentHandler) ansibleCacheDescriptor(ctx context.Context, org uuid.UUID, job *models.AnsibleJob) *runnercontract.CacheDescriptor {
-	if job.PlaybookID == nil || h.playbookRepo == nil || h.storageClient == nil {
+	if job.PlaybookSnapshotUploadID == nil || job.PlaybookID == nil || h.playbookRepo == nil || h.storageClient == nil {
 		return nil
 	}
 	// An organization that caches no Ansible content has nothing to name: its snapshot is not read.
@@ -126,16 +124,23 @@ func (h *RunnerAgentHandler) ansibleCacheDescriptor(ctx context.Context, org uui
 		Limit(1).Count(&cached).Error; err != nil || cached == 0 {
 		return nil
 	}
-	playbook, err := h.playbookRepo.GetByID(*job.PlaybookID)
-	if err != nil || playbook.CachedAt == nil || playbookSourceMode(playbook) == models.PlaybookSourceModeFresh {
-		return nil
-	}
-	stream, err := h.storageClient.GetStream(ctx, ansible.PlaybookSnapshotKey(playbook.ID))
+	playbook, err := h.playbookRepo.WithContext(ctx).GetByID(*job.PlaybookID)
 	if err != nil {
 		return nil
 	}
-	defer func() { _ = stream.Close() }()
-	data, _, err := cachedesc.FindInTarGz(limitReader(stream, maxDescriptorSnapshotBytes), cachedesc.RequirementsFiles, maxDescriptorFileBytes)
+	if !tryPlaybookSnapshotSlot() {
+		return nil
+	}
+	defer releasePlaybookSnapshotSlot()
+	upload, err := h.assignedPlaybookSnapshot(ctx, job, playbook)
+	if err != nil {
+		return nil
+	}
+	snapshot, err := h.readAssignedPlaybookSnapshot(ctx, job, upload)
+	if err != nil {
+		return nil
+	}
+	data, _, err := cachedesc.FindInTarGz(limitReader(bytes.NewReader(snapshot), maxDescriptorSnapshotBytes), cachedesc.RequirementsFiles, maxDescriptorFileBytes)
 	if err != nil || data == nil {
 		return nil
 	}

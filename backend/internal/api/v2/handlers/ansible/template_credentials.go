@@ -73,7 +73,7 @@ func (h *PlaybookHandler) GetTemplateAccess(c *gin.Context) {
 	if template == nil {
 		return
 	}
-	access, err := h.rbacService.GetTeamAccessForAnsibleTemplate(template.Project.OrganizationID, template.ProjectID)
+	access, err := h.rbacService.GetTeamAccessForAnsibleTemplate(c.Request.Context(), template.Project.OrganizationID, template.ProjectID)
 	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to compute team access")
 		return

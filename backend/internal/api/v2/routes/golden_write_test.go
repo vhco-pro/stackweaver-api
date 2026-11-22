@@ -171,6 +171,10 @@ type writeCase struct {
 	// send earlier requests through w.send, mint a credential the way the server does, or write
 	// to w.db directly. None of that is recorded under this route.
 	prepare func(t *testing.T, w *writeRun) *http.Request
+	// beforeRequest installs a request-scoped observation or fault and returns its cleanup.
+	beforeRequest func(t *testing.T, w *writeRun) func()
+	// responseVariants record alternate accepted responses in independent seeded copies.
+	responseVariants []writeResponseVariant
 
 	// requestSecrets and responseSecrets are dotted paths (a field name, for a form) to every
 	// value that is a secret: a credential the request sends, a token the server generates and
@@ -194,6 +198,18 @@ type writeCase struct {
 	// webhook's signing secret, whether a run task may live on a private address), so a case
 	// that needs one has to have it in place before the router exists.
 	env map[string]string
+}
+
+type writeResponseVariant struct {
+	prepare       func(t *testing.T, w *writeRun) *http.Request
+	beforeRequest func(t *testing.T, w *writeRun) func()
+}
+
+// responseVariant preserves route and redaction policy while replacing only variant setup.
+func (wc writeCase) responseVariant(variant writeResponseVariant) writeCase {
+	wc.prepare, wc.beforeRequest = variant.prepare, variant.beforeRequest
+	wc.responseVariants = nil
+	return wc
 }
 
 // accepts reports whether status is the answer of a write the server accepted: a 2xx, or for a
@@ -695,6 +711,10 @@ func (r *writeRecorder) run(t *testing.T, n int, wc writeCase) (fx writeFixture,
 
 	// Only the recorded request's bind counts; preparation binds too.
 	r.binds.reset()
+	if wc.beforeRequest != nil {
+		cleanup := wc.beforeRequest(t, w)
+		defer cleanup()
+	}
 	requestStart := time.Now()
 	rec := w.send(req)
 	bound := r.binds.bound()
@@ -777,6 +797,7 @@ func TestGoldenWrites(t *testing.T) {
 	goroutinesBefore, redisBefore := runtime.NumGoroutine(), redisClients(t)
 	started := time.Now()
 	ran := 0
+	variantIndex := len(writeCases)
 	for n, i := range order {
 		wc := writeCases[i]
 		if !selected(wc.route) {
@@ -791,6 +812,19 @@ func TestGoldenWrites(t *testing.T) {
 		}
 		if !ok {
 			continue // run reported why
+		}
+		for i, variant := range wc.responseVariants {
+			alternate, _, valid := r.run(t, variantIndex, wc.responseVariant(variant))
+			variantIndex++
+			if !wc.accepts(alternate.Status) {
+				t.Errorf("%s response variant %d answered unaccepted status %d", wc.route, i+1, alternate.Status)
+				continue
+			}
+			if !valid {
+				t.Errorf("%s response variant %d was not recorded", wc.route, i+1)
+				continue
+			}
+			fx.ResponseVariants = append(fx.ResponseVariants, writeFixtureResponse{Status: alternate.Status, Response: alternate.Response})
 		}
 		saveOrCompare(t, fx)
 		t.Logf("%-55s %d  %s", wc.route, fx.Status, time.Since(caseStart).Round(time.Millisecond))

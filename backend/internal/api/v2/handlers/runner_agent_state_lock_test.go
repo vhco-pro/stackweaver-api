@@ -43,7 +43,7 @@ func (f *agentPrepFixture) workspaceLock(t *testing.T, wsID string) *models.Stat
 
 func TestStateLock_HeldFromClaimToCompletion(t *testing.T) {
 	f := setupAgentPrepFixture(t)
-	r, _ := f.attemptRouter()
+	r, svc := f.attemptRouter()
 	ws := &models.Workspace{ProjectID: f.projectA, Name: "lock-ws-" + uuid.NewString()[:8], ExecutionMode: "agent", AgentPoolID: &f.poolA, RunTimeout: 900}
 	if err := f.db.Create(ws).Error; err != nil {
 		t.Fatal(err)
@@ -83,7 +83,10 @@ func TestStateLock_HeldFromClaimToCompletion(t *testing.T) {
 	}
 
 	// Completion releases the lock, and the second run starts.
-	done := runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/jobs/"+first.ID+"/complete", map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "failed", "error_message": "test"})
+	if code, _ := f.mintJobToken(t, r, svc, "a1", first.ID, "job"); code != http.StatusOK {
+		t.Fatalf("minting the executor token: %d", code)
+	}
+	done := runnerDo(t, r, "job", http.MethodPost, "/api/v2/runner/jobs/"+first.ID+"/complete", map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "failed", "error_message": "test"})
 	if done.Code != http.StatusOK {
 		t.Fatalf("completing the first run: %d (%s)", done.Code, done.Body.String())
 	}

@@ -47,7 +47,10 @@ func TestMonitorKeepsALauncherBetweenHeartbeats(t *testing.T) {
 	claiming := runner("claiming", OfflineAfter/2+15*time.Second)
 	gone := runner("gone", OfflineAfter+30*time.Second)
 
-	NewMonitorService(repository.NewRunnerRepository(db)).markStaleRunners()
+	monitor := NewMonitorService(repository.NewRunnerRepository(db))
+	// This fixture represents a monitor with an established healthy observation history.
+	monitor.healthySince = monitor.now().Add(-RecoveryGrace)
+	monitor.markStaleRunners(t.Context())
 
 	var c, g models.Runner
 	db.First(&c, "id = ?", claiming.ID)

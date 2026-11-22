@@ -21,8 +21,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
+	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/logbuffer"
@@ -85,15 +88,23 @@ func TestLogCap_OpenTofuRunCompletesWithTheTruncationRecorded(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	store := newSnapshotStore()
 	limits := logbuffer.Limits{MaxBytes: 2000, TailBytes: 500}
+	keys := apikey.NewService(repository.NewAPIKeyRepository(f.db), nil, nil, nil)
 	h := &RunnerAgentHandler{
 		db: f.db, runnerRepo: repository.NewRunnerRepository(f.db), jobExecRepo: repository.NewRunnerJobExecutionRepository(f.db),
 		ansibleJobRepo: repository.NewAnsibleJobRepository(f.db), storageClient: store, logLimits: limits, outputBodyCap: 4096,
+		apiKeyService: keys,
 	}
 	r := f.router(func(authed *gin.RouterGroup) {
 		authed.POST("/jobs/:id/output", h.JobOutput)
 		authed.POST("/jobs/:id/complete", h.JobComplete)
+		authed.POST("/jobs/:id/token", middleware.RequireRunnerToken(), h.JobToken)
 	})
 	run := f.seedRun(t, f.runnerA1)
+	if err := f.db.Model(run).Updates(map[string]any{
+		"dispatched_at": time.Now(), "claimed_phase": "plan", "claimed_run_type": "plan", "phase_attempt": 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	posted := 0
 	for i := range 100 {
 		line := fmt.Sprintf("line %03d %s\n", i, strings.Repeat("x", 40))
@@ -102,7 +113,10 @@ func TestLogCap_OpenTofuRunCompletesWithTheTruncationRecorded(t *testing.T) {
 			t.Fatalf("output %d past the cap: %d, want the job to carry on", i, code)
 		}
 	}
-	if rec := runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/jobs/"+run.ID+"/complete", map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "completed"}); rec.Code != http.StatusOK {
+	if code, _ := f.mintJobToken(t, r, keys, "a1", run.ID, "job"); code != http.StatusOK {
+		t.Fatalf("minting the executor token: %d", code)
+	}
+	if rec := runnerDo(t, r, "job", http.MethodPost, "/api/v2/runner/jobs/"+run.ID+"/complete", map[string]any{"runner_id": f.runnerA1.ID.String(), "status": "completed"}); rec.Code != http.StatusOK {
 		t.Fatalf("completing the run after its output was truncated: %d %s", rec.Code, rec.Body.String())
 	}
 	var done models.Run

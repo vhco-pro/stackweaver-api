@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
+	"github.com/michielvha/stackweaver/core/repository"
+	"gorm.io/gorm"
 )
 
 // A job token (#933, D1) is valid for one job and one attempt. It is minted by the API after the
@@ -126,6 +128,13 @@ func (s *Service) RevokeJobTokens(kind models.JobType, jobID string) error {
 		return fmt.Errorf("revoking job tokens: %w", err)
 	}
 	return s.RevokeJobRegistryTokens(kind, jobID)
+}
+
+// RevokeJobTokensInTransaction binds credential cleanup to the job's settlement transaction.
+func (s *Service) RevokeJobTokensInTransaction(tx *gorm.DB, kind models.JobType, jobID string) error {
+	scoped := *s
+	scoped.apiKeyRepo = repository.NewAPIKeyRepository(tx)
+	return scoped.RevokeJobTokens(kind, jobID)
 }
 
 // RevokeJobAttemptTokens revokes the job tokens of one attempt of a job, leaving a later attempt's

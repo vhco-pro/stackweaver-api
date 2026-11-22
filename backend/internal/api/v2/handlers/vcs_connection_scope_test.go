@@ -76,8 +76,8 @@ func TestRunnerJobArtifacts_PlaybookVCSConnectionOfAnotherOrganization(t *testin
 		t.Run(mode, func(t *testing.T) {
 			f := setupAgentPrepFixture(t)
 			other := f.seedOtherConnection(t)
-			store, q := newSnapshotStore(), &recordingQueue{}
-			router := f.artifactsRouter(store, q)
+			store := newSnapshotStore()
+			router := f.artifactsRouter(store)
 			playbook := f.storedPlaybookNaming(t, playbookSpec{mode: mode}, other)
 			job := f.seedJob(t, &playbook.ID, nil)
 
@@ -92,10 +92,8 @@ func TestRunnerJobArtifacts_PlaybookVCSConnectionOfAnotherOrganization(t *testin
 					t.Errorf("the artifacts carry clone instructions for a playbook naming another organization's connection: %v", doc["vcs"])
 				}
 			}
-			for _, payload := range q.payloads {
-				if raw, err := json.Marshal(payload); err != nil || strings.Contains(string(raw), otherVCSToken) {
-					t.Errorf("a queued sync carries the other organization's token (marshal error %v)", err)
-				}
+			if count := f.snapshotSyncs(t, playbook.ID); count != 0 {
+				t.Errorf("a runner read requested %d captures", count)
 			}
 		})
 	}

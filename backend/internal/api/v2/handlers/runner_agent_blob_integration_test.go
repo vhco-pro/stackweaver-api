@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -61,10 +62,22 @@ func (f *agentPrepFixture) blobRouter(t *testing.T, store *snapshotStore) (*gin.
 	}), svc
 }
 
+// seedClaimedPlan includes the original dispatch identity of a running plan.
+func (f *agentPrepFixture) seedClaimedPlan(t *testing.T) *models.Run {
+	t.Helper()
+	run := f.seedRun(t, f.runnerA1)
+	if err := f.db.Model(run).Updates(map[string]any{
+		"dispatched_at": time.Now(), "claimed_phase": "plan", "claimed_run_type": "plan", "phase_attempt": 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
 // seedRunWithConfig seeds a run whose configuration version holds tarball.
 func (f *agentPrepFixture) seedRunWithConfig(t *testing.T, store *snapshotStore, tarball []byte) *models.Run {
 	t.Helper()
-	run := f.seedRun(t, f.runnerA1)
+	run := f.seedClaimedPlan(t)
 	cv := &models.ConfigurationVersion{ID: "cv-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16], WorkspaceID: run.WorkspaceID, Status: models.ConfigurationVersionStatus("uploaded")}
 	if err := f.db.Create(cv).Error; err != nil {
 		t.Fatal(err)
@@ -80,12 +93,17 @@ func (f *agentPrepFixture) seedRunWithConfig(t *testing.T, store *snapshotStore,
 	return run
 }
 
-func artifactsAs(t *testing.T, r *gin.Engine, key, runID, capabilities string) (runnercontract.TofuArtifacts, string) {
+func artifactsAs(t *testing.T, r *gin.Engine, key, runID, capabilities string, extraHeaders ...map[string]string) (runnercontract.TofuArtifacts, string) {
 	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v2/runner/jobs/"+runID+"/artifacts", nil)
 	req.Header.Set("X-Test-Key", key)
 	if capabilities != "" {
 		req.Header.Set(runnercontract.CapabilitiesHeader, capabilities)
+	}
+	for _, headers := range extraHeaders {
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
 	}
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -154,7 +172,7 @@ func TestBlob_LargeStateUploadedAsARawBody(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	store := newSnapshotStore()
 	r, svc := f.blobRouter(t, store)
-	run := f.seedRun(t, f.runnerA1)
+	run := f.seedClaimedPlan(t)
 	if code, _ := f.mintJobToken(t, r, svc, "a1", run.ID, "job"); code != http.StatusOK {
 		t.Fatalf("mint: %d", code)
 	}

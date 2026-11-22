@@ -13,6 +13,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -42,5 +43,45 @@ func TestAgentPoolDelete_LosingConcurrentDeleteIsNotFound(t *testing.T) {
 		func(tx *gorm.DB) error { return tx.Delete(&models.AgentPool{}, "id = ?", pool.ID).Error })
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("losing delete = %d %s, want 404", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentPoolDelete_LegacyRunnerPreservesRefusal(t *testing.T) {
+	f := setupPlatformAdminFixture(t)
+	pool := &models.AgentPool{ID: uuid.New(), OrganizationID: f.orgA.ID, Name: "legacy-pdel-" + f.sfx}
+	if err := f.db.Create(pool).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Where("id = ?", pool.ID).Delete(&models.AgentPool{}) })
+	runner := &models.Runner{
+		ID: uuid.New(), OrganizationID: &f.orgA.ID, AgentPoolID: &pool.ID,
+		Name: "legacy-pdel-" + f.sfx, Status: models.RunnerStatusOffline,
+	}
+	if err := f.db.Create(runner).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Where("id = ?", runner.ID).Delete(&models.Runner{}) })
+
+	orgs := repository.NewOrganizationRepository(f.db)
+	h := NewAgentPoolHandlerV2(repository.NewAgentPoolRepository(f.db), repository.NewRunnerRepository(f.db), orgs, f.authSvc,
+		rbac.NewServiceWithTeams(orgs, repository.NewTeamRepository(f.db), repository.NewProjectRepository(f.db)))
+	router := platformAdminRouter()
+	router.DELETE("/api/v2/agent-pools/:id", h.Delete)
+
+	path := "/api/v2/agent-pools/" + pool.ID.String()
+	recorder := platformAdminCall(t, router, http.MethodDelete, path, browserAs(f.owner), "")
+	if recorder.Code != http.StatusInternalServerError || !strings.Contains(recorder.Body.String(), "Failed to delete agent pool") {
+		t.Fatalf("delete pool with legacy runner = %d %s, want existing refusal", recorder.Code, recorder.Body.String())
+	}
+	if err := f.db.Where("id = ?", runner.ID).Delete(&models.Runner{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	recorder = platformAdminCall(t, router, http.MethodDelete, path, browserAs(f.owner), "")
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("delete empty pool = %d %s, want 204", recorder.Code, recorder.Body.String())
+	}
+	recorder = platformAdminCall(t, router, http.MethodDelete, path, browserAs(f.owner), "")
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("delete removed pool = %d %s, want 404", recorder.Code, recorder.Body.String())
 	}
 }

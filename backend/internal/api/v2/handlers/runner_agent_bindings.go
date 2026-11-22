@@ -3,6 +3,8 @@
 package handlers
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +16,7 @@ import (
 	"github.com/michielvha/stackweaver/core/runnercontract"
 	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/settings"
+	"gorm.io/gorm"
 )
 
 // jobIdentity resolves the identity binding a job runs with by the level rule and checks that its
@@ -38,8 +41,10 @@ func (h *RunnerAgentHandler) jobIdentity(kind models.JobType, jobID string, pool
 		var tmpl *models.AnsibleJobTemplate
 		if job.TemplateID != nil {
 			var t models.AnsibleJobTemplate
-			if h.db.Select("id", "identity_binding_id").First(&t, "id = ?", *job.TemplateID).Error == nil {
+			if err := h.db.Select("id", "identity_binding_id").First(&t, "id = ?", *job.TemplateID).Error; err == nil {
 				tmpl = &t
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("loading the job template: %w", err)
 			}
 		}
 		resolved, table = settings.EffectiveTemplateIdentity(tmpl, &job.Project, &job.Project.Organization).Value, &models.AnsibleJob{}
@@ -69,7 +74,7 @@ func (h *RunnerAgentHandler) jobIdentity(kind models.JobType, jobID string, pool
 	}
 	if table != nil {
 		if err := h.db.Model(table).Where("id = ?", jobID).Update("placement_identity_binding_id", b.ID).Error; err != nil {
-			logger.Warnf("recording the identity binding of %s: %v", jobID, err)
+			return nil, fmt.Errorf("recording the identity binding of %s: %w", jobID, err)
 		}
 	}
 	ann := map[string]string{}

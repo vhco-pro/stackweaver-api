@@ -34,6 +34,7 @@ import (
 	"github.com/michielvha/stackweaver/core/envfile"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
+	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/encryptionkey"
 	statesvc "github.com/michielvha/stackweaver/core/services/state"
 	"github.com/michielvha/stackweaver/core/services/vcs"
@@ -217,6 +218,10 @@ func main() {
 	// between the app and the tests is impossible.
 	if err := models.AutoMigrate(db); err != nil {
 		logger.Fatalf("Failed to run database migrations: %v", err)
+	}
+
+	if err := ansible.InitializePlaybookSnapshotAssignments(context.Background(), db); err != nil {
+		logger.Fatalf("Failed to initialize playbook snapshot assignments: %v", err)
 	}
 
 	// Seal the plan JSON of runs stored before encryption at rest (#933, AC73). It runs beside the

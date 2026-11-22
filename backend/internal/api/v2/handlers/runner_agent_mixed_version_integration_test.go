@@ -182,6 +182,11 @@ func TestMixedVersion_TwentyJobsCompleteAcrossTwoReleases(t *testing.T) {
 	tokens := make([]string, mixedVersionJobs)
 	for i := range runs {
 		runs[i] = f.seedRun(t, f.runnerA1)
+		if err := f.db.Model(runs[i]).Updates(map[string]any{
+			"dispatched_at": time.Now(), "claimed_phase": "plan", "claimed_run_type": "plan", "phase_attempt": 1,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
 		tokens[i] = m.mint(t, f, runs[i], f.runnerA1)
 	}
 

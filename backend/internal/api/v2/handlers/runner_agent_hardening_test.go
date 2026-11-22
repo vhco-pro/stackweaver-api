@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/ansible"
@@ -63,12 +64,10 @@ func TestRunnerHardening_SnapshotOutlivesTheServerWriteTimeout(t *testing.T) {
 	snapshot := bytes.Repeat([]byte("snapshot-bytes-"), 4096)
 	capturedAt := time.Now().UTC()
 	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &capturedAt, commit: "abc1234"})
-	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), snapshot); err != nil {
-		t.Fatalf("storing snapshot: %v", err)
-	}
-	job := f.seedJob(t, &pb.ID, nil)
+	f.publishFixtureSnapshot(t, pb, store, snapshot)
+	job := f.seedSnapshotJob(t, pb, nil)
 
-	srv := httptest.NewUnstartedServer(f.artifactsRouter(store, &recordingQueue{}))
+	srv := httptest.NewUnstartedServer(f.artifactsRouter(store, middleware.RunnerReadResponse()))
 	srv.Config.WriteTimeout = 200 * time.Millisecond
 	srv.Start()
 	defer srv.Close()
@@ -115,10 +114,8 @@ func TestRunnerHardening_JobWithoutAgentPoolIsOffLimits(t *testing.T) {
 	store := newSnapshotStore()
 	capturedAt := time.Now().UTC()
 	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &capturedAt, commit: "abc1234"})
-	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), []byte("snapshot")); err != nil {
-		t.Fatalf("storing snapshot: %v", err)
-	}
-	read := f.artifactsRouter(store, &recordingQueue{})
+	f.publishFixtureSnapshot(t, pb, store, []byte("snapshot"))
+	read := f.artifactsRouter(store)
 	write := f.eventsRouter()
 
 	platformJob := f.seedJobRow(t, &models.AnsibleJob{PlaybookID: &pb.ID, Status: models.AnsibleJobStatusRunning})
@@ -148,10 +145,8 @@ func TestRunnerHardening_FinishedJobServesNoArtifactsOrSnapshot(t *testing.T) {
 	store := newSnapshotStore()
 	capturedAt := time.Now().UTC()
 	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &capturedAt, commit: "abc1234"})
-	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), []byte("snapshot")); err != nil {
-		t.Fatalf("storing snapshot: %v", err)
-	}
-	r := f.artifactsRouter(store, &recordingQueue{})
+	f.publishFixtureSnapshot(t, pb, store, []byte("snapshot"))
+	r := f.artifactsRouter(store)
 
 	for _, status := range []models.AnsibleJobStatus{
 		models.AnsibleJobStatusSuccessful, models.AnsibleJobStatusFailed, models.AnsibleJobStatusCanceled, models.AnsibleJobStatusError,
@@ -169,7 +164,7 @@ func TestRunnerHardening_FinishedJobServesNoArtifactsOrSnapshot(t *testing.T) {
 	}
 
 	// The control: the same job while it is running is served to its runner.
-	running := f.seedJobRow(t, &models.AnsibleJob{PlaybookID: &pb.ID, Status: models.AnsibleJobStatusRunning, AgentPoolID: &f.poolA, RunnerID: &f.runnerA1.ID})
+	running := f.seedSnapshotJob(t, pb, f.runnerA1)
 	if rec := runnerGet(t, r, "a1", "/api/v2/runner/jobs/"+running.ID.String()+"/playbook-snapshot"); rec.Code != http.StatusOK {
 		t.Errorf("running job: status = %d, want 200", rec.Code)
 	}

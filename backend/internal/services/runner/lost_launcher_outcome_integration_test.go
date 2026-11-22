@@ -86,7 +86,9 @@ func TestLostLauncherOutcome(t *testing.T) {
 	revoker := &recordingRevoker{}
 	m := NewMonitorService(repository.NewRunnerRepository(db))
 	m.SetLostLauncherHandling(repository.NewRunRepository(db), revoker)
-	m.markStaleRunners()
+	// Lost settlement runs after startup grace in an already healthy monitor.
+	m.healthySince = m.now().Add(-RecoveryGrace)
+	m.markStaleRunners(t.Context())
 
 	var p, a models.Run
 	db.First(&p, "id = ?", planning.ID)
