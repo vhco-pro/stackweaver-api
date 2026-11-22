@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -25,6 +26,8 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/queue"
 	"github.com/michielvha/stackweaver/core/runnercontract"
+	"github.com/michielvha/stackweaver/core/services/ansible"
+	"gorm.io/gorm"
 )
 
 // infraGPGPublicKey is the public half of a key generated once for these cases; the private half
@@ -109,8 +112,8 @@ func infraPlainRequest(t *testing.T, w *writeRun, method, target string, body an
 }
 
 // infraRunnerRequest builds a runner-protocol request. The protocol is plain JSON and is
-// authenticated by the token of whoever is calling: an agent token to register, the runner's own
-// token for everything after.
+// authenticated by the caller's token. Registration uses an agent token, control calls use the
+// launcher's token and executor reports use a job token.
 func infraRunnerRequest(t *testing.T, w *writeRun, token, target string, body any) *http.Request {
 	t.Helper()
 	req := infraPlainRequest(t, w, http.MethodPost, target, body)
@@ -270,22 +273,50 @@ func infraStartedRun(t *testing.T, w *writeRun, r infraRunner) string {
 // and claimed by it, which is what a snapshot upload requires.
 func infraClaimedWorkItem(t *testing.T, w *writeRun, r infraRunner) string {
 	t.Helper()
-	pool := uuid.MustParse(r.poolID)
-	var owner models.AgentPool
-	if err := w.db.Select("id", "organization_id").First(&owner, "id = ?", pool).Error; err != nil {
-		t.Fatalf("loading the runner's pool: %v", err)
+	var playbook models.AnsiblePlaybook
+	if err := w.db.First(&playbook, "id = ?", w.id("playbooks")).Error; err != nil {
+		t.Fatalf("loading the playbook: %v", err)
 	}
-	playbook := uuid.MustParse(w.id("playbooks"))
-	now := time.Now()
-	item := &models.WorkItem{
-		OrganizationID: owner.OrganizationID, Kind: models.WorkItemPlaybookSnapshot, PlaybookID: &playbook,
-		TriggeredBy: "manual", AgentPoolID: &pool, QueuedAt: &now, ImageLevel: "platform", TimeoutSeconds: 3600,
+	item, err := ansible.NewWorkItemService(w.db, nil).RequestPlaybookSnapshot(t.Context(), &playbook, "manual")
+	if err != nil {
+		t.Fatalf("requesting the playbook snapshot: %v", err)
 	}
-	if err := w.db.Create(item).Error; err != nil {
-		t.Fatalf("creating the work item: %v", err)
+	if err := w.db.Model(item).Update("agent_pool_id", uuid.MustParse(r.poolID)).Error; err != nil {
+		t.Fatalf("assigning the snapshot to the runner's pool: %v", err)
 	}
 	w.mustSend(t, infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+item.ID+"/start", map[string]any{"runner_id": r.id}))
 	return item.ID
+}
+
+func infraRunnerWithActiveClaims(t *testing.T, w *writeRun) infraRunner {
+	t.Helper()
+	runner := infraRegisterRunner(t, w)
+	infraStartedRun(t, w, runner)
+	infraClaimedWorkItem(t, w, runner)
+	return runner
+}
+
+// infraUnavailableClaimInventory fails only the active work-item list for this request.
+func infraUnavailableClaimInventory(t *testing.T, w *writeRun) func() {
+	t.Helper()
+	callback := "golden-claim-inventory-" + uuid.NewString()
+	seen := false
+	if err := w.db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if _, claims := tx.Statement.Dest.(*[]models.WorkItem); claims && tx.Statement.Table == "work_items" {
+			seen = true
+			_ = tx.AddError(errors.New("recorded active-claim inventory unavailable"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := w.db.Callback().Query().Remove(callback); err != nil {
+			t.Error(err)
+		}
+		if !seen {
+			t.Error("the alternate response never reached the injected claim-inventory read")
+		}
+	}
 }
 
 // Write cases for the registry, agent pools and runners (the runner protocol included), the
@@ -512,6 +543,27 @@ func init() {
 				return infraRunnerRequest(t, w, infraAgentToken(t, w), "/api/v2/runner/register", infraRegisterBody(w.id("agent-pools")))
 			},
 			responseSecrets: []string{"runner_api_key"},
+			responseVariants: []writeResponseVariant{
+				{
+					prepare: func(t *testing.T, w *writeRun) *http.Request {
+						return infraRunnerRequest(t, w, infraAgentToken(t, w), "/api/v2/runner/register", infraRegisterBody(w.id("agent-pools")))
+					},
+					beforeRequest: infraUnavailableClaimInventory,
+				},
+				{
+					prepare: func(t *testing.T, w *writeRun) *http.Request {
+						r := infraRegisterRunner(t, w)
+						return infraRunnerRequest(t, w, infraAgentToken(t, w), "/api/v2/runner/register", infraRegisterBody(r.poolID))
+					},
+					beforeRequest: infraUnavailableClaimInventory,
+				},
+				{
+					prepare: func(t *testing.T, w *writeRun) *http.Request {
+						r := infraRunnerWithActiveClaims(t, w)
+						return infraRunnerRequest(t, w, infraAgentToken(t, w), "/api/v2/runner/register", infraRegisterBody(r.poolID))
+					},
+				},
+			},
 		},
 		writeCase{
 			// A run is queued for the pool first, so the answer shows what a heartbeat is for:
@@ -523,6 +575,21 @@ func init() {
 				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/heartbeat",
 					map[string]any{"runner_id": r.id, "status": "online", "current_jobs": 0, "available_capacity": 2})
 			},
+			responseVariants: []writeResponseVariant{
+				{
+					prepare: func(t *testing.T, w *writeRun) *http.Request {
+						r := infraRegisterRunner(t, w)
+						return infraRunnerRequest(t, w, r.token, "/api/v2/runner/heartbeat", map[string]any{"runner_id": r.id, "status": "online", "current_jobs": 0, "available_capacity": 2})
+					},
+					beforeRequest: infraUnavailableClaimInventory,
+				},
+				{
+					prepare: func(t *testing.T, w *writeRun) *http.Request {
+						r := infraRunnerWithActiveClaims(t, w)
+						return infraRunnerRequest(t, w, r.token, "/api/v2/runner/heartbeat", map[string]any{"runner_id": r.id, "status": "busy", "current_jobs": 2})
+					},
+				},
+			},
 		},
 		writeCase{
 			route: "POST /api/v2/runner/deregister",
@@ -532,12 +599,12 @@ func init() {
 			},
 		},
 		writeCase{
-			// :id is a run here. The same route takes an Ansible job's id, with the same body.
+			// A run echoes its proposed phase and executable type. Ansible has an implicit phase.
 			route: "POST /api/v2/runner/jobs/:id/start",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				r := infraRegisterRunner(t, w)
 				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+infraAgentRun(t, w, r)+"/start",
-					map[string]any{"runner_id": r.id})
+					map[string]any{"runner_id": r.id, "attempt": 1, "phase": "plan", "run_type": "plan"})
 			},
 		},
 		writeCase{
@@ -546,10 +613,8 @@ func init() {
 			route: "POST /api/v2/runner/jobs/:id/token",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				r := infraRegisterRunner(t, w)
-				// The mint takes no body: the job is the path's, the runner the token's.
-				req := w.rawRequest(http.MethodPost, "/api/v2/runner/jobs/"+infraStartedRun(t, w, r)+"/token", "", nil)
-				req.Header.Set("Authorization", "Bearer "+r.token)
-				return req
+				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+infraStartedRun(t, w, r)+"/token",
+					map[string]any{"attempt": 1, "phase": "plan", "run_type": "plan"})
 			},
 			responseSecrets: []string{"token"},
 		},
@@ -647,6 +712,10 @@ func init() {
 					related(document("job-templates", nil), "agent-pool", "agent-pools", r.poolID)))
 				job := w.mustSend(t, w.jsonRequest(t, http.MethodPost, w.path("/api/v2/ansible/job-templates/:id/launch"), nil))
 				jobID := dataID(t, job)
+				// This event-only fixture has no orchestrator to release its snapshot gate.
+				if err := w.db.Model(&models.AnsibleJob{}).Where("id = ?", jobID).Update("queued_at", time.Now()).Error; err != nil {
+					t.Fatal(err)
+				}
 				w.mustSend(t, infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+jobID+"/start", map[string]any{"runner_id": r.id}))
 				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+jobID+"/events",
 					map[string]any{
@@ -664,9 +733,18 @@ func init() {
 			route: "POST /api/v2/runner/jobs/:id/complete",
 			prepare: func(t *testing.T, w *writeRun) *http.Request {
 				r := infraRegisterRunner(t, w)
-				return infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+infraStartedRun(t, w, r)+"/complete",
+				runID := infraStartedRun(t, w, r)
+				minted := w.mustSend(t, infraRunnerRequest(t, w, r.token, "/api/v2/runner/jobs/"+runID+"/token",
+					map[string]any{"attempt": 1, "phase": "plan", "run_type": "plan"}))
+				token, _ := minted["token"].(string)
+				if token == "" {
+					t.Fatal("minting the executor token returned none")
+				}
+				return infraRunnerRequest(t, w, token, "/api/v2/runner/jobs/"+runID+"/complete",
 					map[string]any{
 						"runner_id":             r.id,
+						"attempt":               1,
+						"phase":                 "plan",
 						"status":                "completed",
 						"exit_code":             0,
 						"plan_json":             `{"format_version":"1.2","resource_changes":[{"address":"null_resource.example","mode":"managed","type":"null_resource","name":"example","change":{"actions":["create"]}}]}`,

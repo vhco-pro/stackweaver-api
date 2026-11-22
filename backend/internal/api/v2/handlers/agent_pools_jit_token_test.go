@@ -13,7 +13,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
+	"gorm.io/gorm"
 )
 
 // operatorRouter mounts the pool routes and registration behind the same stand-in for
@@ -33,7 +36,9 @@ func (f *agentPrepFixture) operatorRouter() *gin.Engine {
 	svc := apikey.NewService(repository.NewAPIKeyRepository(f.db), nil, nil, nil)
 	perms := rbac.NewServiceWithTeams(repository.NewOrganizationRepository(f.db), repository.NewTeamRepository(f.db), repository.NewProjectRepository(f.db))
 	pools := &AgentPoolHandlerV2{poolRepo: repository.NewAgentPoolRepository(f.db), apiKeyService: svc, runnerRepo: repository.NewRunnerRepository(f.db), rbacService: perms}
-	runners := &RunnerAgentHandler{db: f.db, runnerRepo: repository.NewRunnerRepository(f.db), poolRepo: repository.NewAgentPoolRepository(f.db), apiKeyService: svc, rbacService: perms}
+	runners := NewRunnerAgentHandlerWithRepos(repository.NewRunnerRepository(f.db), nil, repository.NewAgentPoolRepository(f.db), svc,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, f.db)
+	runners.SetRBACService(perms)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		key := f.keys[c.GetHeader("X-Test-Key")]
@@ -54,6 +59,8 @@ func (f *agentPrepFixture) operatorRouter() *gin.Engine {
 	r.POST("/api/v2/agent-pools/:id/jit-token", pools.JITToken)
 	r.GET("/api/v2/agent-pools/:id/queue-depth", pools.QueueDepth)
 	r.POST("/api/v2/runner/register", runners.Register)
+	r.POST("/api/v2/runner/heartbeat", middleware.RunnerAuth(repository.NewRunnerRepository(f.db), &middleware.LauncherTrust{Permissions: perms}),
+		middleware.RequireRunnerToken(), runners.Heartbeat)
 	return r
 }
 
@@ -201,6 +208,127 @@ func TestJITToken_RegistersOneLauncherOnceIntoItsPool(t *testing.T) {
 		if k.ID == jit.ID {
 			t.Error("the JIT token is listed among the pool's agent tokens")
 		}
+	}
+}
+
+func TestJITToken_RegistrationFailureRollsBackConsumption(t *testing.T) {
+	for _, failTable := range []string{"runners", "api_keys"} {
+		t.Run(failTable, func(t *testing.T) {
+			f := setupAgentPrepFixture(t)
+			owner := f.operatorOwner(t)
+			f.keys["agent"] = f.agentToken(t, owner, f.orgA, f.poolA)
+			r := f.operatorRouter()
+			jit, code := f.mintJIT(t, r, "agent", f.poolA)
+			if code != http.StatusCreated {
+				t.Fatalf("mint JIT token = %d, want 201", code)
+			}
+			f.keys["jit"] = jit
+			name := "jit-retry-" + uuid.NewString()[:8]
+			t.Cleanup(func() {
+				var runner models.Runner
+				if f.db.First(&runner, "name = ?", name).Error == nil {
+					f.db.Where("scopes::text LIKE ?", "%runner:"+runner.ID.String()+":%").Delete(&models.APIKey{})
+					f.db.Delete(&runner)
+				}
+			})
+			create := f.db.Callback().Create()
+			callback := "test:failed-jit-" + uuid.NewString()
+			if err := create.Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+				if tx.Statement.Table == failTable {
+					_ = tx.AddError(errors.New("injected registration failure"))
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			request := map[string]any{"agent_pool_id": f.poolA.String(), "name": name, "tofu_version": "1.9.0"}
+			first := runnerDo(t, r, "jit", http.MethodPost, "/api/v2/runner/register", request)
+			if err := create.Remove(callback); err != nil {
+				t.Fatal(err)
+			}
+			if first.Code != http.StatusInternalServerError {
+				t.Errorf("failed registration returned %d, want 500", first.Code)
+			}
+			var count int64
+			if err := f.db.Model(&models.Runner{}).Where("name = ?", name).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("failed registration left %d runner rows: %v", count, err)
+			}
+			retry := runnerDo(t, r, "jit", http.MethodPost, "/api/v2/runner/register", request)
+			if retry.Code != http.StatusCreated {
+				t.Fatalf("the same unused JIT token returned %d on retry, want 201", retry.Code)
+			}
+			var runner models.Runner
+			if err := f.db.First(&runner, "name = ?", name).Error; err != nil || runner.RunnerAPIKeyID == nil {
+				t.Fatalf("committed runner has no recorded key identity: %v", err)
+			}
+			if rec := runnerDo(t, r, "jit", http.MethodPost, "/api/v2/runner/register", request); rec.Code != http.StatusUnauthorized {
+				t.Errorf("registration with an already committed JIT token returned %d, want 401", rec.Code)
+			}
+		})
+	}
+}
+
+func TestRunnerRegistrationUpgradePause(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	owner := f.operatorOwner(t)
+	f.keys["agent"] = f.agentToken(t, owner, f.orgA, f.poolA)
+	t.Setenv("RUNNER_UPGRADE_PAUSE_REGISTRATION", "")
+	standardRouter := f.operatorRouter()
+	jit, code := f.mintJIT(t, standardRouter, "agent", f.poolA)
+	if code != http.StatusCreated {
+		t.Fatalf("mint JIT token = %d, want 201", code)
+	}
+	f.keys["jit"] = jit
+	name := "upgrade-pause-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		var runner models.Runner
+		if f.db.First(&runner, "name = ?", name).Error == nil {
+			f.db.Where("scopes::text LIKE ?", "%runner:"+runner.ID.String()+":%").Delete(&models.APIKey{})
+			f.db.Where("id = ?", runner.ID).Delete(&models.Runner{})
+		}
+	})
+
+	t.Setenv("RUNNER_UPGRADE_PAUSE_REGISTRATION", "true")
+	pausedRouter := f.operatorRouter()
+	t.Setenv("RUNNER_UPGRADE_PAUSE_REGISTRATION", "")
+	path := "/api/v2/runner/register"
+	request := map[string]any{"agent_pool_id": f.poolA.String(), "name": name, "tofu_version": "1.9.0"}
+	refused := runnerDo(t, pausedRouter, "jit", http.MethodPost, path, request)
+	if refused.Code != http.StatusServiceUnavailable {
+		t.Fatalf("paused registration = %d, want 503", refused.Code)
+	}
+	if !strings.Contains(refused.Body.String(), "runner-upgrade-registration-paused") {
+		t.Fatal("paused registration omitted its retryable reason")
+	}
+	var count int64
+	if err := f.db.Model(&models.Runner{}).Where("name = ?", name).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("pause created a runner, count = %d, error = %v", count, err)
+	}
+	f.keys["hosted-registration"] = &models.APIKey{ID: uuid.New(), Kind: models.APIKeyKindHosted, Scopes: models.StringArray{apikey.ScopeHostedRegister}}
+	refusedHosted := runnerDo(t, pausedRouter, "hosted-registration", http.MethodPost, path, map[string]any{"name": name, "hosted": true})
+	if refusedHosted.Code != http.StatusServiceUnavailable {
+		t.Fatalf("paused hosted registration = %d, want 503", refusedHosted.Code)
+	}
+	if err := f.db.Model(&models.Runner{}).Where("name = ?", name).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("pause created a hosted runner, count = %d, error = %v", count, err)
+	}
+	job := f.seedJob(t, nil, f.runnerA1)
+	heartbeat := runnerDo(t, pausedRouter, "a1", http.MethodPost, "/api/v2/runner/heartbeat", map[string]any{
+		"runner_id": f.runnerA1.ID.String(), "status": "busy", "current_jobs": 1, "available_capacity": 0,
+	})
+	if heartbeat.Code != http.StatusOK {
+		t.Fatalf("existing runner heartbeat = %d, want 200 while registration is paused", heartbeat.Code)
+	}
+	var inventory runnercontract.HeartbeatResponse
+	if err := json.Unmarshal(heartbeat.Body.Bytes(), &inventory); err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.ActiveClaims) != 1 || inventory.ActiveClaims[0].JobID != job.ID.String() {
+		t.Fatal("heartbeat did not report the pre-existing claim")
+	}
+	resumedRouter := f.operatorRouter()
+	resumed := runnerDo(t, resumedRouter, "jit", http.MethodPost, path, request)
+	if resumed.Code != http.StatusCreated {
+		t.Fatalf("registration after cutover = %d, want 201 using the unspent JIT token", resumed.Code)
 	}
 }
 

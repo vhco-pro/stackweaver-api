@@ -4,11 +4,20 @@
   "request": {
     "content_type": "application/json",
     "body": {
+      "attempt": 1,
+      "phase": "plan",
+      "run_type": "plan",
       "runner_id": "\u003cuuid\u003e"
     },
     "schema": {
       "type": "object",
       "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string"
+        },
         "placement": {
           "type": "object",
           "nullable": true,
@@ -36,6 +45,9 @@
             }
           }
         },
+        "run_type": {
+          "type": "string"
+        },
         "runner_id": {
           "type": "string"
         }
@@ -49,6 +61,11 @@
   },
   "status": 200,
   "response": {
-    "status": "started"
+    "meta": {
+      "attempt": 1,
+      "phase": "plan",
+      "run_type": "plan",
+      "status": "started"
+    }
   }
 }

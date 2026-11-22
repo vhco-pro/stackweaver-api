@@ -81,7 +81,7 @@ func TestEngines_OfferOnlyTheDeclaredEngines(t *testing.T) {
 		if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Updates(map[string]any{"status": models.RunStatusPending, "runner_id": nil}).Error; err != nil {
 			t.Fatal(err)
 		}
-		offers, err := h.findPendingJobsForRunner(runner)
+		offers, err := h.findPendingJobsForRunner(t.Context(), runner)
 		if err != nil {
 			t.Fatal(err)
 		}

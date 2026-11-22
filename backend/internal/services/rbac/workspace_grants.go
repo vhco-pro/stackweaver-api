@@ -28,12 +28,12 @@ type WorkspaceGrants struct {
 }
 
 // LoadWorkspaceGrants loads the user's grants in the organization.
-func (s *Service) LoadWorkspaceGrants(_ context.Context, userID, organizationID uuid.UUID) (*WorkspaceGrants, error) {
+func (s *Service) LoadWorkspaceGrants(ctx context.Context, userID, organizationID uuid.UUID) (*WorkspaceGrants, error) {
 	g := &WorkspaceGrants{
 		s: s, orgPerms: map[Permission]bool{},
 		projects: map[uuid.UUID][]models.TeamProjectAccess{}, workspace: map[string][]models.TeamWorkspaceAccess{},
 	}
-	inOrg, err := s.orgRepo.UserInOrg(userID, organizationID)
+	inOrg, err := s.orgRepo.WithContext(ctx).UserInOrg(userID, organizationID)
 	if err != nil {
 		return nil, fmt.Errorf("checking membership of %s: %w", organizationID, err)
 	}
@@ -44,7 +44,8 @@ func (s *Service) LoadWorkspaceGrants(_ context.Context, userID, organizationID 
 	if s.teamRepo == nil {
 		return nil, fmt.Errorf("team repository not available")
 	}
-	teams, err := s.teamRepo.GetTeamsByUserID(userID, organizationID)
+	repo := s.teamRepo.WithContext(ctx)
+	teams, err := repo.GetTeamsByUserID(userID, organizationID)
 	if err != nil {
 		return nil, fmt.Errorf("getting teams of user %s: %w", userID, err)
 	}
@@ -61,14 +62,14 @@ func (s *Service) LoadWorkspaceGrants(_ context.Context, userID, organizationID 
 			}
 		}
 	}
-	projectRows, err := s.teamRepo.ListProjectAccessForTeams(teamIDs)
+	projectRows, err := repo.ListProjectAccessForTeams(teamIDs)
 	if err != nil {
 		return nil, fmt.Errorf("getting project access of user %s: %w", userID, err)
 	}
 	for _, pa := range projectRows {
 		g.projects[pa.ProjectID] = append(g.projects[pa.ProjectID], pa)
 	}
-	workspaceRows, err := s.teamRepo.ListWorkspaceAccessForTeams(teamIDs)
+	workspaceRows, err := repo.ListWorkspaceAccessForTeams(teamIDs)
 	if err != nil {
 		return nil, fmt.Errorf("getting workspace access of user %s: %w", userID, err)
 	}

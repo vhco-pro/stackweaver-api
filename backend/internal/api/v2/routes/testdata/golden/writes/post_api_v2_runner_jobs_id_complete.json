@@ -4,9 +4,11 @@
   "request": {
     "content_type": "application/json",
     "body": {
+      "attempt": 1,
       "exit_code": 0,
       "has_changes": true,
       "output_changes": 0,
+      "phase": "plan",
       "plan_json": "{\"format_version\":\"1.2\",\"resource_changes\":[{\"address\":\"null_resource.example\",\"mode\":\"managed\",\"type\":\"null_resource\",\"name\":\"example\",\"change\":{\"actions\":[\"create\"]}}]}",
       "resource_additions": 1,
       "resource_changes": 0,
@@ -17,6 +19,9 @@
     "schema": {
       "type": "object",
       "properties": {
+        "attempt": {
+          "type": "integer"
+        },
         "cache_manifest": {
           "type": "object",
           "nullable": true,
@@ -72,6 +77,9 @@
         },
         "output_changes": {
           "type": "integer"
+        },
+        "phase": {
+          "type": "string"
         },
         "plan_json": {
           "type": "string"

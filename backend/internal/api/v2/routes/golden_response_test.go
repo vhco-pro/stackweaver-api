@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1066,6 +1067,51 @@ func asTheSPA(req *http.Request) {
 	}
 }
 
+// captureHTTP keeps the shape fixtures on a real response writer, including deadline
+// support before authentication. Preserve the fixture host and synthetic caller address;
+// the selected-read socket tests separately prove the actual timeout behavior.
+func (h *goldenHarness) captureHTTP(t *testing.T, req *http.Request) (int, []byte) {
+	t.Helper()
+	remote := req.RemoteAddr
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, incoming *http.Request) {
+		incoming.RemoteAddr = remote
+		h.router.ServeHTTP(w, incoming)
+	}))
+	server.Config.ReadTimeout = 30 * time.Second
+	server.Config.WriteTimeout = 30 * time.Second
+	server.Start()
+	defer server.Close()
+
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = req.Clone(t.Context())
+	req.URL.Scheme, req.URL.Host = target.Scheme, target.Host
+	req.RequestURI = ""
+	client := server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("the golden HTTP server has no HTTP transport")
+	}
+	transport.DisableCompression = true
+	response, err := client.Do(req) //nolint:gosec // G704: the target is this test's owned loopback server.
+	if err != nil {
+		t.Fatalf("capture %s %s: %v", req.Method, req.URL.Path, err)
+	}
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			t.Errorf("close captured %s %s: %v", req.Method, req.URL.Path, err)
+		}
+	}()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read %s %s: %v", req.Method, req.URL.Path, err)
+	}
+	return response.StatusCode, body
+}
+
 func (h *goldenHarness) captureError(t *testing.T, method, routePath string) goldenFixture {
 	t.Helper()
 	target, reqBody := errorPath(routePath), "{}"
@@ -1079,16 +1125,15 @@ func (h *goldenHarness) captureError(t *testing.T, method, routePath string) gol
 	req.Header.Set("Authorization", "Bearer "+h.token)
 	req.Header.Set("Content-Type", "application/vnd.api+json")
 	asTheSPA(req)
-	rec := httptest.NewRecorder()
-	h.router.ServeHTTP(rec, req)
+	status, raw := h.captureHTTP(t, req)
 
 	var body any
-	if raw := rec.Body.Bytes(); len(raw) > 0 {
+	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
 			body = string(raw)
 		}
 	}
-	return goldenFixture{Method: method, Path: routePath, Status: rec.Code, Body: normalise(body)}
+	return goldenFixture{Method: method, Path: routePath, Status: status, Body: normalise(body)}
 }
 
 func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFixture {
@@ -1101,11 +1146,9 @@ func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFi
 	req.Header.Set("Authorization", "Bearer "+h.token)
 	req.Header.Set("Content-Type", "application/vnd.api+json")
 	asTheSPA(req)
-	rec := httptest.NewRecorder()
-	h.router.ServeHTTP(rec, req)
+	status, raw := h.captureHTTP(t, req)
 
 	var body any
-	raw := rec.Body.Bytes()
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
 			// Not JSON (HTML error page, plain text): record it as a string so the fixture
@@ -1120,7 +1163,7 @@ func (h *goldenHarness) capture(t *testing.T, method, routePath string) goldenFi
 	return goldenFixture{
 		Method: method,
 		Path:   routePath,
-		Status: rec.Code,
+		Status: status,
 		Body:   normalised,
 	}
 }

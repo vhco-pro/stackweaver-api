@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
@@ -87,7 +88,10 @@ func TestSavedPlan_RoundTrip(t *testing.T) {
 	}
 
 	// The apply phase: a new claim, a new attempt, a new token.
-	if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Updates(map[string]any{"status": models.RunStatusApplying, "attempt": 2}).Error; err != nil {
+	if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Updates(map[string]any{
+		"status": models.RunStatusApplying, "attempt": 2, "operation": models.RunOperationPlanAndApply,
+		"dispatched_at": time.Now(), "claimed_phase": "apply", "claimed_run_type": "apply", "phase_attempt": 1,
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := f.mintJobToken(t, r, svc, "a1", run.ID, "apply-job"); code != http.StatusOK {
@@ -119,7 +123,10 @@ func TestSavedPlan_UploadOnlyWhilePlanning(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	r, svc, _ := f.planRouter(t, newSnapshotStore())
 	run := f.seedRun(t, f.runnerA1)
-	if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Update("status", models.RunStatusApplying).Error; err != nil {
+	if err := f.db.Model(&models.Run{}).Where("id = ?", run.ID).Updates(map[string]any{
+		"status": models.RunStatusApplying, "operation": models.RunOperationPlanAndApply,
+		"dispatched_at": time.Now(), "claimed_phase": "apply", "claimed_run_type": "apply", "phase_attempt": 1,
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := f.mintJobToken(t, r, svc, "a1", run.ID, "job"); code != http.StatusOK {

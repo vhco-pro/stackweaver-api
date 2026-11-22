@@ -26,7 +26,6 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
@@ -43,7 +42,6 @@ func (f *agentPrepFixture) jobTokenRouter() (*gin.Engine, *apikey.Service) {
 		playbookRepo:   playbookRepo,
 		vcsRegistry:    registry,
 		storageClient:  newSnapshotStore(),
-		syncRequester:  ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
 	}
 	return f.router(func(authed *gin.RouterGroup) {
 		authed.POST("/jobs/:id/token", middleware.RequireRunnerToken(), h.JobToken)

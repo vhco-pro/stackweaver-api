@@ -60,7 +60,10 @@ func TestMonitorReleasesStaleRunReservations(t *testing.T) {
 		db.Delete(&models.Organization{}, "id = ?", org.ID)
 	})
 
-	NewMonitorService(repository.NewRunnerRepository(db)).markStaleRunners()
+	monitor := NewMonitorService(repository.NewRunnerRepository(db))
+	// This fixture represents a monitor with an established healthy observation history.
+	monitor.healthySince = monitor.now().Add(-RecoveryGrace)
+	monitor.markStaleRunners(t.Context())
 
 	var r models.Run
 	if err := db.First(&r, "id = ?", reserved.ID).Error; err != nil {

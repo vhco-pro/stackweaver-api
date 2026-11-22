@@ -15,8 +15,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
@@ -24,9 +26,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/runnercontract"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/settings"
 	"github.com/michielvha/stackweaver/core/tofu"
+	"gorm.io/gorm/clause"
 )
 
 func gzTar(t *testing.T, files map[string]string) []byte {
@@ -119,6 +121,72 @@ func TestCacheDescriptor_RunResolvesItsVersionAndLockFile(t *testing.T) {
 	}
 }
 
+type blockedRunConfig struct {
+	*snapshotStore
+	opened chan struct{}
+	resume chan struct{}
+}
+
+func (s *blockedRunConfig) Get(ctx context.Context, key string) ([]byte, error) {
+	close(s.opened)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.resume:
+		return s.snapshotStore.Get(ctx, key)
+	}
+}
+
+func TestCacheDescriptor_RunHintReleasesClaimBeforeStorage(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	store := newSnapshotStore()
+	router, _, handler := f.cacheRouterWithHandler(store)
+	run := f.seedRunWithConfig(t, store, gzTar(t, map[string]string{"main.tf": ""}))
+	if err := f.db.Model(&models.Workspace{}).Where("id = ?", run.WorkspaceID).Update("tofu_version", "1.10.6").Error; err != nil {
+		t.Fatal(err)
+	}
+	entry := f.seedNamedCacheEntry(t, store, f.orgA, "tofu", "tofu", "1.10.6", "linux_amd64", []byte("cached tofu"), time.Now())
+	blocked := &blockedRunConfig{snapshotStore: store, opened: make(chan struct{}), resume: make(chan struct{})}
+	handler.storageClient = blocked
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v2/runner/jobs/"+run.ID+"/token", nil)
+	request.Header.Set("X-Test-Key", "a1")
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		router.ServeHTTP(response, request)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	select {
+	case <-blocked.opened:
+	case <-done:
+		t.Fatalf("token route returned before reaching the snapshot read: HTTP %d", response.Code)
+	case <-ctx.Done():
+		t.Fatal("token route did not reach the cache hint storage read")
+	}
+
+	var locked models.Run
+	lockErr := f.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE", Options: "NOWAIT"}).First(&locked, "id = ?", run.ID).Error
+	close(blocked.resume)
+	<-done
+	if lockErr != nil {
+		t.Errorf("same-run claim row could not be locked while optional storage was stalled: %v", lockErr)
+	}
+	var token runnercontract.JobToken
+	if err := json.Unmarshal(response.Body.Bytes(), &token); err != nil || response.Code != http.StatusOK || token.Token == "" {
+		t.Fatalf("token route returned HTTP %d and invalid token response: %v", response.Code, err)
+	}
+	if got := descriptorShas(token.Cache); !slices.Equal(got, []string{entry.SHA256}) {
+		t.Errorf("cache digest list = %v, want %s", got, entry.SHA256)
+	}
+}
+
 // A run whose workspace, project and organization pin no OpenTofu version runs the installation
 // default (the version the job image bakes when TOFU_DEFAULT_VERSION is unset), and its artifacts
 // and descriptor name that version, whatever newer releases the organization caches (#1069, D2).
@@ -168,10 +236,8 @@ func TestCacheDescriptor_AnsibleJobResolvesItsRequirements(t *testing.T) {
 	now := time.Now()
 	pb := f.seedPlaybook(t, playbookSpec{cachedAt: &now, commit: "abc"})
 	reqs := "collections:\n  - name: ansible.posix\n    version: 2.2.2\n  - community.general\nroles:\n  - name: geerlingguy.pip\n    version: 3.0.3\n"
-	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), gzTar(t, map[string]string{"site.yml": "", "collections/requirements.yml": reqs})); err != nil {
-		t.Fatal(err)
-	}
-	job := f.seedJob(t, &pb.ID, f.runnerA1)
+	f.publishFixtureSnapshot(t, pb, store, gzTar(t, map[string]string{"site.yml": "", "collections/requirements.yml": reqs}))
+	job := f.seedSnapshotJob(t, pb, f.runnerA1)
 	code, tok := f.mintJobToken(t, r, svc, "a1", job.ID.String(), "job")
 	if code != http.StatusOK {
 		t.Fatalf("mint: %d", code)
@@ -205,10 +271,8 @@ func TestCacheDescriptor_AnsibleGitSourcesNameTheirRepositoryCommits(t *testing.
 	now := time.Now()
 	pb := f.seedPlaybook(t, playbookSpec{cachedAt: &now, commit: "abc"})
 	reqs := "collections:\n  - name: git+" + repo + "#/collections/c/\n    type: git\n    version: " + pinned + "\n  - name: https://github.com/example/b.git#/b/\n    type: git\n    version: main\n"
-	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), gzTar(t, map[string]string{"site.yml": "", "requirements.yml": reqs})); err != nil {
-		t.Fatal(err)
-	}
-	job := f.seedJob(t, &pb.ID, f.runnerA1)
+	f.publishFixtureSnapshot(t, pb, store, gzTar(t, map[string]string{"site.yml": "", "requirements.yml": reqs}))
+	job := f.seedSnapshotJob(t, pb, f.runnerA1)
 	code, tok := f.mintJobToken(t, r, svc, "a1", job.ID.String(), "job")
 	if code != http.StatusOK {
 		t.Fatalf("mint: %d", code)

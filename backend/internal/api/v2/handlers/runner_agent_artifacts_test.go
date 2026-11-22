@@ -5,7 +5,7 @@
 // playbook's source mode, and GET /api/v2/runner/jobs/:id/playbook-snapshot, which
 // streams the cached snapshot to it.
 //
-// Object storage and the queue are in-memory fakes; the tenant graph is real rows. Gated
+// Object storage is an in-memory fake; the tenant graph is real rows. Gated
 // behind `integration`; skips unless $TEST_DATABASE_URL is set. Every row is created
 // under a unique name and removed by primary key (see setupAgentPrepFixture). Run with:
 //
@@ -18,11 +18,13 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,24 +72,6 @@ func (s *snapshotStore) GetStream(ctx context.Context, key string) (io.ReadClose
 	return countingCloser{Reader: bytes.NewReader(data), store: s}, nil
 }
 
-// recordingQueue is a queue.Queue that records what was enqueued where.
-type recordingQueue struct {
-	queues   []string
-	payloads []any
-	err      error
-}
-
-func (q *recordingQueue) Enqueue(_ context.Context, queueName string, job any) error {
-	if q.err != nil {
-		return q.err
-	}
-	q.queues = append(q.queues, queueName)
-	q.payloads = append(q.payloads, job)
-	return nil
-}
-
-func (q *recordingQueue) Close() error { return nil }
-
 // playbookSpec describes the playbook a test needs.
 type playbookSpec struct {
 	mode     string // "" keeps the column default (cached)
@@ -131,9 +115,56 @@ func (f *agentPrepFixture) reloadPlaybook(t *testing.T, id uuid.UUID) *models.An
 	return &pb
 }
 
+// publishFixtureSnapshot seeds an accepted capture without exercising the upload route.
+func (f *agentPrepFixture) publishFixtureSnapshot(t *testing.T, pb *models.AnsiblePlaybook, store storage.Client, data []byte) string {
+	t.Helper()
+	digest := sha256.Sum256(data)
+	upload := models.PlaybookSnapshotUpload{
+		ID: uuid.New(), PlaybookID: pb.ID, WorkItemID: "wi-fixture-" + uuid.NewString(),
+		Attempt: 1, Sequence: pb.PublishedSnapshotSequence + 1, Commit: pb.CachedCommit,
+		SizeBytes: int64(len(data)), SHA256: hex.EncodeToString(digest[:]), StoredAt: pb.CachedAt,
+	}
+	if err := f.db.Create(&upload).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Delete(&upload) })
+	pb.PublishedSnapshotID = &upload.ID
+	pb.PublishedSnapshotSequence = upload.Sequence
+	if err := f.db.Model(pb).Updates(map[string]any{
+		"published_snapshot_id": upload.ID, "published_snapshot_sequence": upload.Sequence,
+		"published_snapshot_source": pb.SnapshotSource(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := ansible.PlaybookCaptureKey(pb.ID, upload.ID)
+	if store != nil {
+		if err := store.Put(t.Context(), key, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return key
+}
+
+func (f *agentPrepFixture) bindFixtureSnapshot(t *testing.T, jobID uuid.UUID, pb *models.AnsiblePlaybook) {
+	t.Helper()
+	if err := f.db.Model(&models.AnsibleJob{}).Where("id = ?", jobID).Updates(map[string]any{
+		"playbook_snapshot_upload_id": pb.PublishedSnapshotID,
+		"playbook_snapshot_mode":      playbookSourceMode(pb), "playbook_snapshot_path": pb.PlaybookPath,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *agentPrepFixture) seedSnapshotJob(t *testing.T, pb *models.AnsiblePlaybook, assignee *models.Runner) *models.AnsibleJob {
+	t.Helper()
+	job := f.seedJob(t, &pb.ID, assignee)
+	f.bindFixtureSnapshot(t, job.ID, pb)
+	return job
+}
+
 // artifactsRouter wires the two playbook-source endpoints the way SetupV2Routes does,
-// over the given fake store and queue.
-func (f *agentPrepFixture) artifactsRouter(store storage.Client, q *recordingQueue) *gin.Engine {
+// over the given fake store.
+func (f *agentPrepFixture) artifactsRouter(store storage.Client, beforeAuth ...gin.HandlerFunc) *gin.Engine {
 	playbookRepo := repository.NewAnsiblePlaybookRepository(f.db)
 	registryNoNetwork := vcs.NewProviderRegistry(nil, nil, nil, nil)
 	h := &RunnerAgentHandler{
@@ -142,16 +173,11 @@ func (f *agentPrepFixture) artifactsRouter(store storage.Client, q *recordingQue
 		playbookRepo:   playbookRepo,
 		vcsRegistry:    registryNoNetwork,
 		storageClient:  store,
-		syncRequester:  ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
-	}
-	if q != nil && q.err != nil {
-		// A requester that cannot request anything, the failure a sync request can meet.
-		h.syncRequester = ansible.NewPlaybookSnapshotRequester(nil, playbookRepo)
 	}
 	return f.router(func(authed *gin.RouterGroup) {
 		authed.GET("/jobs/:id/artifacts", h.GetJobArtifacts)
 		authed.GET("/jobs/:id/playbook-snapshot", h.GetPlaybookSnapshot)
-	})
+	}, beforeAuth...)
 }
 
 // snapshotSyncs counts the playbook_snapshot work items requested for a playbook (#933, D2: a sync
@@ -215,15 +241,13 @@ func playbookSourceOf(t *testing.T, doc map[string]any) map[string]any {
 
 func TestRunnerJobArtifacts_CachedPlaybookWithSnapshot(t *testing.T) {
 	f := setupAgentPrepFixture(t)
-	store, q := newSnapshotStore(), &recordingQueue{}
-	r := f.artifactsRouter(store, q)
+	store := newSnapshotStore()
+	r := f.artifactsRouter(store)
 
 	capturedAt := time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC)
 	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &capturedAt, commit: "0123456789abcdef0123456789abcdef01234567", size: 4096})
-	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), []byte("snapshot")); err != nil {
-		t.Fatalf("storing snapshot: %v", err)
-	}
-	job := f.seedJob(t, &pb.ID, nil)
+	f.publishFixtureSnapshot(t, pb, store, []byte("snapshot"))
+	job := f.seedSnapshotJob(t, pb, nil)
 
 	doc := getArtifacts(t, r, job.ID)
 
@@ -231,7 +255,7 @@ func TestRunnerJobArtifacts_CachedPlaybookWithSnapshot(t *testing.T) {
 		t.Errorf("project_id = %v, want %s", got, f.projectA)
 	}
 	src := playbookSourceOf(t, doc)
-	if src["mode"] != "cached" || src["commit"] != "0123456789abcdef0123456789abcdef01234567" || src["size_bytes"] != float64(4096) {
+	if src["mode"] != "cached" || src["commit"] != "0123456789abcdef0123456789abcdef01234567" || src["size_bytes"] != float64(len("snapshot")) {
 		t.Errorf("playbook_source = %v, want mode cached with the snapshot's commit and size", src)
 	}
 	// Compared as an instant: the database driver hands the timestamp back in its own zone.
@@ -246,8 +270,8 @@ func TestRunnerJobArtifacts_CachedPlaybookWithSnapshot(t *testing.T) {
 	if strings.Contains(fmtJSON(t, doc), "glpat-") {
 		t.Error("artifacts leak the VCS access token for a cached playbook with a snapshot")
 	}
-	if store.opened != 1 || store.closed != 1 {
-		t.Errorf("snapshot probe opened %d stream(s) and closed %d, want one opened and closed", store.opened, store.closed)
+	if store.opened != 0 {
+		t.Errorf("artifacts opened %d snapshot streams, want metadata only", store.opened)
 	}
 	if n := f.snapshotSyncs(t, pb.ID); n != 0 {
 		t.Errorf("requested %d sync(s), want none for a playbook that has its snapshot", n)
@@ -256,8 +280,8 @@ func TestRunnerJobArtifacts_CachedPlaybookWithSnapshot(t *testing.T) {
 
 func TestRunnerJobArtifacts_FreshPlaybook(t *testing.T) {
 	f := setupAgentPrepFixture(t)
-	store, q := newSnapshotStore(), &recordingQueue{}
-	r := f.artifactsRouter(store, q)
+	store := newSnapshotStore()
+	r := f.artifactsRouter(store)
 
 	// A fresh playbook may still have a snapshot from when it was cached; it is ignored.
 	capturedAt := time.Now().UTC()
@@ -289,89 +313,55 @@ func TestRunnerJobArtifacts_FreshPlaybook(t *testing.T) {
 	}
 }
 
-func TestRunnerJobArtifacts_CachedPlaybookWithoutSnapshot(t *testing.T) {
+func TestRunnerJobArtifacts_RefusesUnassignedCachedPlaybook(t *testing.T) {
+	f := setupAgentPrepFixture(t)
+	store := newSnapshotStore()
+	r := f.artifactsRouter(store)
 	capturedAt := time.Now().UTC()
-	tests := []struct {
-		name string
-		spec playbookSpec
-	}{
-		{"never synced (cached_at unset)", playbookSpec{mode: models.PlaybookSourceModeCached}},
-		{"metadata says synced but the object is gone", playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &capturedAt, commit: "abc1234"}},
+	pb := f.seedPlaybook(t, playbookSpec{cachedAt: &capturedAt, commit: "abc1234"})
+	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), []byte("unverified legacy snapshot")); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := setupAgentPrepFixture(t)
-			store, q := newSnapshotStore(), &recordingQueue{}
-			r := f.artifactsRouter(store, q)
-			pb := f.seedPlaybook(t, tt.spec)
-			job := f.seedJob(t, &pb.ID, nil)
-
-			doc := getArtifacts(t, r, job.ID)
-
-			if _, ok := doc["vcs"].(map[string]any); !ok {
-				t.Fatalf("artifacts carry no vcs object, want the clone URL so this run can clone: %v", doc)
-			}
-			// mode cached without commit or captured_at is the agent's signal that this
-			// cached run clones.
-			src := playbookSourceOf(t, doc)
-			if len(src) != 1 || src["mode"] != "cached" {
-				t.Errorf("playbook_source = %v, want only mode cached", src)
-			}
-
-			if got := f.reloadPlaybook(t, pb.ID).LastSyncStatus; got != "syncing" {
-				t.Errorf("playbook last_sync_status = %q, want syncing", got)
-			}
-			if n := f.snapshotSyncs(t, pb.ID); n != 1 {
-				t.Fatalf("requested %d sync work item(s), want exactly one", n)
-			}
-
-			// The job is offered again, or the agent retries the download: no second sync.
-			getArtifacts(t, r, job.ID)
-			if n := f.snapshotSyncs(t, pb.ID); n != 1 {
-				t.Errorf("after a second artifacts call %d sync(s) are requested, want still 1", n)
-			}
-		})
+	job := f.seedJob(t, &pb.ID, f.runnerA1)
+	base := "/api/v2/runner/jobs/" + job.ID.String()
+	for _, path := range []string{"/artifacts", "/playbook-snapshot"} {
+		rec := runnerDoAnnouncing(t, r, "a1", base+path, runnerCapabilityPlaybookSnapshot)
+		if rec.Code != http.StatusPreconditionFailed || !strings.Contains(rec.Body.String(), "Start a new run") {
+			t.Errorf("%s returned %d %s, want refusal with rerun reason", path, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "unverified legacy snapshot") || strings.Contains(rec.Body.String(), "glpat-") {
+			t.Errorf("%s exposed an unassigned payload", path)
+		}
+	}
+	if store.opened != 0 || f.snapshotSyncs(t, pb.ID) != 0 {
+		t.Fatal("an unassigned read accessed storage or started a refresh")
 	}
 }
 
 func TestRunnerJobArtifacts_EmptySourceModeCountsAsCached(t *testing.T) {
 	f := setupAgentPrepFixture(t)
-	store, q := newSnapshotStore(), &recordingQueue{}
-	r := f.artifactsRouter(store, q)
-	pb := f.seedPlaybook(t, playbookSpec{})
+	store := newSnapshotStore()
+	r := f.artifactsRouter(store)
+	capturedAt := time.Now().UTC()
+	pb := f.seedPlaybook(t, playbookSpec{cachedAt: &capturedAt, commit: "abc1234"})
+	f.publishFixtureSnapshot(t, pb, store, []byte("snapshot"))
 	// Rows written before the column existed carry an empty mode; the column default
 	// hides that on insert, so blank it for this one row.
 	if err := f.db.Model(&models.AnsiblePlaybook{}).Where("id = ?", pb.ID).Update("source_mode", "").Error; err != nil {
 		t.Fatalf("blanking source_mode: %v", err)
 	}
-	job := f.seedJob(t, &pb.ID, nil)
+	pb.SourceMode = ""
+	job := f.seedSnapshotJob(t, pb, nil)
 
 	if src := playbookSourceOf(t, getArtifacts(t, r, job.ID)); src["mode"] != "cached" {
 		t.Errorf("playbook_source.mode = %v, want cached for an empty source mode", src["mode"])
 	}
 }
 
-func TestRunnerJobArtifacts_SyncQueueFailureDoesNotFailTheCall(t *testing.T) {
-	f := setupAgentPrepFixture(t)
-	store, q := newSnapshotStore(), &recordingQueue{err: errors.New("redis unavailable")}
-	r := f.artifactsRouter(store, q)
-	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached})
-	job := f.seedJob(t, &pb.ID, nil)
-
-	doc := getArtifacts(t, r, job.ID)
-
-	if _, ok := doc["vcs"].(map[string]any); !ok {
-		t.Errorf("artifacts carry no vcs object after a failed sync enqueue, want the run to clone anyway: %v", doc)
-	}
-	if got := f.reloadPlaybook(t, pb.ID).LastSyncStatus; got != "failed" {
-		t.Errorf("playbook last_sync_status = %q, want failed (not stuck in syncing)", got)
-	}
-}
-
 func TestRunnerJobArtifacts_NoPlaybookSourceWithoutVCS(t *testing.T) {
 	f := setupAgentPrepFixture(t)
-	store, q := newSnapshotStore(), &recordingQueue{}
-	r := f.artifactsRouter(store, q)
+	store := newSnapshotStore()
+	r := f.artifactsRouter(store)
 	pb := f.seedPlaybook(t, playbookSpec{noVCS: true})
 
 	for name, job := range map[string]*models.AnsibleJob{
@@ -396,19 +386,17 @@ func TestRunnerJobArtifacts_NoPlaybookSourceWithoutVCS(t *testing.T) {
 func TestRunnerPlaybookSnapshot_StreamsTheStoredObject(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	store := newSnapshotStore()
-	r := f.artifactsRouter(store, &recordingQueue{})
+	r := f.artifactsRouter(store)
 
 	// Not valid gzip on purpose: the endpoint must hand over the stored bytes untouched.
 	snapshot := bytes.Repeat([]byte{0x1f, 0x8b, 0x00, 0xff, 0x7a}, 20_000)
 	capturedAt := time.Now().UTC()
 	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &capturedAt, commit: "abc1234", size: 1}) // size lags on purpose
-	if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), snapshot); err != nil {
-		t.Fatalf("storing snapshot: %v", err)
-	}
+	f.publishFixtureSnapshot(t, pb, store, snapshot)
 
 	for name, job := range map[string]*models.AnsibleJob{
-		"job offered to the pool, not yet claimed": f.seedJob(t, &pb.ID, nil),
-		"job claimed by the calling runner":        f.seedJob(t, &pb.ID, f.runnerA1),
+		"job offered to the pool, not yet claimed": f.seedSnapshotJob(t, pb, nil),
+		"job claimed by the calling runner":        f.seedSnapshotJob(t, pb, f.runnerA1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := runnerGet(t, r, "a1", "/api/v2/runner/jobs/"+job.ID.String()+"/playbook-snapshot")
@@ -418,9 +406,9 @@ func TestRunnerPlaybookSnapshot_StreamsTheStoredObject(t *testing.T) {
 			if got := rec.Header().Get("Content-Type"); got != "application/gzip" {
 				t.Errorf("Content-Type = %q, want application/gzip", got)
 			}
-			// The metadata's size can lag the object, so the response must not promise one.
-			if got := rec.Header().Get("Content-Length"); got != "" {
-				t.Errorf("Content-Length = %q, want none (chunked)", got)
+			// The response uses the actual body, independent of the cached size.
+			if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(len(snapshot)) {
+				t.Errorf("Content-Length = %q, want %d", got, len(snapshot))
 			}
 			if !bytes.Equal(rec.Body.Bytes(), snapshot) {
 				t.Errorf("body is %d bytes and differs from the %d stored bytes", rec.Body.Len(), len(snapshot))
@@ -435,24 +423,23 @@ func TestRunnerPlaybookSnapshot_StreamsTheStoredObject(t *testing.T) {
 func TestRunnerPlaybookSnapshot_Refusals(t *testing.T) {
 	f := setupAgentPrepFixture(t)
 	store := newSnapshotStore()
-	r := f.artifactsRouter(store, &recordingQueue{})
+	r := f.artifactsRouter(store)
 
 	capturedAt := time.Now().UTC()
 	withSnapshot := func(mode string) *models.AnsiblePlaybook {
 		pb := f.seedPlaybook(t, playbookSpec{mode: mode, cachedAt: &capturedAt, commit: "abc1234"})
-		if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), []byte("snapshot")); err != nil {
-			t.Fatalf("storing snapshot: %v", err)
-		}
+		f.publishFixtureSnapshot(t, pb, store, []byte("snapshot"))
 		return pb
 	}
 	cached := withSnapshot(models.PlaybookSourceModeCached)
 	fresh := withSnapshot(models.PlaybookSourceModeFresh)
 	neverSynced := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached})
 	objectGone := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &capturedAt, commit: "abc1234"})
+	f.publishFixtureSnapshot(t, objectGone, nil, []byte("snapshot"))
 	noVCS := f.seedPlaybook(t, playbookSpec{noVCS: true})
 
-	offered := f.seedJob(t, &cached.ID, nil)
-	claimedByA1 := f.seedJob(t, &cached.ID, f.runnerA1)
+	offered := f.seedSnapshotJob(t, cached, nil)
+	claimedByA1 := f.seedSnapshotJob(t, cached, f.runnerA1)
 
 	tests := []struct {
 		name       string
@@ -466,9 +453,9 @@ func TestRunnerPlaybookSnapshot_Refusals(t *testing.T) {
 		{"job claimed by another runner", "a2", claimedByA1, http.StatusForbidden, "different launcher"},
 		{"API key that is not a runner token", "org", offered, http.StatusForbidden, "not a launcher token"},
 		{"no API key", "", offered, http.StatusUnauthorized, ""},
-		{"playbook never synced", "a1", f.seedJob(t, &neverSynced.ID, nil), http.StatusNotFound, "no snapshot yet"},
-		{"snapshot object missing from storage", "a1", f.seedJob(t, &objectGone.ID, nil), http.StatusNotFound, "no snapshot yet"},
-		{"fresh playbook", "a1", f.seedJob(t, &fresh.ID, nil), http.StatusNotFound, "fresh"},
+		{"playbook never synced", "a1", f.seedJob(t, &neverSynced.ID, nil), http.StatusPreconditionFailed, "Start a new run"},
+		{"snapshot object missing from storage", "a1", f.seedSnapshotJob(t, objectGone, nil), http.StatusInternalServerError, ""},
+		{"fresh playbook without an assignment", "a1", f.seedJob(t, &fresh.ID, nil), http.StatusPreconditionFailed, "Start a new run"},
 		{"playbook without a VCS connection", "a1", f.seedJob(t, &noVCS.ID, nil), http.StatusNotFound, ""},
 		{"job without a playbook", "a1", f.seedJob(t, nil, nil), http.StatusNotFound, ""},
 	}
@@ -520,8 +507,8 @@ func TestRunnerJobArtifacts_WithoutSnapshotCapabilityIsTheOldContract(t *testing
 		for _, pbCase := range playbooks {
 			t.Run("header="+announced+"/"+pbCase.name, func(t *testing.T) {
 				f := setupAgentPrepFixture(t)
-				store, q := newSnapshotStore(), &recordingQueue{}
-				r := f.artifactsRouter(store, q)
+				store := newSnapshotStore()
+				r := f.artifactsRouter(store)
 				pb := f.seedPlaybook(t, pbCase.spec)
 				if pbCase.withSnapshot {
 					if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), []byte("snapshot")); err != nil {
@@ -597,7 +584,7 @@ func fmtJSON(t *testing.T, v any) string {
 // major it is shaped by (#933, D2, AC72), so an executor can refuse one it does not know.
 func TestRunnerJobArtifacts_CarryContractVersion(t *testing.T) {
 	f := setupAgentPrepFixture(t)
-	r := f.artifactsRouter(newSnapshotStore(), &recordingQueue{})
+	r := f.artifactsRouter(newSnapshotStore())
 	pb := f.seedPlaybook(t, playbookSpec{noVCS: true})
 	job := f.seedJob(t, &pb.ID, nil)
 
@@ -639,7 +626,6 @@ func TestRunnerJobArtifacts_AnsibleCarriesEveryPerRunToken(t *testing.T) {
 	h := &RunnerAgentHandler{
 		db: f.db, ansibleJobRepo: repository.NewAnsibleJobRepository(f.db), playbookRepo: playbookRepo,
 		vcsRegistry: registry, storageClient: newSnapshotStore(),
-		syncRequester: ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
 	}
 	h.SetOIDCServices(repository.NewAzureOIDCConfigurationRepository(f.db), repository.NewAWSOIDCConfigurationRepository(f.db),
 		repository.NewGCPOIDCConfigurationRepository(f.db), repository.NewVaultOIDCConfigurationRepository(f.db),

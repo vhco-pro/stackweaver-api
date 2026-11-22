@@ -63,20 +63,67 @@
   },
   "status": 200,
   "response": {
+    "active_claims": [],
     "capabilities": [
       "blob",
+      "claim-recovery-v1",
       "job-token",
       "playbook-snapshot"
     ],
     "pending_jobs": [
       {
+        "attempt": 1,
         "job_id": "\u003cid\u003e",
         "job_type": "tofu_run",
+        "phase": "plan",
         "priority": 0,
         "run_type": "plan",
         "workspace_id": "\u003cid\u003e",
         "workspace_name": "analytics-warehouse"
       }
     ]
-  }
+  },
+  "response_variants": [
+    {
+      "status": 200,
+      "response": {
+        "active_claims": null,
+        "capabilities": [
+          "blob",
+          "claim-recovery-v1",
+          "job-token",
+          "playbook-snapshot"
+        ],
+        "pending_jobs": []
+      }
+    },
+    {
+      "status": 200,
+      "response": {
+        "active_claims": [
+          {
+            "attempt": 1,
+            "job_id": "\u003cid\u003e",
+            "job_type": "tofu_run",
+            "phase": "plan",
+            "run_type": "plan",
+            "timeout_seconds": 7200
+          },
+          {
+            "attempt": 1,
+            "job_id": "\u003cid\u003e",
+            "job_type": "work_item",
+            "timeout_seconds": 3600
+          }
+        ],
+        "capabilities": [
+          "blob",
+          "claim-recovery-v1",
+          "job-token",
+          "playbook-snapshot"
+        ],
+        "pending_jobs": []
+      }
+    }
+  ]
 }

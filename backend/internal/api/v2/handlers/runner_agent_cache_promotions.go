@@ -32,10 +32,10 @@ const promotionTTL = 24 * time.Hour
 
 // recordCachePromotions stores the manifest of a successful job as pending promotions for the
 // runner that ran it, leaving out what the organization's cache already holds.
-func (h *RunnerAgentHandler) recordCachePromotions(c *gin.Context, kind models.JobType, jobID string, org uuid.UUID, pool *uuid.UUID, m *runnercontract.CacheManifest) {
+func (h *RunnerAgentHandler) recordCachePromotions(c *gin.Context, kind models.JobType, jobID string, org uuid.UUID, pool *uuid.UUID, m *runnercontract.CacheManifest) error {
 	runner, ok := callingRunner(c)
 	if !ok || m == nil || len(m.Entries) == 0 {
-		return
+		return nil
 	}
 	entries := m.Entries
 	if len(entries) > maxManifestEntries {
@@ -52,25 +52,29 @@ func (h *RunnerAgentHandler) recordCachePromotions(c *gin.Context, kind models.J
 		} else {
 			q = q.Where("version = ? AND platform = ?", e.Version, e.Platform)
 		}
-		if err := q.Count(&cached).Error; err != nil || cached > 0 {
+		if err := q.Count(&cached).Error; err != nil {
+			return err
+		}
+		if cached > 0 {
 			continue
 		}
 		raw, err := json.Marshal(e)
 		if err != nil {
-			continue
+			return err
 		}
 		var doc models.JSONB
 		if err := json.Unmarshal(raw, &doc); err != nil {
-			continue
+			return err
 		}
 		p := &models.CachePromotion{
 			OrganizationID: org, AgentPoolID: pool, RunnerID: runner.ID, JobKind: string(kind), JobID: jobID,
 			Entry: doc, Status: models.CachePromotionPending,
 		}
 		if err := h.db.Create(p).Error; err != nil {
-			logger.Warnf("Recording a cache promotion of job %s: %v", jobID, err)
+			return err
 		}
 	}
+	return nil
 }
 
 // pendingPromotions are the promotions waiting for runner, oldest first.

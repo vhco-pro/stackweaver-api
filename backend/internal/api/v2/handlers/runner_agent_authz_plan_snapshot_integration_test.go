@@ -21,7 +21,6 @@ import (
 
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/runnercontract"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 )
 
 func TestRunnerToken_RefusedOnPlanAndSnapshot(t *testing.T) {
@@ -68,6 +67,7 @@ func TestRunnerToken_RefusedOnPlanAndSnapshot(t *testing.T) {
 		upload := func(key string) *httptest.ResponseRecorder {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/snapshot", bytes.NewReader([]byte("tarball")))
 			req.Header.Set("X-Test-Key", key)
+			req.Header.Set(runnercontract.HeaderSnapshotCommit, "0123456789abcdef")
 			rec := httptest.NewRecorder()
 			f.r.ServeHTTP(rec, req)
 			return rec
@@ -75,8 +75,12 @@ func TestRunnerToken_RefusedOnPlanAndSnapshot(t *testing.T) {
 		if rec := upload("a1"); rec.Code != http.StatusForbidden {
 			t.Errorf("POST snapshot with the runner token: status %d, want 403 (%s)", rec.Code, rec.Body.String())
 		}
-		if _, err := f.store.Get(t.Context(), ansible.PlaybookSnapshotKey(pb.ID)); err == nil {
-			t.Error("a refused upload stored a snapshot")
+		var allocations int64
+		if err := f.db.Model(&models.PlaybookSnapshotUpload{}).Where("work_item_id = ?", item.ID).Count(&allocations).Error; err != nil {
+			t.Fatal(err)
+		}
+		if allocations != 0 {
+			t.Errorf("a refused upload made %d storage allocations", allocations)
 		}
 		if rec := upload("wi"); rec.Code != http.StatusOK {
 			t.Errorf("POST snapshot with the job token: status %d, want 200 (%s)", rec.Code, rec.Body.String())

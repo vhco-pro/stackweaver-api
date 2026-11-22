@@ -44,13 +44,9 @@ func (h *RunnerAgentHandler) loadWorkItem(c *gin.Context, id string) (*models.Wo
 		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Work item not found")
 		return nil, false
 	}
-	item, err := h.workItems.Items().GetByID(id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Work item not found")
-		return nil, false
-	}
+	item, err := h.workItems.Items().WithContext(c.Request.Context()).GetByID(id)
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		writeRunnerJobReadError(c, err)
 		return nil, false
 	}
 	return item, true
@@ -91,48 +87,6 @@ func (h *RunnerAgentHandler) offersWorkItems(runner *models.Runner) bool {
 	return h.workItems != nil && runner.HasCapability(runnercontract.CapabilityWorkItems)
 }
 
-// jobStartWorkItem claims a work item for the calling runner, a new attempt, and marks its target
-// syncing.
-func (h *RunnerAgentHandler) jobStartWorkItem(c *gin.Context, id string, placement *runnercontract.Placement) {
-	runner, ok := callingRunner(c)
-	if !ok {
-		writeRunnerForbidden(c, "launcher identity required")
-		return
-	}
-	item, ok := h.loadWorkItem(c, id)
-	if !ok || !h.authorizeRunnerForWorkItem(c, item, false) {
-		return
-	}
-	claimed, err := h.workItems.Items().ClaimForRunner(id, runner.ID)
-	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	if !claimed {
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Work item already claimed by another launcher")
-		return
-	}
-	h.revokeJobTokens(models.JobTypeWorkItem, id)
-	h.recordPlacement(models.JobTypeWorkItem, id, placement)
-	if err := h.workItems.Started(item); err != nil {
-		logger.Warnf("marking the target of work item %s syncing: %v", id, err)
-	}
-	response.Status(c, http.StatusOK, "started")
-}
-
-// workItemTokenFields is what the job token of a work item is minted from.
-func (h *RunnerAgentHandler) workItemTokenFields(c *gin.Context, id string) (item *models.WorkItem, ok bool) {
-	item, ok = h.loadWorkItem(c, id)
-	if !ok || !h.authorizeRunnerForWorkItem(c, item, true) {
-		return nil, false
-	}
-	if item.Finished() {
-		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTerminal, "Forbidden", "the work item has finished")
-		return nil, false
-	}
-	return item, true
-}
-
 // getWorkItemArtifacts serves a work item's artifacts to the executor holding its job token.
 func (h *RunnerAgentHandler) getWorkItemArtifacts(c *gin.Context, id string) {
 	item, ok := h.loadWorkItem(c, id)
@@ -145,11 +99,16 @@ func (h *RunnerAgentHandler) getWorkItemArtifacts(c *gin.Context, id string) {
 	}
 	art, err := h.workItemArtifacts(c.Request.Context(), item)
 	if err != nil {
-		// Nothing a later attempt could fix: the work item fails with the reason, and the runner
-		// is told so.
+		if !errors.Is(err, ansible.ErrInvalidInput) && !errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		// A missing required source or invalid configuration ends this work item.
 		finished, finishErr := h.workItems.FinishedContext(c.Request.Context(), item, models.WorkItemStatusFailed, err.Error(), nil)
 		if finishErr != nil {
 			logger.Warnf("failing work item %s: %v", item.ID, finishErr)
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
 		}
 		if finished {
 			h.revokeWorkItemAttempt(item)
@@ -172,16 +131,16 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 			return nil, fmt.Errorf("loading playbook: %w", err)
 		}
 		if playbook.VCSConnectionID == nil || playbook.VCSRepository == "" {
-			return nil, errors.New("playbook has no VCS connection configured")
+			return nil, fmt.Errorf("playbook has no VCS connection configured: %w", ansible.ErrInvalidInput)
+		}
+		if item.PlaybookSnapshotSource != playbook.SnapshotSource() {
+			return nil, fmt.Errorf("the playbook source changed after the capture was requested: %w", ansible.ErrInvalidInput)
 		}
 		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
 			return ansible.PlaybookVCSConnection(scope, playbook.ProjectID, *playbook.VCSConnectionID)
 		}, playbook.VCSRepository, playbook.VCSBranch)
-		if errors.Is(err, errCloneUnresolved) {
-			return nil, errors.New("the playbook's VCS connection could not be resolved")
-		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("resolving the playbook's VCS connection: %w", err)
 		}
 		art.Clone, art.PlaybookPath = clone, playbook.PlaybookPath
 	case models.WorkItemInventoryFileSync:
@@ -190,22 +149,22 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 			return nil, fmt.Errorf("loading inventory: %w", err)
 		}
 		if inventory.VCSConnectionID == nil || inventory.VCSRepository == "" || inventory.InventoryPath == "" {
-			return nil, errors.New("inventory has no VCS connection configured")
+			return nil, fmt.Errorf("inventory has no VCS connection configured: %w", ansible.ErrInvalidInput)
 		}
 		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
 			return ansible.InventoryVCSConnection(scope, inventory.OrganizationID, *inventory.VCSConnectionID)
 		}, inventory.VCSRepository, inventory.VCSBranch)
-		if errors.Is(err, errCloneUnresolved) {
-			return nil, errors.New("the inventory's VCS connection could not be resolved")
-		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("resolving the inventory's VCS connection: %w", err)
 		}
 		art.Clone, art.InventoryPath = clone, inventory.InventoryPath
-		art.AzureSubscriptionID = h.orgAzureSubscription(item.OrganizationID)
+		art.AzureSubscriptionID, err = h.orgAzureSubscription(item.OrganizationID)
+		if err != nil {
+			return nil, fmt.Errorf("loading the organization's Azure subscription: %w", err)
+		}
 	case models.WorkItemConfigurationSnapshot:
 		if item.RunID == nil {
-			return nil, errors.New("the work item names no run")
+			return nil, fmt.Errorf("the work item names no run: %w", ansible.ErrInvalidInput)
 		}
 		var run models.Run
 		if err := h.db.WithContext(ctx).Preload("Workspace").First(&run, "id = ?", *item.RunID).Error; err != nil {
@@ -213,16 +172,13 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		}
 		ws := run.Workspace
 		if ws.VCSConnectionID == nil || ws.VCSRepository == "" {
-			return nil, errors.New("the run's workspace has no VCS connection configured")
+			return nil, fmt.Errorf("the run's workspace has no VCS connection configured: %w", ansible.ErrInvalidInput)
 		}
 		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
 			return scope.VCSConnectionForProject(*ws.VCSConnectionID, ws.ProjectID)
 		}, ws.VCSRepository, ws.VCSBranch)
-		if errors.Is(err, errCloneUnresolved) {
-			return nil, errors.New("the workspace's VCS connection could not be resolved")
-		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("resolving the workspace's VCS connection: %w", err)
 		}
 		// The run's fetching configuration version says which commit to capture (#938): a
 		// delivery's commit, or the branch head when it names none.
@@ -238,29 +194,26 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		art.Clone = clone
 	case models.WorkItemModuleTagSnapshot:
 		if item.ModuleID == nil || item.RequestedRef == "" {
-			return nil, errors.New("the work item names no module tag")
+			return nil, fmt.Errorf("the work item names no module tag: %w", ansible.ErrInvalidInput)
 		}
 		var module models.Module
 		if err := h.db.WithContext(ctx).First(&module, "id = ?", *item.ModuleID).Error; err != nil {
 			return nil, fmt.Errorf("loading module: %w", err)
 		}
 		if module.VCSConnectionID == nil || module.VCSRepository == "" {
-			return nil, errors.New("the module has no VCS connection configured")
+			return nil, fmt.Errorf("the module has no VCS connection configured: %w", ansible.ErrInvalidInput)
 		}
 		// The module's own connection, resolved within its organization, at the tag (#938).
 		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
 			return scope.VCSConnection(*module.VCSConnectionID, module.OrganizationID)
 		}, module.VCSRepository, item.RequestedRef)
-		if errors.Is(err, errCloneUnresolved) {
-			return nil, errors.New("the module's VCS connection could not be resolved")
-		}
 		if err != nil {
 			return nil, err
 		}
 		// No unauthenticated clone: a connection that cannot mint a token fails the capture, as
 		// AUD-130 requires of every clone.
 		if clone.Token == "" && clone.SSHPrivateKey == "" {
-			return nil, errors.New("the module's VCS connection could not mint a token")
+			return nil, fmt.Errorf("the module's VCS connection could not mint a token: %w", ansible.ErrInvalidInput)
 		}
 		art.Clone = clone
 	case models.WorkItemConstructedRebuild, models.WorkItemDynamicSourceSync:
@@ -270,7 +223,7 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		}
 		art.Inventory = cmd
 	default:
-		return nil, fmt.Errorf("work item kind %q is not served by this API", item.Kind)
+		return nil, fmt.Errorf("work item kind %q is not served by this API: %w", item.Kind, ansible.ErrInvalidInput)
 	}
 	return art, nil
 }
@@ -281,34 +234,29 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 // without putting it in an argument or a file (decision 18).
 func (h *RunnerAgentHandler) cloneSourceFor(ctx context.Context, lookup func(*repository.OrganizationScope) (*models.VCSConnection, error), repo, branch string) (*runnercontract.CloneSource, error) {
 	if h.vcsRegistry == nil {
-		return nil, errCloneUnresolved
+		return nil, fmt.Errorf("VCS providers are not configured: %w", ansible.ErrInvalidInput)
 	}
 	conn, err := lookup(repository.NewOrganizationScope(h.db).WithContext(ctx))
 	if err != nil {
-		if !errors.Is(err, ansible.ErrInvalidInput) {
-			logger.Warnf("loading the VCS connection for %s failed: %v", repo, err)
-		}
-		return nil, errCloneUnresolved
+		return nil, fmt.Errorf("loading the VCS connection for %s: %w", repo, err)
 	}
 	provider, err := h.vcsRegistry.GetProvider(conn)
 	if err != nil {
-		return nil, errCloneUnresolved
+		return nil, fmt.Errorf("selecting the VCS provider: %w", errors.Join(ansible.ErrInvalidInput, err))
 	}
-	// No unauthenticated clone of a connected repository (AUD-130, #938): a connection that
-	// cannot mint its token fails the work item with the provider's reason.
 	token, err := provider.GetFreshToken(ctx, conn)
 	if err != nil {
-		return nil, fmt.Errorf("the VCS connection could not mint a token: %w", err)
+		return nil, fmt.Errorf("refreshing the VCS token: %w", err)
 	}
 	if branch == "" {
 		branch = "main"
 	}
-	return cloneSourceFromURL(provider.BuildCloneURL(conn, token, repo), branch), nil
+	clone := cloneSourceFromURL(provider.BuildCloneURL(conn, token, repo), branch)
+	if clone == nil {
+		return nil, fmt.Errorf("the repository clone URL is invalid: %w", ansible.ErrInvalidInput)
+	}
+	return clone, nil
 }
-
-// errCloneUnresolved is cloneSourceFor's answer when the target's connection does not resolve
-// within its organization; each work item kind reports it in its own words.
-var errCloneUnresolved = errors.New("the VCS connection could not be resolved")
 
 // cloneSourceFromURL splits a credential-embedded clone URL into the bare URL and its credential.
 func cloneSourceFromURL(raw, branch string) *runnercontract.CloneSource {
@@ -336,15 +284,18 @@ func cloneSourceFromURL(raw, branch string) *runnercontract.CloneSource {
 
 // orgAzureSubscription is the organization's Azure subscription, the fallback of a VCS inventory
 // file that names none.
-func (h *RunnerAgentHandler) orgAzureSubscription(orgID uuid.UUID) string {
+func (h *RunnerAgentHandler) orgAzureSubscription(orgID uuid.UUID) (string, error) {
 	if h.azureOIDCRepo == nil {
-		return ""
+		return "", nil
 	}
 	configs, err := h.azureOIDCRepo.GetByOrganization(orgID)
-	if err != nil || len(configs) == 0 {
-		return ""
+	if err != nil {
+		return "", err
 	}
-	return strings.TrimSpace(configs[0].SubscriptionID)
+	if len(configs) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(configs[0].SubscriptionID), nil
 }
 
 // jobOutputWorkItem appends a chunk of a work item's output to its record and sync history.
@@ -361,38 +312,6 @@ func (h *RunnerAgentHandler) jobOutputWorkItem(c *gin.Context, id string, req Jo
 		}
 	}
 	response.Status(c, http.StatusOK, "ok")
-}
-
-// jobCompleteWorkItem ends a work item with what its executor reported.
-func (h *RunnerAgentHandler) jobCompleteWorkItem(c *gin.Context, id string, req JobCompleteRequest) {
-	item, ok := h.loadWorkItem(c, id)
-	if !ok || !h.authorizeRunnerForWorkItem(c, item, true) {
-		return
-	}
-	status := models.WorkItemStatusFailed
-	switch req.Status {
-	case "completed", "successful":
-		status = models.WorkItemStatusCompleted
-	case "canceled":
-		status = models.WorkItemStatusCanceled
-	}
-	if h.beforeWorkItemFinish != nil {
-		h.beforeWorkItemFinish(item.ID)
-	}
-	finished, err := h.workItems.FinishedContext(c.Request.Context(), item, status, req.ErrorMessage, req.WorkResult)
-	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	if !finished {
-		// Finished already, or reclaimed since this request was authorized: the completion
-		// changed nothing, and the current attempt's credentials are left alone.
-		jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTerminal, "Forbidden", "the work item was finished or reclaimed")
-		return
-	}
-	h.revokeWorkItemAttempt(item)
-	h.wakeCallersPool(c)
-	response.Status(c, http.StatusOK, "completed")
 }
 
 // revokeWorkItemAttempt revokes the job tokens of the attempt of item the request was authorized
@@ -450,11 +369,28 @@ func (h *RunnerAgentHandler) UploadSnapshot(c *gin.Context) {
 		jsonapi.WriteErrorNoDetail(c, http.StatusServiceUnavailable, "Object storage is not configured")
 		return
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxSnapshotBytes))
+	limit := int64(maxSnapshotBytes)
+	if snapshotOfPlaybook {
+		limit = maxPlaybookSnapshotBytes
+		if c.Request.ContentLength > limit {
+			jsonapi.WriteError(c, http.StatusRequestEntityTooLarge, "Request Entity Too Large", oversizedPlaybookSnapshot)
+			return
+		}
+		if !tryPlaybookSnapshotSlot() {
+			writePlaybookSnapshotBusy(c)
+			return
+		}
+		defer releasePlaybookSnapshotSlot()
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, limit))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			jsonapi.WriteError(c, http.StatusRequestEntityTooLarge, "Request Entity Too Large", "the snapshot exceeds the size limit")
+			detail := "the snapshot exceeds the size limit"
+			if snapshotOfPlaybook {
+				detail = oversizedPlaybookSnapshot
+			}
+			jsonapi.WriteError(c, http.StatusRequestEntityTooLarge, "Request Entity Too Large", detail)
 			return
 		}
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "reading the snapshot failed")
@@ -474,29 +410,9 @@ func (h *RunnerAgentHandler) UploadSnapshot(c *gin.Context) {
 		h.storeRunConfiguration(c, item, commit, data)
 		return
 	}
-	if commit != "" {
-		if err := h.workItems.Items().SetCommit(id, commit); err != nil {
-			logger.Warnf("recording the snapshot commit of work item %s: %v", id, err)
-		}
-	}
-	// A playbook deleted while its snapshot was captured stays gone: its delete pruned this prefix.
-	var kept int64
-	if err := h.db.Model(&models.AnsiblePlaybook{}).Where("id = ?", *item.PlaybookID).Count(&kept).Error; err != nil {
-		logger.Errorf("reading the playbook of work item %s: %v", id, err)
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+	if err := h.storePlaybookSnapshot(c.Request.Context(), item, commit, data); err != nil {
+		writePlaybookUploadError(c, item.ID, err)
 		return
-	}
-	if kept == 0 {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Playbook not found")
-		return
-	}
-	if err := h.storageClient.Put(c.Request.Context(), ansible.PlaybookSnapshotKey(*item.PlaybookID), data); err != nil {
-		logger.Errorf("storing the snapshot of work item %s: %v", id, err)
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	if err := h.db.Model(&models.AnsiblePlaybook{}).Where("id = ?", *item.PlaybookID).Update("cached_size_bytes", len(data)).Error; err != nil {
-		logger.Warnf("recording the snapshot size of playbook %s: %v", *item.PlaybookID, err)
 	}
 	response.Status(c, http.StatusOK, "stored")
 }

@@ -18066,9 +18066,36 @@
           "runner_id"
         ]
       },
-      "post-api-v2-runner-heartbeat-b955dc": {
+      "post-api-v2-runner-heartbeat-200-response": {
         "type": "object",
         "properties": {
+          "active_claims": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "integer"
+                },
+                "job_id": {
+                  "type": "string"
+                },
+                "job_type": {
+                  "type": "string"
+                },
+                "phase": {
+                  "type": "string"
+                },
+                "run_type": {
+                  "type": "string"
+                },
+                "timeout_seconds": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "capabilities": {
             "type": "array",
             "items": {
@@ -18080,10 +18107,16 @@
             "items": {
               "type": "object",
               "properties": {
+                "attempt": {
+                  "type": "integer"
+                },
                 "job_id": {
                   "type": "string"
                 },
                 "job_type": {
+                  "type": "string"
+                },
+                "phase": {
                   "type": "string"
                 },
                 "priority": {
@@ -18163,6 +18196,9 @@
       "post-api-v2-runner-jobs-id-complete-request": {
         "type": "object",
         "properties": {
+          "attempt": {
+            "type": "integer"
+          },
           "cache_manifest": {
             "type": "object",
             "nullable": true,
@@ -18218,6 +18254,9 @@
           },
           "output_changes": {
             "type": "integer"
+          },
+          "phase": {
+            "type": "string"
           },
           "plan_json": {
             "type": "string"
@@ -18415,17 +18454,37 @@
           }
         }
       },
-      "post-api-v2-runner-jobs-id-start-f47007": {
+      "post-api-v2-runner-jobs-id-start-meta": {
         "type": "object",
         "properties": {
-          "status": {
-            "type": "string"
+          "meta": {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "type": "integer"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "run_type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
           }
         }
       },
       "post-api-v2-runner-jobs-id-start-request": {
         "type": "object",
         "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "phase": {
+            "type": "string"
+          },
           "placement": {
             "type": "object",
             "nullable": true,
@@ -18452,6 +18511,9 @@
                 "type": "string"
               }
             }
+          },
+          "run_type": {
+            "type": "string"
           },
           "runner_id": {
             "type": "string"
@@ -18499,9 +18561,15 @@
           "job_id": {
             "type": "string"
           },
+          "phase": {
+            "type": "string"
+          },
           "pool": {
             "type": "object",
             "additionalProperties": true
+          },
+          "run_type": {
+            "type": "string"
           },
           "timeout_seconds": {
             "type": "integer"
@@ -18511,9 +18579,86 @@
           }
         }
       },
-      "post-api-v2-runner-register-1039b3": {
+      "post-api-v2-runner-jobs-id-token-request": {
         "type": "object",
         "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "run_type": {
+            "type": "string"
+          }
+        }
+      },
+      "post-api-v2-runner-register-200-response": {
+        "type": "object",
+        "properties": {
+          "active_claims": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object",
+              "properties": {
+                "attempt": {
+                  "type": "integer"
+                },
+                "job_id": {
+                  "type": "string"
+                },
+                "job_type": {
+                  "type": "string"
+                },
+                "phase": {
+                  "type": "string"
+                },
+                "run_type": {
+                  "type": "string"
+                },
+                "timeout_seconds": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pending_jobs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "runner_api_key": {
+            "type": "string"
+          },
+          "runner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "post-api-v2-runner-register-201-response": {
+        "type": "object",
+        "properties": {
+          "active_claims": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
           "capabilities": {
             "type": "array",
             "items": {
@@ -40692,7 +40837,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-runner-heartbeat-b955dc"
+                  "$ref": "#/components/schemas/post-api-v2-runner-heartbeat-200-response"
                 }
               }
             },
@@ -40833,9 +40978,11 @@
           "content": {
             "application/json": {
               "example": {
+                "attempt": 1,
                 "exit_code": 0,
                 "has_changes": true,
                 "output_changes": 0,
+                "phase": "plan",
                 "plan_json": "{\"format_version\":\"1.2\",\"resource_changes\":[{\"address\":\"null_resource.example\",\"mode\":\"managed\",\"type\":\"null_resource\",\"name\":\"example\",\"change\":{\"actions\":[\"create\"]}}]}",
                 "resource_additions": 1,
                 "resource_changes": 0,
@@ -41177,6 +41324,9 @@
           "content": {
             "application/json": {
               "example": {
+                "attempt": 1,
+                "phase": "plan",
+                "run_type": "plan",
                 "runner_id": "\u003cuuid\u003e"
               },
               "schema": {
@@ -41192,7 +41342,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-runner-jobs-id-start-f47007"
+                  "$ref": "#/components/schemas/post-api-v2-runner-jobs-id-start-meta"
                 }
               }
             },
@@ -41303,7 +41453,6 @@
     },
     "/api/v2/runner/jobs/{id}/token": {
       "post": {
-        "description": "Takes no request body.",
         "operationId": "post-api-v2-runner-jobs-id-token",
         "parameters": [
           {
@@ -41315,6 +41464,21 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "attempt": 1,
+                "phase": "plan",
+                "run_type": "plan"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/post-api-v2-runner-jobs-id-token-request"
+              }
+            }
+          },
+          "description": "Described from the type the server decodes this body into: every member it accepts is listed, and a member is marked required where that type requires it. A rule the server enforces in code is not shown. The example is a request the server accepted, with identifiers, timestamps and secrets replaced by placeholders."
+        },
         "responses": {
           "200": {
             "content": {
@@ -41398,11 +41562,21 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/post-api-v2-runner-register-200-response"
+                }
+              }
+            },
+            "description": "Success"
+          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/post-api-v2-runner-register-1039b3"
+                  "$ref": "#/components/schemas/post-api-v2-runner-register-201-response"
                 }
               }
             },

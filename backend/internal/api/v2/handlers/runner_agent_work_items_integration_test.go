@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -68,6 +69,7 @@ func setupWorkItemRunner(t *testing.T) *workItemRunnerFixture {
 		authed.POST("/jobs/:id/start", middleware.RequireRunnerToken(), h.JobStart)
 		authed.POST("/jobs/:id/token", middleware.RequireRunnerToken(), h.JobToken)
 		authed.GET("/jobs/:id/artifacts", middleware.JobData(), h.GetJobArtifacts)
+		authed.GET("/jobs/:id/playbook-snapshot", middleware.JobData(), h.GetPlaybookSnapshot)
 		authed.GET("/jobs/:id/status", h.GetJobStatus)
 		authed.POST("/jobs/:id/output", h.JobOutput)
 		authed.POST("/jobs/:id/snapshot", middleware.JobData(), h.UploadSnapshot)
@@ -134,7 +136,12 @@ func (f *workItemRunnerFixture) reload(t *testing.T, id string) models.WorkItem 
 
 func TestWorkItemRunner_PlaybookSnapshotLifecycle(t *testing.T) {
 	f := setupWorkItemRunner(t)
-	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached})
+	cachedAt := time.Now().UTC()
+	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &cachedAt, commit: "previous", size: 8})
+	key := ansible.PlaybookSnapshotKey(pb.ID)
+	if err := f.store.Put(t.Context(), key, []byte("previous")); err != nil {
+		t.Fatal(err)
+	}
 	item, err := f.items.RequestPlaybookSnapshot(t.Context(), pb, "manual")
 	if err != nil {
 		t.Fatal(err)
@@ -186,19 +193,40 @@ func TestWorkItemRunner_PlaybookSnapshotLifecycle(t *testing.T) {
 	if rec := runnerDo(t, f.r, "wi", http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/output", JobOutputRequest{RunnerID: f.runnerA1.ID.String(), Output: "Cloning acme/playbooks\n"}); rec.Code != http.StatusOK {
 		t.Fatalf("output: %d %s", rec.Code, rec.Body.String())
 	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/snapshot", bytes.NewReader([]byte("tarball")))
-	req.Header.Set("X-Test-Key", "wi")
-	req.Header.Set(runnercontract.HeaderSnapshotCommit, "0123456789abcdef")
-	up := httptest.NewRecorder()
-	f.r.ServeHTTP(up, req)
+	done := JobCompleteRequest{RunnerID: f.runnerA1.ID.String(), Status: "completed", WorkResult: &runnercontract.WorkResult{Commit: "0123456789abcdef"}}
+	complete := "/api/v2/runner/jobs/" + item.ID + "/complete"
+	if rec := runnerDo(t, f.r, "wi", http.MethodPost, complete, done); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("completion before upload returned %d, want retryable failure", rec.Code)
+	}
+	upload := func(data string) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/snapshot", strings.NewReader(data))
+		req.Header.Set("X-Test-Key", "wi")
+		req.Header.Set(runnercontract.HeaderSnapshotCommit, "0123456789abcdef")
+		rec := httptest.NewRecorder()
+		f.r.ServeHTTP(rec, req)
+		return rec
+	}
+	up := upload("tarball")
 	if up.Code != http.StatusOK {
 		t.Fatalf("snapshot upload: %d %s", up.Code, up.Body.String())
 	}
-	if data, err := f.store.Get(t.Context(), ansible.PlaybookSnapshotKey(pb.ID)); err != nil || string(data) != "tarball" {
-		t.Errorf("stored snapshot = %q (%v), want the uploaded tarball", data, err)
+	if data, err := f.store.Get(t.Context(), key); err != nil || string(data) != "previous" {
+		t.Fatalf("an unfinished capture changed the published archive to %q (%v)", data, err)
 	}
-	done := JobCompleteRequest{RunnerID: f.runnerA1.ID.String(), Status: "completed", WorkResult: &runnercontract.WorkResult{Commit: "0123456789abcdef"}}
-	if rec := runnerDo(t, f.r, "wi", http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/complete", done); rec.Code != http.StatusOK {
+	if afterUpload := f.reloadPlaybook(t, pb.ID); afterUpload.CachedCommit != "previous" || afterUpload.CachedSizeBytes != 8 {
+		t.Fatalf("an unfinished capture changed the published metadata to %q (%d bytes)", afterUpload.CachedCommit, afterUpload.CachedSizeBytes)
+	}
+	accepted := f.reload(t, item.ID)
+	if accepted.PlaybookSnapshotUploadID == nil {
+		t.Fatal("the capture did not record a selected upload")
+	}
+	if rec := upload("tarball"); rec.Code != http.StatusOK {
+		t.Fatalf("same upload retry returned %d", rec.Code)
+	}
+	if rec := upload("changed"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("different upload retry returned %d", rec.Code)
+	}
+	if rec := runnerDo(t, f.r, "wi", http.MethodPost, complete, done); rec.Code != http.StatusOK {
 		t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
 	}
 	got := f.reload(t, item.ID)
@@ -206,12 +234,75 @@ func TestWorkItemRunner_PlaybookSnapshotLifecycle(t *testing.T) {
 		t.Errorf("work item = %q at %q with output %q, want completed at the commit with its output", got.Status, got.Commit, got.Output)
 	}
 	after := f.reloadPlaybook(t, pb.ID)
+	if after.PublishedSnapshotID == nil || *after.PublishedSnapshotID != *accepted.PlaybookSnapshotUploadID {
+		t.Fatal("completion did not publish the originally selected upload")
+	}
+	job := f.seedJob(t, &pb.ID, f.runnerA1)
+	if err := f.db.Model(job).UpdateColumn("playbook_snapshot_upload_id", after.PublishedSnapshotID).Error; err != nil {
+		t.Fatal(err)
+	}
+	snapshot := runnerGet(t, f.artifactsRouter(f.store), "a1", "/api/v2/runner/jobs/"+job.ID.String()+"/playbook-snapshot")
+	if snapshot.Code != http.StatusOK || snapshot.Body.String() != "tarball" {
+		t.Fatalf("download returned %d %q, want the originally selected archive", snapshot.Code, snapshot.Body.String())
+	}
 	if after.LastSyncStatus != "successful" || after.CachedCommit != "0123456789abcdef" || after.CachedAt == nil || after.CachedSizeBytes != int64(len("tarball")) {
 		t.Errorf("playbook = %q, cached %q at %v (%d bytes), want the snapshot recorded", after.LastSyncStatus, after.CachedCommit, after.CachedAt, after.CachedSizeBytes)
 	}
 	// The job token ends with the work item.
 	if rec := runnerDo(t, f.r, "wi", http.MethodGet, "/api/v2/runner/jobs/"+item.ID+"/artifacts", nil); rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
 		t.Errorf("artifacts after completion with the job token = %d, want it refused", rec.Code)
+	}
+}
+
+func TestWorkItemRunner_PlaybookPublicationKeepsNewerCapture(t *testing.T) {
+	f := setupWorkItemRunner(t)
+	pb := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached})
+	reserve := func(runner string) *models.WorkItem {
+		t.Helper()
+		item, err := f.items.RequestPlaybookSnapshot(t.Context(), pb, "manual")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.onPool(t, item)
+		if !slices.Contains(f.offered(t, runner), item.ID) {
+			t.Fatalf("%s did not reserve %s", runner, item.ID)
+		}
+		return item
+	}
+	older := reserve("a1")
+	newer := reserve("a2")
+	if newer.ID == older.ID || older.PlaybookSnapshotSequence <= 0 ||
+		newer.PlaybookSnapshotSequence <= older.PlaybookSnapshotSequence {
+		t.Fatal("the two reservations did not receive separate ordered capture identities")
+	}
+	uploadAndFinish := func(item *models.WorkItem, runner, token, commit string) {
+		t.Helper()
+		path := "/api/v2/runner/jobs/" + item.ID
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path+"/snapshot", strings.NewReader(commit))
+		req.Header.Set("X-Test-Key", token)
+		req.Header.Set(runnercontract.HeaderSnapshotCommit, commit)
+		rec := httptest.NewRecorder()
+		f.r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("upload %s returned %d %s", commit, rec.Code, rec.Body.String())
+		}
+		done := JobCompleteRequest{RunnerID: f.keyRunner(runner), Status: "completed", WorkResult: &runnercontract.WorkResult{Commit: commit}}
+		if rec := runnerDo(t, f.r, token, http.MethodPost, path+"/complete", done); rec.Code != http.StatusOK {
+			t.Fatalf("complete %s returned %d %s", commit, rec.Code, rec.Body.String())
+		}
+	}
+	f.claim(t, "a2", newer.ID, "newer")
+	uploadAndFinish(newer, "a2", "newer", "newer")
+	f.claim(t, "a1", older.ID, "older")
+	if got := f.reloadPlaybook(t, pb.ID).LastSyncStatus; got != "successful" {
+		t.Errorf("starting the older capture changed the newer capture's status to %q", got)
+	}
+	uploadAndFinish(older, "a1", "older", "older")
+	published := f.reloadPlaybook(t, pb.ID)
+	if published.CachedCommit != "newer" || published.PublishedSnapshotSequence != newer.PlaybookSnapshotSequence ||
+		published.LastSyncStatus != "successful" {
+		t.Errorf("older completion changed the published capture or status: commit %q, sequence %d, status %q",
+			published.CachedCommit, published.PublishedSnapshotSequence, published.LastSyncStatus)
 	}
 }
 
@@ -233,13 +324,18 @@ func TestWorkItemRunner_NoSnapshotIsStoredForADeletedPlaybook(t *testing.T) {
 	}
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/runner/jobs/"+item.ID+"/snapshot", bytes.NewReader([]byte("tarball")))
 	req.Header.Set("X-Test-Key", "wi")
+	req.Header.Set(runnercontract.HeaderSnapshotCommit, "0123456789abcdef")
 	up := httptest.NewRecorder()
 	f.r.ServeHTTP(up, req)
 	if up.Code != http.StatusNotFound {
 		t.Errorf("snapshot of a deleted playbook: %d %s, want 404", up.Code, up.Body.String())
 	}
-	if data, err := f.store.Get(t.Context(), ansible.PlaybookSnapshotKey(pb.ID)); err == nil {
-		t.Errorf("a snapshot of %d bytes was stored for a deleted playbook", len(data))
+	var allocations int64
+	if err := f.db.Model(&models.PlaybookSnapshotUpload{}).Where("work_item_id = ?", item.ID).Count(&allocations).Error; err != nil {
+		t.Fatal(err)
+	}
+	if allocations != 0 {
+		t.Errorf("allocated %d uploads for a deleted playbook", allocations)
 	}
 }
 

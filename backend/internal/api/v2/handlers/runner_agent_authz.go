@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/runnercontract"
+	"gorm.io/gorm"
 )
 
 // AUD-001 authorization helpers for the runner control plane.
@@ -186,7 +188,15 @@ func (h *RunnerAgentHandler) authorizePool(c *gin.Context, runner *models.Runner
 		return true
 	}
 	var pool models.AgentPool
-	if err := h.db.Select("id", "kind", "organization_id").First(&pool, "id = ?", *poolID).Error; err != nil || !pool.IsHosted() || pool.OrganizationID != orgID {
+	if err := h.db.Select("id", "kind", "organization_id").First(&pool, "id = ?", *poolID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeRunnerForbidden(c, what+" is not on hosted capacity")
+		} else {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return false
+	}
+	if !pool.IsHosted() || pool.OrganizationID != orgID {
 		writeRunnerForbidden(c, what+" is not on hosted capacity")
 		return false
 	}

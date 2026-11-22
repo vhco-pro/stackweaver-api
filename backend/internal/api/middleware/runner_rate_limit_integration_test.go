@@ -28,6 +28,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/dbtest"
@@ -142,6 +143,8 @@ func parallelOn(t *testing.T, width, n int, fn func(i int) error) {
 // the runner control plane carved out, API-key authentication, then on /api/v2/runner RunnerAuth
 // and the per-principal limiter, each at its deployment default.
 func productionChain(db *gorm.DB, svc *apikey.Service) *gin.Engine {
+	// The API initializes logging before it accepts concurrent requests.
+	logger.Get()
 	gin.SetMode(gin.TestMode)
 	authSvc := auth.NewService(repository.NewUserRepository(db))
 	authSvc.SetAPIKeyService(svc)
@@ -236,15 +239,48 @@ func TestRunnerRateLimit_ThreeHundredLaunchersBehindOneAddress(t *testing.T) {
 	}
 
 	// The same address on a route outside the runner control plane meets the per-IP limiter.
-	limited := false
-	for range 260 {
-		// An unknown token is refused after the limiter has counted it, without a bcrypt compare.
+	// Send a concurrent burst: sequential database-backed refusals can refill the 100/s bucket
+	// while 260 requests consume its initial 200 tokens.
+	var limited atomic.Bool
+	parallelOn(t, 260, 260, func(int) error {
 		if send(r, http.MethodGet, "/api/v2/organizations", "tfe-not-a-stored-token") == http.StatusTooManyRequests {
-			limited = true
-			break
+			limited.Store(true)
 		}
-	}
-	if !limited {
+		return nil
+	})
+	if !limited.Load() {
 		t.Error("the per-IP limiter no longer governs /api/v2/organizations")
 	}
+}
+
+// The API initializes logging before accepting concurrent requests. Exercise the fixture's
+// first authentication burst in a fresh test process with the race detector.
+func TestRunnerRateLimit_ConcurrentFirstAuthentication(t *testing.T) {
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Fatal("TEST_DATABASE_URL is required for the concurrent authentication regression")
+	}
+	db, err := dbtest.Open(t, dbURL, &gorm.Config{})
+	if err != nil {
+		t.Fatalf("connect test db: %v", err)
+	}
+	svc := apikey.NewService(repository.NewAPIKeyRepository(db), nil, nil, nil)
+	r := productionChain(db, svc)
+	start := make(chan struct{})
+	var ready, finished sync.WaitGroup
+	ready.Add(64)
+	finished.Add(64)
+	for range 64 {
+		go func() {
+			defer finished.Done()
+			ready.Done()
+			<-start
+			if code := send(r, http.MethodPost, "/api/v2/runner/heartbeat", "tfe-not-a-stored-token"); code != http.StatusUnauthorized {
+				t.Errorf("unknown runner token = %d, want 401", code)
+			}
+		}()
+	}
+	ready.Wait()
+	close(start)
+	finished.Wait()
 }

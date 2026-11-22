@@ -141,11 +141,12 @@ func (f *agentPrepFixture) seedJob(t *testing.T, playbookID *uuid.UUID, assignee
 	return job
 }
 
-// router builds the production middleware chain for the runner control plane: a
-// stand-in for AuthMiddleware (the X-Test-Key header selects the API key), the real
-// RunnerAuth, then the routes register adds.
-func (f *agentPrepFixture) router(register func(authed *gin.RouterGroup)) *gin.Engine {
+// router builds the runner test chain: optional middleware, a stand-in for
+// AuthMiddleware (the X-Test-Key header selects the API key), the real RunnerAuth,
+// then the routes register adds. Socket fixtures install their read policy before auth.
+func (f *agentPrepFixture) router(register func(authed *gin.RouterGroup), beforeAuth ...gin.HandlerFunc) *gin.Engine {
 	r := gin.New()
+	r.Use(beforeAuth...)
 	r.Use(func(c *gin.Context) {
 		if key := f.keys[c.GetHeader("X-Test-Key")]; key != nil {
 			c.Set("auth_method", "api_key")

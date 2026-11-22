@@ -59,8 +59,16 @@ type writeFixture struct {
 	Request  writeFixtureRequest `json:"request,omitzero"`
 	Status   int                 `json:"status,omitempty"`
 	Response any                 `json:"response,omitempty"`
+	// ResponseVariants holds other accepted status/response pairs, redacted and normalized
+	// by the same policy as the primary response.
+	ResponseVariants []writeFixtureResponse `json:"response_variants,omitempty"`
 	// Named is set, and nothing else is, for a route that is not recorded.
 	Named *writeFixtureNamed `json:"named,omitempty"`
+}
+
+type writeFixtureResponse struct {
+	Status   int `json:"status"`
+	Response any `json:"response"`
 }
 
 // writeFixtureNamed is why a route was not recorded: one of the four reasons, and what this

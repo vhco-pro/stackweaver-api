@@ -102,6 +102,7 @@ func SetupV2Routes(
 
 	// API v2
 	v2 := r.Group("/api/v2")
+	v2.Use(middleware.RunnerReadResponse())
 	v2.Use(middleware.AuthMiddleware(authService))
 	// Tenant-isolation wall: for api-key tokens, resolve the request's
 	// target organization and enforce that an org-bound token may only act
@@ -1476,15 +1477,11 @@ func SetupV2Routes(
 	// Initialize inventory service for generating proper Ansible inventory content
 	runnerInventoryService := ansible.NewInventoryService(ansibleInventoryRepo, orgRepo)
 
-	// A cached-mode job that reaches a runner before its playbook has a snapshot makes the
-	// artifacts endpoint request a sync work item to repair the cache (#933, D2).
-	playbookSyncRequester := ansible.NewPlaybookSnapshotRequester(ansibleServices.WorkItems, ansiblePlaybookRepo)
-
 	runnerAgentHandler := handlers.NewRunnerAgentHandlerWithRepos(
 		runnerRepo, runnerJobExecRepo, agentPoolRepo, tokenAPIKeyService,
 		ansibleJobRepo, ansiblePlaybookRepo, ansibleInventoryRepo,
 		ansibleCredentialRepo, ansibleConfigRepo, runnerInventoryService, vcsRegistry, runnerCryptoSvc,
-		variableService, storageClient, playbookSyncRequester, db,
+		variableService, storageClient, db,
 	)
 	runnerAgentHandler.SetRBACService(rbacService)
 	runnerAgentHandler.SetWorkItems(ansible.NewWorkItemRuntime(db, runnerInventoryService, ansibleServices.InventorySources))
@@ -1525,6 +1522,9 @@ func SetupV2Routes(
 	runnerAgentHandler.SetAllowedRegistries(settings.AllowedRegistries(os.Getenv))
 	// The per-organization caches stay under their cache_size_limit (#933, D7, AC36). Every API
 	// replica sweeps; a sweep that races another deletes nothing twice.
+	if storageClient != nil {
+		ansible.StartPlaybookSnapshotCleanup(context.Background(), db, storageClient)
+	}
 	if storageClient != nil && os.Getenv("CACHE_JANITOR") != "off" {
 		(&cachejanitor.Janitor{DB: db, Store: storageClient, DefaultLimit: settings.DeploymentCacheSizeLimit(os.Getenv), PromotionRetention: 7 * 24 * time.Hour}).Start(context.Background(), time.Hour)
 	}
@@ -1563,12 +1563,13 @@ func SetupV2Routes(
 			// capped so a runner cannot push arbitrarily large stdout/stderr into the
 			// events table.
 			runnerAuthed.POST("/jobs/:id/events", middleware.MaxBodyBytes(1<<20), runnerAgentHandler.JobEvents)
-			runnerAuthed.POST("/jobs/:id/complete", middleware.JobData(), runnerAgentHandler.JobComplete)
+			// JobComplete admits only bound failed-start reports from launcher keys.
+			runnerAuthed.POST("/jobs/:id/complete", runnerAgentHandler.JobComplete)
 			runnerAuthed.POST("/jobs/:id/state", middleware.JobData(), runnerAgentHandler.UploadState)
 			// The saved plan of a run's plan phase, applied as is by its apply phase (#933, D2).
 			runnerAuthed.POST("/jobs/:id/plan", middleware.JobData(), runnerAgentHandler.UploadPlan)
 			runnerAuthed.GET("/jobs/:id/plan", middleware.JobData(), runnerAgentHandler.DownloadPlan)
-			// An artifact too large to inline, served once per attempt (#933, D2).
+			// Large artifacts use claim-scoped replay with validators or legacy one-fetch delivery.
 			runnerAuthed.GET("/jobs/:id/blob/*name", middleware.JobData(), runnerAgentHandler.GetJobBlob)
 			runnerAuthed.GET("/jobs/:id/artifacts", middleware.JobData(), runnerAgentHandler.GetJobArtifacts)
 			// The cached snapshot of the job's playbook, streamed from object storage.

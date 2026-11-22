@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
@@ -170,10 +171,17 @@ func TestAtRestWriters_PlaybookSnapshot(t *testing.T) {
 	}
 	f.claimWorkItem(t, item, "wi")
 	snapshot := append([]byte("\x1f\x8b\x08 playbook "), atRestSecret...)
-	if rec := f.post(t, "wi", "/api/v2/runner/jobs/"+item.ID+"/snapshot", "application/octet-stream", snapshot, nil); rec.Code != http.StatusOK {
+	if rec := f.post(t, "wi", "/api/v2/runner/jobs/"+item.ID+"/snapshot", "application/octet-stream", snapshot, map[string]string{runnercontract.HeaderSnapshotCommit: "0123456789abcdef"}); rec.Code != http.StatusOK {
 		t.Fatalf("POST snapshot: %d %s", rec.Code, rec.Body.String())
 	}
-	f.assertSealedObject(t, ansible.PlaybookSnapshotKey(pb.ID), snapshot)
+	var captured models.WorkItem
+	if err := f.db.First(&captured, "id = ?", item.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if captured.PlaybookSnapshotUploadID == nil {
+		t.Fatal("the captured snapshot has no accepted upload")
+	}
+	f.assertSealedObject(t, ansible.PlaybookCaptureKey(pb.ID, *captured.PlaybookSnapshotUploadID), snapshot)
 }
 
 func TestAtRestWriters_ConfigurationSnapshot(t *testing.T) {
@@ -228,6 +236,11 @@ func TestAtRestWriters_LargeState(t *testing.T) {
 func TestAtRestWriters_PlanJSON(t *testing.T) {
 	f := setupAtRestWriters(t)
 	run := f.seedRun(t, f.runnerA1)
+	if err := f.db.Model(run).Updates(map[string]any{
+		"dispatched_at": time.Now(), "claimed_phase": "plan", "claimed_run_type": "plan", "phase_attempt": 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if code, _ := f.mintJobToken(t, f.r, f.svc, "a1", run.ID, "job"); code != http.StatusOK {
 		t.Fatalf("mint: %d", code)
 	}

@@ -18,6 +18,48 @@ import (
 	"github.com/gin-gonic/gin/binding"
 )
 
+func TestWriteResponseVariantPreservesRecordingPolicy(t *testing.T) {
+	primary := writeCase{
+		route: "POST /api/v2/runner/register", responseSecrets: []string{"runner_api_key"},
+		requestSecrets: []string{"registration_secret"}, responseVaries: []string{"challenge"},
+		env: map[string]string{"RECORDING_SETTING": "enabled"}, redirects: true,
+		responseVariants: []writeResponseVariant{{}},
+	}
+	prepared := false
+	variant := primary.responseVariant(writeResponseVariant{prepare: func(t *testing.T, _ *writeRun) *http.Request {
+		t.Helper()
+		prepared = true
+		return httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v2/runner/register", nil)
+	}})
+	if variant.route != primary.route || !reflect.DeepEqual(variant.responseSecrets, primary.responseSecrets) ||
+		!reflect.DeepEqual(variant.requestSecrets, primary.requestSecrets) || !reflect.DeepEqual(variant.responseVaries, primary.responseVaries) ||
+		!reflect.DeepEqual(variant.env, primary.env) || !variant.redirects || len(variant.responseVariants) != 0 {
+		t.Fatal("response variant discarded the primary recording policy or retained nested variants")
+	}
+	variant.prepare(t, nil)
+	if !prepared {
+		t.Fatal("response variant did not use its own isolated preparation")
+	}
+	response, err := describeResponse([]byte(`{"runner_api_key":"variant-secret","challenge":"random-value","active_claims":null}`), variant.responseSecrets, variant.responseVaries, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx := writeFixture{
+		Method: http.MethodPost, Path: "/api/v2/runner/register", Status: http.StatusOK,
+		Response: map[string]any{"active_claims": []any{}}, ResponseVariants: []writeFixtureResponse{{Status: http.StatusOK, Response: response}},
+	}
+	raw := mustJSON(t, fx)
+	if !strings.Contains(raw, `"response_variants"`) || strings.Contains(raw, "variant-secret") || strings.Contains(raw, "random-value") {
+		t.Errorf("response variant was lost or retained volatile values: %s", raw)
+	}
+	if strings.Count(raw, `"method"`) != 1 {
+		t.Error("response variants introduced a second route fixture")
+	}
+	if _, err := describeResponse([]byte(`{"active_claims":[]}`), variant.responseSecrets, variant.responseVaries, nil); err == nil {
+		t.Error("a variant silently ignored missing declared response members")
+	}
+}
+
 // These pin the rules the write recorder applies to what it commits (#869). They need no
 // service: the functions are fed a request and a response directly.
 

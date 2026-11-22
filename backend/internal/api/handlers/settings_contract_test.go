@@ -382,6 +382,37 @@ func TestCreateAPIKey_RegistrationScopeNeedsAgentPoolPermission(t *testing.T) {
 		}
 	})
 
+	t.Run("a permission lookup failure leaves the credential unissued", func(t *testing.T) {
+		callback := f.db.Callback().Query()
+		const name = "registration_key_permission:fail_membership"
+		observed := false
+		if err := callback.Before("gorm:query").Register(name, func(tx *gorm.DB) {
+			if tx.Statement.Table == "organization_members" {
+				observed = true
+				_ = tx.AddError(errors.New("temporary permission read failure"))
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := callback.Remove(name); err != nil {
+				t.Error(err)
+			}
+		})
+
+		code, _ := f.call(t, http.MethodPost, "/api/v2/settings/api-keys", body)
+		if code != http.StatusInternalServerError || !observed {
+			t.Errorf("permission lookup returned HTTP %d, fault observed %v", code, observed)
+		}
+		var keys int64
+		if err := f.db.Model(&models.APIKey{}).Where("user_id = ?", f.user.ID).Count(&keys).Error; err != nil {
+			t.Fatal(err)
+		}
+		if keys != 0 {
+			t.Errorf("%d keys were stored after the failed check", keys)
+		}
+	})
+
 	t.Run("an owner may mint one", func(t *testing.T) {
 		orgID := uuid.MustParse(f.orgID)
 		owners := &models.Team{ID: uuid.New(), OrganizationID: orgID, Name: "owners"}

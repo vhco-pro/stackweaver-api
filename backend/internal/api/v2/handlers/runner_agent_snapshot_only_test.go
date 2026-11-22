@@ -25,7 +25,6 @@ import (
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
-	"github.com/michielvha/stackweaver/core/services/ansible"
 	"github.com/michielvha/stackweaver/core/services/vcs"
 )
 
@@ -37,7 +36,6 @@ func (f *agentPrepFixture) snapshotOnlyRouter(store *snapshotStore) (*gin.Engine
 		db: f.db, apiKeyService: svc, jobExecRepo: repository.NewRunnerJobExecutionRepository(f.db),
 		ansibleJobRepo: repository.NewAnsibleJobRepository(f.db), playbookRepo: playbookRepo,
 		vcsRegistry: vcs.NewProviderRegistry(nil, nil, nil, nil), storageClient: store,
-		syncRequester: ansible.NewPlaybookSnapshotRequester(ansible.NewWorkItemService(f.db, nil), playbookRepo),
 	}
 	return f.router(func(authed *gin.RouterGroup) {
 		authed.POST("/jobs/:id/token", middleware.RequireRunnerToken(), h.JobToken)
@@ -69,13 +67,11 @@ func TestSnapshotOnly_NoCloneURLForAJobToken(t *testing.T) {
 	fresh := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeFresh, cachedAt: &captured, commit: "abc1234", size: 8})
 	cached := f.seedPlaybook(t, playbookSpec{mode: models.PlaybookSourceModeCached, cachedAt: &captured, commit: "abc1234", size: 8})
 	for _, pb := range []*models.AnsiblePlaybook{fresh, cached} {
-		if err := store.Put(t.Context(), ansible.PlaybookSnapshotKey(pb.ID), []byte("snapshot")); err != nil {
-			t.Fatal(err)
-		}
+		f.publishFixtureSnapshot(t, pb, store, []byte("snapshot"))
 	}
 	for name, pb := range map[string]*models.AnsiblePlaybook{"fresh": fresh, "cached": cached} {
 		t.Run("ansible "+name, func(t *testing.T) {
-			job := f.seedJob(t, &pb.ID, f.runnerA1)
+			job := f.seedSnapshotJob(t, pb, f.runnerA1)
 			if code, _ := f.mintJobToken(t, r, svc, "a1", job.ID.String(), "job-"+name); code != http.StatusOK {
 				t.Fatalf("minting the job token: %d", code)
 			}

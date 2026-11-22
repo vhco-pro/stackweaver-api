@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -39,6 +40,7 @@ import (
 	"github.com/michielvha/stackweaver/core/storage"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RunnerAgentHandler handles runner agent API endpoints
@@ -78,10 +80,6 @@ type RunnerAgentHandler struct {
 	// State object access (encryption at rest) - optional, injected after creation.
 	// Routes self-hosted-runner state reads/writes through the encrypt/decrypt chokepoint.
 	stateService *state.Service
-	// syncRequester queues a playbook sync when a cached-mode job reaches an agent
-	// before the playbook has a snapshot. Optional: when nil the run still clones, the
-	// snapshot is just not repaired for the next run.
-	syncRequester *ansible.PlaybookSyncRequester
 	// Redis log buffer - optional, injected after creation. When set, agent job output streams
 	// through Redis (O(1) APPEND) instead of the O(n²) read-modify-write on object storage
 	// (AUD-028), and is copied to MinIO once at completion.
@@ -110,6 +108,8 @@ type RunnerAgentHandler struct {
 	// modulePublisher publishes the version a module_tag_snapshot uploads (#938;
 	// SetModulePublisher).
 	modulePublisher *registry.ModulePublisher
+	// pauseRegistration holds new launcher registration and work admission during staged upgrades.
+	pauseRegistration bool
 }
 
 // SetModulePublisher sets the publisher of module versions captured from a tag.
@@ -167,7 +167,6 @@ func NewRunnerAgentHandlerWithRepos(
 	cryptoService *crypto.CryptoService,
 	variableService *variable.Service,
 	storageClient storage.Client,
-	syncRequester *ansible.PlaybookSyncRequester,
 	db *gorm.DB,
 ) *RunnerAgentHandler {
 	return &RunnerAgentHandler{
@@ -185,8 +184,8 @@ func NewRunnerAgentHandlerWithRepos(
 		cryptoService:     cryptoService,
 		variableService:   variableService,
 		storageClient:     storageClient,
-		syncRequester:     syncRequester,
 		db:                db,
+		pauseRegistration: os.Getenv("RUNNER_UPGRADE_PAUSE_REGISTRATION") == "true",
 	}
 }
 
@@ -324,6 +323,15 @@ func deriveRunnerType(tofuVersion, ansibleVersion string) models.RunnerType {
 	}
 }
 
+func (h *RunnerAgentHandler) rejectPausedRegistration(c *gin.Context) bool {
+	if !h.pauseRegistration {
+		return false
+	}
+	jsonapi.WriteCodedError(c, http.StatusServiceUnavailable, "runner-upgrade-registration-paused",
+		"Service Unavailable", "Launcher registration is paused during this upgrade. Retry after cutover.")
+	return true
+}
+
 func (h *RunnerAgentHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -417,151 +425,43 @@ func (h *RunnerAgentHandler) Register(c *gin.Context) {
 		}
 	}
 
-	// A just-in-time token registers one launcher once (#933, D11): using it up is the same
-	// statement that checks it is still unused, so two registrations racing with it cannot both
-	// pass. A refused pool above did not use it.
-	if raw, ok := c.Get("api_key"); ok {
-		if k, ok := raw.(*models.APIKey); ok && k != nil && k.IsJITToken {
-			used, err := h.apiKeyService.UseJITToken(k.ID)
-			if err != nil {
-				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-				return
-			}
-			if !used {
-				jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "this just-in-time token has been used or has expired")
-				return
-			}
-		}
+	if h.rejectPausedRegistration(c) {
+		return
 	}
-
-	// The runner-scoped token is owned by the same user as the registering key.
+	rawKey, _ := c.Get("api_key")
+	registrationKey, _ := rawKey.(*models.APIKey)
 	registeringUserID, _ := c.Get("user_id")
 	registeringUserUUID, _ := registeringUserID.(uuid.UUID)
+	apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
+	runner, raw, created, err := h.registerCustomerRunner(c.Request.Context(), req, pool, registrationKey, apiKeyUUID, registeringUserUUID, c.ClientIP())
+	if errors.Is(err, errJITRegistrationConsumed) {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "this just-in-time token has been used or has expired")
+		return
+	}
+	if err != nil {
+		logger.Warnf("Launcher registration failed for pool %s: %v", poolID, err)
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to register launcher")
+		return
+	}
+	logger.Infof("Launcher registered: %s (ID: %s, pool: %s)", runner.Name, runner.ID, poolID)
 
-	// Check if runner with this name already exists - if so, re-register (update and reuse)
-	existing, _ := h.runnerRepo.GetByName(pool.OrganizationID, req.Name)
-	if existing != nil {
-		// Re-register: update the existing runner entry and return it
-		existing.Status = models.RunnerStatusOnline
-		existing.AgentPoolID = &poolID
-		existing.IPAddress = c.ClientIP()
-		now := time.Now()
-		existing.LastHeartbeatAt = &now
-		if req.TofuVersion != "" {
-			existing.TofuVersion = req.TofuVersion
-		}
-		if req.AnsibleVersion != "" {
-			existing.AnsibleVersion = req.AnsibleVersion
-		}
-		// Refresh the runner type from the capabilities just reported. Without this a row keeps
-		// whatever type it was first created with, so a runner whose capabilities changed - or one
-		// created under an older enum value - stays permanently unroutable: it heartbeats as Online
-		// while FindAvailableRunner never matches it and every job sits pending, silently.
-		existing.RunnerType = runnerTypeFor(req.Engines, req.TofuVersion, req.AnsibleVersion)
-		// The capabilities are the binary's, so a re-registration replaces them.
-		existing.Capabilities = models.RunnerLabels(req.Capabilities)
-		existing.Driver, existing.NetworkMode = req.Driver, req.NetworkMode
-		applyLauncherSettings(existing, req)
-		// A new launcher process under the name is not draining (D11).
-		existing.DrainRequestedAt = nil
-		apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
-		existing.RegisteredWithAPIKeyID = &apiKeyUUID
-		if err := h.runnerRepo.Update(existing); err != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to re-register launcher")
-			return
-		}
-		logger.Infof("Launcher re-registered: %s (ID: %s, pool: %s)", existing.Name, existing.ID, poolID)
-
-		// Mint a fresh runner-scoped token on every registration (AUD-001): the
-		// runner authenticates the control plane with it, not the org registration
-		// key. Old tokens for this runner id are revoked inside generateRunnerAPIKey.
-		reRegKey, keyErr := h.generateRunnerAPIKey(existing, registeringUserUUID)
-		if keyErr != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to mint launcher token")
-			return
-		}
-
-		// On re-registration, also check for pending jobs (same as heartbeat) so
-		// runners that re-register on each cycle still pick up work.
+	// Fetch post-registration state after commit. No response may disclose an
+	// identity or key that failed to commit alongside the one-time token.
+	active := h.activeClaims(c.Request.Context(), runner.ID)
+	if !created {
 		pendingJobs := []PendingJob{}
-		if jobs, err := h.findPendingJobsForRunner(existing); err == nil {
+		if jobs, err := h.findPendingJobsForRunner(c.Request.Context(), runner); err == nil {
 			pendingJobs = jobs
 		}
-
 		c.JSON(http.StatusOK, RunnerReRegisterResponse{
-			RunnerID:     existing.ID.String(),
-			RunnerAPIKey: reRegKey,
-			Status:       "re-registered",
-			PendingJobs:  pendingJobs,
-			Capabilities: runnercontract.APICapabilities,
+			RunnerID: runner.ID.String(), RunnerAPIKey: raw, Status: "re-registered",
+			PendingJobs: pendingJobs, Capabilities: runnercontract.APICapabilities, ActiveClaims: active,
 		})
 		return
 	}
-
-	// The engines the runner declared decide what it is offered; one that predates engines is typed
-	// by the tool versions it reports.
-	runnerType := runnerTypeFor(req.Engines, req.TofuVersion, req.AnsibleVersion)
-
-	// Get client IP
-	clientIP := c.ClientIP()
-
-	// Create the runner. AUD-080: parse the API key ID the same safe way as the re-register branch
-	// above - a bare type assertion panics if the middleware stored api_key_id as a non-uuid.UUID.
-	apiKeyUUID, _ := uuid.Parse(fmt.Sprintf("%v", apiKeyID))
-	now := time.Now()
-	maxJobs := req.MaxConcurrentJobs
-	if maxJobs <= 0 {
-		maxJobs = 1
-	}
-
-	runner := &models.Runner{
-		OrganizationID:         &pool.OrganizationID,
-		AgentPoolID:            &poolID,
-		Name:                   req.Name,
-		RunnerType:             runnerType,
-		Status:                 models.RunnerStatusOnline,
-		Hostname:               req.Hostname,
-		IPAddress:              clientIP,
-		OSType:                 req.OSType,
-		OSVersion:              req.OSVersion,
-		AgentVersion:           req.AgentVersion,
-		TofuVersion:            req.TofuVersion,
-		AnsibleVersion:         req.AnsibleVersion,
-		AvailableCollections:   models.RunnerCollections(req.AvailableCollections),
-		MaxConcurrentJobs:      maxJobs,
-		Labels:                 models.RunnerLabels(req.Labels),
-		Capabilities:           models.RunnerLabels(req.Capabilities),
-		Driver:                 req.Driver,
-		NetworkMode:            req.NetworkMode,
-		LastHeartbeatAt:        &now,
-		RegisteredAt:           now,
-		RegisteredWithAPIKeyID: &apiKeyUUID,
-	}
-	applyLauncherSettings(runner, req)
-
-	if err := h.runnerRepo.Create(runner); err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to create launcher")
-		return
-	}
-
-	// Generate a runner-specific API key
-	// This key is scoped to only this runner: runner:<runner_id>:*
-	runnerAPIKey, err := h.generateRunnerAPIKey(runner, registeringUserUUID)
-	if err != nil {
-		// The runner-scoped credential is mandatory now (AUD-001): without it the
-		// runner cannot authenticate the control plane. Fail registration so the
-		// agent retries rather than silently falling back to the org key.
-		logger.Errorf("Launcher registration: failed to mint launcher token for %s: %v", runner.ID, err)
-		_ = h.runnerRepo.Delete(runner.ID)
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "failed to mint launcher token")
-		return
-	}
-
 	c.JSON(http.StatusCreated, RunnerRegisterResponse{
-		RunnerID:            runner.ID.String(),
-		RunnerAPIKey:        runnerAPIKey,
-		PollIntervalSeconds: 10,
-		Capabilities:        runnercontract.APICapabilities,
+		RunnerID: runner.ID.String(), RunnerAPIKey: raw, PollIntervalSeconds: 10,
+		ActiveClaims: active, Capabilities: runnercontract.APICapabilities,
 	})
 }
 
@@ -574,6 +474,9 @@ func (h *RunnerAgentHandler) registerHosted(c *gin.Context, req RegisterRequest)
 	key, _ := raw.(*models.APIKey)
 	if !apikey.IsHostedRegistrationKey(key) {
 		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "only the hosted registration secret may register a hosted launcher")
+		return
+	}
+	if h.rejectPausedRegistration(c) {
 		return
 	}
 	if h.apiKeyService == nil {
@@ -625,28 +528,7 @@ func (h *RunnerAgentHandler) registerHosted(c *gin.Context, req RegisterRequest)
 		return
 	}
 	logger.Infof("Hosted launcher registered: %s (ID: %s, group: %s)", runner.Name, runner.ID, group)
-	c.JSON(status, RunnerRegisterResponse{RunnerID: runner.ID.String(), RunnerAPIKey: token, PollIntervalSeconds: 10, Capabilities: runnercontract.APICapabilities})
-}
-
-// generateRunnerAPIKey mints and persists a runner-scoped API key (AUD-001).
-// The key binds to this runner via runner:<id>:* scopes and to the runner's org;
-// the runner authenticates every subsequent /runner/* call with it, and
-// middleware.RunnerAuth recovers the runner identity from the scopes. Any stale
-// tokens for the same runner id (re-registration) are revoked first so a runner
-// never has more than one live credential.
-func (h *RunnerAgentHandler) generateRunnerAPIKey(runner *models.Runner, userID uuid.UUID) (string, error) {
-	if h.apiKeyService == nil {
-		return "", fmt.Errorf("api key service not configured for launcher token minting")
-	}
-	if runner.AgentPoolID == nil {
-		return "", fmt.Errorf("launcher %s has no agent pool to mint its token for", runner.ID)
-	}
-	_ = h.apiKeyService.DeleteAPIKeysForRunner(runner.ID)
-	_, rawKey, err := h.apiKeyService.CreateRunnerToken(userID, runner.ID, runner.OrgID(), *runner.AgentPoolID, "runner-"+runner.Name)
-	if err != nil {
-		return "", err
-	}
-	return rawKey, nil
+	c.JSON(status, RunnerRegisterResponse{RunnerID: runner.ID.String(), RunnerAPIKey: token, PollIntervalSeconds: 10, Capabilities: runnercontract.APICapabilities, ActiveClaims: h.activeClaims(c.Request.Context(), runner.ID)})
 }
 
 // HeartbeatRequest is runnercontract.HeartbeatRequest, the shared runner wire contract.
@@ -700,6 +582,12 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 		}
 	}
 
+	if h.pauseRegistration {
+		if err := h.runnerRepo.ReleaseUpgradeReservations(c.Request.Context(), runnerID); err != nil {
+			logger.Warnf("releasing unstarted upgrade reservations for runner %s: %v", runnerID, err)
+		}
+	}
+
 	// Find pending jobs for this runner's pool
 	pendingJobs := []PendingJob{}
 
@@ -716,13 +604,13 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 
 	// A runner asked to drain is offered nothing and told so (D11).
 	draining := runner.DrainRequestedAt != nil
-	if draining {
+	if draining || h.pauseRegistration {
 		availableCapacity = 0
 	}
 
 	// Only query for jobs if runner has capacity
 	if availableCapacity > 0 {
-		pendingJobs = h.offers(runner)
+		pendingJobs = h.offers(c.Request.Context(), runner)
 		// The long poll (#933, D3): with nothing to offer, hold the request until a wakeup for the
 		// runner's pool or the wait ends, then query again. The waiter is registered before the
 		// second query, so work that became offerable between the two is not missed; while it waits
@@ -730,7 +618,7 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 		if len(pendingJobs) == 0 && req.WaitSeconds > 0 && h.wakeHub != nil {
 			wait := min(time.Duration(req.WaitSeconds)*time.Second, h.longPollMax)
 			woken, forget := h.wakeHub.Wait(wakeKey(runner))
-			if pendingJobs = h.offers(runner); len(pendingJobs) == 0 {
+			if pendingJobs = h.offers(c.Request.Context(), runner); len(pendingJobs) == 0 {
 				timer := time.NewTimer(wait)
 				select {
 				case <-woken:
@@ -748,7 +636,7 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 				if err := h.runnerRepo.UpdateHeartbeat(runnerID, status, req.CurrentJobs); err != nil {
 					logger.Warnf("heartbeat of runner %s after its wait: %v", runnerID, err)
 				}
-				pendingJobs = h.offers(runner)
+				pendingJobs = h.offers(c.Request.Context(), runner)
 			} else {
 				forget()
 			}
@@ -757,13 +645,15 @@ func (h *RunnerAgentHandler) Heartbeat(c *gin.Context) {
 
 	resp := HeartbeatResponse{
 		PendingJobs: pendingJobs, Capabilities: runnercontract.APICapabilities,
-		Ensure:      h.ingestInventory(runner, req.Inventory),
-		HostedDepth: h.hostedDepth(runner),
-		Drain:       draining,
-		ReapRunners: h.lostPeers(runner),
+		Drain: draining, ActiveClaims: h.activeClaims(c.Request.Context(), runner.ID),
 	}
-	if resp.CachePromotions = h.pendingPromotions(runner); len(resp.CachePromotions) > 0 {
-		resp.Mirror = h.mirror
+	if !h.pauseRegistration {
+		resp.Ensure = h.ingestInventory(runner, req.Inventory)
+		resp.HostedDepth = h.hostedDepth(runner)
+		resp.ReapRunners = h.lostPeers(runner)
+		if resp.CachePromotions = h.pendingPromotions(runner); len(resp.CachePromotions) > 0 {
+			resp.Mirror = h.mirror
+		}
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -819,8 +709,8 @@ type DrainRequest = runnercontract.DrainRequest
 
 // offers is the work offered to runner now; a failed query offers nothing and the next heartbeat
 // asks again.
-func (h *RunnerAgentHandler) offers(runner *models.Runner) []PendingJob {
-	jobs, err := h.findPendingJobsForRunner(runner)
+func (h *RunnerAgentHandler) offers(ctx context.Context, runner *models.Runner) []PendingJob {
+	jobs, err := h.findPendingJobsForRunner(ctx, runner)
 	if err != nil || jobs == nil {
 		return []PendingJob{}
 	}
@@ -833,184 +723,52 @@ type JobStartRequest = runnercontract.JobStartRequest
 // JobStart marks a job as started
 // POST /api/v2/runner/jobs/:id/start
 func (h *RunnerAgentHandler) JobStart(c *gin.Context) {
-	jobIDStr := c.Param("id")
-
 	var req JobStartRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-
-	if isWorkItem(jobIDStr) {
-		h.jobStartWorkItem(c, jobIDStr, req.Placement)
-		return
-	}
-
-	// Determine if this is a Terraform run (ID starts with "run-") or Ansible job (UUID)
-	if strings.HasPrefix(jobIDStr, "run-") {
-		// Terraform run
-		h.jobStartTerraformRun(c, jobIDStr)
-		if c.Writer.Status() == http.StatusOK {
-			h.recordPlacement(models.JobTypeTofuRun, jobIDStr, req.Placement)
-		}
-		return
-	}
-
-	// Ansible job (UUID)
-	jobID, err := uuid.Parse(jobIDStr)
-	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
-		return
-	}
-
-	if h.ansibleJobRepo == nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	// AUD-001: the runner is the authenticated identity, never the body runner_id.
-	runnerCaller, ok := callingRunner(c)
+	runner, ok := callingRunner(c)
 	if !ok {
 		writeRunnerForbidden(c, "launcher identity required")
 		return
 	}
-	runnerID := runnerCaller.ID
-
-	// Authorize the runner for this job (same org + agent pool) before claiming.
-	job, err := h.ansibleJobRepo.GetByID(jobID)
+	if isWorkItem(c.Param("id")) && h.workItems == nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Work item not found")
+		return
+	}
+	result, err := h.startExpectedClaim(c.Request.Context(), c.Param("id"), runner.ID, req)
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
+		writeRunnerClaimError(c, err)
 		return
 	}
-	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
-		return
-	}
-
-	// Atomically claim the job. Only the runner that flips the still-pending row
-	// wins; any other runner offered the same job loses the race and is told to
-	// skip it (409). This prevents two agent-pool runners from executing the same
-	// job/slice.
-	claimed, err := h.ansibleJobRepo.ClaimForRunner(jobID, runnerID)
-	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-	if !claimed {
-		// Either the job no longer exists, or another runner already claimed it.
-		if _, getErr := h.ansibleJobRepo.GetByID(jobID); getErr != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
-			return
-		}
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Job already claimed by another launcher")
-		return
-	}
-
-	// Record the execution against the winning runner. The exec record is created
-	// here (at claim time) rather than at offer time, so capacity accounting and
-	// completion tracking reflect the runner that actually owns the job.
-	h.upsertJobExecution(jobID, runnerID)
-	h.revokeJobTokens(models.JobTypeAnsibleJob, jobIDStr)
-	h.recordPlacement(models.JobTypeAnsibleJob, jobIDStr, req.Placement)
-
-	response.Status(c, http.StatusOK, "started")
+	jsonapi.WriteMeta(c, http.StatusOK, result)
 }
 
 // upsertJobExecution ensures a running RunnerJobExecution record exists for the
 // (claimed) Ansible job, bound to the winning runner. Created at claim time so a
 // runner is only counted as busy with jobs it actually owns.
-func (h *RunnerAgentHandler) upsertJobExecution(jobID, runnerID uuid.UUID) {
-	workspaceName := ""
-	if job, err := h.ansibleJobRepo.GetByID(jobID); err == nil && job.Project.Name != "" {
-		workspaceName = job.Project.Name
+func (h *RunnerAgentHandler) upsertJobExecution(job *models.AnsibleJob, runnerID uuid.UUID) error {
+	exec, err := h.jobExecRepo.GetByJobID(job.ID)
+	if err == nil {
+		return h.db.Model(&models.RunnerJobExecution{}).Where("id = ?", exec.ID).Updates(map[string]any{
+			"runner_id": runnerID, "status": models.JobExecutionStatusRunning,
+			"started_at": job.StartedAt, "finished_at": nil, "error_message": "",
+			"workspace_name": job.Project.Name,
+		}).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("loading the job execution: %w", err)
 	}
 
-	if exec, err := h.jobExecRepo.GetByJobID(jobID); err == nil {
-		_ = h.jobExecRepo.UpdateStatus(exec.ID, models.JobExecutionStatusRunning, "")
-		return
-	}
-
-	_ = h.jobExecRepo.Create(&models.RunnerJobExecution{
+	return h.jobExecRepo.Create(&models.RunnerJobExecution{
 		RunnerID:      runnerID,
 		JobType:       models.JobTypeAnsibleJob,
-		JobID:         jobID,
-		WorkspaceName: workspaceName,
+		JobID:         job.ID,
+		WorkspaceName: job.Project.Name,
 		Status:        models.JobExecutionStatusRunning,
+		StartedAt:     job.StartedAt,
 	})
-}
-
-// jobStartTerraformRun handles job start for Terraform runs
-func (h *RunnerAgentHandler) jobStartTerraformRun(c *gin.Context, runID string) {
-	var run models.Run
-	if err := h.db.First(&run, "id = ?", runID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
-		} else {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		}
-		return
-	}
-
-	// AUD-001: authorize the authenticated runner for this run (same org + agent
-	// pool; run may still be unassigned - this is the assignment point) and bind
-	// the run to the authenticated runner, not the body runner_id.
-	runnerCaller, ok := callingRunner(c)
-	if !ok {
-		writeRunnerForbidden(c, "launcher identity required")
-		return
-	}
-	if !h.authorizeRunnerForRun(c, &run, false) {
-		return
-	}
-	runnerID := runnerCaller.ID
-
-	// AUD-007/112: atomically claim this run for dispatch before starting it. The heartbeat offers
-	// the same pending/applying run to every agent runner in the pool; the claim (a conditional
-	// UPDATE that wins for exactly one caller) ensures the run is started - and therefore applied -
-	// on only one machine. A runner that loses the race gets 409 and skips the job. A run that was
-	// canceled in the meantime is no longer pending/applying, so the claim also fails → 409.
-	claimed, err := repository.NewRunRepository(h.db).ClaimForDispatch(runID)
-	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to claim run")
-		return
-	}
-	if !claimed {
-		jsonapi.WriteErrorNoDetail(c, http.StatusConflict, "Run already claimed by another launcher or no longer dispatchable")
-		return
-	}
-
-	// The API holds the workspace state lock for the phase (#933, D2, AC7), so the lock is the
-	// same on every driver and an executor that vanishes wedges nothing beyond the TTL. A run whose
-	// workspace another run holds is not started: the claim is undone and it stays pending, to be
-	// offered again once the lock is released.
-	if locked, lockErr := h.lockWorkspaceForRun(&run); lockErr != nil || !locked {
-		_ = repository.NewRunRepository(h.db).ClearDispatch(runID)
-		if lockErr != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to lock the workspace state")
-			return
-		}
-		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "the workspace state is locked by another run; this run waits")
-		return
-	}
-
-	now := time.Now()
-
-	// Only the phase's own columns are written: the row was loaded before the claim, and saving it
-	// whole would write the claim's dispatched_at and attempt back to their old values, leaving a
-	// started run looking unstarted (#933, AC9).
-	columns := map[string]any{"runner_id": runnerID}
-	switch run.Status { //nolint:exhaustive // only pending/pre_plan_completed and applying need action on job start
-	case models.RunStatusPending, models.RunStatusPrePlanCompleted:
-		// pre_plan_completed = the run's pre_plan task stage passed; it dispatches like pending
-		// (a run with an UNPASSED pre_plan stage never gets here - ClaimForDispatch refuses it).
-		columns["status"], columns["started_at"] = models.RunStatusPlanning, now
-	case models.RunStatusApplying:
-		// Apply phase start - already in applying status
-		columns["apply_started_at"] = now
-	}
-	_ = h.db.Model(&models.Run{}).Where("id = ?", runID).Updates(columns).Error
-	h.revokeJobTokens(models.JobTypeTofuRun, runID)
-
-	response.Status(c, http.StatusOK, "started")
 }
 
 // JobOutputRequest is runnercontract.JobOutputRequest, the shared runner wire contract.
@@ -1053,7 +811,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 		// any runner could poison another tenant's plan/apply output.
 		var run models.Run
 		if err := h.db.First(&run, "id = ?", jobIDStr).Error; err != nil {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
+			writeRunnerJobReadError(c, err)
 			return
 		}
 		if !h.authorizeRunnerForRunReport(c, &run) {
@@ -1117,7 +875,7 @@ func (h *RunnerAgentHandler) JobOutput(c *gin.Context) {
 	// AUD-001: only the runner that owns the job may write its output/events.
 	outputJob, err := h.ansibleJobRepo.GetByID(jobID)
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
+		writeRunnerJobReadError(c, err)
 		return
 	}
 	if !h.authorizeRunnerForAnsibleJobReport(c, outputJob) {
@@ -1264,7 +1022,7 @@ func (h *RunnerAgentHandler) JobEvents(c *gin.Context) {
 
 	job, err := h.ansibleJobRepo.GetByID(jobID)
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
+		writeRunnerJobReadError(c, err)
 		return
 	}
 	// AUD-001: only the runner that owns the job may write its events.
@@ -1336,157 +1094,100 @@ type JobCompleteRequest = runnercontract.JobCompleteRequest
 // JobComplete marks a job as completed
 // POST /api/v2/runner/jobs/:id/complete
 func (h *RunnerAgentHandler) JobComplete(c *gin.Context) {
-	jobIDStr := c.Param("id")
-
+	jobID := c.Param("id")
 	var req JobCompleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-
-	if isWorkItem(jobIDStr) {
-		h.jobCompleteWorkItem(c, jobIDStr, req)
+	if _, jobToken := callingJob(c); !jobToken {
+		h.completeStartupFailure(c, jobID, req)
 		return
 	}
-
-	// Determine if this is a Terraform run or Ansible job
-	if strings.HasPrefix(jobIDStr, "run-") {
-		h.jobCompleteTerraformRun(c, jobIDStr, req)
-		if c.Writer.Status() == http.StatusOK {
-			if req.Status == "completed" && req.CacheManifest != nil {
-				var run models.Run
-				if err := h.db.First(&run, "id = ?", jobIDStr).Error; err == nil {
-					if org, pool, err := h.runOrgAndPool(&run); err == nil {
-						h.recordCachePromotions(c, models.JobTypeTofuRun, jobIDStr, org, pool, req.CacheManifest)
-					}
-				}
-			}
-			h.revokeJobTokens(models.JobTypeTofuRun, jobIDStr)
-			h.releaseWorkspaceLock(jobIDStr)
-			h.wakeCallersPool(c)
-		}
+	validStatus := req.Status == "completed" || req.Status == "failed" || req.Status == "canceled" || (isWorkItem(jobID) && req.Status == "successful")
+	if !validStatus || req.Attempt < 0 {
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid completion")
 		return
 	}
-
-	jobID, err := uuid.Parse(jobIDStr)
+	effect, err := h.completeReportedClaim(c, jobID, req)
+	if errors.Is(err, errCompletionAnswered) {
+		return
+	}
+	if errors.Is(err, errCompletionMissing) {
+		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
+		return
+	}
+	if errors.Is(err, repository.ErrInvalidClaim) || errors.Is(err, errInvalidRunnerJobID) {
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid completion identity")
+		return
+	}
 	if err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid job ID")
-		return
-	}
-
-	// Get the job execution record
-	exec, err := h.jobExecRepo.GetByJobID(jobID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
-		} else {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		}
-		return
-	}
-
-	// AUD-001: only the runner that owns the job may complete it - otherwise a
-	// caller could force-complete/fail another tenant's job. Gate on the job's
-	// org/pool/reservation before mutating any status.
-	wasCanceled := false
-	if completeJob, jErr := h.ansibleJobRepo.GetByID(jobID); jErr == nil {
-		if !h.authorizeRunnerForAnsibleJobReport(c, completeJob) {
-			return
-		}
-		wasCanceled = completeJob.Status == models.AnsibleJobStatusCanceled
-	} else if runner, rok := callingRunner(c); !rok || exec.RunnerID != runner.ID {
-		// Job row gone but the exec record must still belong to the caller.
-		writeRunnerForbidden(c, "job is not owned by this launcher")
-		return
-	}
-
-	// Map status string to enum
-	var status models.JobExecutionStatus
-	switch req.Status {
-	case "completed":
-		status = models.JobExecutionStatusCompleted
-	case "failed":
-		status = models.JobExecutionStatusFailed
-	case "canceled":
-		status = models.JobExecutionStatusCanceled
-	default:
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid status")
-		return
-	}
-
-	// Update execution record status
-	if err := h.jobExecRepo.UpdateStatus(exec.ID, status, req.ErrorMessage); err != nil {
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}
+	h.finalizeCompletedClaim(c.Request.Context(), effect)
+	h.wakeCallersPool(c)
+	response.Status(c, http.StatusOK, "completed")
+}
 
-	// Update the ansible job status and finalize stats
-	if h.ansibleJobRepo != nil {
-		job, err := h.ansibleJobRepo.GetByID(jobID)
-		if err == nil && wasCanceled {
-			// Canceled while it ran: the executor's report ends its log, and the job stays canceled
-			// whatever the interrupted playbook's exit says.
-			_ = h.ansibleJobRepo.CreateEventNextCounter(&models.AnsibleJobEvent{JobID: jobID, Event: "runner_output", Stdout: jobCancelMarker})
-			if job.FinishedAt == nil {
-				now := time.Now()
-				job.FinishedAt = &now
-				_ = h.ansibleJobRepo.UpdateColumns(job, "finished_at")
-			}
-		} else if err == nil {
-			now := time.Now()
-			job.FinishedAt = &now
-
-			switch req.Status {
-			case "completed":
-				job.Status = models.AnsibleJobStatusSuccessful
-			case "failed":
-				job.Status = models.AnsibleJobStatusFailed
-				if req.ErrorMessage != "" {
-					job.ErrorMessage = req.ErrorMessage
-				}
-				// If no failures or unreachable hosts were counted, set failures to 1
-				if job.HostsFailed == 0 && job.HostsUnreachable == 0 {
-					job.HostsFailed = 1
-				}
-			case "canceled":
-				job.Status = models.AnsibleJobStatusCanceled
-			}
-
-			// Count warnings from stderr events
-			events, _, _ := h.ansibleJobRepo.ListEventsByJob(jobID, 10000, 0)
-			warningsCount := 0
-			for _, evt := range events {
-				if evt.Stderr != "" {
-					warningsCount += strings.Count(evt.Stderr, "[WARNING]:") + strings.Count(evt.Stderr, "[DEPRECATION WARNING]:")
-				}
-			}
-			if warningsCount > 0 {
-				job.HasWarnings = true
-				job.WarningsCount = warningsCount
-			}
-
-			_ = h.ansibleJobRepo.UpdateColumns(job, "finished_at", "status", "error_message", "hosts_failed",
-				"has_warnings", "warnings_count")
-		}
+// completeStartupFailure is the completion-only launcher-key exception. It consumes the
+// original candidate under the start lock before committing its failed outcome and cleanup.
+func (h *RunnerAgentHandler) completeStartupFailure(c *gin.Context, id string, req JobCompleteRequest) {
+	runner, ok := callingRunner(c)
+	if !ok || req.RunnerID != runner.ID.String() {
+		writeRunnerForbidden(c, "runner_id does not match the authenticated launcher")
+		return
 	}
-
-	// Update runner status back to online (if it was busy). Use the authenticated
-	// runner, not the body runner_id (AUD-001).
-	if runner, ok := callingRunner(c); ok {
-		activeJobs, _ := h.jobExecRepo.CountActiveByRunner(runner.ID)
-		if activeJobs == 0 {
-			_ = h.runnerRepo.UpdateStatus(runner.ID, models.RunnerStatusOnline)
-		}
+	tofu := strings.HasPrefix(id, "run-")
+	validPhase := req.Phase == ""
+	if tofu {
+		validPhase = req.Phase == "plan" || req.Phase == "apply"
 	}
-
-	if req.Status == "completed" && req.CacheManifest != nil {
-		if job, err := h.ansibleJobRepo.GetByID(jobID); err == nil {
-			if org, pool, err := h.ansibleJobOrgAndPool(job); err == nil {
-				h.recordCachePromotions(c, models.JobTypeAnsibleJob, jobIDStr, org, pool, req.CacheManifest)
+	if req.Attempt <= 0 || !validPhase || req.Status != "failed" || req.Output != "" || req.PlanJSON != "" ||
+		req.ResourceAdditions != 0 || req.ResourceChanges != 0 || req.ResourceDestructions != 0 ||
+		req.OutputChanges != 0 || req.HasChanges || req.WorkResult != nil || req.CacheManifest != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "launcher completion requires a bound failed startup without result data")
+		return
+	}
+	if h.db == nil || (isWorkItem(id) && h.workItems == nil) {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		expected := runnercontract.JobStartRequest{RunnerID: req.RunnerID, Attempt: req.Attempt, Phase: req.Phase}
+		if tofu {
+			var run models.Run
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, "id = ?", id).Error; err != nil {
+				return err
+			}
+			expected.RunType = runnercontract.ExecutableRunType(run.Operation, req.Phase)
+			if expected.RunType == "" {
+				return repository.ErrInvalidClaim
 			}
 		}
+		scoped := *h
+		scoped.db = tx
+		if _, err := scoped.startExpectedClaim(c.Request.Context(), id, runner.ID, expected); err != nil {
+			return err
+		}
+		kind, err := failStartedClaim(tx, id, req)
+		if err != nil {
+			return err
+		}
+		keys := apikey.NewService(repository.NewAPIKeyRepository(tx), nil, nil, nil)
+		if err := keys.RevokeJobTokens(kind, id); err != nil {
+			return err
+		}
+		return updateRunnerAfterClaim(tx, runner.ID)
+	})
+	if errors.Is(err, repository.ErrClaimConflict) {
+		jsonapi.WriteCodedError(c, http.StatusConflict, runnercontract.ErrorCodeJobTerminal, "Conflict", "the expected claim has settled or been superseded")
+		return
 	}
-	h.revokeJobTokens(models.JobTypeAnsibleJob, jobIDStr)
+	if err != nil {
+		writeRunnerClaimError(c, err)
+		return
+	}
 	h.wakeCallersPool(c)
 	response.Status(c, http.StatusOK, "completed")
 }
@@ -1537,17 +1238,6 @@ func (h *RunnerAgentHandler) lockWorkspaceForRun(run *models.Run) (bool, error) 
 	return true, nil
 }
 
-// releaseWorkspaceLock releases the state lock a run holds once a phase completes.
-func (h *RunnerAgentHandler) releaseWorkspaceLock(runID string) {
-	var run models.Run
-	if err := h.db.Select("id", "workspace_id").First(&run, "id = ?", runID).Error; err != nil {
-		return
-	}
-	if err := repository.NewRunRepository(h.db).ReleaseStateLock(run.WorkspaceID, run.ID); err != nil {
-		logger.Warnf("releasing the state lock of run %s: %v", runID, err)
-	}
-}
-
 // MaxStateUploadBytes bounds one uploaded state.
 const MaxStateUploadBytes = 512 << 20
 
@@ -1591,34 +1281,101 @@ func readStateUpload(c *gin.Context) ([]byte, bool) {
 	return data, true
 }
 
-// jobRegistryBlock mints a job's token for the platform's private module registry when the
-// artifacts are fetched with a job token, replacing any earlier one of the job. An agent fetching
-// with its runner token gets none: it predates the per-job token and reads the registry through
-// its host's own TF_TOKEN_ variables.
-func (h *RunnerAgentHandler) jobRegistryBlock(c *gin.Context, run *models.Run) *runnercontract.RegistryBlock {
-	if _, isJob := callingJob(c); !isJob || h.registryHost == "" || h.apiKeyService == nil {
-		return nil
+// jobRegistryBlock replaces a job's private-registry credential under its current
+// claim lock. Only a committed replacement is returned to the executor.
+func (h *RunnerAgentHandler) jobRegistryBlock(c *gin.Context, run *models.Run) (*runnercontract.RegistryBlock, bool) {
+	principal, isJob := callingJob(c)
+	if !isJob {
+		return nil, true
 	}
-	if err := h.apiKeyService.RevokeJobRegistryTokens(models.JobTypeTofuRun, run.ID); err != nil {
-		logger.Warnf("replacing the registry token of run %s: %v", run.ID, err)
+	values, supplied := c.Request.Header[http.CanonicalHeaderKey(runnercontract.ArtifactSequenceHeader)]
+	var sequence int64
+	if supplied {
+		var err error
+		if len(values) == 1 {
+			sequence, err = strconv.ParseInt(values[0], 10, 64)
+		}
+		if len(values) != 1 || err != nil || sequence <= 0 {
+			jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid artifact sequence")
+			return nil, false
+		}
 	}
-	// The run's pool, falling back to its workspace's, as runOrgAndPool authorized it.
-	pool := run.AgentPoolID
-	if pool == nil {
-		pool = run.Workspace.AgentPoolID
+	fixedClient := runnerCan(c, runnercontract.CapabilityClaimRecovery)
+	if (run.ClaimRecovery || run.ArtifactSequence > 0 || fixedClient) && !supplied {
+		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Artifact sequence required")
+		return nil, false
 	}
-	if pool == nil {
-		logger.Warnf("run %s has no agent pool to mint its registry token for", run.ID)
-		return nil
+	if h.registryHost == "" {
+		return nil, true
 	}
-	timeout := settings.EffectiveWorkspaceRunTimeout(&run.Workspace, settings.DeploymentRunTimeout(os.Getenv)).Value
-	expiresAt := time.Now().Add(time.Duration(timeout)*time.Second + apikey.JobTokenGrace)
-	token, err := h.apiKeyService.CreateJobRegistryToken(run.Workspace.Project.OrganizationID, *pool, models.JobTypeTofuRun, run.ID, expiresAt)
+	if h.apiKeyService == nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return nil, false
+	}
+	var token string
+	err := h.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var current models.Run
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Workspace.Project.Organization").First(&current, "id = ?", run.ID).Error; err != nil {
+			writeRunnerJobReadError(c, err)
+			return err
+		}
+		scoped := *h
+		scoped.db = tx
+		if !authorizeJobPrincipal(c, principal, models.JobTypeTofuRun, current.ID, current.RunnerID, current.Attempt, false) || !scoped.authorizeRunnerForRun(c, &current, true) {
+			return errors.New("artifact claim authorization refused")
+		}
+		phase := current.ClaimedPhase
+		if phase != "plan" && phase != "apply" {
+			return errors.New("original artifact phase unavailable")
+		}
+		resolved := runnercontract.ExecutableRunType(current.Operation, phase)
+		if resolved == "" || (current.ClaimedRunType != "" && current.ClaimedRunType != resolved) {
+			return errors.New("original artifact operation unavailable")
+		}
+		active := current.DispatchedAt != nil && ((phase == "plan" && current.Status == models.RunStatusPlanning) || (phase == "apply" && current.Status == models.RunStatusApplying))
+		if !active {
+			jsonapi.WriteCodedError(c, http.StatusForbidden, runnercontract.ErrorCodeJobTerminal, "Forbidden", "the original artifact claim has finished")
+			return errors.New("artifact claim has finished")
+		}
+		ordered := current.ClaimRecovery || current.ArtifactSequence > 0 || fixedClient || supplied
+		if ordered && !supplied {
+			jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Artifact sequence required")
+			return errors.New("artifact sequence required")
+		}
+		if ordered && sequence <= current.ArtifactSequence {
+			c.Header(runnercontract.ArtifactSequenceHeader, strconv.FormatInt(current.ArtifactSequence, 10))
+			jsonapi.WriteCodedError(c, http.StatusConflict, runnercontract.ErrorCodeArtifactReadSuperseded, "Conflict", "a later artifact request has been accepted")
+			return errors.New("artifact read superseded")
+		}
+		if ordered {
+			if err := tx.Model(&models.Run{}).Where("id = ?", current.ID).UpdateColumn("artifact_sequence", sequence).Error; err != nil {
+				return err
+			}
+		}
+		keys := apikey.NewService(repository.NewAPIKeyRepository(tx), nil, nil, nil)
+		if err := keys.RevokeJobRegistryTokens(models.JobTypeTofuRun, current.ID); err != nil {
+			return err
+		}
+		timeout := settings.EffectiveWorkspaceRunTimeout(&current.Workspace, settings.DeploymentRunTimeout(os.Getenv)).Value
+		expiresAt := time.Now().Add(time.Duration(timeout)*time.Second + apikey.JobTokenGrace)
+		var err error
+		pool := current.AgentPoolID
+		if pool == nil {
+			pool = current.Workspace.AgentPoolID
+		}
+		if pool == nil {
+			return errors.New("original artifact pool unavailable")
+		}
+		token, err = keys.CreateJobRegistryToken(current.Workspace.Project.OrganizationID, *pool, models.JobTypeTofuRun, current.ID, expiresAt)
+		return err
+	})
 	if err != nil {
-		logger.Warnf("minting the registry token of run %s: %v", run.ID, err)
-		return nil
+		if !c.Writer.Written() {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
+		return nil, false
 	}
-	return &runnercontract.RegistryBlock{Hosts: []runnercontract.RegistryHostToken{{Host: h.registryHost, Token: token}}}
+	return &runnercontract.RegistryBlock{Hosts: []runnercontract.RegistryHostToken{{Host: h.registryHost, Token: token}}}, true
 }
 
 // recordPlacement merges a launcher's or executor's placement report into the job's placement
@@ -1660,51 +1417,9 @@ func (h *RunnerAgentHandler) recordPlacement(kind models.JobType, jobID string, 
 		}
 		current = job.Placement
 	}
-	current.Merge(report.ToModel())
-	err := h.db.Model(table).Where("id = ?", jobID).Updates(map[string]any{
-		"placement_driver":              current.Driver,
-		"placement_placement_id":        current.PlacementID,
-		"placement_image":               current.Image,
-		"placement_image_digest":        current.ImageDigest,
-		"placement_image_level":         current.ImageLevel,
-		"placement_identity_binding_id": current.IdentityBindingID,
-		"placement_node":                current.Node,
-	}).Error
+	err := h.db.Model(table).Where("id = ?", jobID).Updates(placementColumns(current, report)).Error
 	if err != nil {
 		logger.Warnf("recording the placement of %s %s: %v", kind, jobID, err)
-	}
-}
-
-// appendCancelMarker ends the log of the phase a canceled run was in with cancelMarker, after the
-// interrupted engine's last output. The phase is apply once the plan completed, as the log reader
-// expects (plan.log or apply.log).
-func (h *RunnerAgentHandler) appendCancelMarker(ctx context.Context, run *models.Run) {
-	phase := "plan"
-	if run.PlanCompletedAt != nil && run.Operation != models.RunOperationPlanOnly {
-		phase = "apply"
-	}
-	line := "\n" + cancelMarker + "\n"
-	var err error
-	switch {
-	case h.logBuffer != nil:
-		_, err = h.logBuffer.AppendCapped(ctx, run.ID, phase, line, h.jobLogLimits())
-	case h.storageClient != nil:
-		_, err = logbuffer.AppendStorageLogCapped(ctx, h.storageClient, run.ID, phase, line, h.jobLogLimits())
-	}
-	if err != nil {
-		logger.Warnf("Failed to append the cancel marker to run %s phase %s: %v", run.ID, phase, err)
-	}
-}
-
-// revokeJobTokens deletes every job token of a job (#933, D1): at completion, and at a claim, which
-// starts a new attempt the earlier attempts' tokens must not reach. A failure is logged, not
-// returned: the attempt and terminal checks refuse a token that survives.
-func (h *RunnerAgentHandler) revokeJobTokens(kind models.JobType, jobID string) {
-	if h.apiKeyService == nil {
-		return
-	}
-	if err := h.apiKeyService.RevokeJobTokens(kind, jobID); err != nil {
-		logger.Warnf("revoking job tokens of %s %s: %v", kind, jobID, err)
 	}
 }
 
@@ -1728,226 +1443,6 @@ func planFinishedStatus(op models.RunOperation, hasChanges, hasPostPlanStage, au
 	default:
 		return models.RunStatusPlanned
 	}
-}
-
-// jobCompleteTerraformRun handles job completion for Terraform runs
-func (h *RunnerAgentHandler) jobCompleteTerraformRun(c *gin.Context, runID string, req JobCompleteRequest) {
-	var run models.Run
-	if err := h.db.First(&run, "id = ?", runID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
-		} else {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		}
-		return
-	}
-
-	// AUD-001: only the assigned runner may complete a run - this handler flips run
-	// status (planned/applied/failed), can trigger auto-apply, and finalizes logs. A canceled run
-	// still takes the completion of the attempt that was running (authorizeRunnerForRunReport).
-	if !h.authorizeRunnerForRunReport(c, &run) {
-		return
-	}
-	canceled := run.Status == models.RunStatusCancelled
-	if canceled {
-		h.appendCancelMarker(c.Request.Context(), &run)
-	}
-
-	// JobComplete is terminal for whichever phase this job ran, so no more output will
-	// follow: append the ETX end-of-text marker to the phase logs. Finalizing both
-	// phases is safe - it is idempotent (a missing or already-terminated object is left
-	// untouched), so the plan job finalizes plan.log while apply.log is still absent,
-	// and the later apply job finalizes apply.log without touching the framed plan.log.
-	for _, phase := range []string{"plan", "apply"} {
-		// AUD-028: when the Redis buffer is in use, finalize there and copy the completed phase log
-		// to MinIO once (so it persists past Redis eviction and the read path's MinIO fallback
-		// finds it). Otherwise finalize the object-storage log in place.
-		if h.logBuffer != nil {
-			if err := h.logBuffer.Finalize(c.Request.Context(), runID, phase); err != nil {
-				logger.Warnf("Failed to finalize agent Redis log for run %s phase %s: %v", runID, phase, err)
-			}
-			if h.storageClient != nil {
-				if err := h.logBuffer.CopyToStorage(c.Request.Context(), runID, phase, h.storageClient); err != nil {
-					logger.Warnf("Failed to copy agent log to storage for run %s phase %s: %v", runID, phase, err)
-				}
-			}
-		} else if h.storageClient != nil {
-			if err := logbuffer.FinalizeStorageLog(c.Request.Context(), h.storageClient, runID, phase); err != nil {
-				logger.Warnf("Failed to finalize agent log for run %s phase %s: %v", runID, phase, err)
-			}
-		}
-	}
-
-	now := time.Now()
-
-	// Store plan metadata if provided (from self-hosted runner's terraform show -json)
-	if req.PlanJSON != "" || req.HasChanges {
-		if run.PlanOutput == nil {
-			run.PlanOutput = make(models.PlanOutput)
-		}
-		run.PlanOutput["AddCount"] = float64(req.ResourceAdditions)
-		run.PlanOutput["ChangeCount"] = float64(req.ResourceChanges)
-		run.PlanOutput["DestroyCount"] = float64(req.ResourceDestructions)
-		run.PlanOutput["OutputChangeCount"] = float64(req.OutputChanges)
-
-		// Store the FULL parsed plan JSON (all top-level keys), matching the platform runner. The
-		// old subset (resource_changes/output_changes only) was enough for hasChanges() detection
-		// but starved the plans/:id/json-output endpoint that run-task services (plan_json_api_url)
-		// and go-tfe read - agent runs must serve the same plan JSON platform runs do.
-		if req.PlanJSON != "" {
-			var planData map[string]interface{}
-			if err := json.Unmarshal([]byte(req.PlanJSON), &planData); err == nil {
-				for k, v := range planData {
-					run.PlanOutput[k] = v
-				}
-			}
-		}
-
-		logger.Infof("Stored plan metadata for run %s: additions=%d, changes=%d, destructions=%d, hasChanges=%v",
-			runID, req.ResourceAdditions, req.ResourceChanges, req.ResourceDestructions, req.HasChanges)
-	}
-
-	switch req.Status {
-	case "completed":
-		switch run.Status { //nolint:exhaustive // only planning has special handling
-		case models.RunStatusPlanning:
-			// Plan phase completed. The status it leads to is planFinishedStatus's.
-			run.PlanCompletedAt = &now
-			// TFE-compatible: Only auto-apply for VCS-triggered runs with workspace.AutoApply enabled
-			// UI-triggered "Plan and Apply" runs must wait for user confirmation via the Apply endpoint.
-			// The AutoApplyAfterPlan flag only indicates this is a "plan-and-apply" run (not "plan-only"),
-			// it does NOT mean the run should auto-apply without user confirmation.
-			// Computed BEFORE the run-task gate below so a run pausing at a post_plan stage persists
-			// the same decision (AutoApplyResolved) for the continuation to apply.
-			shouldAutoApply := false
-			if (run.AutoApplyAfterPlan || run.AutoApply) && (run.Operation == models.RunOperationPlanAndApply || run.Operation == models.RunOperationDestroy) {
-				// go-tfe `auto-apply: true` (e.g. tfe_workspace_run fire-and-forget) auto-applies
-				// regardless of VCS/workspace settings - it is an explicit per-run intent.
-				if run.AutoApply {
-					shouldAutoApply = true
-					logger.Infof("Auto-applying run %s: per-run auto-apply intent (go-tfe auto-apply)", runID)
-				}
-				if run.ConfigurationVersionID != nil {
-					if configVersion, err := h.runConfigurationVersion(&run); err == nil {
-						if configVersion.Source == "tfe-vcs" {
-							var workspace models.Workspace
-							if err := h.db.First(&workspace, "id = ?", run.WorkspaceID).Error; err == nil && workspace.AutoApply {
-								shouldAutoApply = true
-								logger.Infof("Auto-applying run %s: VCS-triggered with workspace auto-apply enabled", runID)
-							}
-						}
-					}
-				}
-			}
-
-			// Run-task gate: a run with a post_plan task stage pauses at post_plan_running; the
-			// continuation (runtask.ContinueAfterStagePassed) makes the same decision after the stage
-			// passes.
-			hasPostPlanStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostPlan)
-			if tsErr != nil {
-				// Fail closed: skipping the gate on a DB error would let a run bypass a mandatory task.
-				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to check task stages")
-				return
-			}
-			run.Status = planFinishedStatus(run.Operation, run.PlanOutput.IndicatesChanges(), hasPostPlanStage, shouldAutoApply)
-			switch run.Status { //nolint:exhaustive // planFinishedStatus returns one of these four
-			case models.RunStatusPostPlanRunning:
-				run.AutoApplyResolved = shouldAutoApply
-				logger.Infof("Run %s paused at post_plan task stage (auto-apply resolved: %v)", runID, shouldAutoApply)
-			case models.RunStatusPlannedAndFinished:
-				// Nothing to apply: a plan-only run, or a plan with no changes. The run is final.
-				run.CompletedAt = &now
-				logger.Infof("Run %s planned and finished (%s, no changes to apply or plan-only)", runID, run.Operation)
-			case models.RunStatusApplying:
-				// Clear the dispatch claim consumed by the PLAN job start, or no agent can ever claim
-				// the apply phase (ClaimForDispatch requires a NULL claim) and the run wedges at
-				// `applying`. The manual-confirm path already clears it; this auto-apply path never
-				// did (pre-existing bug, found while wiring run tasks - see #554). Cleared via a
-				// separate UPDATE before the Save below persists the applying status.
-				if clearErr := repository.NewRunRepository(h.db).ClearDispatch(runID); clearErr != nil {
-					logger.Warnf("Failed to clear dispatch claim for auto-applied run %s: %v", runID, clearErr)
-				}
-				run.DispatchedAt = nil // keep the in-memory struct consistent with the cleared claim for the Save below
-				run.RunnerID = nil     // the apply phase is offered afresh, as ClearDispatch releases the reservation
-			default:
-				logger.Infof("Run %s plan completed, waiting for user confirmation (not VCS-triggered or workspace auto-apply disabled)", runID)
-			}
-		case models.RunStatusCancelled:
-			// Run was cancelled (e.g. user cancelled mid-apply); do not overwrite with applied
-			break
-		default:
-			// The apply phase completed. Only set applied if run is not cancelled
-			// (atomic update so we never overwrite cancelled, regardless of race with Cancel API).
-			// Run-task gate: with a post_apply task stage the run pauses at post_apply_running (no
-			// completed_at yet); the continuation writes applied after the stage passes. Mirrors the
-			// platform runner's post-apply gate.
-			hasPostApplyStage, tsErr := repository.NewTaskStageRepository(h.db).HasStage(runID, models.TaskStagePostApply)
-			if tsErr != nil {
-				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Failed to check task stages")
-				return
-			}
-			terminalUpdates := map[string]interface{}{
-				"status":       models.RunStatusApplied,
-				"completed_at": now,
-				"updated_at":   now,
-			}
-			if hasPostApplyStage {
-				terminalUpdates = map[string]interface{}{
-					"status":     models.RunStatusPostApplyRunning,
-					"updated_at": now,
-				}
-				logger.Infof("Run %s paused at post_apply task stage", runID)
-			}
-			res := h.db.Model(&models.Run{}).Where("id = ? AND status != ?", runID, models.RunStatusCancelled).Updates(terminalUpdates)
-			if res.RowsAffected == 0 {
-				response.Status(c, http.StatusOK, "completed")
-				return
-			}
-			// Persist plan metadata if provided (run struct was updated above the switch)
-			if req.PlanJSON != "" || req.HasChanges {
-				_ = h.db.Model(&models.Run{}).Where("id = ?", runID).Update("plan_output", run.PlanOutput)
-			}
-			response.Status(c, http.StatusOK, "completed")
-			return
-		}
-	case "failed":
-		if canceled {
-			// The engine exited non-zero because it was interrupted: the run stays canceled.
-			break
-		}
-		run.Status = models.RunStatusErrored
-		// Use ErrorMessage if provided, fall back to Output for error context
-		errMsg := req.ErrorMessage
-		if errMsg == "" && req.Output != "" {
-			errMsg = req.Output
-		}
-		run.ErrorMessage = errMsg
-		run.CompletedAt = &now
-	case "canceled":
-		run.Status = models.RunStatusCancelled
-		if run.CompletedAt == nil {
-			run.CompletedAt = &now
-		}
-	default:
-		jsonapi.WriteErrorNoDetail(c, http.StatusBadRequest, "Invalid status")
-		return
-	}
-
-	if err := h.db.Save(&run).Error; err != nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	// Update runner status back to online (if it was busy). Use the authenticated
-	// runner, not the body runner_id (AUD-001).
-	if runner, ok := callingRunner(c); ok {
-		activeJobs, _ := h.jobExecRepo.CountActiveByRunner(runner.ID)
-		if activeJobs == 0 {
-			_ = h.runnerRepo.UpdateStatus(runner.ID, models.RunnerStatusOnline)
-		}
-	}
-
-	response.Status(c, http.StatusOK, "completed")
 }
 
 // Deregister removes a runner
@@ -2041,87 +1536,6 @@ func playbookSourceMode(playbook *models.AnsiblePlaybook) string {
 	return models.PlaybookSourceModeCached
 }
 
-// resolvePlaybookSource decides how a self-hosted runner obtains a VCS-backed playbook.
-//
-//   - fresh: the runner clones, so it gets the clone URL.
-//   - cached with a snapshot: the runner downloads the snapshot. No clone URL is sent,
-//     because a runner has no reason to hold a token-embedded URL it will not use.
-//   - cached without a snapshot: a self-hosted runner cannot build one (it has no object
-//     storage), so this run clones and a sync is queued to repair the cache for the next.
-func (h *RunnerAgentHandler) resolvePlaybookSource(ctx context.Context, playbook *models.AnsiblePlaybook) (*PlaybookSourceArtifact, *VCSArtifact) {
-	mode := playbookSourceMode(playbook)
-	source := &PlaybookSourceArtifact{Mode: mode}
-	if mode == models.PlaybookSourceModeFresh {
-		return source, h.playbookVCSArtifact(ctx, playbook)
-	}
-
-	if h.playbookSnapshotExists(ctx, playbook) {
-		source.Commit = playbook.CachedCommit
-		source.CapturedAt = playbook.CachedAt
-		source.SizeBytes = playbook.CachedSizeBytes
-		return source, nil
-	}
-
-	// Resolve the clone URL before queueing the sync: Request rewrites the sync status
-	// on the playbook, and the artifact must not depend on that write succeeding.
-	vcsArtifact := h.playbookVCSArtifact(ctx, playbook)
-	if h.syncRequester != nil {
-		if err := h.syncRequester.RequestTriggered(ctx, playbook, "launch"); err != nil {
-			logger.Warnf("Playbook %s has no snapshot and a sync could not be queued (this run clones regardless): %v", playbook.ID, err)
-		}
-	}
-	return source, vcsArtifact
-}
-
-// snapshotOnlySource is the playbook source of a job whose executor holds a job token: the
-// playbook's snapshot, whatever its source mode (a fresh-mode one is taken at launch). A playbook that has none yet gets a sync, and the
-// job fails with the reason rather than run without its files; it answers the request then.
-func (h *RunnerAgentHandler) snapshotOnlySource(c *gin.Context, job *models.AnsibleJob, playbook *models.AnsiblePlaybook) (*PlaybookSourceArtifact, bool) {
-	ctx := c.Request.Context()
-	if h.playbookSnapshotExists(ctx, playbook) {
-		// The mode travels with the snapshot: a fresh-mode one was captured for this launch.
-		return &PlaybookSourceArtifact{Mode: playbookSourceMode(playbook), Commit: playbook.CachedCommit, CapturedAt: playbook.CachedAt, SizeBytes: playbook.CachedSizeBytes}, true
-	}
-	if h.syncRequester != nil {
-		if err := h.syncRequester.RequestTriggered(ctx, playbook, "launch"); err != nil {
-			logger.Warnf("Playbook %s has no snapshot and a sync could not be requested: %v", playbook.ID, err)
-		}
-	}
-	const reason = "the playbook has no snapshot yet: a sync was requested; launch the job again once it completes"
-	if h.ansibleJobRepo != nil {
-		if err := h.db.Model(&models.AnsibleJob{}).Where("id = ? AND status IN ?", job.ID,
-			[]models.AnsibleJobStatus{models.AnsibleJobStatusPending, models.AnsibleJobStatusRunning}).
-			Updates(map[string]any{"status": models.AnsibleJobStatusFailed, "error_message": reason}).Error; err != nil {
-			logger.Warnf("failing job %s without a playbook snapshot: %v", job.ID, err)
-		}
-	}
-	jsonapi.WriteError(c, http.StatusConflict, "Conflict", reason)
-	return nil, false
-}
-
-// playbookSnapshotExists reports whether a cached playbook has a snapshot a runner can
-// download: the metadata says one was captured and the object is not missing from
-// storage. The object is probed by opening it and closing it straight away.
-func (h *RunnerAgentHandler) playbookSnapshotExists(ctx context.Context, playbook *models.AnsiblePlaybook) bool {
-	if playbook.CachedAt == nil || h.storageClient == nil {
-		return false
-	}
-	stream, err := h.storageClient.GetStream(ctx, ansible.PlaybookSnapshotKey(playbook.ID))
-	if errors.Is(err, storage.ErrNotFound) {
-		return false
-	}
-	if err != nil {
-		// Not provably missing. Treat the snapshot as present: the download reports the
-		// real failure, instead of this silently turning a cached run into a clone.
-		logger.Warnf("Playbook %s: probing the cached snapshot failed: %v", playbook.ID, err)
-		return true
-	}
-	if closeErr := stream.Close(); closeErr != nil {
-		logger.Warnf("Playbook %s: closing the snapshot probe failed: %v", playbook.ID, closeErr)
-	}
-	return true
-}
-
 // playbookVCSArtifact builds the clone instructions for a VCS-backed playbook: a fresh
 // token from the provider registry embedded in the clone URL. It returns nil when the
 // connection or a clone URL cannot be resolved.
@@ -2129,41 +1543,39 @@ func (h *RunnerAgentHandler) playbookSnapshotExists(ctx context.Context, playboo
 // The connection is loaded within the playbook's organization. A playbook row that names another
 // organization's connection resolves to nothing, so a self-hosted runner is handed no clone URL
 // and no token for it.
-func (h *RunnerAgentHandler) playbookVCSArtifact(ctx context.Context, playbook *models.AnsiblePlaybook) *VCSArtifact {
+func (h *RunnerAgentHandler) playbookVCSArtifact(ctx context.Context, playbook *models.AnsiblePlaybook) (*VCSArtifact, error) {
 	if playbook.VCSConnectionID == nil {
-		return nil
+		return nil, nil //nolint:nilnil // no usable legacy clone source
 	}
 	scope := repository.NewOrganizationScope(h.db).WithContext(ctx)
 	vcsConn, err := ansible.PlaybookVCSConnection(scope, playbook.ProjectID, *playbook.VCSConnectionID)
 	if err != nil {
 		if !errors.Is(err, ansible.ErrInvalidInput) {
-			logger.Warnf("Playbook %s: loading its VCS connection failed: %v", playbook.ID, err)
+			return nil, fmt.Errorf("loading the playbook VCS connection: %w", err)
 		}
-		return nil
+		return nil, nil //nolint:nilnil // no usable legacy clone source
 	}
 	if h.vcsRegistry == nil {
-		return nil
+		return nil, nil //nolint:nilnil // no usable legacy clone source
 	}
 	provider, err := h.vcsRegistry.GetProvider(vcsConn)
 	if err != nil {
-		return nil
+		return nil, nil //nolint:nilnil // no usable legacy clone source
 	}
-	accessToken, _ := provider.GetFreshToken(ctx, vcsConn)
+	accessToken, err := provider.GetFreshToken(ctx, vcsConn)
+	if err != nil {
+		return nil, fmt.Errorf("refreshing the playbook VCS token: %w", err)
+	}
 	repoURL := provider.BuildCloneURL(vcsConn, accessToken, playbook.VCSRepository)
 	if repoURL == "" {
-		return nil
+		return nil, nil //nolint:nilnil // no usable legacy clone source
 	}
 	branch := playbook.VCSBranch
 	if branch == "" {
 		branch = "main"
 	}
-	return &VCSArtifact{RepoURL: repoURL, Branch: branch, Repository: playbook.VCSRepository}
+	return &VCSArtifact{RepoURL: repoURL, Branch: branch, Repository: playbook.VCSRepository}, nil
 }
-
-// playbookSnapshotStreamTimeout bounds one snapshot response. It matches the time the
-// executor allows itself for the download (see ansibleexec.Execute), so neither side
-// gives up before the other.
-const playbookSnapshotStreamTimeout = 10 * time.Minute
 
 // GetPlaybookSnapshot streams the cached snapshot of a job's playbook to the self-hosted
 // runner executing it. A runner reaches nothing but this API, so the object is proxied
@@ -2179,14 +1591,13 @@ func (h *RunnerAgentHandler) GetPlaybookSnapshot(c *gin.Context) {
 		jsonapi.WriteErrorNoDetail(c, http.StatusNotImplemented, "Playbook snapshots not configured")
 		return
 	}
+	scoped := *h
+	scoped.db = h.db.WithContext(c.Request.Context())
+	h = &scoped
 
-	job, err := h.ansibleJobRepo.GetByID(jobID)
+	job, err := h.ansibleJobRepo.WithContext(c.Request.Context()).GetByID(jobID)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
-		} else {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		}
+		writeRunnerJobReadError(c, err)
 		return
 	}
 	// Same binding as the artifacts endpoint (AUD-001): a runner in the job's
@@ -2202,56 +1613,47 @@ func (h *RunnerAgentHandler) GetPlaybookSnapshot(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "this job has no playbook")
 		return
 	}
-	playbook, err := h.playbookRepo.GetByID(*job.PlaybookID)
+	playbook, err := h.playbookRepo.WithContext(c.Request.Context()).GetByID(*job.PlaybookID)
 	if err != nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "playbook not found")
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound) && job.PlaybookSnapshotUploadID != nil:
+			writeAssignedSnapshotError(c, errAssignedSnapshotUnavailable)
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "playbook not found")
+		default:
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		}
 		return
 	}
-	if !isVCSBacked(playbook) {
+	if !isVCSBacked(playbook) && job.PlaybookSnapshotUploadID == nil {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook has no VCS repository, so it has no snapshot")
 		return
 	}
-	// An executor with a job token starts every job from a snapshot, a fresh-mode one too: that
-	// playbook is captured at the branch head for each launch (decision 18). An old agent with a
-	// runner token still clones a fresh-mode playbook and has no use for its snapshot.
-	if _, executorWithJobToken := callingJob(c); !executorWithJobToken && playbookSourceMode(playbook) == models.PlaybookSourceModeFresh {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook's source mode is fresh: it is cloned, not served from a snapshot")
-		return
-	}
-	if playbook.CachedAt == nil {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook has no snapshot yet")
-		return
-	}
-
-	stream, err := h.storageClient.GetStream(c.Request.Context(), ansible.PlaybookSnapshotKey(playbook.ID))
-	if errors.Is(err, storage.ErrNotFound) {
-		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "the playbook has no snapshot yet")
-		return
-	}
+	ctx := c.Request.Context()
+	upload, err := h.assignedPlaybookSnapshot(ctx, job, playbook)
 	if err != nil {
-		logger.Errorf("Failed to open the snapshot of playbook %s for job %s: %v", playbook.ID, job.ID, err)
-		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		writeAssignedSnapshotError(c, err)
 		return
 	}
-	defer func() { _ = stream.Close() }()
-
-	// The server's write timeout is sized for JSON responses and would cut a large
-	// snapshot on a slow link every time. Give this one response the same budget the
-	// runner gives the download. A writer that cannot move its deadline (a test
-	// recorder) keeps the server default, which is all it had before.
-	if err := http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(playbookSnapshotStreamTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		logger.Warnf("Could not extend the write deadline for the snapshot of playbook %s: %v", playbook.ID, err)
+	match := c.Request.Header.Values("If-Match")
+	if runnerCapabilities(c)[runnercontract.CapabilityVerifiedPlaybookSnapshot] || len(match) != 0 {
+		if len(match) != 1 || match[0] != assignedSnapshotValidator(upload.ID) {
+			writeAssignedSnapshotError(c, errAssignedSnapshotUnavailable)
+			return
+		}
 	}
-
-	// No Content-Length: the size in the playbook metadata can lag a sync that replaced
-	// the object after the row was read, and the stream does not expose the object's
-	// size. Without it the response is sent chunked.
-	c.Header("Content-Type", "application/gzip")
-	c.Status(http.StatusOK)
-	if _, err := io.Copy(c.Writer, stream); err != nil {
-		// The status line is already out; all that is left is to say why the body is short.
-		logger.Warnf("Streaming the snapshot of playbook %s to job %s was cut short: %v", playbook.ID, job.ID, err)
+	if !tryPlaybookSnapshotSlot() {
+		writePlaybookSnapshotBusy(c)
+		return
 	}
+	defer releasePlaybookSnapshotSlot()
+	data, err := h.readAssignedPlaybookSnapshot(ctx, job, upload)
+	if err != nil {
+		writeAssignedSnapshotError(c, err)
+		return
+	}
+	c.Header("Content-Length", strconv.Itoa(len(data)))
+	c.Data(http.StatusOK, "application/gzip", data)
 }
 
 // GetJobStatus returns the current run/job status so the agent can poll for cancellation.
@@ -2271,11 +1673,7 @@ func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 		// Select the fields the authorization check needs (AUD-001) in addition to status.
 		var run models.Run
 		if err := h.db.Select("id", "status", "workspace_id", "agent_pool_id", "runner_id", "attempt").First(&run, "id = ?", jobIDStr).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
-				return
-			}
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			writeRunnerJobReadError(c, err)
 			return
 		}
 		if !h.authorizeRunnerForRun(c, &run, false) {
@@ -2295,8 +1693,8 @@ func (h *RunnerAgentHandler) GetJobStatus(c *gin.Context) {
 		return
 	}
 	job, getErr := h.ansibleJobRepo.GetByID(jobID)
-	if getErr != nil || job == nil {
-		jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Not Found")
+	if getErr != nil {
+		writeRunnerJobReadError(c, getErr)
 		return
 	}
 	if !h.authorizeRunnerForAnsibleJob(c, job, false) {
@@ -2342,6 +1740,7 @@ func (h *RunnerAgentHandler) ansibleJobCredentialIDs(c *gin.Context, job *models
 // GetJobArtifacts returns all artifacts needed to execute a job
 // GET /api/v2/runner/jobs/:id/artifacts
 func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
+	h = h.artifactReadContext(c.Request.Context())
 	jobIDStr := c.Param("id")
 
 	if isWorkItem(jobIDStr) {
@@ -2370,11 +1769,7 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	// Get the ansible job
 	job, err := h.ansibleJobRepo.GetByID(jobID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Job not found")
-		} else {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		}
+		writeRunnerJobReadError(c, err)
 		return
 	}
 
@@ -2392,7 +1787,9 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	// project_id, playbook_source, and a clone URL only when this run clones. One that
 	// does not (a runner built before the capability existed) can only clone, so it gets
 	// the response it has always got, with no new fields and no side effects.
-	snapshotCapable := runnerCapabilities(c)[runnerCapabilityPlaybookSnapshot]
+	capabilities := runnerCapabilities(c)
+	verifiedSnapshot := capabilities[runnercontract.CapabilityVerifiedPlaybookSnapshot]
+	snapshotCapable := verifiedSnapshot || capabilities[runnerCapabilityPlaybookSnapshot]
 
 	response := JobArtifactsResponse{
 		JobID:           job.ID.String(),
@@ -2425,29 +1822,53 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		}
 	}
 
-	// Get playbook info, and for a VCS-backed playbook decide where this job's files
-	// come from: the cached snapshot or a clone.
+	// Resolve the job's assigned capture before handing out any execution artifacts.
 	if h.playbookRepo != nil && job.PlaybookID != nil {
 		playbook, err := h.playbookRepo.GetByID(*job.PlaybookID)
+		if errors.Is(err, gorm.ErrRecordNotFound) && job.PlaybookSnapshotUploadID != nil {
+			writeAssignedSnapshotError(c, errAssignedSnapshotUnavailable)
+			return
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
 		if err == nil {
 			response.PlaybookPath = playbook.PlaybookPath
 			_, executorWithJobToken := callingJob(c)
+			var sourceErr error
 			switch {
-			case !isVCSBacked(playbook):
-			case executorWithJobToken:
-				// An executor holding a job token runs the playbook's snapshot and is never handed
-				// a clone URL (#933, decision 18, AC68); the launch held the job until a
-				// playbook_snapshot work item captured it.
-				source, ok := h.snapshotOnlySource(c, job, playbook)
-				if !ok {
+			case !isVCSBacked(playbook) && job.PlaybookSnapshotUploadID == nil:
+			case job.PlaybookSnapshotUploadID != nil || executorWithJobToken ||
+				verifiedSnapshot ||
+				(snapshotCapable && playbookSourceMode(playbook) == models.PlaybookSourceModeCached):
+				if job.PlaybookSnapshotUploadID != nil && !snapshotCapable && !executorWithJobToken {
+					writeAssignedSnapshotError(c, errAssignedSnapshotUnavailable)
 					return
 				}
-				response.PlaybookSource = source
-			case snapshotCapable:
-				response.PlaybookSource, response.VCS = h.resolvePlaybookSource(c.Request.Context(), playbook)
+				upload, err := h.assignedPlaybookSnapshot(c.Request.Context(), job, playbook)
+				if err != nil {
+					writeAssignedSnapshotError(c, err)
+					return
+				}
+				response.PlaybookPath = job.PlaybookSnapshotPath
+				response.PlaybookSource = &PlaybookSourceArtifact{
+					Mode: job.PlaybookSnapshotMode, Commit: upload.Commit, CapturedAt: upload.StoredAt, SizeBytes: upload.SizeBytes,
+				}
+				if verifiedSnapshot {
+					response.PlaybookSource.SHA256 = upload.SHA256
+					response.PlaybookSource.Validator = assignedSnapshotValidator(upload.ID)
+				}
 			default:
-				// Clone URL only, whatever the source mode: no snapshot probe, no sync.
-				response.VCS = h.playbookVCSArtifact(c.Request.Context(), playbook)
+				// Pre-upgrade jobs that explicitly use the runner-token clone path.
+				response.VCS, sourceErr = h.playbookVCSArtifact(c.Request.Context(), playbook)
+				if snapshotCapable {
+					response.PlaybookSource = &PlaybookSourceArtifact{Mode: models.PlaybookSourceModeFresh}
+				}
+			}
+			if sourceErr != nil {
+				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+				return
 			}
 		}
 	}
@@ -2479,8 +1900,8 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 		for _, id := range credIDs {
 			cred, err := h.credentialRepo.GetByID(id)
 			if err != nil {
-				logger.Warnf("Failed to load credential %s for job %s: %v", id, job.ID, err)
-				continue
+				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+				return
 			}
 			switch cred.Type {
 			case models.CredentialTypeSSH, models.CredentialTypeMachineSSH:
@@ -2535,6 +1956,10 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	// Generate inventory content using the inventory service (same approach as platform-managed runner)
 	if h.inventoryService != nil {
 		inventoryJSON, err := h.inventoryService.GenerateInventoryJSON(job.InventoryID)
+		if err != nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
 		// Job slicing: keep only this slice's modulo-partition of the hosts.
 		if err == nil && job.SliceCount > 1 {
 			inventoryJSON, err = ansible.FilterInventoryJSONForSlice(inventoryJSON, job.SliceNumber, job.SliceCount)
@@ -2564,7 +1989,11 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 			if h.credentialRepo != nil {
 				for _, id := range credIDs {
 					cred, err := h.credentialRepo.GetByID(id)
-					if err != nil || cred.Username == "" {
+					if err != nil {
+						jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+						return
+					}
+					if cred.Username == "" {
 						continue
 					}
 					if cred.Type != models.CredentialTypeSSH && cred.Type != models.CredentialTypeMachineSSH {
@@ -2584,13 +2013,19 @@ func (h *RunnerAgentHandler) GetJobArtifacts(c *gin.Context) {
 	if h.ansibleConfigRepo != nil {
 		// Get project to find workspace
 		var project models.Project
-		if err := h.db.First(&project, "id = ?", job.ProjectID).Error; err == nil {
-			// Try project config first, then org (no workspace for ansible jobs)
-			// GetForWorkspace signature: (workspaceID string, projectID, orgID uuid.UUID)
-			config, err := h.ansibleConfigRepo.GetForWorkspace("", job.ProjectID, project.OrganizationID)
-			if err == nil && config != nil {
-				response.AnsibleCfg = config.ConfigContent
-			}
+		if err := h.db.First(&project, "id = ?", job.ProjectID).Error; err != nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		// Try project config first, then org (no workspace for ansible jobs)
+		// GetForWorkspace signature: (workspaceID string, projectID, orgID uuid.UUID)
+		config, err := h.ansibleConfigRepo.GetForWorkspace("", job.ProjectID, project.OrganizationID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		if err == nil && config != nil {
+			response.AnsibleCfg = config.ConfigContent
 		}
 	}
 
@@ -2627,13 +2062,12 @@ func (h *RunnerAgentHandler) runConfigurationVersion(run *models.Run) (*models.C
 // getTerraformRunArtifacts returns artifacts needed for a self-hosted Terraform runner
 // to execute a run: configuration tarball, variables, environment variables, and workspace metadata.
 func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID string) {
+	scoped := *h
+	scoped.db = h.db.WithContext(c.Request.Context())
+	h = &scoped
 	var run models.Run
 	if err := h.db.Preload("Workspace.Project.Organization").First(&run, "id = ?", runID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Run not found")
-		} else {
-			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
-		}
+		writeRunnerJobReadError(c, err)
 		return
 	}
 
@@ -2655,14 +2089,18 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	// run's artifacts.
 	tfVersion := settings.EffectiveTofuVersion(&run.Workspace, repository.InstallationTofuVersion(h.db)).Value
 
+	plan, err := h.planDescriptor(c.Request.Context(), &run)
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
 	response := AgentJobArtifacts{
 		JobID:            run.ID,
 		JobType:          "tofu_run",
 		ContractVersion:  runnercontract.Version,
 		TofuVersion:      tfVersion,
 		WorkingDirectory: run.Workspace.WorkingDirectory,
-		Plan:             h.planDescriptor(c.Request.Context(), &run),
-		Registry:         h.jobRegistryBlock(c, &run),
+		Plan:             plan,
 		Mirror:           h.mirror,
 	}
 
@@ -2670,9 +2108,12 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	// configuration (#938). A new replica never offers such a run; an older one during a rolling
 	// deploy might, and the runner then retries or the run ends with the reason.
 	if run.ConfigurationVersionID != nil {
-		var cv models.ConfigurationVersion
-		if err := h.db.Select("id", "status").First(&cv, "id = ?", *run.ConfigurationVersionID).Error; err == nil &&
-			cv.Status != models.ConfigurationVersionStatusUploaded {
+		cv, err := h.runConfigurationVersion(&run)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		if err == nil && cv.Status != models.ConfigurationVersionStatusUploaded {
 			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "the run's configuration is not uploaded yet")
 			return
 		}
@@ -2682,20 +2123,28 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 	// looked up within the run's workspace first: a run row that names a configuration version
 	// uploaded to another workspace finds none, and the runner is handed none of its code.
 	var tarball []byte
-	if run.ConfigurationVersionID != nil && h.storageClient != nil {
+	if run.ConfigurationVersionID != nil {
+		if h.storageClient == nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
 		if configVersion, cvErr := h.runConfigurationVersion(&run); cvErr == nil {
 			storageKey := configVersion.TarballKey()
-			ctx := context.Background()
-			if data, err := h.storageClient.Get(ctx, storageKey); err == nil {
-				tarball = data
-				if len(data) > h.inlineLimit() && runnerCan(c, runnercontract.CapabilityBlob) {
-					response.ConfigTarballBlob = blobRef(run.ID, blobConfigTarball, data)
-				} else {
-					response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
-				}
+			ctx := c.Request.Context()
+			data, err := h.storageClient.Get(ctx, storageKey)
+			if err != nil {
+				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+				return
 			}
-		} else {
-			logger.Warnf("Configuration version lookup failed for run %s: %v", runID, cvErr)
+			tarball = data
+			if len(data) > h.inlineLimit() && runnerCan(c, runnercontract.CapabilityBlob) {
+				response.ConfigTarballBlob = blobRef(run.ID, blobConfigTarball, data)
+			} else {
+				response.ConfigTarball = base64.StdEncoding.EncodeToString(data)
+			}
+		} else if !errors.Is(cvErr, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
 		}
 	}
 	response.Cache = h.runCacheDescriptor(run.Workspace.Project.OrganizationID, &run, tfVersion, tarball)
@@ -2744,15 +2193,21 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 				logger.Warnf("VCS clone URL is empty for run %s: provider=%s",
 					runID, vcsConn.Provider)
 			}
-		} else {
-			logger.Warnf("VCS connection lookup failed for run %s, vcsConnectionID=%v", runID, run.Workspace.VCSConnectionID)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
 		}
 	}
 
 	// Get Terraform variables (category == "terraform")
 	if h.variableService != nil {
-		ctx := context.Background()
-		if varsMeta, err := h.variableService.GetVariablesWithMetaForRun(ctx, run.WorkspaceID); err == nil && len(varsMeta) > 0 {
+		ctx := c.Request.Context()
+		varsMeta, err := h.variableService.GetVariablesWithMetaForRun(ctx, run.WorkspaceID)
+		if err != nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+		if len(varsMeta) > 0 {
 			vars := make(map[string]string, len(varsMeta))
 			var hclKeys []string
 			for k, v := range varsMeta {
@@ -2770,9 +2225,12 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 			}
 		}
 		// Get environment variables (category == "env")
-		if envVars, err := h.variableService.GetEnvironmentVariablesForRun(ctx, run.WorkspaceID); err == nil && len(envVars) > 0 {
-			response.EnvironmentVars = envVars
+		envVars, err := h.variableService.GetEnvironmentVariablesForRun(ctx, run.WorkspaceID)
+		if err != nil {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
 		}
+		response.EnvironmentVars = envVars
 	}
 
 	// Workload identity: the platform-minted per-run tokens for Azure, AWS, GCP and Vault (#933, D8).
@@ -2791,21 +2249,32 @@ func (h *RunnerAgentHandler) getTerraformRunArtifacts(c *gin.Context, runID stri
 		// Find the latest state version for this workspace
 		var latestState models.StateVersion
 		if err := h.db.Where("workspace_id = ?", run.WorkspaceID).
-			Order("version DESC").First(&latestState).Error; err == nil {
+			Order("version DESC").First(&latestState).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+			return
+		} else if err == nil {
 			// Read state from object storage (the authoritative copy), decrypting at rest
 			// state to plaintext before base64-encoding it into the job payload.
-			ctx := context.Background()
-			if stateData, err := h.stateService.GetStateObject(ctx, run.WorkspaceID, latestState.Version); err == nil && len(stateData) > 0 {
-				if len(stateData) > h.inlineLimit() && runnerCan(c, runnercontract.CapabilityBlob) {
-					response.StateBlob = blobRef(run.ID, blobState, stateData)
-				} else {
-					response.StateJSON = base64.StdEncoding.EncodeToString(stateData)
-				}
-				logger.Infof("Including state version %d (%d bytes) in artifacts for run %s", latestState.Version, len(stateData), runID)
+			ctx := c.Request.Context()
+			stateData, err := h.stateService.GetStateObject(ctx, run.WorkspaceID, latestState.Version)
+			if err != nil || len(stateData) == 0 {
+				jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+				return
 			}
+			if len(stateData) > h.inlineLimit() && runnerCan(c, runnercontract.CapabilityBlob) {
+				response.StateBlob = blobRef(run.ID, blobState, stateData)
+			} else {
+				response.StateJSON = base64.StdEncoding.EncodeToString(stateData)
+			}
+			logger.Infof("Including state version %d (%d bytes) in artifacts for run %s", latestState.Version, len(stateData), runID)
 		}
 	}
 
+	registry, ok := h.jobRegistryBlock(c, &run)
+	if !ok {
+		return
+	}
+	response.Registry = registry
 	c.JSON(http.StatusOK, response)
 }
 
@@ -2823,7 +2292,31 @@ func (h *RunnerAgentHandler) projectNameByID(projectID uuid.UUID) string {
 // Ansible jobs are reserved for the runner here (runner_id stamped) so concurrent
 // pollers get disjoint work; the agent then claims each via JobStart.
 // Supports both Ansible jobs and Terraform runs depending on runner type.
-func (h *RunnerAgentHandler) findPendingJobsForRunner(runner *models.Runner) ([]PendingJob, error) {
+func (h *RunnerAgentHandler) findPendingJobsForRunner(ctx context.Context, runner *models.Runner) ([]PendingJob, error) {
+	scoped := *h
+	scoped.db = h.db.WithContext(ctx)
+	if h.workItems != nil {
+		scoped.workItems = ansible.NewWorkItemRuntime(scoped.db, nil, nil)
+	}
+	pending, err := scoped.reservePendingJobsForRunner(runner)
+	if err != nil {
+		return nil, err
+	}
+	offers := make([]PendingJob, 0, len(pending))
+	repo := repository.NewRunnerRepository(scoped.db)
+	for _, job := range pending {
+		offer, eligible, err := repo.PrepareOffer(ctx, runner.ID, job)
+		if err != nil {
+			return nil, err
+		}
+		if eligible {
+			offers = append(offers, offer)
+		}
+	}
+	return offers, nil
+}
+
+func (h *RunnerAgentHandler) reservePendingJobsForRunner(runner *models.Runner) ([]PendingJob, error) {
 	if runner.IsHosted() {
 		return h.hostedOffers(runner)
 	}
@@ -3274,7 +2767,8 @@ type RunnerReRegisterResponse struct {
 	Status       string       `json:"status"`
 	PendingJobs  []PendingJob `json:"pending_jobs"`
 	// Capabilities are the API's (runnercontract.APICapabilities).
-	Capabilities []string `json:"capabilities,omitempty"`
+	Capabilities []string                     `json:"capabilities,omitempty"`
+	ActiveClaims []runnercontract.ActiveClaim `json:"active_claims"`
 }
 
 // RunnerRegisterResponse answers a first-time runner registration.
@@ -3283,7 +2777,8 @@ type RunnerRegisterResponse struct {
 	RunnerAPIKey        string `json:"runner_api_key"`
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 	// Capabilities are the API's (runnercontract.APICapabilities).
-	Capabilities []string `json:"capabilities,omitempty"`
+	Capabilities []string                     `json:"capabilities,omitempty"`
+	ActiveClaims []runnercontract.ActiveClaim `json:"active_claims"`
 }
 
 // PendingJobsResponse is the runner poll response.
