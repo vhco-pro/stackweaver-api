@@ -103,6 +103,14 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Failed to connect to database: %v", err)
 	}
+	// Refuse an older PostgreSQL server before anything touches the schema.
+	if err := checkPostgresVersion(func() (string, error) {
+		var v string
+		err := db.Raw("SHOW server_version_num").Scan(&v).Error
+		return v, err
+	}); err != nil {
+		logger.Fatalf("startup: %v", err)
+	}
 	// The plan JSON runs store is sealed at rest under ENCRYPTION_KEY (#933, D2, AC73); every
 	// process that reads or writes runs sets the same sealer before it touches one.
 	planSealer, err := crypto.NewCryptoService(encryptionkey.Resolve(os.Getenv("ENCRYPTION_KEY")))
