@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/michielvha/logger"
+	"github.com/michielvha/stackweaver/backend/internal/api/health"
 	"github.com/michielvha/stackweaver/backend/internal/api/routes"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	v2routes "github.com/michielvha/stackweaver/backend/internal/api/v2/routes"
@@ -59,6 +61,13 @@ type Config struct {
 }
 
 func main() {
+	// `stackweaver-api healthcheck` probes a running API's /readyz for Docker Compose. It runs
+	// before the generated env file and the logger, which hold nothing it needs, so an unrelated
+	// credential problem never marks a serving API unhealthy.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(runHealthcheck(os.Stderr))
+	}
+
 	// Before anything reads the environment: load the env file a Docker Compose install names,
 	// so values zitadel-init generated after this container was created are in place. The
 	// logger is not initialised yet, so a failure goes to stderr.
@@ -71,32 +80,13 @@ func main() {
 	logLevel := os.Getenv("LOG_LEVEL")
 	logger.Init(logLevel)
 
-	// Load configuration
-	// When CONFIG_PATH is explicitly set, the file must exist (misconfiguration is fatal).
-	// When CONFIG_PATH is unset, the default path is tried; if missing the binary
-	// continues with defaults + env-var overrides (enables file-free Kubernetes deploys).
-	configPath := os.Getenv("CONFIG_PATH")
-	explicitPath := configPath != ""
-	if !explicitPath {
-		configPath = "config/config.yaml"
+	config, fromFile, err := loadConfigFile()
+	if err != nil {
+		logger.Fatalf("Loading configuration: %v", err)
 	}
-
-	config := defaultConfig()
-	configData, err := os.ReadFile(configPath) //nolint:gosec // configPath is from environment variable, validated
-	switch {
-	case err == nil:
-		if err := yaml.Unmarshal(configData, &config); err != nil {
-			logger.Fatalf("Failed to parse config: %v", err)
-		}
-	case !explicitPath && (errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission)):
+	if !fromFile {
 		logger.Info("No config file found, using environment variables only")
-	default:
-		logger.Fatalf("Failed to read config file: %v", err)
 	}
-
-	// Apply environment variable overrides (allows Kubernetes deployments to
-	// inject configuration without modifying config.yaml).
-	applyEnvOverrides(&config)
 
 	// Initialize database
 	db, err := repository.NewDatabase(config.Database)
@@ -898,7 +888,7 @@ func main() {
 	}
 
 	// Create HTTP server
-	addr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)
+	addr := serverListenAddr(config)
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      router,
@@ -958,6 +948,74 @@ func main() {
 	cancel()
 
 	logger.Info("Server exited")
+}
+
+// loadConfig reads the configuration the server and the healthcheck command share. When CONFIG_PATH
+// is set, that file must be read and parsed. When it is unset, config/config.yaml is tried, and a
+// missing or unreadable file means defaults plus environment overrides (file-free Kubernetes
+// deploys); any other read error, and malformed YAML, is an error.
+func loadConfig() (Config, error) {
+	config, _, err := loadConfigFile()
+	return config, err
+}
+
+// loadConfigFile is loadConfig that also reports whether a config file was read.
+func loadConfigFile() (Config, bool, error) {
+	configPath := os.Getenv("CONFIG_PATH")
+	explicitPath := configPath != ""
+	if !explicitPath {
+		configPath = "config/config.yaml"
+	}
+
+	config := defaultConfig()
+	configData, err := os.ReadFile(configPath) //nolint:gosec // configPath is from environment variable, validated
+	switch {
+	case err == nil:
+		if err := yaml.Unmarshal(configData, &config); err != nil {
+			return Config{}, false, fmt.Errorf("parsing config file %s: %w", configPath, err)
+		}
+	case !explicitPath && (errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission)):
+		// No usable default file: defaults and environment overrides only.
+	default:
+		return Config{}, false, fmt.Errorf("reading config file %s: %w", configPath, err)
+	}
+
+	// Apply environment variable overrides (allows Kubernetes deployments to
+	// inject configuration without modifying config.yaml).
+	applyEnvOverrides(&config)
+	return config, err == nil, nil
+}
+
+// serverListenAddr is the address the server binds: IPv6 hosts bracketed, an empty host the IPv4
+// wildcard.
+func serverListenAddr(config Config) string {
+	return health.ListenAddr(config.Server.Host, config.Server.Port)
+}
+
+// healthcheckURL is the /readyz URL the healthcheck command probes for a configuration: a wildcard
+// host is reached on its family's loopback address, and port 0 is refused.
+func healthcheckURL(config Config) (string, error) {
+	addr, err := health.ResolveProbeAddr(config.Server.Host, config.Server.Port)
+	if err != nil {
+		return "", err
+	}
+	return health.ProbeURL(addr), nil
+}
+
+// runHealthcheck is the healthcheck subcommand: it loads the configuration as the server does,
+// probes /readyz once, and returns the exit status.
+func runHealthcheck(stderr io.Writer) int {
+	config, err := loadConfig()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "healthcheck: loading configuration: %v\n", err)
+		return 1
+	}
+	url, err := healthcheckURL(config)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "healthcheck: %v\n", err)
+		return 1
+	}
+	return health.RunHealthcheck(context.Background(), url, stderr)
 }
 
 // defaultConfig returns a Config with sensible defaults matching the values

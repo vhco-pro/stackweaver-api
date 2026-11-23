@@ -1,0 +1,6 @@
+{
+  "method": "HEAD",
+  "path": "/readyz",
+  "status": 200,
+  "body": null
+}
