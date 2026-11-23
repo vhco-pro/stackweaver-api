@@ -3,6 +3,10 @@
 package routes
 
 import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -10,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/handlers"
+	"github.com/michielvha/stackweaver/backend/internal/api/health"
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	v2handlers "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/response"
@@ -38,58 +43,19 @@ func SetupRoutes(
 	authProxy *v2handlers.AuthProxy,
 	v2opts ...v2routes.Option,
 ) (*gin.Engine, *v2routes.AnsibleRouteServices) {
-	r := gin.Default()
-
-	// Round 25c Finding C-3 (CRITICAL): lock down trusted proxies.
-	// Gin's default trusts all proxies, so any peer can spoof the
-	// client IP via X-Forwarded-For. Combined with the per-IP rate
-	// limiter (and per-IP decoy keying) this neutralises every per-
-	// IP cap and lets an attacker mint unbounded fresh limiter
-	// buckets for memory exhaustion. Operators behind a reverse
-	// proxy/k8s ingress set TRUSTED_PROXIES (comma-separated CIDRs);
-	// when unset we trust no proxies and `c.ClientIP()` falls back
-	// to the direct connection address.
-	if trusted := os.Getenv("TRUSTED_PROXIES"); trusted != "" {
-		proxies := []string{}
-		for p := range strings.SplitSeq(trusted, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				proxies = append(proxies, p)
-			}
-		}
-		_ = r.SetTrustedProxies(proxies)
-	} else {
-		_ = r.SetTrustedProxies(nil)
+	readiness, err := mainPool(db)
+	if err != nil {
+		logger.Errorf("Getting the main database pool for /readyz: %v", err)
 	}
-
-	// One origin allowlist for CORS, the /auth group and the session cookie: the app's own origin,
-	// CORS_EXTRA_ORIGINS, and localhost outside release mode.
 	origins := middleware.OriginPolicyFromEnv()
 	if authService != nil {
 		authService.SetSessionRequestCheck(origins.CheckBrowserRequest)
 	}
-
-	// Middleware
-	r.Use(middleware.CORSMiddleware(origins))
-	// The runner control plane is limited per runner and per job instead (#933, D3, AC74), so
-	// launchers behind one address never share one budget.
-	r.Use(middleware.NewIPRateLimiter(rateLimitFromEnv("RATE_LIMIT", 100, 200)).MiddlewareExcept("/api/v2/runner/"))
-	// Security headers on every response (JSON API + auth proxy). CSP is inert on
-	// JSON but nosniff/HSTS/etc. are real defense-in-depth. Applied globally after
-	// CORS so preflight (OPTIONS) short-circuits before it, and so the /auth group
-	// no longer needs its own SecurityHeaders() registration.
-	r.Use(middleware.SecurityHeaders())
-
-	// Health check (supports both GET and HEAD for healthchecks)
-	r.GET("/health", func(c *gin.Context) {
-		response.Status(c, 200, "ok")
+	r := newBaseRouter(baseRouterConfig{
+		Origins:   origins,
+		Limiter:   middleware.NewIPRateLimiter(rateLimitFromEnv("RATE_LIMIT", 100, 200)),
+		Readiness: readiness,
 	})
-	r.HEAD("/health", func(c *gin.Context) {
-		c.Status(200)
-	})
-
-	// Terraform Service Discovery (public endpoint - no auth required)
-	// GET /.well-known/terraform.json
-	r.GET("/.well-known/terraform.json", v2handlers.HandleServiceDiscovery)
 
 	// ==========================================
 	// Terraform CLI login (login.v1) - OAuth2 authorization-code + PKCE.
@@ -291,6 +257,107 @@ func setupAuthProxyRoutes(r *gin.Engine, proxy *v2handlers.AuthProxy, origins mi
 // without TRUSTED_PROXIES) need a bigger bucket, and test harnesses drive
 // everything from one IP by construction (#597). Invalid or non-positive
 // values are rejected loudly rather than silently weakening a security limit.
+// probePaths are the root probe endpoints: exempt from the per-address limiter and the request log.
+var probePaths = []string{"/livez", "/readyz", "/health"}
+
+// baseRouterConfig is what the router's base needs: the origin allowlist, the per-address limiter,
+// the pool /readyz pings, and where the request log goes (nil means gin's default writer).
+type baseRouterConfig struct {
+	Origins   middleware.OriginPolicy
+	Limiter   *middleware.IPRateLimiter
+	Readiness health.Pinger
+	LogOutput io.Writer
+}
+
+// newBaseRouter builds the engine with its global middleware in order (request log, recovery, CORS,
+// the per-address limiter, security headers) and the root probe endpoints.
+func newBaseRouter(cfg baseRouterConfig) *gin.Engine {
+	r := gin.New()
+	// The request log skips the probe paths, which the kubelet and Compose call every few seconds.
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{Output: cfg.LogOutput, SkipPaths: probePaths}), gin.Recovery())
+
+	// Round 25c Finding C-3 (CRITICAL): lock down trusted proxies.
+	// Gin's default trusts all proxies, so any peer can spoof the
+	// client IP via X-Forwarded-For. Combined with the per-IP rate
+	// limiter (and per-IP decoy keying) this neutralises every per-
+	// IP cap and lets an attacker mint unbounded fresh limiter
+	// buckets for memory exhaustion. Operators behind a reverse
+	// proxy/k8s ingress set TRUSTED_PROXIES (comma-separated CIDRs);
+	// when unset we trust no proxies and `c.ClientIP()` falls back
+	// to the direct connection address.
+	if trusted := os.Getenv("TRUSTED_PROXIES"); trusted != "" {
+		proxies := []string{}
+		for p := range strings.SplitSeq(trusted, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				proxies = append(proxies, p)
+			}
+		}
+		_ = r.SetTrustedProxies(proxies)
+	} else {
+		_ = r.SetTrustedProxies(nil)
+	}
+
+	// Middleware
+	r.Use(middleware.CORSMiddleware(cfg.Origins))
+	// The runner control plane is limited per runner and per job instead (#933, D3, AC74), so
+	// launchers behind one address never share one budget.
+	// The probe paths are exempt by exact path, so a monitor or kubelet never sees 429.
+	r.Use(cfg.Limiter.MiddlewareExempt(probePaths, "/api/v2/runner/"))
+	// Security headers on every response (JSON API + auth proxy). CSP is inert on
+	// JSON but nosniff/HSTS/etc. are real defense-in-depth. Applied globally after
+	// CORS so preflight (OPTIONS) short-circuits before it, and so the /auth group
+	// no longer needs its own SecurityHeaders() registration.
+	r.Use(middleware.SecurityHeaders())
+
+	// Health check (supports both GET and HEAD for healthchecks)
+	r.GET("/health", func(c *gin.Context) {
+		response.Status(c, 200, "ok")
+	})
+	r.HEAD("/health", func(c *gin.Context) {
+		c.Status(200)
+	})
+	probes := probeHandlers{livez: health.Livez(), readiness: health.NewReadiness(cfg.Readiness)}
+	r.GET("/livez", probes.serveLivez)
+	r.HEAD("/livez", probes.serveLivez)
+	r.GET("/readyz", probes.serveReadyz)
+	r.HEAD("/readyz", probes.serveReadyz)
+
+	// Terraform Service Discovery (public endpoint - no auth required)
+	// GET /.well-known/terraform.json
+	r.GET("/.well-known/terraform.json", v2handlers.HandleServiceDiscovery)
+
+	return r
+}
+
+// probeHandlers adapts the health package's handlers to gin as named methods, so the route
+// inventory resolves each probe route to a function.
+type probeHandlers struct {
+	livez     http.Handler
+	readiness *health.Readiness
+}
+
+func (p probeHandlers) serveLivez(c *gin.Context)  { p.livez.ServeHTTP(c.Writer, c.Request) }
+func (p probeHandlers) serveReadyz(c *gin.Context) { p.readiness.ServeHTTP(c.Writer, c.Request) }
+
+// mainPool is the database/sql pool under the API's main GORM handle, which /readyz pings. When it
+// cannot be had, readiness reports the error on every request.
+func mainPool(db *gorm.DB) (health.Pinger, error) {
+	if db == nil {
+		return failingPinger{err: errNoPool}, errNoPool
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return failingPinger{err: err}, err
+	}
+	return sqlDB, nil
+}
+
+var errNoPool = errors.New("no database handle")
+
+type failingPinger struct{ err error }
+
+func (f failingPinger) PingContext(context.Context) error { return f.err }
+
 func rateLimitFromEnv(prefix string, defRPS, defBurst int) (int, int) {
 	rps, burst := defRPS, defBurst
 	if v := os.Getenv(prefix + "_RPS"); v != "" {

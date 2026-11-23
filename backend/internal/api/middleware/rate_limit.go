@@ -5,6 +5,7 @@ package middleware
 import (
 	"container/list"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -29,7 +30,7 @@ type IPRateLimiter struct {
 	limiters map[string]*list.Element
 	entries  *list.List
 	cap      int
-	rps      int
+	limit    rate.Limit
 	burst    int
 }
 
@@ -39,11 +40,17 @@ type ipLimiterEntry struct {
 }
 
 func NewIPRateLimiter(rps int, burst int) *IPRateLimiter {
+	return NewIPRateLimiterRate(rate.Limit(rps), burst)
+}
+
+// NewIPRateLimiterRate is NewIPRateLimiter with a refill rate below one token a second, which tests
+// use to build a bucket that does not refill while they run.
+func NewIPRateLimiterRate(limit rate.Limit, burst int) *IPRateLimiter {
 	return &IPRateLimiter{
 		limiters: make(map[string]*list.Element),
 		entries:  list.New(),
 		cap:      defaultIPLimiterCap,
-		rps:      rps,
+		limit:    limit,
 		burst:    burst,
 	}
 }
@@ -55,7 +62,7 @@ func (rl *IPRateLimiter) getLimiter(ip string) *rate.Limiter {
 		rl.entries.MoveToFront(el)
 		return el.Value.(*ipLimiterEntry).limiter
 	}
-	entry := &ipLimiterEntry{ip: ip, limiter: rate.NewLimiter(rate.Limit(rl.rps), rl.burst)}
+	entry := &ipLimiterEntry{ip: ip, limiter: rate.NewLimiter(rl.limit, rl.burst)}
 	el := rl.entries.PushFront(entry)
 	rl.limiters[ip] = el
 	if rl.entries.Len() > rl.cap {
@@ -85,8 +92,18 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 // MiddlewareExcept is Middleware for every path except those under the given prefixes, which a
 // limiter keyed on something other than the address governs (the runner control plane, #933, D3).
 func (rl *IPRateLimiter) MiddlewareExcept(prefixes ...string) gin.HandlerFunc {
+	return rl.MiddlewareExempt(nil, prefixes...)
+}
+
+// MiddlewareExempt is MiddlewareExcept that also exempts each path in exact by exact match, so a
+// probe endpoint skips the limiter while a neighbouring path such as /healthz stays limited.
+func (rl *IPRateLimiter) MiddlewareExempt(exact []string, prefixes ...string) gin.HandlerFunc {
 	limit := rl.Middleware()
 	return func(c *gin.Context) {
+		if slices.Contains(exact, c.Request.URL.Path) {
+			c.Next()
+			return
+		}
 		for _, p := range prefixes {
 			if strings.HasPrefix(c.Request.URL.Path, p) {
 				c.Next()

@@ -7198,6 +7198,22 @@
           }
         }
       },
+      "get-livez-1e8cd5": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "get-readyz-f9b5cc": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "get-v1-modules-1b59d5": {
         "type": "object",
         "properties": {
@@ -7505,6 +7521,12 @@
         }
       },
       "head-health-3ad84b": {
+        "nullable": true
+      },
+      "head-livez-49c658": {
+        "nullable": true
+      },
+      "head-readyz-429bfe": {
         "nullable": true
       },
       "hosted-capacities-response": {
@@ -49634,6 +49656,46 @@
         ]
       }
     },
+    "/livez": {
+      "get": {
+        "operationId": "get-livez",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-livez-1e8cd5"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /livez",
+        "tags": [
+          "livez"
+        ]
+      },
+      "head": {
+        "operationId": "head-livez",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/head-livez-49c658"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "HEAD /livez",
+        "tags": [
+          "livez"
+        ]
+      }
+    },
     "/openapi/stable.json": {
       "get": {
         "description": "Not recorded by the golden harness: serves the committed OpenAPI document, which has its own drift check",
@@ -49656,6 +49718,46 @@
         "summary": "GET /openapi/stable.json",
         "tags": [
           "openapi"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "get-readyz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/get-readyz-f9b5cc"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /readyz",
+        "tags": [
+          "readyz"
+        ]
+      },
+      "head": {
+        "operationId": "head-readyz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/head-readyz-429bfe"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "HEAD /readyz",
+        "tags": [
+          "readyz"
         ]
       }
     },

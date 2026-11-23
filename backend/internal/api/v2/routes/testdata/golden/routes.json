@@ -3387,13 +3387,25 @@
       "method": "GET",
       "path": "/health",
       "mutating": false,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.SetupRoutes.func1"
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.newBaseRouter.func1"
     },
     {
       "method": "HEAD",
       "path": "/health",
       "mutating": false,
-      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.SetupRoutes.func2"
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.newBaseRouter.func2"
+    },
+    {
+      "method": "GET",
+      "path": "/livez",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.probeHandlers.serveLivez-fm"
+    },
+    {
+      "method": "HEAD",
+      "path": "/livez",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.probeHandlers.serveLivez-fm"
     },
     {
       "method": "GET",
@@ -3401,6 +3413,18 @@
       "excluded": "serves the committed OpenAPI document, which has its own drift check",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/openapi.Handler"
+    },
+    {
+      "method": "GET",
+      "path": "/readyz",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.probeHandlers.serveReadyz-fm"
+    },
+    {
+      "method": "HEAD",
+      "path": "/readyz",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/routes.probeHandlers.serveReadyz-fm"
     },
     {
       "method": "GET",
