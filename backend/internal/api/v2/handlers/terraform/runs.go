@@ -1907,7 +1907,8 @@ func (h *RunHandlerV2) ForceExecute(c *gin.Context) {
 	workspace.Locked = false
 	workspace.LockedBy = nil
 	workspace.LockedAt = nil
-	if err := h.workspaceRepo.Update(workspace); err != nil {
+	workspace.LockedReason = ""
+	if _, err := h.workspaceRepo.Unlock(workspace.ID, nil); err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to unlock workspace")
 		return
 	}

@@ -154,7 +154,7 @@ func SetupV2Routes(
 		logger.Infof("Azure DevOps VCS integration disabled (AZURE_DEVOPS_CLIENT_ID/SECRET not set)")
 	}
 	vcsRegistry := vcs.NewProviderRegistry(githubAppManager, azureDevOpsManager, func(conn *models.VCSConnection) error {
-		return repository.NewVCSConnectionRepository(db).Update(conn)
+		return repository.NewVCSConnectionRepository(db).UpdateTokens(conn)
 	}, atRestCrypto)
 
 	// Repositories

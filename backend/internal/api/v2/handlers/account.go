@@ -150,7 +150,7 @@ func (h *AccountHandlerV2) Update(c *gin.Context) {
 			*field.into = *field.value
 		}
 	}
-	if err := h.userRepo.Update(user); err != nil {
+	if err := h.userRepo.UpdateProfile(user); err != nil {
 		jsonAPIError(c, http.StatusInternalServerError, "Internal Server Error", "failed to update the account: "+err.Error())
 		return
 	}
