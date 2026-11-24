@@ -160,7 +160,7 @@ func (s *DriftDetectionService) processDueDriftChecks() {
 				continue
 			}
 			workspace.NextDriftCheckAt = &nextRun
-			if err := s.workspaceRepo.Update(&workspace); err != nil {
+			if err := s.workspaceRepo.SetDriftCheckTimes(workspace.ID, &nextRun, nil); err != nil {
 				logger.Infof("Error updating next drift check for workspace %s: %v", workspace.ID, err)
 			}
 			continue
@@ -184,7 +184,7 @@ func (s *DriftDetectionService) processDueDriftChecks() {
 		}
 		workspace.NextDriftCheckAt = &nextRun
 		workspace.LastDriftCheckAt = &now
-		if err := s.workspaceRepo.Update(&workspace); err != nil {
+		if err := s.workspaceRepo.SetDriftCheckTimes(workspace.ID, &nextRun, &now); err != nil {
 			logger.Infof("Error updating drift check times for workspace %s: %v", workspace.ID, err)
 		}
 	}

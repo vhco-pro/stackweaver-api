@@ -279,7 +279,11 @@ func (h *RunImageHandler) Update(c *gin.Context) {
 	if !h.validate(c, r) {
 		return
 	}
-	if err := h.db.Save(r).Error; err != nil {
+	if err := repository.UpdateExisting(h.db, r, r.ID, "run image"); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Run image not found")
+			return
+		}
 		if repository.IsUniqueViolation(err) {
 			jsonapi.WriteError(c, http.StatusConflict, "Conflict", "the organization already has a run image of that name")
 			return

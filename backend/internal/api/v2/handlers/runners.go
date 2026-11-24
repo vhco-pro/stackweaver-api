@@ -238,7 +238,7 @@ func (h *RunnerHandlerV2) Update(c *gin.Context) {
 		runner.Labels = models.RunnerLabels(req.Data.Attributes.Labels)
 	}
 
-	if err := h.runnerRepo.Update(runner); err != nil {
+	if err := h.runnerRepo.UpdateSettings(runner); err != nil {
 		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		return
 	}

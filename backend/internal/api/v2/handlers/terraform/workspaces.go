@@ -2129,15 +2129,19 @@ func (h *WorkspaceHandlerV2) Lock(c *gin.Context) {
 	lockedBy := &user.ID
 
 	now := time.Now()
+	locked, err := h.workspaceRepo.Lock(workspace.ID, user.ID, lockReq.Reason, now)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to lock workspace")
+		return
+	}
+	if !locked {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is already locked")
+		return
+	}
 	workspace.Locked = true
 	workspace.LockedBy = lockedBy
 	workspace.LockedAt = &now
 	workspace.LockedReason = lockReq.Reason
-
-	if err := h.workspaceRepo.Update(workspace); err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to lock workspace")
-		return
-	}
 
 	// Reload to get updated workspace
 	workspace, _ = h.workspaceRepo.GetByID(workspaceID)
@@ -2196,12 +2200,17 @@ func (h *WorkspaceHandlerV2) Unlock(c *gin.Context) {
 		return
 	}
 
+	unlocked, err := h.workspaceRepo.Unlock(workspace.ID, &user.ID)
+	if err == nil && !unlocked {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is not locked by you; it was unlocked or locked again meanwhile")
+		return
+	}
 	workspace.Locked = false
 	workspace.LockedBy = nil
 	workspace.LockedAt = nil
 	workspace.LockedReason = ""
 
-	if err := h.workspaceRepo.Update(workspace); err != nil {
+	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to unlock workspace")
 		return
 	}
@@ -2251,12 +2260,17 @@ func (h *WorkspaceHandlerV2) ForceUnlock(c *gin.Context) {
 		return
 	}
 
+	unlocked, err := h.workspaceRepo.Unlock(workspace.ID, nil)
+	if err == nil && !unlocked {
+		jsonapi.WriteError(c, http.StatusConflict, "Conflict", "Workspace is already unlocked")
+		return
+	}
 	workspace.Locked = false
 	workspace.LockedBy = nil
 	workspace.LockedAt = nil
 	workspace.LockedReason = ""
 
-	if err := h.workspaceRepo.Update(workspace); err != nil {
+	if err != nil {
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to force unlock workspace")
 		return
 	}

@@ -349,7 +349,11 @@ func (h *AdminTofuVersionsHandler) Update(c *gin.Context) {
 		version.ArchsJSON = marshalArchs(validArchs)
 	}
 
-	if err := h.db.Save(&version).Error; err != nil {
+	if err := repository.UpdateExisting(h.db, &version, version.ID, "tofu version"); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			jsonapi.WriteErrorNoDetail(c, http.StatusNotFound, "Terraform version not found")
+			return
+		}
 		jsonapi.WriteError(c, http.StatusInternalServerError, "Failed to update terraform version", err.Error())
 		return
 	}
