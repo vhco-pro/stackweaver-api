@@ -15,12 +15,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
 func TestJobTemplateIdentityBinding_MustBeOfferedByItsPool(t *testing.T) {
 	f := setupNeighbourScope(t)
-	if err := f.db.AutoMigrate(&models.IdentityBinding{}); err != nil {
+	if err := testschema.Ensure(f.db); err != nil {
 		t.Fatal(err)
 	}
 	var project models.Project

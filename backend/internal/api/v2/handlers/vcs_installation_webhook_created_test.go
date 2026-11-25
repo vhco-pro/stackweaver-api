@@ -39,6 +39,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
@@ -67,7 +68,7 @@ func setupInstallationWebhook(t *testing.T) *installationWebhookFixture {
 		t.Fatalf("connect test db: %v", err)
 	}
 	// The whole schema: deleting a connection detaches workspaces and modules first.
-	if err := models.AutoMigrate(db); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

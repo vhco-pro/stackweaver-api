@@ -32,6 +32,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
@@ -95,7 +96,7 @@ type platformContractFixture struct {
 func setupPlatformContract(t *testing.T) *platformContractFixture {
 	t.Helper()
 	db := setupTestDB(t)
-	if err := db.AutoMigrate(&models.VCSConnection{}, &models.APIKey{}, &models.AuditLog{}, &models.Project{}, &models.TeamProjectAccess{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	org := setupTestOrg(t, db)

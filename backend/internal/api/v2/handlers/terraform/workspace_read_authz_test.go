@@ -35,6 +35,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -60,11 +61,7 @@ func setupWorkspaceReadAuthz(t *testing.T) *wsReadFixture {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
-		&models.Project{}, &models.Workspace{},
-		&models.Team{}, &models.TeamMember{}, &models.TeamWorkspaceAccess{},
-	); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	sfx := uuid.NewString()[:8]

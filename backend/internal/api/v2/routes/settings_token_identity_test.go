@@ -35,6 +35,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -74,11 +75,7 @@ func setupSettingsGuard(t *testing.T) *settingsGuardFixture {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.User{}, &models.Organization{}, &models.OrganizationMember{},
-		&models.Team{}, &models.TeamMember{}, &models.Project{},
-		&models.APIKey{}, &models.AuditLog{},
-	); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

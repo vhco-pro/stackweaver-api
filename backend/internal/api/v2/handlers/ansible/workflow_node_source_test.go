@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -39,7 +40,7 @@ func setupNodeSource(t *testing.T) *nodeSourceFixture {
 	t.Helper()
 	base := setupReferentScope(t)
 	// Every table, not only the fixture's: the permission check reads more of them.
-	if err := models.AutoMigrate(base.db); err != nil {
+	if err := testschema.Ensure(base.db); err != nil {
 		t.Fatalf("migrating: %v", err)
 	}
 	sfx := uuid.NewString()[:8]

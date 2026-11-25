@@ -36,6 +36,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
@@ -85,11 +86,9 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	}
 	// The orphan schedule below is built by deleting the job template under it, which only works
 	// once fk_ansible_schedules_job_template is ON DELETE SET NULL. AutoMigrate creates that
-	// constraint bare; the rule is applied by the API's startup migration, so the fixture runs
-	// the same step rather than depend on something else having run it first. A no-op on a
-	// database that is already reconciled.
-	if _, err := models.ReconcileFKDeleteRules(db); err != nil {
-		t.Fatalf("reconciling the foreign key delete rules: %v", err)
+	// constraint bare; testschema.Ensure applies the API's delete rules as well.
+	if err := testschema.Ensure(db); err != nil {
+		t.Fatalf("migrating the test schema: %v", err)
 	}
 	sfx := uuid.NewString()[:8]
 
@@ -226,8 +225,8 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	enabledSourceSchedule := newSchedule("errenv-sched-src-on", models.ScheduleTypeInventorySource, nil, &source.ID)
 	brokenCronSchedule := newSchedule("errenv-sched-cron", models.ScheduleTypeJobTemplate, &template.ID, nil)
 
-	// The schedule's foreign key is ON DELETE SET NULL (models.ReconcileFKDeleteRules, applied
-	// above), so deleting the template leaves a schedule with no target, which run-now cannot
+	// The schedule's foreign key is ON DELETE SET NULL (models.ReconcileFKDeleteRules, applied by
+	// testschema.Ensure above), so deleting the template leaves a schedule with no target, which run-now cannot
 	// execute.
 	if err := db.Where("id = ?", doomedTemplate.ID).Delete(&models.AnsibleJobTemplate{}).Error; err != nil {
 		t.Fatalf("deleting the job template under the orphan schedule: %v", err)

@@ -31,10 +31,6 @@ import (
 // download any org's private registry artifacts.
 func TestRegistryProtocolReadAuthz(t *testing.T) {
 	db := setupTestDBForProvider(t)
-	// The shared provider migrate set does not include the module models.
-	if err := db.AutoMigrate(&models.Module{}, &models.ModuleVersion{}, &models.ModuleDownload{}); err != nil {
-		t.Fatalf("migrate module models: %v", err)
-	}
 
 	// Declare up front and register cleanup BEFORE any seeding, so a failure mid-setup still
 	// removes whatever rows were created (register-before-seed; the closure reads the vars by

@@ -16,12 +16,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
 func TestWorkspaceIdentityBinding_MustBeOfferedByItsPool(t *testing.T) {
 	f := setupWorkspacePools(t)
-	if err := f.db.AutoMigrate(&models.IdentityBinding{}); err != nil {
+	if err := testschema.Ensure(f.db); err != nil {
 		t.Fatal(err)
 	}
 	var project models.Project

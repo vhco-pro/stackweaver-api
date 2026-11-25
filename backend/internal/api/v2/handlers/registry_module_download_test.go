@@ -19,6 +19,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/storage/storagetest"
@@ -32,7 +33,7 @@ import (
 // tarball as the metadata response, and the storage endpoint is often unreachable from a job.
 func TestModuleDownloadNamesTheArchiveOnTheRegistryHost(t *testing.T) {
 	db := setupTestDBForProvider(t)
-	if err := db.AutoMigrate(&models.Module{}, &models.ModuleVersion{}, &models.ModuleDownload{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate module models: %v", err)
 	}
 	var org, other *models.Organization

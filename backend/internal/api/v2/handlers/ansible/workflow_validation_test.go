@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -332,7 +333,7 @@ func TestWorkflowNodeCreate_RefusesWhatItCannotStore(t *testing.T) {
 	if err := f.db.First(&workflow, "id = ?", f.workflowID).Error; err != nil {
 		t.Fatalf("loading the seeded workflow: %v", err)
 	}
-	if err := f.db.AutoMigrate(&models.AnsibleCredential{}); err != nil {
+	if err := testschema.Ensure(f.db); err != nil {
 		t.Fatalf("migrating the credential table: %v", err)
 	}
 	credential := &models.AnsibleCredential{

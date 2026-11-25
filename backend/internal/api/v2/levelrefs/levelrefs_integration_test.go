@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
@@ -28,7 +29,7 @@ func TestChecker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(models.AllModels()...); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatal(err)
 	}
 	sfx := uuid.NewString()[:8]

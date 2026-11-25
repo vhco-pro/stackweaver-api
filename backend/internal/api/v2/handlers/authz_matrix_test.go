@@ -31,12 +31,13 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
 )
 
-// setupAuthzTestDB connects to $TEST_DATABASE_URL and migrates the models the matrix needs.
+// setupAuthzTestDB connects to $TEST_DATABASE_URL and makes sure it has the full schema.
 func setupAuthzTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	dbURL := os.Getenv("TEST_DATABASE_URL")
@@ -47,16 +48,9 @@ func setupAuthzTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	// Migrate the full model set: the team-membership handlers load teams through the rbac
-	// service, which preloads project/workspace/org access rows - a partial migrate set only
-	// passes against a DB that already has those tables (dev) and fails on a fresh CI Postgres.
-	if err := models.AutoMigrate(db); err != nil {
+	// The full schema with the API's foreign-key delete rules, migrated once per test process.
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
-	}
-	// The foreign-key delete rules the API reconciles at startup (cmd/api), so a fresh database
-	// has the schema a deployed one has, cascades included, and not only a development one.
-	if _, err := models.ReconcileFKDeleteRules(db); err != nil {
-		t.Fatalf("reconcile foreign-key delete rules: %v", err)
 	}
 	return db
 }

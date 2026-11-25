@@ -36,6 +36,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
@@ -67,9 +68,9 @@ func setupCredentialDelete(t *testing.T) *credentialDeleteFixture {
 		t.Fatalf("connecting to the test database: %v", err)
 	}
 	// The template's credential link cascades only once the delete rules are reconciled, as the
-	// API does on startup. A no-op on a database that is already reconciled.
-	if _, err := models.ReconcileFKDeleteRules(db); err != nil {
-		t.Fatalf("reconciling the foreign key delete rules: %v", err)
+	// API does on startup; testschema.Ensure does both.
+	if err := testschema.Ensure(db); err != nil {
+		t.Fatalf("migrating the test schema: %v", err)
 	}
 
 	sfx := uuid.NewString()[:8]

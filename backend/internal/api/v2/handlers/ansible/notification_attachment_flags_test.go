@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
@@ -81,9 +82,7 @@ func assertStoredBool(t *testing.T, where string, attrs map[string]any, attr str
 func TestNotificationAttachment_FlagsAreStoredAsSent(t *testing.T) {
 	f := setupAnsibleSubResourceAuthz(t) // org A with an owner and a job template; cleans up after itself
 	db := f.db
-	if err := db.AutoMigrate(
-		&models.AnsibleNotificationTemplate{}, &models.AnsibleNotificationAttachment{}, &models.AnsibleWorkflow{},
-	); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	templateID := uuid.MustParse(f.templateID)

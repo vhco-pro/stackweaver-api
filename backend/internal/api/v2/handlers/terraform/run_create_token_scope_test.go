@@ -29,6 +29,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -60,7 +61,7 @@ func setupRunCreateScope(t *testing.T) *runCreateScopeFixture {
 	}
 	// The full production migration, so run creation finds every table it writes (task stages,
 	// team workspace access) on a fresh database too, not only on a development one.
-	if err := models.AutoMigrate(db); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	sfx := uuid.NewString()[:8]
