@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -61,12 +62,7 @@ func seedPendingAnsibleJob(t *testing.T, h *RunnerAgentHandler, poolID uuid.UUID
 
 func migrateOfferingModels(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	if err := db.AutoMigrate(
-		&models.Runner{},
-		&models.RunnerJobExecution{},
-		&models.AnsibleJob{},
-		&models.Project{},
-	); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 }

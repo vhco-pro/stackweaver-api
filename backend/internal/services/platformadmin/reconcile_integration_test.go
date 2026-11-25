@@ -24,6 +24,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/activity"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -45,7 +46,7 @@ func newDeclaredRig(t *testing.T) *declaredRig {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	if err := models.AutoMigrate(db); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return &declaredRig{

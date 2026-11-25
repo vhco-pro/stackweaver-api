@@ -32,6 +32,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
@@ -51,7 +52,7 @@ func setupWorkspacePools(t *testing.T) *workspacePoolFixture {
 	t.Helper()
 	base := setupWorkspaceBooleans(t)
 	db := base.db
-	if err := db.AutoMigrate(&models.AgentPool{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrating agent pools: %v", err)
 	}
 	sfx := uuid.NewString()[:8]

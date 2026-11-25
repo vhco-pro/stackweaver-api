@@ -33,6 +33,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 )
@@ -48,7 +49,7 @@ type runConfigurationVersionFixture struct {
 func setupRunConfigurationVersions(t *testing.T) *runConfigurationVersionFixture {
 	t.Helper()
 	base := setupRunCreateScope(t)
-	if err := base.db.AutoMigrate(&models.ConfigurationVersion{}); err != nil {
+	if err := testschema.Ensure(base.db); err != nil {
 		t.Fatalf("migrating configuration versions: %v", err)
 	}
 	sfx := uuid.NewString()[:8]

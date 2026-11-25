@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -38,7 +39,7 @@ type registryAuthzFixture struct {
 func setupRegistryAuthzFixture(t *testing.T) *registryAuthzFixture {
 	t.Helper()
 	db := setupAuthzTestDB(t)
-	if err := db.AutoMigrate(&models.Module{}, &models.ModuleVersion{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate modules: %v", err)
 	}
 	sfx := uuid.NewString()[:8]

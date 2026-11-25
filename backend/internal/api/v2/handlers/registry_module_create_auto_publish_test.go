@@ -34,6 +34,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	coreansible "github.com/michielvha/stackweaver/core/services/ansible"
@@ -43,7 +44,7 @@ import (
 
 func TestRegistryModuleCreate_AutoPublishTagsIsStoredAsSent(t *testing.T) {
 	db := setupTestDB(t)
-	if err := db.AutoMigrate(&models.VCSConnection{}, &models.Project{}, &models.TeamProjectAccess{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	org := setupTestOrg(t, db) // its cleanup removes this organization's modules, teams and members

@@ -37,6 +37,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
@@ -65,7 +66,7 @@ func setupWorkflowUpdate(t *testing.T) *workflowUpdateFixture {
 	t.Helper()
 	f := setupAnsibleSubResourceAuthz(t) // org A with an owner who administers its project
 	db := f.db
-	if err := db.AutoMigrate(&models.AnsibleWorkflow{}, &models.AnsibleWorkflowNode{}, &models.AnsibleWorkflowEdge{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrating the workflow tables: %v", err)
 	}
 

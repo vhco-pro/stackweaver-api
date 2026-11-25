@@ -31,6 +31,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
@@ -95,8 +96,8 @@ func setupRequestContract(t *testing.T) *requestContractFixture {
 	if err != nil {
 		t.Fatalf("connecting to the test database: %v", err)
 	}
-	if _, err := models.ReconcileFKDeleteRules(db); err != nil {
-		t.Fatalf("reconciling the foreign key delete rules: %v", err)
+	if err := testschema.Ensure(db); err != nil {
+		t.Fatalf("migrating the test schema: %v", err)
 	}
 	sfx := uuid.NewString()[:8]
 

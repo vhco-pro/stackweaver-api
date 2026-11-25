@@ -36,6 +36,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/state"
@@ -62,9 +63,7 @@ func setupStateVersionContract(t *testing.T) *stateVersionFixture {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
-	// The md5, size, status and resources-processed columns are new; the API migrates them on
-	// startup, and the test migrates them itself so it does not depend on that having run.
-	if err := db.AutoMigrate(&models.StateVersion{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate state versions: %v", err)
 	}
 	sfx := uuid.NewString()[:8]

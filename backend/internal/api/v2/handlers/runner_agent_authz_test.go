@@ -27,6 +27,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
@@ -36,11 +37,7 @@ import (
 func setupRunnerAuthzDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := setupAuthzTestDB(t) // shared helper in authz_matrix_test.go
-	if err := db.AutoMigrate(
-		&models.Organization{}, &models.Project{}, &models.Workspace{},
-		&models.Run{}, &models.Runner{}, &models.AgentPool{},
-		&models.User{}, &models.APIKey{},
-	); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db

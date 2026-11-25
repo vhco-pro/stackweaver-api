@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
@@ -52,7 +53,7 @@ func setupGroupParents(t *testing.T) *groupParentFixture {
 	t.Helper()
 	base := setupNeighbourScope(t)
 	db := base.db
-	if err := db.AutoMigrate(&models.AnsibleInventoryGroup{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrating the tables: %v", err)
 	}
 	sfx := uuid.NewString()[:8]

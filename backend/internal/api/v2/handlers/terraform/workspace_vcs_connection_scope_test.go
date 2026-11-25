@@ -37,6 +37,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/api/middleware"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/services/vcs"
@@ -63,7 +64,7 @@ type workspaceConnectionFixture struct {
 func setupWorkspaceConnections(t *testing.T) *workspaceConnectionFixture {
 	t.Helper()
 	base := setupWorkspaceBooleans(t)
-	if err := base.db.AutoMigrate(&models.VCSConnection{}); err != nil {
+	if err := testschema.Ensure(base.db); err != nil {
 		t.Fatalf("migrating VCS connections: %v", err)
 	}
 	sfx := uuid.NewString()[:8]
@@ -301,7 +302,7 @@ func TestWorkspaceVCSRepo_DefaultConnection(t *testing.T) {
 
 	t.Run("one connection is the default", func(t *testing.T) {
 		base := setupWorkspaceBooleans(t)
-		if err := base.db.AutoMigrate(&models.VCSConnection{}); err != nil {
+		if err := testschema.Ensure(base.db); err != nil {
 			t.Fatalf("migrating VCS connections: %v", err)
 		}
 		var project models.Project
@@ -375,7 +376,7 @@ func TestWorkspaceVCSConnection_StoredRowIsNotTrusted(t *testing.T) {
 	// git refuses the transport before it opens a connection, so a clone this test must not
 	// see cannot reach the network either.
 	t.Setenv("GIT_ALLOW_PROTOCOL", "file")
-	if err := f.db.AutoMigrate(&models.Run{}, &models.ConfigurationVersion{}); err != nil {
+	if err := testschema.Ensure(f.db); err != nil {
 		t.Fatalf("migrating runs and configuration versions: %v", err)
 	}
 	stored := &models.Workspace{

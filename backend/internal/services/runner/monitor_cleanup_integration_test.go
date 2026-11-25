@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/apikey"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/runnercontract"
@@ -56,7 +57,7 @@ func newMonitorCleanupFixture(t *testing.T) *monitorCleanupFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := models.AutoMigrate(db); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatal(err)
 	}
 	create := func(value any) {

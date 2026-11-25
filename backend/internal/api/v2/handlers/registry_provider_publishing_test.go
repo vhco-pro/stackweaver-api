@@ -37,6 +37,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/storage/storagetest"
@@ -52,19 +53,7 @@ func setupTestDBForProvider(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Skipf("Failed to connect to test database (set TEST_DATABASE_URL or ensure local DB is running): %v", err)
 	}
-	if err := db.AutoMigrate(
-		&models.Organization{},
-		&models.User{},
-		&models.Team{},
-		&models.TeamMember{},
-		&models.TeamOrganizationAccess{},
-		&models.Project{},
-		&models.Provider{},
-		&models.ProviderVersion{},
-		&models.ProviderPlatform{},
-		&models.ProviderDownload{},
-		&models.GPGKey{},
-	); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 	return db

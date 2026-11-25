@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	ansiblesvc "github.com/michielvha/stackweaver/core/services/ansible"
@@ -39,7 +40,7 @@ func TestLaunchFromTemplate_OverridesReachTheJob(t *testing.T) {
 	// Org A with an owner and a job template (playbook plus inventory); cleans up after itself.
 	f := setupAnsibleSubResourceAuthz(t)
 	db := f.db
-	if err := db.AutoMigrate(&models.AnsibleJob{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrating ansible jobs: %v", err)
 	}
 	templateID := uuid.MustParse(f.templateID)

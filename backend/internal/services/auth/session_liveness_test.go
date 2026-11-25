@@ -25,6 +25,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -146,7 +147,7 @@ func newLivenessRig(t *testing.T, interval time.Duration) *livenessRig {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.BrowserSession{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	user := &models.User{ID: uuid.New(), ZitadelSubject: "sub-" + uuid.NewString(), Email: "liveness-" + uuid.NewString()[:8] + "@example.com"}

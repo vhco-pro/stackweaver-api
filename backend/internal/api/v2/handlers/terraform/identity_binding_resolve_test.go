@@ -16,12 +16,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 )
 
 func TestRunCreate_IdentityBindingMustBeOfferedByThePool(t *testing.T) {
 	f := setupRunCreateScope(t)
-	if err := f.db.AutoMigrate(&models.AgentPool{}, &models.IdentityBinding{}); err != nil {
+	if err := testschema.Ensure(f.db); err != nil {
 		t.Fatal(err)
 	}
 	pool := &models.AgentPool{ID: uuid.New(), OrganizationID: f.orgA, Name: "idpool-" + uuid.NewString()[:8], OrganizationScoped: true}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"gorm.io/gorm"
@@ -33,7 +34,7 @@ func TestFilterWorkspacesByInstallation(t *testing.T) {
 	if err != nil {
 		t.Skipf("no test database: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Organization{}, &models.Project{}, &models.VCSConnection{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -101,7 +102,7 @@ func setupBindingFixture(t *testing.T) *bindingFixture {
 	if err != nil {
 		t.Skipf("no test database: %v", err)
 	}
-	if err := db.AutoMigrate(&models.Organization{}, &models.Project{}, &models.VCSConnection{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/storage/storagetest"
 	"gorm.io/gorm"
@@ -33,7 +34,7 @@ func testDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(models.AllModels()...); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatal(err)
 	}
 	return db

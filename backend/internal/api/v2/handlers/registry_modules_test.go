@@ -37,6 +37,7 @@ import (
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/backend/internal/services/registry"
 	"github.com/michielvha/stackweaver/core/dbtest"
+	"github.com/michielvha/stackweaver/core/dbtest/testschema"
 	"github.com/michielvha/stackweaver/core/models"
 	"github.com/michielvha/stackweaver/core/repository"
 	"github.com/michielvha/stackweaver/core/storage/storagetest"
@@ -62,17 +63,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	// read endpoints on org membership (orgRepo.UserInOrg reads organization_members AND
 	// teams/team_members) - omitting any of them makes the tests pass only against a DB
 	// that already has the tables (dev) and fail on a fresh CI Postgres.
-	if err := db.AutoMigrate(
-		&models.Organization{},
-		&models.Module{},
-		&models.ModuleVersion{},
-		&models.ModuleDownload{},
-		&models.User{},
-		&models.OrganizationMember{},
-		&models.Team{},
-		&models.TeamMember{},
-		&models.TeamOrganizationAccess{},
-	); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -355,7 +346,7 @@ func TestPublishModuleVersion(t *testing.T) {
 
 	// AUD-004: PublishVersion now requires manage-modules permission. Set up an owner
 	// (owners team → all permissions) and authenticate the request as that user.
-	if err := db.AutoMigrate(&models.User{}, &models.OrganizationMember{}, &models.Team{}, &models.TeamMember{}, &models.TeamOrganizationAccess{}); err != nil {
+	if err := testschema.Ensure(db); err != nil {
 		t.Fatalf("migrate rbac models: %v", err)
 	}
 	ownerUser := &models.User{ID: uuid.New(), ZitadelSubject: "reg-pub-owner-" + uuid.NewString()[:8], Email: "reg-pub-owner-" + uuid.NewString()[:8] + "@test.local"}
