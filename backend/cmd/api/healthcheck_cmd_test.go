@@ -85,9 +85,12 @@ func apiBinary(t *testing.T) string {
 // runHealthcheckBinary runs `stackweaver-api healthcheck` in dir with the test's environment.
 func runHealthcheckBinary(t *testing.T, dir string) (int, string) {
 	t.Helper()
+	// Build before the deadline starts: the first caller builds the whole API,
+	// which can take longer than the deadline on a loaded host.
+	bin := apiBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, apiBinary(t), "healthcheck") //nolint:gosec // G204: runs the binary this test just built
+	cmd := exec.CommandContext(ctx, bin, "healthcheck") //nolint:gosec // G204: runs the binary this test just built
 	cmd.Dir = dir
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

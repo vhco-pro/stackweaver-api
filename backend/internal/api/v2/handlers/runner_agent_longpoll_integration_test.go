@@ -139,9 +139,14 @@ func TestLongPoll_AnOfferIsAnsweredAtOnce(t *testing.T) {
 
 // A thousand held heartbeats hold no database connection: each waits on a channel, not a query
 // (AC70).
+//
+// Every heartbeat queries the database before it registers, so on a busy host registering a
+// thousand takes a while. Each waits far longer than the registration may take, and the wakeup at
+// the end releases them: a short wait let the first waiters expire before the last had registered,
+// and the count then never reached a thousand.
 func TestLongPoll_WaitersHoldNoDatabaseConnection(t *testing.T) {
 	f := setupAgentPrepFixture(t)
-	r, rdb, hub := f.longPollRouter(t, 20*time.Second)
+	r, rdb, hub := f.longPollRouter(t, 10*time.Minute)
 	sqlDB, err := f.db.DB()
 	if err != nil {
 		t.Fatal(err)
@@ -151,10 +156,10 @@ func TestLongPoll_WaitersHoldNoDatabaseConnection(t *testing.T) {
 	var wg sync.WaitGroup
 	for range waiters {
 		wg.Go(func() {
-			runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/heartbeat", runnercontract.HeartbeatRequest{RunnerID: f.runnerA1.ID.String(), WaitSeconds: 15})
+			runnerDo(t, r, "a1", http.MethodPost, "/api/v2/runner/heartbeat", runnercontract.HeartbeatRequest{RunnerID: f.runnerA1.ID.String(), WaitSeconds: 600})
 		})
 	}
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(5 * time.Minute)
 	for hub.Waiting() < waiters {
 		if time.Now().After(deadline) {
 			t.Fatalf("only %d of %d heartbeats are waiting", hub.Waiting(), waiters)
