@@ -200,6 +200,8 @@ func TestWorkItemRunner_OtherSyncsRunInThePlatformImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Every one of them runs in the platform image. A VCS file sync runs with its inventory's
+	// effective binding, here the project's (#1113, D2); the other two keep the platform identity.
 	for _, item := range []*models.WorkItem{snapshot, fileSync, rebuild} {
 		t.Run(item.Kind, func(t *testing.T) {
 			f.onPool(t, item)
@@ -207,12 +209,24 @@ func TestWorkItemRunner_OtherSyncsRunInThePlatformImage(t *testing.T) {
 			if tok.Image != nil {
 				t.Errorf("image in the token = %+v, want none: the %s runs in the platform image", tok.Image, item.Kind)
 			}
-			if tok.Identity != nil {
-				t.Errorf("identity in the token = %+v, want none: the %s runs with the platform identity", tok.Identity, item.Kind)
-			}
 			got := f.reload(t, item.ID)
-			if got.Placement.Image != "" || got.Placement.ImageLevel != "" || got.Placement.IdentityBindingID != nil {
-				t.Errorf("placement = %+v, want no image and no identity binding recorded", got.Placement)
+			if got.Placement.Image != "" || got.Placement.ImageLevel != "" {
+				t.Errorf("placement = %+v, want no image recorded", got.Placement)
+			}
+			if item.Kind == models.WorkItemInventoryFileSync {
+				if tok.Identity == nil || tok.Identity.BindingID != f.projectBinding.ID.String() {
+					t.Errorf("identity in the token = %+v, want the project's binding %s", tok.Identity, f.projectBinding.ID)
+				}
+				if got.Placement.IdentityBindingID == nil || *got.Placement.IdentityBindingID != f.projectBinding.ID {
+					t.Errorf("placement identity binding = %v, want the project's %s", got.Placement.IdentityBindingID, f.projectBinding.ID)
+				}
+			} else {
+				if tok.Identity != nil {
+					t.Errorf("identity in the token = %+v, want none: the %s runs with the platform identity", tok.Identity, item.Kind)
+				}
+				if got.Placement.IdentityBindingID != nil {
+					t.Errorf("placement = %+v, want no identity binding recorded", got.Placement)
+				}
 			}
 			if got.Image != "" || got.ImageLevel != "platform" {
 				t.Errorf("work item image = %q level %q, want the platform image", got.Image, got.ImageLevel)

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/michielvha/logger"
 	"github.com/michielvha/stackweaver/backend/internal/api/v2/jsonapi"
+	"github.com/michielvha/stackweaver/backend/internal/api/v2/levelrefs"
 	"github.com/michielvha/stackweaver/backend/internal/services/auth"
 	"github.com/michielvha/stackweaver/backend/internal/services/rbac"
 	"github.com/michielvha/stackweaver/core/models"
@@ -32,6 +33,50 @@ type InventoryHandler struct {
 	workItems         *ansible.WorkItemService
 	vcsRegistry       *vcs.ProviderRegistry
 	vcsConnectionRepo *repository.VCSConnectionRepository
+	levelRefs         *levelrefs.Checker
+}
+
+// SetLevelRefs sets the checker of the identity binding a VCS inventory selects (#1113, D1).
+func (h *InventoryHandler) SetLevelRefs(c *levelrefs.Checker) { h.levelRefs = c }
+
+// identityBinding checks the identity-binding-id a create or update sends for an inventory of
+// typ in org (#1113, D1): absent leaves the selection, null or empty inherits, an id must name a
+// binding of the organization or the hosted binding. Only a VCS inventory may select one, because
+// only its file syncs run with it. It writes the error and returns false when the request must
+// stop.
+func (h *InventoryHandler) identityBinding(c *gin.Context, typ models.InventoryType, org uuid.UUID, attr jsonapi.Nullable[string]) (id *uuid.UUID, set, ok bool) {
+	if !attr.Present {
+		return nil, false, true
+	}
+	if typ != models.InventoryTypeVCS {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "identity-binding-id applies to a VCS inventory only: its file syncs are what run with the binding")
+		return nil, false, false
+	}
+	if h.levelRefs == nil {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", "identity bindings are not configured")
+		return nil, false, false
+	}
+	raw := attr.Value
+	id, set, err := h.levelRefs.IdentityBinding(org, &raw)
+	if errors.Is(err, levelrefs.ErrInvalid) {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		return nil, false, false
+	}
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return nil, false, false
+	}
+	return id, set, true
+}
+
+// identityRefusal is the reason a refused identity binding is reported with, without the wrapping
+// of the layers it passed through.
+func identityRefusal(err error) string {
+	msg := err.Error()
+	if i := strings.Index(msg, ansible.ErrIdentityBindingRefused.Error()+": "); i >= 0 {
+		return msg[i+len(ansible.ErrIdentityBindingRefused.Error())+2:]
+	}
+	return msg
 }
 
 // NewInventoryHandler creates a new inventory handler
@@ -106,6 +151,8 @@ type CreateInventoryRequest struct {
 			ConstructedLimit        string   `json:"constructed-limit"`
 			ConstructedCacheTimeout int      `json:"constructed-cache-timeout"`
 			InputInventoryIDs       []string `json:"input-inventory-ids"`
+			// IdentityBindingID is a VCS inventory's identity binding (#1113, D1).
+			IdentityBindingID jsonapi.Nullable[string] `json:"identity-binding-id"`
 		} `json:"attributes"`
 		Relationships struct {
 			VCSConnection struct {
@@ -141,6 +188,9 @@ type UpdateInventoryRequest struct {
 			ConstructedLimit        *string   `json:"constructed-limit"`
 			ConstructedCacheTimeout *int      `json:"constructed-cache-timeout"`
 			InputInventoryIDs       *[]string `json:"input-inventory-ids"`
+			// IdentityBindingID is a VCS inventory's identity binding: null or empty inherits
+			// (#1113, D1).
+			IdentityBindingID jsonapi.Nullable[string] `json:"identity-binding-id"`
 		} `json:"attributes"`
 		Relationships struct {
 			VCSConnection struct {
@@ -306,6 +356,11 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 		projectID = defaultProjectID
 	}
 
+	identityID, identitySet, ok := h.identityBinding(c, invType, org.ID, req.Data.Attributes.IdentityBindingID)
+	if !ok {
+		return
+	}
+
 	inventory, err := h.inventoryService.CreateInventory(
 		org.ID,
 		projectID,
@@ -318,7 +373,14 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 		req.Data.Attributes.VCSRepository,
 		req.Data.Attributes.VCSBranch,
 		req.Data.Attributes.InventoryPath,
+		// The binding is inserted with the inventory, in the transaction that locks and checks
+		// it, before the first sync is requested (#1113, D1, D2).
+		ansible.IdentityChange{Set: identitySet, ID: identityID},
 	)
+	if errors.Is(err, ansible.ErrIdentityBindingRefused) {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", identityRefusal(err))
+		return
+	}
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		// A VCS connection the inventory may not name: one of another organization and one
 		// that does not exist get this same answer.
@@ -356,13 +418,24 @@ func (h *InventoryHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Auto-trigger sync for VCS-backed inventories
+	// Auto-trigger sync for VCS-backed inventories. The inventory is already created, so the
+	// request answers 201 whatever happens to its first sync: a refusal or a database error is
+	// recorded as the inventory's last sync, only when no file sync of it exists yet (#1113, D2).
 	if inventory.VCSConnectionID != nil && inventory.VCSRepository != "" && inventory.InventoryPath != "" && h.workItems != nil {
-		h.setSyncStatus(inventory, "syncing", "")
-
 		if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
-			// Log error but don't fail the create request
-			h.setSyncStatus(inventory, "pending", "Auto-sync could not be requested: "+err.Error())
+			reason, refused := ansible.FileSyncRefusal(err)
+			if !refused {
+				logger.Warnf("requesting the first sync of inventory %s: %v", inventory.ID, err)
+				reason = ansible.FirstSyncRetryReason
+			}
+			if recErr := h.workItems.RecordFileSyncFailure(c.Request.Context(), inventory.ID, reason, ansible.FirstSyncFailure); recErr != nil {
+				logger.Warnf("recording the failed first sync of inventory %s: %v", inventory.ID, recErr)
+			}
+			if stored, getErr := h.inventoryRepo.GetByID(inventory.ID); getErr == nil {
+				inventory.LastSyncStatus, inventory.LastSyncError = stored.LastSyncStatus, stored.LastSyncError
+			}
+		} else {
+			inventory.LastSyncStatus, inventory.LastSyncError = "syncing", ""
 		}
 	}
 
@@ -475,6 +548,10 @@ func (h *InventoryHandler) Update(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	identityID, identitySet, ok := h.identityBinding(c, rbacInventory.Type, rbacInventory.OrganizationID, req.Data.Attributes.IdentityBindingID)
+	if !ok {
+		return
+	}
 
 	// Parse VCS connection ID if provided
 	var vcsConnectionID *uuid.UUID
@@ -521,7 +598,14 @@ func (h *InventoryHandler) Update(c *gin.Context) {
 		req.Data.Attributes.VCSRepository,
 		req.Data.Attributes.VCSBranch,
 		req.Data.Attributes.InventoryPath,
+		// Every attribute the update changes, the binding included, is written in one transaction
+		// on the locked row; the binding only when the request sends it (#1113, D1).
+		ansible.IdentityChange{Set: identitySet, ID: identityID},
 	)
+	if errors.Is(err, ansible.ErrIdentityBindingRefused) {
+		jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", identityRefusal(err))
+		return
+	}
 	if errors.Is(err, ansible.ErrInvalidInput) {
 		// As on create: the one answer for a VCS connection the inventory may not name.
 		jsonapi.WriteError(c, http.StatusBadRequest, jsonapi.TitleBadRequest, err.Error())
@@ -846,22 +930,38 @@ func (h *InventoryHandler) SyncInventory(c *gin.Context) {
 		return
 	}
 
-	// Update sync status to syncing
-	if err := h.inventoryRepo.SetSyncStatus(inventory.ID, "syncing", ""); err != nil {
-		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update sync status")
+	if inventory.Type == models.InventoryTypeConstructed {
+		// A constructed rebuild is marked syncing first, as before (#1113 leaves rebuilds as they are).
+		if err := h.inventoryRepo.SetSyncStatus(inventory.ID, "syncing", ""); err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to update sync status")
+			return
+		}
+		inventory.LastSyncStatus, inventory.LastSyncError = "syncing", ""
+		if h.workItems != nil {
+			if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
+				h.setSyncStatus(inventory, "failed", "Failed to request the sync: "+err.Error())
+				jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
+				return
+			}
+		}
+		jsonapi.WriteDocument(c, http.StatusAccepted, formatInventoryResponse(inventory))
 		return
 	}
-	inventory.LastSyncStatus, inventory.LastSyncError = "syncing", ""
 
-	// Request the sync work item
+	// A file sync request is checked before anything is written: it marks the inventory syncing in
+	// the transaction that queues the work item, so a refusal or a failure leaves the status as it
+	// was, and nothing this request writes later can overwrite a fast completion (#1113, D2).
 	if h.workItems != nil {
 		if _, err := h.workItems.RequestInventorySync(c.Request.Context(), inventory, "manual"); err != nil {
-			// Revert status when the sync cannot be requested
-			h.setSyncStatus(inventory, "failed", "Failed to request the sync: "+err.Error())
-
+			if reason, refused := ansible.FileSyncRefusal(err); refused {
+				jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", reason)
+				return
+			}
+			logger.Warnf("requesting a sync of inventory %s: %v", inventory.ID, err)
 			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to request the sync")
 			return
 		}
+		inventory.LastSyncStatus, inventory.LastSyncError = "syncing", ""
 	}
 
 	jsonapi.WriteDocument(c, http.StatusAccepted, formatInventoryResponse(inventory))
@@ -906,6 +1006,7 @@ func formatInventoryResponse(inv *models.AnsibleInventory) *jsonapi.Resource[Inv
 	attributes.VCSRepository = inv.VCSRepository
 	attributes.VCSBranch = inv.VCSBranch
 	attributes.InventoryPath = inv.InventoryPath
+	attributes.IdentityBindingID = levelrefs.UUIDString(inv.IdentityBindingID)
 
 	relationships := InventoryRelationships{
 		Organization: jsonapi.ToOne(inv.OrganizationID.String(), "organizations"),

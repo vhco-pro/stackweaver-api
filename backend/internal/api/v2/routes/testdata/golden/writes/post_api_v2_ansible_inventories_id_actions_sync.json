@@ -12,6 +12,7 @@
         "constructed-limit": "",
         "created-at": "\u003ctimestamp\u003e",
         "description": "",
+        "identity-binding-id": null,
         "inventory-type": "constructed",
         "last-sync-at": null,
         "last-sync-error": "",

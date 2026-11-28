@@ -415,6 +415,9 @@ type InventoryAttributes struct {
 	VCSRepository           string                    `json:"vcs_repository,omitempty"`
 	VCSBranch               string                    `json:"vcs_branch,omitempty"`
 	InventoryPath           string                    `json:"inventory_path,omitempty"`
+	// IdentityBindingID is the identity binding a VCS inventory's file syncs use, null to inherit
+	// from the project and organization (#1113, D1).
+	IdentityBindingID *string `json:"identity-binding-id"`
 	// InputInventories is decorated post-hoc on the detail route for constructed
 	// inventories, so it is a slice pointer: absent everywhere else, present (even empty)
 	// once set.

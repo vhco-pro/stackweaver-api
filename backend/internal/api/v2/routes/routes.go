@@ -477,6 +477,7 @@ func SetupV2Routes(
 	v2.GET("/workspaces/:id/effective-settings", effectiveSettingsHandler.GetWorkspace)
 	v2.GET("/ansible/job-templates/:id/effective-settings", effectiveSettingsHandler.GetJobTemplate)
 	v2.GET("/ansible/inventory-sources/:source_id/effective-settings", effectiveSettingsHandler.GetInventorySource)
+	v2.GET("/ansible/inventories/:id/effective-settings", effectiveSettingsHandler.GetInventory)
 
 	// Notification configurations (tfe_notification_configuration): workspace run-notifications with
 	// real delivery (generic HMAC webhook / Slack / Teams). Delivery fires from the orchestrator poll.
@@ -961,7 +962,9 @@ func SetupV2Routes(
 	agentTokenHandler := handlers.NewAgentTokenHandlerV2(tokenAPIKeyService, authService, rbacService, agentPoolRepo)
 	// Identity bindings a customer pool offers its job pods (#933, D8).
 	identityBindingHandler := handlers.NewIdentityBindingHandler(agentPoolRepo, repository.NewIdentityBindingRepository(db), authService, rbacService)
+	identityBindingHandler.SetOrganizations(orgRepo)
 	v2.GET("/agent-pools/:id/identity-bindings", identityBindingHandler.List)
+	v2.GET("/organizations/:name/identity-bindings", identityBindingHandler.ListOrganization)
 	v2.POST("/agent-pools/:id/identity-bindings", identityBindingHandler.Create)
 	v2.GET("/identity-bindings/:id", identityBindingHandler.Get)
 	v2.PATCH("/identity-bindings/:id", identityBindingHandler.Update)

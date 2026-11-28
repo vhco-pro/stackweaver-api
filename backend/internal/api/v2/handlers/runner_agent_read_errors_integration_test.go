@@ -360,6 +360,11 @@ func TestRunnerReadErrors_WorkItemTargetReads(t *testing.T) {
 	if err := f.db.Model(&models.Workspace{}).Where("id = ?", run.WorkspaceID).Updates(map[string]any{"vcs_connection_id": f.vcsConn, "vcs_repository": "fixture/configuration"}).Error; err != nil {
 		t.Fatal(err)
 	}
+	// The fixture's GitLab connection holds a stored credential, which reaches pool A only when the
+	// organization allows it (#1113, D2).
+	if err := f.db.Model(&models.Organization{}).Where("id = ?", f.orgA).Update("allow_stored_vcs_credentials_on_agent_pools", true).Error; err != nil {
+		t.Fatal(err)
+	}
 	h := &RunnerAgentHandler{
 		db: f.db, inventoryRepo: repository.NewAnsibleInventoryRepository(f.db),
 		vcsRegistry:   vcs.NewProviderRegistry(nil, nil, nil, nil),
@@ -385,6 +390,12 @@ func TestRunnerReadErrors_WorkItemTargetReads(t *testing.T) {
 				InventoryID: &f.inventory, RunID: &run.ID,
 				Status: models.WorkItemStatusRunning, AgentPoolID: &f.poolA,
 				RunnerID: &f.runnerA1.ID, Attempt: 1,
+				// The attempt's first token recorded its decision and the inventory scope it
+				// validated (the organization-scoped inventory has no project), as the artifacts
+				// route requires (#1113, D2).
+				Placement: models.JobPlacement{IdentityAttempt: 1, Identity: &models.PlacementIdentity{
+					Mechanism: models.PlacementMechanismPlatform, Scope: &models.PlacementScope{},
+				}},
 			}
 			if err := f.db.Create(item).Error; err != nil {
 				t.Fatal(err)

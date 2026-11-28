@@ -262,6 +262,7 @@ func SetupAnsibleRoutes(
 	// Initialize new handlers
 	inventorySourceHandler := ansibleHandlers.NewInventorySourceHandler(inventorySourceService, inventoryService, authService, rbacService, workItems)
 	inventorySourceHandler.SetLevelRefs(levelrefs.New(db))
+	inventoryHandler.SetLevelRefs(levelrefs.New(db))
 	playbookHandler.SetLevelRefs(levelrefs.New(db))
 	inventorySyncHandler := ansibleHandlers.NewInventorySyncHandler(repository.NewAnsibleInventorySyncRepository(db), inventoryRepo, authService, rbacService)
 	scheduleHandler := ansibleHandlers.NewScheduleHandler(schedulerService, orgRepo, authService, rbacService)

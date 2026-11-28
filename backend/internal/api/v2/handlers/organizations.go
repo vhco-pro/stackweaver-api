@@ -82,6 +82,9 @@ type OrganizationAttributes struct {
 	AnsibleRunImageID *string `json:"ansible-run-image-id"`
 	IdentityBindingID *string `json:"identity-binding-id"`
 	CacheSizeLimit    *int64  `json:"cache-size-limit"`
+	// AllowStoredVCSCredentialsOnAgentPools is a Stackweaver extension (#1113, Q13): whether file
+	// syncs of inventories whose VCS connection holds a stored credential may run on agent pools.
+	AllowStoredVCSCredentialsOnAgentPools *bool `json:"allow-stored-vcs-credentials-on-agent-pools"`
 
 	// tfe_organization policy flags (all optional pointers so PATCH can distinguish unset from
 	// false). See the tfe_organization spec doc for the runtime each one drives.
@@ -334,6 +337,7 @@ type OrganizationResponseAttributes struct {
 	CacheSizeLimit                                    int64   `json:"cache-size-limit"`
 	AnsibleJobRetentionDays                           int     `json:"ansible-job-retention-days"`
 	AnsibleAdhocModules                               string  `json:"ansible-adhoc-modules"`
+	AllowStoredVCSCredentialsOnAgentPools             bool    `json:"allow-stored-vcs-credentials-on-agent-pools"`
 	SpeculativePlanManagementEnabled                  bool    `json:"speculative-plan-management-enabled"`
 	AggregatedCommitStatusEnabled                     bool    `json:"aggregated-commit-status-enabled"`
 	AssessmentsEnforced                               bool    `json:"assessments-enforced"`
@@ -373,27 +377,28 @@ func buildTFEOrganizationResponse(org *models.Organization, defaultProjectID *uu
 		ID:   org.Name,
 		Type: "organizations",
 		Attributes: OrganizationResponseAttributes{
-			Name:                             org.Name,
-			ExternalID:                       org.ID.String(),
-			CreatedAt:                        jsonapi.FormatTime(org.CreatedAt),
-			UpdatedAt:                        jsonapi.FormatTime(org.UpdatedAt),
-			Email:                            org.Email,
-			CollaboratorAuthPolicy:           collaboratorAuthPolicy,
-			CostEstimationEnabled:            org.CostEstimationEnabled,
-			DefaultTerraformVersion:          org.DefaultTofuVersion,
-			DefaultExecutionMode:             defaultExecutionMode,
-			RunTimeout:                       org.RunTimeout,
-			TofuRunImageID:                   levelrefs.UUIDString(org.TofuRunImageID),
-			AnsibleRunImageID:                levelrefs.UUIDString(org.AnsibleRunImageID),
-			IdentityBindingID:                levelrefs.UUIDString(org.IdentityBindingID),
-			CacheSizeLimit:                   org.CacheSizeLimit,
-			AnsibleJobRetentionDays:          org.AnsibleJobRetentionDays,
-			AnsibleAdhocModules:              org.AnsibleAdHocModules,
-			SpeculativePlanManagementEnabled: org.SpeculativePlanManagement(),
-			AggregatedCommitStatusEnabled:    org.AggregatedCommitStatusEnabled,
-			AssessmentsEnforced:              org.AssessmentsEnforced,
-			AllowForceDeleteWorkspaces:       org.AllowForceDeleteWorkspaces,
-			UserTokensEnabled:                org.UserTokensAllowed(),
+			Name:                                  org.Name,
+			ExternalID:                            org.ID.String(),
+			CreatedAt:                             jsonapi.FormatTime(org.CreatedAt),
+			UpdatedAt:                             jsonapi.FormatTime(org.UpdatedAt),
+			Email:                                 org.Email,
+			CollaboratorAuthPolicy:                collaboratorAuthPolicy,
+			CostEstimationEnabled:                 org.CostEstimationEnabled,
+			DefaultTerraformVersion:               org.DefaultTofuVersion,
+			DefaultExecutionMode:                  defaultExecutionMode,
+			RunTimeout:                            org.RunTimeout,
+			TofuRunImageID:                        levelrefs.UUIDString(org.TofuRunImageID),
+			AnsibleRunImageID:                     levelrefs.UUIDString(org.AnsibleRunImageID),
+			IdentityBindingID:                     levelrefs.UUIDString(org.IdentityBindingID),
+			CacheSizeLimit:                        org.CacheSizeLimit,
+			AnsibleJobRetentionDays:               org.AnsibleJobRetentionDays,
+			AnsibleAdhocModules:                   org.AnsibleAdHocModules,
+			AllowStoredVCSCredentialsOnAgentPools: org.AllowStoredVCSCredentialsOnAgentPools,
+			SpeculativePlanManagementEnabled:      org.SpeculativePlanManagement(),
+			AggregatedCommitStatusEnabled:         org.AggregatedCommitStatusEnabled,
+			AssessmentsEnforced:                   org.AssessmentsEnforced,
+			AllowForceDeleteWorkspaces:            org.AllowForceDeleteWorkspaces,
+			UserTokensEnabled:                     org.UserTokensAllowed(),
 			SendPassingStatusesForUntriggeredSpeculativePlans: org.SendPassingStatusesForUntriggeredSpeculativePlans,
 			Permissions: OrganizationPermissions{
 				CanUpdate: true, CanDestroy: true, CanAccessViaTeams: true,
@@ -861,6 +866,9 @@ func (h *OrganizationHandlerV2) Update(c *gin.Context) {
 	}
 	if newAnsibleAdHocModules != nil {
 		org.AnsibleAdHocModules = *newAnsibleAdHocModules
+	}
+	if attrs.AllowStoredVCSCredentialsOnAgentPools != nil {
+		org.AllowStoredVCSCredentialsOnAgentPools = *attrs.AllowStoredVCSCredentialsOnAgentPools
 	}
 
 	// tfe_organization_default_settings: the org-wide execution defaults.

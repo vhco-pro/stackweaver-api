@@ -198,7 +198,7 @@ func (h *WorkspaceHandlerV2) checkIdentityBindingOffered(c *gin.Context, workspa
 	}
 	binding := settings.EffectiveWorkspaceIdentity(&resolved).Value
 	pool := settings.EffectiveExecution(&resolved).Value.PoolID
-	if err := levelrefs.New(h.db).Offered(binding, pool); err != nil {
+	if err := levelrefs.New(h.db).Offered(resolved.Project.OrganizationID, binding, pool); err != nil {
 		if errors.Is(err, repository.ErrBindingNotOffered) {
 			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 		} else {

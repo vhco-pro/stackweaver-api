@@ -93,6 +93,13 @@ func ParseJobPrincipal(scopes []string) (p JobPrincipal, ok bool) {
 //
 // poolID is the agent pool of the launcher the token is minted for, nil for a hosted launcher. It
 // is stored as the token's AgentPoolID, marking the token as minted for a launcher that passed
+// HasJobToken reports whether a job token was ever minted for the job's attempt, expired, revoked or
+// live. An attempt that holds one but no identity decision started before decisions were recorded
+// (#1113, D3).
+func (s *Service) HasJobToken(kind models.JobType, jobID string, attempt int) (bool, error) {
+	return s.apiKeyRepo.ExistsByScopes(jobScopePrefix+string(kind)+":"+jobID+":", jobAttemptScopePrefix+strconv.Itoa(attempt))
+}
+
 // RunnerAuth as it now works; RunnerAuth refuses a customer job token without it.
 func (s *Service) CreateJobToken(orgID uuid.UUID, poolID *uuid.UUID, p JobPrincipal, expiresAt time.Time) (*models.APIKey, string, error) {
 	key, err := GenerateAPIKey()

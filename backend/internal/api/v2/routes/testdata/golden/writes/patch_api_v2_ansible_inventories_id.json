@@ -36,6 +36,10 @@
                   "type": "string",
                   "nullable": true
                 },
+                "identity-binding-id": {
+                  "type": "string",
+                  "nullable": true
+                },
                 "input-inventory-ids": {
                   "type": "array",
                   "nullable": true,
@@ -131,6 +135,7 @@
         "constructed-limit": "",
         "created-at": "\u003ctimestamp\u003e",
         "description": "Updated by the golden write harness",
+        "identity-binding-id": null,
         "inventory-type": "static",
         "last-sync-at": null,
         "last-sync-error": "",

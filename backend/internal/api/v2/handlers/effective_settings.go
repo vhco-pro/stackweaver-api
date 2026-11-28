@@ -107,6 +107,15 @@ func inventorySourceEffectiveSettings(src *models.AnsibleInventorySource, projec
 	}
 }
 
+// inventoryEffectiveSettings resolves a VCS inventory's settings (#1113, D1): the identity binding
+// its file syncs run with, through the inventory, its project (nil for an organization-scoped
+// inventory) and its organization.
+func inventoryEffectiveSettings(inv *models.AnsibleInventory, project *models.Project, org *models.Organization) EffectiveSettingsAttributes {
+	return EffectiveSettingsAttributes{
+		IdentityBindingID: idSetting(settings.EffectiveInventoryIdentity(inv, project, org)),
+	}
+}
+
 func effectiveSettingsResource(id string, attrs EffectiveSettingsAttributes) jsonapi.Resource[EffectiveSettingsAttributes] {
 	return jsonapi.Resource[EffectiveSettingsAttributes]{ID: id, Type: effectiveSettingsType, Attributes: attrs}
 }
@@ -116,6 +125,7 @@ func effectiveSettingsResource(id string, attrs EffectiveSettingsAttributes) jso
 //	GET /workspaces/:id/effective-settings
 //	GET /ansible/job-templates/:id/effective-settings
 //	GET /ansible/inventory-sources/:source_id/effective-settings
+//	GET /ansible/inventories/:id/effective-settings
 //
 // Each answers with the resolved value of every multi-level setting and the level it came from, so
 // the UI and the provider show where a value is inherited from. Reading needs read access to the
@@ -268,4 +278,51 @@ func (h *EffectiveSettingsHandlerV2) GetInventorySource(c *gin.Context) {
 		return
 	}
 	jsonapi.WriteDocument(c, http.StatusOK, effectiveSettingsResource(source.ID.String(), inventorySourceEffectiveSettings(source, project, org, h.syncTimeout)))
+}
+
+// GetInventory - GET /ansible/inventories/:id/effective-settings: the identity binding a VCS
+// inventory's file syncs run with and the level it came from (#1113, D1).
+func (h *EffectiveSettingsHandlerV2) GetInventory(c *gin.Context) {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusBadRequest, "Bad Request", "Invalid inventory ID")
+		return
+	}
+	inventory, err := h.inventoryRepo.GetByID(id)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
+		return
+	}
+	var allowed bool
+	if inventory.ProjectID != nil {
+		allowed, err = h.rbacService.CheckAnsibleResourcePermission(c.Request.Context(), user.ID, rbac.ResourceTypeAnsibleInventory, inventory.ID.String(), rbac.PermissionAnsibleInventoryRead, inventory.ProjectID)
+	} else {
+		allowed, err = h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, inventory.OrganizationID)
+	}
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+		return
+	}
+	if !allowed {
+		jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to access this inventory")
+		return
+	}
+	var project *models.Project
+	if inventory.ProjectID != nil {
+		if project, err = h.projectRepo.GetByID(*inventory.ProjectID); err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load the inventory's project")
+			return
+		}
+	}
+	org, err := h.orgRepo.GetByID(inventory.OrganizationID)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to load the inventory's organization")
+		return
+	}
+	jsonapi.WriteDocument(c, http.StatusOK, effectiveSettingsResource(inventory.ID.String(), inventoryEffectiveSettings(inventory, project, org)))
 }
