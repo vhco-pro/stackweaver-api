@@ -68,6 +68,9 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Workspace not found")
 		return
 	}
+	if !h.authorizeWorkspaceRuns(c, workspace) {
+		return
+	}
 
 	var req CreateConfigurationVersionRequestV2
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -143,6 +146,30 @@ func (h *ConfigurationVersionHandlerV2) Create(c *gin.Context) {
 		Speculative:   configVersion.Speculative,
 		CreatedAt:     jsonapi.FormatTime(configVersion.CreatedAt),
 	}, workspace.ID, uploadURL))
+}
+
+// authorizeWorkspaceRuns writes the JSON:API error and returns false unless the caller may create
+// runs in the workspace. A new configuration version is what a run without one plans, so creating
+// one takes the same permissions as creating a run: runs and workspace write (RunHandlerV2.Create).
+func (h *ConfigurationVersionHandlerV2) authorizeWorkspaceRuns(c *gin.Context, ws *models.Workspace) bool {
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return false
+	}
+	ctx := c.Request.Context()
+	for _, permission := range []rbac.Permission{rbac.PermissionRuns, rbac.PermissionWorkspaceWrite} {
+		allowed, err := h.rbacService.CheckResourcePermission(ctx, user.ID, rbac.ResourceTypeTerraformWorkspace, ws.ID, permission, &ws.ProjectID)
+		if err != nil {
+			jsonapi.WriteError(c, http.StatusInternalServerError, "Internal Server Error", "Failed to check permissions")
+			return false
+		}
+		if !allowed {
+			jsonapi.WriteError(c, http.StatusForbidden, "Forbidden", "You do not have permission to create configuration versions in this workspace")
+			return false
+		}
+	}
+	return true
 }
 
 // authorizeWorkspaceRead writes the JSON:API error and returns false unless the caller may read the
