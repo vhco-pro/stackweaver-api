@@ -41,6 +41,8 @@ type workItemRunnerFixture struct {
 	svc   *apikey.Service
 	store *snapshotStore
 	items *ansible.WorkItemService
+	// registration is the raw agent token launcherAPI minted for pool A.
+	registration string
 }
 
 func setupWorkItemRunner(t *testing.T) *workItemRunnerFixture {
@@ -60,9 +62,22 @@ func setupWorkItemRunner(t *testing.T) *workItemRunnerFixture {
 		storageClient:  store,
 	}
 	h.SetWorkItems(ansible.NewWorkItemRuntime(f.db, export, nil))
-	// The pool's runners declare that they run work items, as a launcher does.
+	// The pool's runners declare that they run work items, as a launcher does, and place pods, so
+	// the API issues them an identity binding (#1113, D3).
 	for _, r := range []*models.Runner{f.runnerA1, f.runnerA2} {
 		f.declareCapabilities(t, r, runnercontract.CapabilityJobToken, runnercontract.CapabilityWorkItems)
+		if err := f.db.Model(r).Update("driver", "kubernetes").Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Pool A lets project A use it, and organization A allows its GitLab connection's stored
+	// credential on agent pools, so file syncs bound to pool A queue there (#1113, D2).
+	if err := f.db.Exec("INSERT INTO agent_pool_allowed_projects (agent_pool_id, project_id) VALUES (?, ?) ON CONFLICT DO NOTHING", f.poolA, f.projectA).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.db.Exec("DELETE FROM agent_pool_allowed_projects WHERE agent_pool_id = ?", f.poolA) })
+	if err := f.db.Model(&models.Organization{}).Where("id = ?", f.orgA).Update("allow_stored_vcs_credentials_on_agent_pools", true).Error; err != nil {
+		t.Fatal(err)
 	}
 	r := f.router(func(authed *gin.RouterGroup) {
 		authed.POST("/heartbeat", middleware.RequireRunnerToken(), h.Heartbeat)
@@ -341,14 +356,17 @@ func TestWorkItemRunner_NoSnapshotIsStoredForADeletedPlaybook(t *testing.T) {
 
 func TestWorkItemRunner_InventoryFileSyncPersistsTheResult(t *testing.T) {
 	f := setupWorkItemRunner(t)
+	// A project inventory: the test moves its sync onto pool A, which lets project A use it, and an
+	// organization-scoped inventory may use only an organization-scoped pool (#1113, D2).
 	inv := &models.AnsibleInventory{
-		ID: uuid.New(), OrganizationID: f.orgA, Name: "wi-inv-" + uuid.NewString()[:8], Type: models.InventoryTypeVCS,
+		ID: uuid.New(), OrganizationID: f.orgA, ProjectID: &f.projectA, Name: "wi-inv-" + uuid.NewString()[:8], Type: models.InventoryTypeVCS,
 		VCSConnectionID: &f.vcsConn, VCSRepository: "acme/inventories", VCSBranch: "main", InventoryPath: "hosts.yml",
 	}
 	if err := f.db.Create(inv).Error; err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		f.db.Where("inventory_id = ?", inv.ID).Delete(&models.WorkItem{})
 		f.db.Where("inventory_id = ?", inv.ID).Delete(&models.AnsibleInventorySync{})
 		f.db.Where("inventory_id = ?", inv.ID).Delete(&models.AnsibleInventoryHost{})
 		f.db.Where("inventory_id = ?", inv.ID).Delete(&models.AnsibleInventoryGroup{})

@@ -1203,7 +1203,7 @@ func (h *PlaybookHandler) checkTemplateIdentityOffered(c *gin.Context, t *models
 	}
 	binding := settings.EffectiveTemplateIdentity(t, project, &project.Organization).Value
 	pool := settings.EffectiveJobPool(t, project).Value
-	if err := h.levelRefs.Offered(binding, pool); err != nil {
+	if err := h.levelRefs.Offered(project.OrganizationID, binding, pool); err != nil {
 		if errors.Is(err, repository.ErrBindingNotOffered) {
 			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 		} else {

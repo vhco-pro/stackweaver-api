@@ -147,7 +147,7 @@ func setupErrorEnvelope(t *testing.T) *errorEnvelopeFixture {
 	))
 
 	inventory, err := inventoryService.CreateInventory(
-		orgA.ID, &projA.ID, "errenv-inv-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "",
+		orgA.ID, &projA.ID, "errenv-inv-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "", ansiblesvc.IdentityChange{},
 	)
 	if err != nil {
 		t.Fatalf("creating the inventory: %v", err)

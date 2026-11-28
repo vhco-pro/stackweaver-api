@@ -23,6 +23,7 @@ import (
 	"github.com/michielvha/stackweaver/core/runnercontract"
 	"github.com/michielvha/stackweaver/core/security/gitargs"
 	"github.com/michielvha/stackweaver/core/services/ansible"
+	"github.com/michielvha/stackweaver/core/services/vcs"
 	"github.com/michielvha/stackweaver/core/services/wakeup"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -144,18 +145,23 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		}
 		art.Clone, art.PlaybookPath = clone, playbook.PlaybookPath
 	case models.WorkItemInventoryFileSync:
-		inventory, err := h.inventoryRepo.GetByID(*item.InventoryID)
-		if err != nil {
+		// One statement: the scope check and the clone inputs come from the same row, so a move
+		// that commits after this read never sends the destination's repository to a pool validated
+		// for the old project (#1113, D2).
+		var inventory models.AnsibleInventory
+		if err := h.db.WithContext(ctx).Select("id", "organization_id", "project_id", "vcs_connection_id", "vcs_repository", "vcs_branch", "inventory_path").
+			First(&inventory, "id = ?", *item.InventoryID).Error; err != nil {
 			return nil, fmt.Errorf("loading inventory: %w", err)
 		}
 		if inventory.VCSConnectionID == nil || inventory.VCSRepository == "" || inventory.InventoryPath == "" {
 			return nil, fmt.Errorf("inventory has no VCS connection configured: %w", ansible.ErrInvalidInput)
 		}
-		clone, err := h.cloneSourceFor(ctx, func(scope *repository.OrganizationScope) (*models.VCSConnection, error) {
-			return ansible.InventoryVCSConnection(scope, inventory.OrganizationID, *inventory.VCSConnectionID)
-		}, inventory.VCSRepository, inventory.VCSBranch)
+		if err := validatedInventoryScope(item, &inventory); err != nil {
+			return nil, err
+		}
+		clone, err := h.fileSyncCloneSource(ctx, item, &inventory)
 		if err != nil {
-			return nil, fmt.Errorf("resolving the inventory's VCS connection: %w", err)
+			return nil, err
 		}
 		art.Clone, art.InventoryPath = clone, inventory.InventoryPath
 		art.AzureSubscriptionID, err = h.orgAzureSubscription(item.OrganizationID)
@@ -226,6 +232,76 @@ func (h *RunnerAgentHandler) workItemArtifacts(ctx context.Context, item *models
 		return nil, fmt.Errorf("work item kind %q is not served by this API: %w", item.Kind, ansible.ErrInvalidInput)
 	}
 	return art, nil
+}
+
+// validatedInventoryScope checks that the attempt holds an identity decision and that the inventory
+// is still in the project that decision validated (#1113, D2, D3). An attempt with no decision, as
+// for an executor token minted before decisions were recorded, gets no clone inputs.
+func validatedInventoryScope(item *models.WorkItem, inv *models.AnsibleInventory) error {
+	attempt := item.Attempt
+	if attempt == 0 {
+		attempt = 1
+	}
+	decided := item.Placement.Identity
+	if item.Placement.IdentityAttempt != attempt || decided == nil || decided.Scope == nil {
+		return fmt.Errorf("no validated inventory scope for this attempt: %w", ansible.ErrInvalidInput)
+	}
+	want, got := decided.Scope.ProjectID, inv.ProjectID
+	if (want == nil) != (got == nil) || (want != nil && *want != *got) {
+		return fmt.Errorf("the inventory moved to another project after this attempt's first token: %w", ansible.ErrInvalidInput)
+	}
+	return nil
+}
+
+// fileSyncCloneSource resolves a file sync's clone (#1113, D2, owner decision Q13). A connection with
+// a stored credential is refused, before any token is fetched, for a work item on an agent pool
+// while the organization does not allow stored credentials there. The token comes from
+// ProviderRegistry.RepositoryToken: limited to the inventory's repository, read-only, for a GitHub
+// App connection. GitHub's refusal of that token fails the work item; any other failure answers 500
+// and leaves it for a retry. No database lock is held while the token is fetched.
+func (h *RunnerAgentHandler) fileSyncCloneSource(ctx context.Context, item *models.WorkItem, inv *models.AnsibleInventory) (*runnercontract.CloneSource, error) {
+	if h.vcsRegistry == nil {
+		return nil, fmt.Errorf("VCS providers are not configured: %w", ansible.ErrInvalidInput)
+	}
+	conn, err := ansible.InventoryVCSConnection(repository.NewOrganizationScope(h.db).WithContext(ctx), inv.OrganizationID, *inv.VCSConnectionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving the inventory's VCS connection: %w", err)
+	}
+	if !conn.Narrowable() && item.AgentPoolID != nil {
+		var pool models.AgentPool
+		if err := h.db.WithContext(ctx).Select("id", "name", "kind").First(&pool, "id = ?", *item.AgentPoolID).Error; err != nil {
+			return nil, fmt.Errorf("loading the pool of %s: %w", item.ID, err)
+		}
+		if !pool.IsHosted() {
+			var org models.Organization
+			if err := h.db.WithContext(ctx).Select("id", "allow_stored_vcs_credentials_on_agent_pools").First(&org, "id = ?", inv.OrganizationID).Error; err != nil {
+				return nil, fmt.Errorf("loading organization %s: %w", inv.OrganizationID, err)
+			}
+			if !org.AllowStoredVCSCredentialsOnAgentPools {
+				return nil, fmt.Errorf("%s: %w", ansible.StoredCredentialRefusal(conn, pool.Name), ansible.ErrInvalidInput)
+			}
+		}
+	}
+	provider, err := h.vcsRegistry.GetProvider(conn)
+	if err != nil {
+		return nil, fmt.Errorf("selecting the VCS provider: %w", errors.Join(ansible.ErrInvalidInput, err))
+	}
+	token, err := h.vcsRegistry.RepositoryToken(ctx, conn, inv.VCSRepository)
+	if errors.Is(err, vcs.ErrRepositoryTokenRefused) {
+		return nil, fmt.Errorf("%w: %w", err, ansible.ErrInvalidInput)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fetching the clone token for %s: %w", inv.VCSRepository, err)
+	}
+	branch := inv.VCSBranch
+	if branch == "" {
+		branch = "main"
+	}
+	clone := cloneSourceFromURL(provider.BuildCloneURL(conn, token, inv.VCSRepository), branch)
+	if clone == nil {
+		return nil, fmt.Errorf("the repository clone URL is invalid: %w", ansible.ErrInvalidInput)
+	}
+	return clone, nil
 }
 
 // cloneSourceFor resolves a repository's clone through the connection lookup names, within the

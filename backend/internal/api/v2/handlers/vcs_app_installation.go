@@ -159,14 +159,36 @@ func NewVCSAppInstallationHandlerV2(
 	}
 }
 
+// webhookSyncTimeout bounds a webhook-triggered inventory sync request and its failure record,
+// including every lock wait in them (#1113, D2).
+var webhookSyncTimeout = 30 * time.Second
+
 // requestInventorySync requests the webhook-triggered sync of an inventory as a work item. The
-// credential the clone needs is resolved when a launcher runs it, never carried on the request.
+// credential the clone needs is resolved when a launcher runs it, never carried on the request. A
+// refused or failed file sync request is recorded on the inventory unless a file sync of it is
+// waiting or running; a request whose wait timed out writes nothing (#1113, D2).
 func (h *VCSAppInstallationHandlerV2) requestInventorySync(inv *models.AnsibleInventory) {
 	if h.workItems == nil {
 		return
 	}
-	if _, err := h.workItems.RequestInventorySync(context.Background(), inv, "webhook"); err != nil {
-		logger.Errorf("Error requesting a sync of inventory %s: %v", inv.ID, err)
+	ctx, cancel := context.WithTimeout(context.Background(), webhookSyncTimeout)
+	defer cancel()
+	_, err := h.workItems.RequestInventorySync(ctx, inv, "webhook")
+	if err == nil {
+		return
+	}
+	logger.Errorf("Error requesting a sync of inventory %s: %v", inv.ID, err)
+	if inv.Type == models.InventoryTypeConstructed || ctx.Err() != nil {
+		return
+	}
+	reason, refused := coreansible.FileSyncRefusal(err)
+	if !refused {
+		reason = coreansible.FirstSyncRetryReason
+	}
+	recordCtx, recordCancel := context.WithTimeout(context.Background(), webhookSyncTimeout)
+	defer recordCancel()
+	if recErr := h.workItems.RecordFileSyncFailure(recordCtx, inv.ID, reason, coreansible.WebhookSyncFailure); recErr != nil {
+		logger.Errorf("Error recording the refused sync of inventory %s: %v", inv.ID, recErr)
 	}
 }
 

@@ -114,7 +114,7 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 
 	// Project-scoped inventory with a host, group and dynamic source in org A.
 	inventory, err := inventoryService.CreateInventory(
-		orgA.ID, &projA.ID, "inv-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "",
+		orgA.ID, &projA.ID, "inv-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "", ansiblesvc.IdentityChange{},
 	)
 	if err != nil {
 		t.Fatalf("create inventory: %v", err)
@@ -129,7 +129,7 @@ func setupAnsibleSubResourceAuthz(t *testing.T) *ansibleAuthzFixture {
 	}
 	// The outsider's own inventory + host in org B (they hold write on it).
 	inventoryB, err := inventoryService.CreateInventory(
-		orgB.ID, &projB.ID, "invb-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "",
+		orgB.ID, &projB.ID, "invb-"+sfx, "", models.InventoryTypeStatic, "", models.InventoryVariables{}, nil, "", "", "", ansiblesvc.IdentityChange{},
 	)
 	if err != nil {
 		t.Fatalf("create inventory B: %v", err)

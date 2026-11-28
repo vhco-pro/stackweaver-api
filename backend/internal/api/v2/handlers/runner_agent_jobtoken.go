@@ -86,6 +86,7 @@ func (h *RunnerAgentHandler) jobTokenForClaim(c *gin.Context, runnerID uuid.UUID
 		recovery, active bool
 		pool             *uuid.UUID
 		target           any
+		placement        models.JobPlacement
 		authorize        func() bool
 	)
 	metadata := map[string]any{}
@@ -104,7 +105,7 @@ func (h *RunnerAgentHandler) jobTokenForClaim(c *gin.Context, runnerID uuid.UUID
 		}
 		orgID, kind, attempt, timeout, pool = item.OrganizationID, models.JobTypeWorkItem, item.Attempt, item.TimeoutSeconds, item.AgentPoolID
 		recovery, active = item.ClaimRecovery, item.Status == models.WorkItemStatusRunning
-		target = &models.WorkItem{ID: item.ID}
+		target, placement = &models.WorkItem{ID: item.ID}, item.Placement
 		authorize = func() bool { return h.authorizeRunnerForWorkItem(c, item, true) }
 		if timeout <= 0 {
 			timeout = settings.SyncTimeout(os.Getenv)
@@ -141,7 +142,7 @@ func (h *RunnerAgentHandler) jobTokenForClaim(c *gin.Context, runnerID uuid.UUID
 		if run.Attempt == 0 && run.PhaseAttempt == 0 && phase != "" && active {
 			metadata["phase_attempt"] = 1
 		}
-		target = &models.Run{ID: run.ID}
+		target, placement = &models.Run{ID: run.ID}, run.Placement
 		authorize = func() bool { return h.authorizeRunnerForRun(c, &run, true) }
 		*cacheHint = func(committed *RunnerAgentHandler) *runnercontract.CacheDescriptor {
 			return committed.runCacheDescriptorFor(c.Request.Context(), &run)
@@ -163,7 +164,7 @@ func (h *RunnerAgentHandler) jobTokenForClaim(c *gin.Context, runnerID uuid.UUID
 		}
 		orgID, kind, attempt, timeout, pool = job.Project.OrganizationID, models.JobTypeAnsibleJob, job.Attempt, job.TimeoutSeconds, job.AgentPoolID
 		recovery, active = job.ClaimRecovery, job.Status == models.AnsibleJobStatusRunning
-		target = &models.AnsibleJob{ID: job.ID}
+		target, placement = &models.AnsibleJob{ID: job.ID}, job.Placement
 		authorize = func() bool { return h.authorizeRunnerForAnsibleJob(c, job, true) }
 		*cacheHint = func(committed *RunnerAgentHandler) *runnercontract.CacheDescriptor {
 			// Token issuance can normalize a legacy attempt from zero to one.
@@ -211,11 +212,14 @@ func (h *RunnerAgentHandler) jobTokenForClaim(c *gin.Context, runnerID uuid.UUID
 			return nil, false
 		}
 	}
-	identity, err := h.jobIdentity(kind, jobID, pool)
+	identity, err := h.attemptIdentity(&runner, kind, jobID, pool, attempt, placement, target)
 	if err != nil {
-		if errors.Is(err, repository.ErrBindingNotOffered) {
+		switch {
+		case errors.Is(err, repository.ErrBindingNotOffered):
 			jsonapi.WriteError(c, http.StatusConflict, "Conflict", err.Error())
-		} else {
+		case errors.Is(err, errIdentityNotApplicable):
+			jsonapi.WriteError(c, http.StatusConflict, "Conflict", strings.TrimPrefix(err.Error(), errIdentityNotApplicable.Error()+": "))
+		default:
 			jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
 		}
 		return nil, false

@@ -1395,7 +1395,7 @@ func (h *RunnerAgentHandler) recordPlacement(kind models.JobType, jobID string, 
 		table = &models.AnsibleJob{}
 	}
 	// Only the placement columns are read, into a row of the job's own table.
-	columns := []string{"id", "placement_driver", "placement_placement_id", "placement_image", "placement_image_digest", "placement_image_level", "placement_identity_binding_id", "placement_node"}
+	columns := []string{"id", "placement_driver", "placement_placement_id", "placement_image", "placement_image_digest", "placement_image_level", "placement_node"}
 	var current models.JobPlacement
 	switch kind {
 	case models.JobTypeWorkItem:

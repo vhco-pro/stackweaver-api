@@ -63,6 +63,10 @@ func TestJobToken_CarriesTheIdentityBinding(t *testing.T) {
 	if err := f.db.Model(&models.Project{}).Where("id = ?", f.projectA).Update("identity_binding_id", offered.ID).Error; err != nil {
 		t.Fatal(err)
 	}
+	// Only a launcher on the Kubernetes driver is issued an identity binding (#1113, D3).
+	if err := f.db.Model(f.runnerA1).Update("driver", "kubernetes").Error; err != nil {
+		t.Fatal(err)
+	}
 	job := f.seedJob(t, nil, f.runnerA1)
 	code, tok := f.mintJobToken(t, r, svc, "a1", job.ID.String(), "job")
 	if code != http.StatusOK {

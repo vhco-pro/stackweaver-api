@@ -63,12 +63,16 @@ func (c *Checker) RunImage(org uuid.UUID, kind string, raw *string) (*uuid.UUID,
 	return id, true, nil
 }
 
-// IdentityBinding checks that raw names an identity binding of org. Whether the object's pool
-// offers it is checked by Offered once the object's effective pool is known (#933, D8).
+// IdentityBinding checks that raw names an identity binding of org, or the configured hosted
+// binding, which every organization may select (#1113, D3). Whether the object's pool offers it is
+// checked by Offered once the object's effective pool is known (#933, D8).
 func (c *Checker) IdentityBinding(org uuid.UUID, raw *string) (*uuid.UUID, bool, error) {
 	id, set, err := parse(raw)
 	if err != nil || id == nil {
 		return id, set, err
+	}
+	if repository.IsHostedBinding(*id) {
+		return id, true, nil
 	}
 	var b models.IdentityBinding
 	if err := c.db.Select("id", "organization_id").First(&b, "id = ?", *id).Error; err != nil {
@@ -86,12 +90,13 @@ func (c *Checker) IdentityBinding(org uuid.UUID, raw *string) (*uuid.UUID, bool,
 // Offered checks that the pool an object runs on offers the identity binding it resolves (#933, D8):
 // a save is refused with the same reason a job of it would be (repository.ErrBindingNotOffered),
 // so a binding of another pool never reaches a run. A nil binding is the platform identity, which
-// every pool offers; a nil pool is the organization's hosted capacity.
-func (c *Checker) Offered(binding, pool *uuid.UUID) error {
+// every pool offers; a nil pool is the organization's hosted capacity. org is the organization of
+// the object being saved: another organization's binding or hosted pool is never offered (#1113).
+func (c *Checker) Offered(org uuid.UUID, binding, pool *uuid.UUID) error {
 	if binding == nil {
 		return nil
 	}
-	_, err := repository.NewIdentityBindingRepository(c.db).Offered(binding, pool)
+	_, err := repository.NewIdentityBindingRepository(c.db).Offered(org, binding, pool)
 	return err
 }
 

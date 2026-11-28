@@ -174,6 +174,8 @@ func setupNeighbourScope(t *testing.T) *neighbourScopeFixture {
 		ansiblesvc.NewInventorySourceService(repository.NewAnsibleInventorySourceRepository(db), inventoryRepo, credentialRepo, nil),
 		ansiblesvc.NewInventoryService(inventoryRepo, orgRepo), authService, rbacService, nil,
 	)
+	// Production wires the level checker into every handler that takes a level reference.
+	sources.SetLevelRefs(levelrefs.New(db))
 
 	adHoc := NewAdHocHandler(
 		inventoryRepo, orgRepo, credentialRepo, projectRepo, repository.NewAgentPoolRepository(db),

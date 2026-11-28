@@ -249,6 +249,17 @@ func main() {
 		logger.Infof("Created the hosted pool of %d organization(s)", n)
 	}
 
+	// The hosted binding (#1113, D3): read once, before the router serves, and read-only from then
+	// on. An invalid configuration stops the API with the reason.
+	hostedIdentity, err := hostedIdentityFromEnv(os.Getenv)
+	if err != nil {
+		logger.Fatalf("Invalid hosted identity binding: %v", err)
+	}
+	repository.SetHostedBinding(hostedIdentity)
+	if hostedIdentity != nil {
+		logger.Infof("Hosted capacity offers the identity binding %q (%s, ServiceAccount %s)", hostedIdentity.Name, hostedIdentity.Mechanism, hostedIdentity.ServiceAccount)
+	}
+
 	// users.email is unique case-insensitively, and only for non-empty values. The step lives in
 	// core/models so this and the integration tests drive the same code (AUD-020 for the partial
 	// half, #798 for the case-insensitive half - see models.EnsureEmailUniqueness). Conflicting

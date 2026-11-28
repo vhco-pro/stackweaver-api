@@ -56,12 +56,143 @@ type identityBindingRequest struct {
 	} `json:"data"`
 }
 
-// IdentityBindingHandler serves the identity bindings of customer pools.
+// OrganizationIdentityBindingAttributes is one entry of an organization's binding list (#1113,
+// D3): a binding's attributes, plus whether it is the hosted binding and whether the deployment's
+// configuration defines it, both read-only.
+type OrganizationIdentityBindingAttributes struct {
+	IdentityBindingAttributes
+	AgentPoolName     string `json:"agent-pool-name"`
+	Hosted            bool   `json:"hosted"`
+	DeploymentManaged bool   `json:"deployment-managed"`
+}
+
+// IdentityBindingHandler serves the identity bindings of customer pools and the organization's
+// list, which also holds the hosted binding.
 type IdentityBindingHandler struct {
 	poolRepo    *repository.AgentPoolRepository
 	bindings    *repository.IdentityBindingRepository
+	orgRepo     *repository.OrganizationRepository
 	authService *auth.Service
 	rbacService *rbac.Service
+}
+
+// SetOrganizations sets the repository the organization's binding list resolves its name with.
+func (h *IdentityBindingHandler) SetOrganizations(orgRepo *repository.OrganizationRepository) {
+	h.orgRepo = orgRepo
+}
+
+// ListOrganization lists the organization's customer bindings and then the configured hosted
+// binding, each with its pool and pool name, paged by page[size] and page[number] (#1113, D3, D5).
+// Reading needs membership, as the per-pool list does.
+// filter[inventory]=<id> narrows it to the hosted binding and the bindings of pools that inventory
+// may use; an inventory of another organization, or one the caller may not read, answers 404
+// before anything is filtered or counted.
+//
+// GET /api/v2/organizations/:name/identity-bindings
+func (h *IdentityBindingHandler) ListOrganization(c *gin.Context) {
+	if h.orgRepo == nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	org, err := h.orgRepo.GetByName(c.Param("name"))
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Organization not found")
+		return
+	}
+	if !h.access(c, org.ID, false) {
+		return
+	}
+	var inventory *models.AnsibleInventory
+	if raw := c.Query("filter[inventory]"); raw != "" {
+		var ok bool
+		if inventory, ok = h.readableInventory(c, org.ID, raw); !ok {
+			return
+		}
+	}
+	list, err := h.bindings.ListByOrganization(org.ID)
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	hosted, err := h.bindings.Hosted(org.ID)
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	if hosted != nil {
+		list = append(list, *hosted)
+	}
+	poolIDs := make([]uuid.UUID, 0, len(list))
+	for i := range list {
+		poolIDs = append(poolIDs, list[i].AgentPoolID)
+	}
+	pools, err := h.bindings.Pools(poolIDs)
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+	out := make([]jsonapi.Resource[OrganizationIdentityBindingAttributes], 0, len(list))
+	for i := range list {
+		b := &list[i]
+		pool := pools[b.AgentPoolID]
+		if inventory != nil && !b.DeploymentManaged && (pool == nil || !pool.AllowsInventory(inventory.ProjectID)) {
+			continue
+		}
+		r := identityBindingResource(b)
+		attrs := OrganizationIdentityBindingAttributes{IdentityBindingAttributes: r.Attributes, Hosted: b.DeploymentManaged, DeploymentManaged: b.DeploymentManaged}
+		if pool != nil {
+			attrs.AgentPoolName = pool.Name
+		}
+		if b.DeploymentManaged {
+			attrs.CreatedAt = ""
+		}
+		out = append(out, jsonapi.Resource[OrganizationIdentityBindingAttributes]{ID: r.ID, Type: r.Type, Attributes: attrs, Relationships: r.Relationships})
+	}
+	page, size := jsonapi.PageParams(c, 20, 100)
+	total := len(out)
+	start := min(jsonapi.Offset(page, size), total)
+	end := min(start+size, total)
+	jsonapi.WriteDocumentMeta(c, http.StatusOK, out[start:end], jsonapi.NewPaginationMeta(page, size, int64(total)))
+}
+
+// readableInventory loads filter[inventory]: an inventory of the organization the caller may read.
+// Anything else, a malformed id included, answers 404 as an unknown inventory does.
+func (h *IdentityBindingHandler) readableInventory(c *gin.Context, orgID uuid.UUID, raw string) (*models.AnsibleInventory, bool) {
+	notFound := func() (*models.AnsibleInventory, bool) {
+		jsonapi.WriteError(c, http.StatusNotFound, "Not Found", "Inventory not found")
+		return nil, false
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return notFound()
+	}
+	inv, err := h.bindings.OrganizationInventory(orgID, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return notFound()
+	}
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return nil, false
+	}
+	user, err := h.authService.GetUserFromContext(c)
+	if err != nil {
+		jsonapi.WriteError(c, http.StatusUnauthorized, "Unauthorized", "Authentication required")
+		return nil, false
+	}
+	var readable bool
+	if inv.ProjectID != nil {
+		readable, err = h.rbacService.CheckAnsibleResourcePermission(c.Request.Context(), user.ID, rbac.ResourceTypeAnsibleInventory, inv.ID.String(), rbac.PermissionAnsibleInventoryRead, inv.ProjectID)
+	} else {
+		readable, err = h.rbacService.CheckOrgReadAnsible(c.Request.Context(), user.ID, orgID)
+	}
+	if err != nil {
+		jsonapi.WriteErrorNoDetail(c, http.StatusInternalServerError, "Internal Server Error")
+		return nil, false
+	}
+	if !readable {
+		return notFound()
+	}
+	return inv, true
 }
 
 // NewIdentityBindingHandler builds the handler.
@@ -213,6 +344,24 @@ func validateBinding(b *models.IdentityBinding) string {
 		v, _ := b.Annotations[req.key].(string)
 		if !req.valid.MatchString(strings.TrimSpace(v)) {
 			return fmt.Sprintf("a %s binding whose ServiceAccount Stackweaver creates needs the annotation %s, set to %s", b.Mechanism, req.key, req.form)
+		}
+	}
+	return ""
+}
+
+// ValidateHostedBinding checks the hosted binding an operator configures (#1113, D3) with the
+// rules of a customer binding, and always checks the mechanism's required annotation: the
+// synthesized hosted binding is a reference binding, which validateBinding exempts, but its
+// configuration is the one place the binding's client id or role is recorded. It returns the
+// reason, or "" when the binding is valid.
+func ValidateHostedBinding(b *models.IdentityBinding) string {
+	if reason := validateBinding(b); reason != "" {
+		return reason
+	}
+	if req, ok := requiredAnnotations[b.Mechanism]; ok {
+		v, _ := b.Annotations[req.key].(string)
+		if !req.valid.MatchString(strings.TrimSpace(v)) {
+			return fmt.Sprintf("the hosted binding (%s) needs the annotation %s, set to %s", b.Mechanism, req.key, req.form)
 		}
 	}
 	return ""

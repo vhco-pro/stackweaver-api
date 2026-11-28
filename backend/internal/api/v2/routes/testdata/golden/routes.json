@@ -354,6 +354,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/v2/ansible/inventories/:id/effective-settings",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*EffectiveSettingsHandlerV2).GetInventory-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/v2/ansible/inventories/:id/groups",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers/ansible.(*GroupHandler).List-fm",
@@ -1292,6 +1298,17 @@
       "path": "/api/v2/organizations/:name/hosted-capacity",
       "mutating": false,
       "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*HostedCapacityHandler).Get-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/organizations/:name/identity-bindings",
+      "mutating": false,
+      "handler": "github.com/michielvha/stackweaver/backend/internal/api/v2/handlers.(*IdentityBindingHandler).ListOrganization-fm",
+      "query": [
+        "filter[inventory]",
+        "page[number]",
+        "page[size]"
+      ]
     },
     {
       "method": "GET",

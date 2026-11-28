@@ -154,6 +154,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/agent-pools/:id/authentication-tokens":    resource("id", rAgentPool),
 	"/api/v2/agent-pools/:id/identity-bindings":        resource("id", rAgentPool),
 	"/api/v2/identity-bindings/:id":                    resource("id", rIdentityBinding),
+	"/api/v2/organizations/:name/identity-bindings":    orgByName(),
 	"/api/v2/agent-pools/:id/pull-secrets":             resource("id", rAgentPool),
 	"/api/v2/pull-secrets/:id":                         resource("id", rPullSecret),
 	"/api/v2/organizations/:name/run-images":           orgByName(),
@@ -372,6 +373,7 @@ var wallRegistry = map[string]routeEntry{
 	"/api/v2/ansible/groups/:id":                                      resource("id", rAnsibleGroup),
 	"/api/v2/ansible/inventory-sources/:source_id":                    resource("source_id", rAnsibleInventorySource),
 	"/api/v2/ansible/inventory-sources/:source_id/effective-settings": resource("source_id", rAnsibleInventorySource),
+	"/api/v2/ansible/inventories/:id/effective-settings":              resource("id", rAnsibleInventory),
 	"/api/v2/ansible/inventory-sources/:source_id/actions/sync":       resource("source_id", rAnsibleInventorySource),
 
 	// --- ansible: credentials ---

@@ -769,7 +769,7 @@ func (h *RunHandlerV2) Create(c *gin.Context) {
 
 	// The run's identity binding, by the same level rule, must be one its pool offers (#933, D8,
 	// AC44): refused here, at creation, rather than at placement.
-	if _, err := h.runRepo.IdentityBindings().Offered(settings.EffectiveWorkspaceIdentity(workspace).Value, effectiveAgentPoolID); err != nil {
+	if _, err := h.runRepo.IdentityBindings().Offered(workspace.Project.OrganizationID, settings.EffectiveWorkspaceIdentity(workspace).Value, effectiveAgentPoolID); err != nil {
 		if errors.Is(err, repository.ErrBindingNotOffered) {
 			jsonapi.WriteError(c, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 			return

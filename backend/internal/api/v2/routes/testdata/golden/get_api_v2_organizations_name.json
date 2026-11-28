@@ -7,6 +7,7 @@
       "attributes": {
         "aggregated-commit-status-enabled": false,
         "allow-force-delete-workspaces": false,
+        "allow-stored-vcs-credentials-on-agent-pools": false,
         "ansible-adhoc-modules": "",
         "ansible-job-retention-days": 90,
         "ansible-run-image-id": null,

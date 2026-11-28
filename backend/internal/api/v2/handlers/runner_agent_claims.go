@@ -149,8 +149,7 @@ func placementColumns(current models.JobPlacement, report *runnercontract.Placem
 	return map[string]any{
 		"placement_driver": current.Driver, "placement_placement_id": current.PlacementID,
 		"placement_image": current.Image, "placement_image_digest": current.ImageDigest,
-		"placement_image_level": current.ImageLevel, "placement_identity_binding_id": current.IdentityBindingID,
-		"placement_node": current.Node,
+		"placement_image_level": current.ImageLevel, "placement_node": current.Node,
 	}
 }
 

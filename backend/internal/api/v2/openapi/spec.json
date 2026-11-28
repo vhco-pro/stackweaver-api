@@ -1608,6 +1608,9 @@
                     "description": {
                       "type": "string"
                     },
+                    "identity-binding-id": {
+                      "nullable": true
+                    },
                     "inventory-type": {
                       "type": "string"
                     },
@@ -1731,6 +1734,9 @@
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "identity-binding-id": {
+                    "nullable": true
                   },
                   "inventory-type": {
                     "type": "string"
@@ -7572,6 +7578,129 @@
           }
         }
       },
+      "identity-bindings-collection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "agent-pool-name": {
+                      "type": "string"
+                    },
+                    "annotations": {
+                      "type": "object",
+                      "properties": {
+                        "eks.amazonaws.com/role-arn": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "created-at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "declared-externally": {
+                      "type": "boolean"
+                    },
+                    "deployment-managed": {
+                      "type": "boolean"
+                    },
+                    "external-manager": {
+                      "type": "string"
+                    },
+                    "hosted": {
+                      "type": "boolean"
+                    },
+                    "mechanism": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "object-present": {
+                      "nullable": true
+                    },
+                    "per-job-sa": {
+                      "type": "boolean"
+                    },
+                    "reference": {
+                      "type": "boolean"
+                    },
+                    "reported-at": {
+                      "nullable": true
+                    },
+                    "service-account": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "relationships": {
+                  "type": "object",
+                  "properties": {
+                    "agent-pool": {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "pagination": {
+                "type": "object",
+                "properties": {
+                  "current-page": {
+                    "type": "integer"
+                  },
+                  "next-page": {
+                    "nullable": true
+                  },
+                  "page-size": {
+                    "type": "integer"
+                  },
+                  "prev-page": {
+                    "nullable": true
+                  },
+                  "total-count": {
+                    "type": "integer"
+                  },
+                  "total-pages": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "identity-bindings-response": {
         "type": "object",
         "properties": {
@@ -8676,6 +8805,9 @@
                     "allow-force-delete-workspaces": {
                       "type": "boolean"
                     },
+                    "allow-stored-vcs-credentials-on-agent-pools": {
+                      "type": "boolean"
+                    },
                     "ansible-adhoc-modules": {
                       "type": "string"
                     },
@@ -8927,6 +9059,9 @@
                     "type": "boolean"
                   },
                   "allow-force-delete-workspaces": {
+                    "type": "boolean"
+                  },
+                  "allow-stored-vcs-credentials-on-agent-pools": {
                     "type": "boolean"
                   },
                   "ansible-adhoc-modules": {
@@ -9640,6 +9775,10 @@
                     "nullable": true
                   },
                   "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "identity-binding-id": {
                     "type": "string",
                     "nullable": true
                   },
@@ -10605,6 +10744,10 @@
                     "nullable": true
                   },
                   "allow-force-delete-workspaces": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "allow-stored-vcs-credentials-on-agent-pools": {
                     "type": "boolean",
                     "nullable": true
                   },
@@ -15429,6 +15572,10 @@
                   "description": {
                     "type": "string"
                   },
+                  "identity-binding-id": {
+                    "type": "string",
+                    "nullable": true
+                  },
                   "input-inventory-ids": {
                     "type": "array",
                     "items": {
@@ -17786,6 +17933,10 @@
                     "nullable": true
                   },
                   "allow-force-delete-workspaces": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "allow-stored-vcs-credentials-on-agent-pools": {
                     "type": "boolean",
                     "nullable": true
                   },
@@ -29143,6 +29294,37 @@
         ]
       }
     },
+    "/api/v2/ansible/inventories/{id}/effective-settings": {
+      "get": {
+        "operationId": "get-api-v2-ansible-inventories-id-effective-settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/effective-settings-response"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/ansible/inventories/:id/effective-settings",
+        "tags": [
+          "ansible/inventories"
+        ]
+      }
+    },
     "/api/v2/ansible/inventories/{id}/groups": {
       "get": {
         "operationId": "get-api-v2-ansible-inventories-id-groups",
@@ -35614,6 +35796,63 @@
         "summary": "GET /api/v2/organizations/:name/hosted-capacity",
         "tags": [
           "hosted-capacity"
+        ]
+      }
+    },
+    "/api/v2/organizations/{name}/identity-bindings": {
+      "get": {
+        "operationId": "get-api-v2-organizations-name-identity-bindings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter[inventory]",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which page to return, 1-based.",
+            "in": "query",
+            "name": "page[number]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page. Clamped to the endpoint's maximum; a value below 1 falls back to its default.",
+            "in": "query",
+            "name": "page[size]",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/identity-bindings-collection"
+                }
+              }
+            },
+            "description": "Success"
+          }
+        },
+        "summary": "GET /api/v2/organizations/:name/identity-bindings",
+        "tags": [
+          "identity-bindings"
         ]
       }
     },
